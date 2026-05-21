@@ -106,6 +106,85 @@ async def lgtbot_query_user(event, match):
     await event.reply(md)
 
 
+# ──────── 「📋 更多功能」子菜单 + 更新公告(所有人可用) ─────────────────────
+# 这两个 handler 都同时监听消息事件和 INTERACTION_CREATE,因为「更多功能」
+# 和「更新公告」按钮在 ``buttons.py`` 里是 type=2:
+#   · 默认行为:点击 → 文字回填到输入框 → 用户手动发送 → 走消息事件路径
+#   · 若 bot.yaml 配了 ``button_enter_to_send: true``:type=2 被框架转 type=1
+#     → 点击直接触发 INTERACTION → 走 INTERACTION_CREATE 路径
+# 一个 handler 接两种事件,优先级 50 高于 ``lgtbot_interaction_dispatch``(-100),
+# 抢在被派回 LGTBot 引擎之前响应,免得引擎不认得这俩元指令报「未预料的元指令」。
+
+_UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
+_DEFAULT_UPDATE_NOTICE = '暂无更新公告'
+
+
+def _read_update_notice() -> str:
+    """实时读取 ``data/update_notice.txt`` 内容。
+
+    · 文件不存在时自动建,写入默认 ``暂无更新公告``,返回默认值。
+    · 读取成功但内容为空(只有空白字符)同样按默认值兜底。
+    · 任何异常吞掉返回默认值,handler 不会因文件 IO 问题崩。
+
+    每次调用都重新打开文件 —— 这就是「热更新」:管理员直接编辑 txt,下条命令
+    就拿到新内容,无需重启进程。
+    """
+    try:
+        if not os.path.isfile(_UPDATE_NOTICE_PATH):
+            os.makedirs(os.path.dirname(_UPDATE_NOTICE_PATH), exist_ok=True)
+            with open(_UPDATE_NOTICE_PATH, 'w', encoding='utf-8') as f:
+                f.write(_DEFAULT_UPDATE_NOTICE)
+            return _DEFAULT_UPDATE_NOTICE
+        with open(_UPDATE_NOTICE_PATH, 'r', encoding='utf-8') as f:
+            content = f.read().rstrip()
+        return content or _DEFAULT_UPDATE_NOTICE
+    except Exception as e:
+        log.warning(f'读取 update_notice.txt 异常: {e}')
+        return _DEFAULT_UPDATE_NOTICE
+
+
+@handler(r'^更多功能$',
+         name='LGTBot 更多功能',
+         desc='展示「更多功能」子菜单',
+         priority=50,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_more_features(event, match):
+    """收到「更多功能」(文本或按钮)→ 回一条带子菜单按钮的 markdown。
+
+    INTERACTION 路径要先 ack 抑制客户端 3s「请求超时」toast。
+    """
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    md = (
+        '## 🧩 更多功能\n'
+        '\n'
+        '---\n'
+        '\n'
+    )
+    await event.reply(md, buttons=buttons.build_more_features_buttons())
+
+
+@handler(r'^更新公告$',
+         name='LGTBot 更新公告',
+         desc='读取 data/update_notice.txt 实时返回公告内容',
+         priority=50,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_update_notice(event, match):
+    """收到「更新公告」(文本或按钮)→ 把 txt 文件内容包在代码块里 reply。"""
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    notice = _read_update_notice()
+    # 代码块包裹 —— 保留换行 / 缩进 / 特殊字符原样显示,管理员可以贴格式化文本
+    md = f'```公告详情\n{notice}\n```'
+    await event.reply(md)
+
+
 # ──────── 消息派发 ────────────────────────────────────────────────────────
 
 @handler(r'.*', name='LGTBot 消息派发',
@@ -171,7 +250,7 @@ async def lgtbot_dispatch(event, match):
                       + buttons.MENU_TEXT_BODY)
             else:
                 md = buttons.MENU_TEXT_HEADER + buttons.MENU_TEXT_BODY
-            await event.reply(md, buttons=buttons.build_menu_buttons())
+            await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
             message_log.log_outgoing(gid or uid, not (event.is_group and gid),
                                      '[欢迎菜单]')
         except Exception as e:

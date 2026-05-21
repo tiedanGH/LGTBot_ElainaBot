@@ -142,12 +142,31 @@ _OFFICIAL_GROUP_LINK = (
 )
 
 
-def build_menu_buttons() -> list[list[dict]]:
+def _build_robot_invite_link(uin: str, appid: str) -> str:
+    """拼 QQ 群机器人添加链接 —— 接收方在 QQ 客户端打开后能看到「邀请到我的群」按钮。
+
+    uin/appid 由调用方从框架(``helpers.get_bot_uin`` / ``event.appid``)获取;
+    任一为空时也照常生成 URL —— QQ 点击后会自己拒绝并提示无效 robot,这样
+    用户能立刻发现 bot.yaml 里 ``robot_qq`` 没配。
+    """
+    return (f'https://qun.qq.com/qunpro/robot/qunshare'
+            f'?robot_uin={uin}&robot_appid={appid}&biz_type=0')
+
+
+def build_menu_buttons(appid: str = '') -> list[list[dict]]:
     """组装欢迎菜单完整按钮组(每次调用都按当前 ``MENU_GAMES`` 重新渲染)。
 
     游戏快捷部分被切分为每行 ``MENU_GAMES_PER_ROW`` 个;``MENU_GAMES`` 为空
-    列表时跳过整个游戏分区,菜单仍包含帮助/创建房间等固定按钮和仓库链接。
+    列表时跳过整个游戏分区,菜单仍包含帮助/创建房间等固定按钮和底部链接。
+
+    ``appid`` 用于拼「邀我进群」按钮的链接(需要 bot 的 robot_qq + appid);
+    调用方建议传 ``event.appid``,空则从框架任一已加载 bot 取。
     """
+    # 从 helpers 拿 bot 的 QQ uin 拼邀请链接(避免 circular import)
+    from . import helpers as _helpers
+    uin = _helpers.get_bot_uin(appid)
+    invite_link = _build_robot_invite_link(uin, appid)
+
     game_rows: list[list[dict]] = []
     for i in range(0, len(MENU_GAMES), MENU_GAMES_PER_ROW):
         chunk = MENU_GAMES[i:i + MENU_GAMES_PER_ROW]
@@ -163,15 +182,48 @@ def build_menu_buttons() -> list[list[dict]]:
         ],
         [
             {'text': '🎮 创建房间', 'data': '/新游戏',  'type': 2, 'style': 1},
-            {'text': '📊 我的战绩', 'data': '/战绩',    'type': 2, 'style': 1},
+            {'text': '🧩 更多功能', 'data': '更多功能', 'type': 1, 'style': 1},
         ],
-        # 游戏快捷开局按钮(可配置 —— data/config.yaml 的 menu_game_buttons)
+        # 游戏快捷开局按钮 (可配置 —— data/config.yaml 的 menu_game_buttons)
         *game_rows,
-        # 链接按钮(type=0)
+        # 底部链接按钮
         [
-            {'text': '仓库', 'link': 'https://github.com/tiedanGH/LGTBot_ElainaBot'},
-            {'text': '网站', 'link': 'https://tiedan.site'},
-            {'text': '官群', 'link': _OFFICIAL_GROUP_LINK},
+            {'text': '💬 官方群聊', 'link': _OFFICIAL_GROUP_LINK},
+            {'text': '🚀 邀我进群', 'link': invite_link},
+        ],
+    ]
+
+
+# ──────── 「🧩 更多功能」子菜单 ─────────────────────────────────────────────
+# 由 dispatcher 的 ``lgtbot_more_features`` handler 在用户点击「更多功能」按钮
+# / 直接发送「更多功能」文本时回复。
+
+# 问题反馈链接 —— 默认走 LGTBot_ElainaBot 仓库的 issues 页;有更专门的反馈
+# 入口可以改这里。
+_ISSUES_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
+_NAV_HOME_LINK = 'https://tiedan.site/'
+
+
+def build_more_features_buttons() -> list[list[dict]]:
+    """「更多功能」子菜单 4 行按钮设计"""
+    return [
+        # Row 1: 更新公告
+        [
+            {'text': '📢 更新公告', 'data': '更新公告', 'type': 1, 'style': 4},
+        ],
+        # Row 2: 本群排行 / 我的战绩
+        [
+            {'text': '🏆 本群排行', 'data': '/排行大图 本群', 'type': 2, 'style': 1},
+            {'text': '📊 我的战绩', 'data': '/战绩',         'type': 2, 'style': 1},
+        ],
+        # Row 3: 导航主页(单按钮一行)
+        [
+            {'text': '🌠 导航网站主页', 'link': _NAV_HOME_LINK},
+        ],
+        # Row 4: 问题反馈 / 关于框架
+        [
+            {'text': '🛠️ 问题反馈', 'link': _ISSUES_LINK},
+            {'text': 'ℹ️ 关于框架',  'data': '/关于', 'type': 2, 'style': 0},
         ],
     ]
 

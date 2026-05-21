@@ -46,6 +46,36 @@ def humanize_mentions(text: str) -> str:
     return _MENTION_RE.sub(_repl, text)
 
 
+def get_bot_uin(appid: str = '') -> str:
+    """从主框架 BotManager 拿本 bot 的 QQ uin (``BotInstance.robot_qq``)。
+
+    由 ``bot.yaml`` 每个 bot 节下的 ``robot_qq`` 字段配置(框架在
+    ``core/bot/instance.py::__init__`` 里读出来挂到 BotInstance)。
+
+    Args:
+        appid: bot 的 appid;空字符串时返回任一已加载 bot 的 uin。
+
+    Returns:
+        uin 字符串。bot 未加载 / 字段未配置时返回 ``''``,调用方应能优雅降级
+        (比如「邀我进群」按钮的链接里 ``robot_uin=`` 留空仍可生成 URL,
+        QQ 点击后会提示无效 robot,用户回头查 bot.yaml 即可修复)。
+    """
+    try:
+        from core.bot.manager import _bot_manager_ref
+        if _bot_manager_ref is None or not _bot_manager_ref._bots:
+            return ''
+        bots = _bot_manager_ref._bots
+        if appid and appid in bots:
+            return getattr(bots[appid], 'robot_qq', '') or ''
+        for bot in bots.values():
+            uin = getattr(bot, 'robot_qq', '') or ''
+            if uin:
+                return uin
+    except Exception as e:
+        log.warning(f'获取 bot uin 失败: {e}')
+    return ''
+
+
 def get_sender(appid: str = ''):
     """从 BotManager 全局引用获取 MessageSender。
 
