@@ -51,6 +51,32 @@ async def _resolve_menu_logo() -> dict | None:
         log.debug(f'菜单 logo 解析失败: {e}')
         return None
 
+
+async def _send_welcome_menu(event) -> None:
+    """发出欢迎菜单回复(logo + 按钮组)。三个入口共用本函数:
+      · ``lgtbot_dispatch`` 空消息分支(单独 @bot)
+      · ``lgtbot_welcome_menu`` 接到 ``菜单`` 文本
+      · ``lgtbot_welcome_menu`` 接到 ``菜单`` callback INTERACTION
+
+    本函数只负责发送 + 出向日志;**inbound 日志由 caller 写**,因为不同入口
+    的日志标签需要区分(「空消息」「菜单按钮」「菜单文本」)。
+    """
+    try:
+        logo = await _resolve_menu_logo()
+        if logo and logo.get('url'):
+            md = (f'![logo #{logo["width"]}px #{logo["height"]}px]'
+                  f'({logo["url"]})\n\n'
+                  + buttons.MENU_TEXT_BODY)
+        else:
+            md = buttons.MENU_TEXT_HEADER + buttons.MENU_TEXT_BODY
+        await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
+        uid = event.user_id or ''
+        gid = event.group_id or event.channel_id or ''
+        message_log.log_outgoing(gid or uid, not (event.is_group and gid),
+                                 '[欢迎菜单]')
+    except Exception as e:
+        log.warning(f'菜单回复失败: {e}')
+
 # 本插件监听的消息事件类型
 # 加 GROUP_MESSAGE_CREATE 是为了适配「全量群」场景:某些 QQ 部署下,即便用户
 # @了 bot,事件也会走 GROUP_MESSAGE_CREATE + is_at_self=True 而非 GROUP_AT_*。
@@ -141,6 +167,32 @@ def _read_update_notice() -> str:
     except Exception as e:
         log.warning(f'读取 update_notice.txt 异常: {e}')
         return _DEFAULT_UPDATE_NOTICE
+
+
+@handler(r'^菜单$',
+         name='LGTBot 欢迎菜单',
+         desc='触发欢迎菜单 (等同于单独 @bot)',
+         priority=50,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_welcome_menu(event, match):
+    """收到「菜单」(文本或按钮)→ 回欢迎菜单。
+
+    与 lgtbot_dispatch 空消息分支共享 ``_send_welcome_menu``;入口日志在这里
+    打,标签区分文本 / 按钮路径,方便排查。state.started=False(引擎崩溃 30s
+    窗口)时静默不回 —— 菜单按钮指向的命令都依赖引擎,提前发出去也没用。
+    """
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    if not state.started:
+        return
+    uid = event.user_id or ''
+    gid = event.group_id or event.channel_id or ''
+    label = '(菜单按钮)' if event.is_interaction else '菜单'
+    message_log.log_incoming(uid, gid if event.is_group else '', label)
+    await _send_welcome_menu(event)
 
 
 @handler(r'^更多功能$',
@@ -242,19 +294,7 @@ async def lgtbot_dispatch(event, match):
     # 空消息（仅 @bot）→ 回欢迎菜单，不进 LGTBot 引擎
     if not content:
         message_log.log_incoming(uid, gid, '(空消息：触发欢迎菜单)')
-        try:
-            logo = await _resolve_menu_logo()
-            if logo and logo.get('url'):
-                md = (f'![logo #{logo["width"]}px #{logo["height"]}px]'
-                      f'({logo["url"]})\n\n'
-                      + buttons.MENU_TEXT_BODY)
-            else:
-                md = buttons.MENU_TEXT_HEADER + buttons.MENU_TEXT_BODY
-            await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
-            message_log.log_outgoing(gid or uid, not (event.is_group and gid),
-                                     '[欢迎菜单]')
-        except Exception as e:
-            log.warning(f'菜单回复失败: {e}')
+        await _send_welcome_menu(event)
         return
 
     # 按钮附加完全交给 C++ 桥接层根据消息内容判断（见
