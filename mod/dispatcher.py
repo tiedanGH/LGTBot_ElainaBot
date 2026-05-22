@@ -233,7 +233,13 @@ async def lgtbot_update_notice(event, match):
             pass
     notice = _read_update_notice()
     # 代码块包裹 —— 保留换行 / 缩进 / 特殊字符原样显示,管理员可以贴格式化文本
-    md = f'```公告详情\n{notice}\n```'
+    md = (
+        '## 📢 更新公告\n'
+        '\n'
+        '---\n'
+        '\n'
+        f'```公告详情\n{notice}\n```'
+    )
     await event.reply(md)
 
 
