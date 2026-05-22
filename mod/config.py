@@ -32,39 +32,11 @@ DEFAULT_CONFIG = {
     'crash_notify_group': '',
 }
 CONFIG_COMMENTS = {
-    'admin_uids': (
-        'LGTBot 内部管理员 openid 列表（不同于 ElainaBot 的 owner_ids）\n'
-        '#   这些用户可执行 LGTBot 管理命令（如 %帮助 等）\n'
-        '#   留空则该机器人无 LGTBot 管理员；可在 Web 面板「日志」查 user_id'
-    ),
-    'refresh_wait_timeout': (
-        '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数\n'
-        '#   超时后改走主动消息（不再尝试用过期 msg_id 强发，避免必拒）\n'
-        '#   推荐 5–30 秒：过短玩家来不及点，过长命令响应延迟明显'
-    ),
-    'image_hosting': (
-        '游戏图片走 markdown 内嵌时使用的图床（依赖主框架 image_hosting 模块）\n'
-        '#   留空 = 不启用图床，所有图片直接以 msg_type=7 媒体消息发送\n'
-        '#   可选值：cos / nature / bilibili / chatglm / ukaka / xingye\n'
-        '#   只尝试指定的这一个图床，上传失败立即回退 msg_type=7\n'
-        '#   （遍历所有启用图床耗时过长，故仅支持单选）\n'
-        '#   注意：图床域名需先在 QQ 开放平台「消息 URL 配置」报备'
-    ),
-    'menu_game_buttons': (
-        '欢迎菜单（单独 @机器人时回复）里「游戏快捷开局」按钮列表\n'
-        '#   每个游戏名会被拼成 `/新游戏 <游戏名>` 作为按钮点击后的命令\n'
-        '#   默认每行 3 个按钮自动排版（默认 6 个游戏 = 2 行）\n'
-        '#   留空列表 = 不显示游戏快捷按钮（菜单里仍有帮助/创建房间等其他按钮）\n'
-        '#   游戏名需与 /游戏列表 输出一致，否则点击后引擎会回「未知的游戏名」'
-    ),
-    'crash_notify_group': (
-        'LGTBot 引擎严重问题通知群 openid —— 引擎触发段错误时,除了给玩家发\n'
-        '#   道歉外,还向此群主动推送一条崩溃报告(含信号 / 触发源 / 消息预览)。\n'
-        '#   留空 = 不推送。\n'
-        '#   通常填管理员监控的全量群 openid —— 该群需在 QQ 后台给本 bot 开了\n'
-        '#   「全量推送」权限,主动消息才会被 QQ 接受,否则推送会被拒绝(只打\n'
-        '#   warning,不影响道歉发送和 30s 后的整进程 execv 自启)。'
-    ),
+    'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
+    'refresh_wait_timeout': '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
+    'image_hosting': '游戏图片走 markdown 内嵌时使用的图床（可选值：cos / nature / bilibili / chatglm / ukaka / xingye）。上传失败回退 msg_type=7',
+    'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
+    'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
 }
 
 

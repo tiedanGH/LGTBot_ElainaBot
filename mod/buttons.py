@@ -115,7 +115,7 @@ def build_about_buttons() -> list[list[dict]]:
     """
     return [[
         {'text': '适配层 仓库',  'link': 'https://github.com/tiedanGH/LGTBot_ElainaBot'},
-        {'text': 'LGT-Bot 仓库', 'link': 'https://github.com/Slontia/lgtbot'},
+        {'text': 'LGTBot 仓库', 'link': 'https://github.com/Slontia/lgtbot'},
     ]]
 
 # ──────── 欢迎菜单按钮组 ────────────────────────────────────────────────────

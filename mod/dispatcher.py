@@ -91,7 +91,7 @@ _LGT_MSG_EVENTS = frozenset({
 # ──────── 用户查询(所有人可用) ────────────────────────────────────────────
 
 @handler(r'^(?i:查询id)\s+(\S+)$',
-         name='LGTBot 查询用户',
+         name='查询用户',
          desc='查缓存中的昵称 / 头像 / 上次活跃',
          priority=50,
          event_types=_LGT_MSG_EVENTS)
@@ -239,7 +239,8 @@ async def lgtbot_update_notice(event, match):
 
 # ──────── 消息派发 ────────────────────────────────────────────────────────
 
-@handler(r'.*', name='LGTBot 消息派发',
+@handler(r'.*',
+         name='LGTBot 消息派发',
          desc='把群 @bot / 私聊 / 全量群 @bot 消息派发给 LGTBot C++ 引擎',
          priority=-100,
          event_types=_LGT_MSG_EVENTS, ignore_at_check=True)
