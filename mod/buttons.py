@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import random
+
 
 # 玩家在 LGTBot 房间里常用动作（C++ 桥接层 ClassifyMatchEvent 决定挂在哪条上）
 def build_game_action_buttons(game_name: str | None = None,
@@ -167,9 +169,19 @@ def build_menu_buttons(appid: str = '') -> list[list[dict]]:
     uin = _helpers.get_bot_uin(appid)
     invite_link = _build_robot_invite_link(uin, appid)
 
+    # 游戏快捷区:固定显示 2 行 × MENU_GAMES_PER_ROW 个 = 6 个。
+    #   · 配置 ≤ 6 个:按原序全部展示(每次完全一致,不洗牌)
+    #   · 配置 > 6 个:每次调用都用 ``random.sample`` 随机抽 6 个,顺序也是随机的
+    #     —— 让用户每次 @bot 都能看到不同游戏组合,提升发现感
+    display_max = MENU_GAMES_PER_ROW * 2
+    if len(MENU_GAMES) > display_max:
+        display_games = random.sample(MENU_GAMES, display_max)
+    else:
+        display_games = list(MENU_GAMES)
+
     game_rows: list[list[dict]] = []
-    for i in range(0, len(MENU_GAMES), MENU_GAMES_PER_ROW):
-        chunk = MENU_GAMES[i:i + MENU_GAMES_PER_ROW]
+    for i in range(0, len(display_games), MENU_GAMES_PER_ROW):
+        chunk = display_games[i:i + MENU_GAMES_PER_ROW]
         game_rows.append([
             {'text': name, 'data': f'/新游戏 {name}',
              'type': 2, 'style': 0}
