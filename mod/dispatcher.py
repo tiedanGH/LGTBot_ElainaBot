@@ -243,6 +243,22 @@ async def lgtbot_update_notice(event, match):
     await event.reply(md)
 
 
+# ──────── /关于 抢占(优于系统插件的同名指令) ───────────────────────────────
+# 系统插件 ``plugins/system/app/basic.py::about_info`` 注册了 ``^关于$`` 默认
+# priority=0,展示框架级机器人信息。本插件的引擎自带 about 回执,用户在本 bot 上发 ``/关于`` 应优先看到这个
+#
+# priority=50 高于系统插件,first-match-wins 让本 handler 抢到事件,系统插件的
+# about_info 不再触发。函数体里直接转发给 lgtbot_dispatch
+
+@handler(r'^/?关于$',
+         name='LGTBot 关于',
+         desc='查看 LGTBot 版本、作者、仓库链接',
+         priority=50,
+         event_types=_LGT_MSG_EVENTS)
+async def lgtbot_about(event, match):
+    await lgtbot_dispatch(event, match)
+
+
 # ──────── 消息派发 ────────────────────────────────────────────────────────
 
 @handler(r'.*',
