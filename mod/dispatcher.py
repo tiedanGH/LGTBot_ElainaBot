@@ -63,12 +63,17 @@ async def _send_welcome_menu(event) -> None:
     """
     try:
         logo = await _resolve_menu_logo()
+        # 「logo/标题下方,真按钮上方」内容由 buttons.MENU_HEADER_EXTRA_MD 提供,
+        # 图床有 / 无 logo 两条路径都拼上去 —— 「快速查看最近更新」超链接照常显示。
         if logo and logo.get('url'):
             md = (f'![logo #{logo["width"]}px #{logo["height"]}px]'
                   f'({logo["url"]})\n\n'
-                  + buttons.MENU_TEXT_BODY)
+                  + buttons.MENU_TEXT_BODY
+                  + buttons.MENU_HEADER_EXTRA_MD)
         else:
-            md = buttons.MENU_TEXT_HEADER + buttons.MENU_TEXT_BODY
+            md = (buttons.MENU_TEXT_HEADER
+                  + buttons.MENU_TEXT_BODY
+                  + buttons.MENU_HEADER_EXTRA_MD)
         await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
         uid = event.user_id or ''
         gid = event.group_id or event.channel_id or ''

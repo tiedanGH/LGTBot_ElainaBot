@@ -251,3 +251,12 @@ MENU_TEXT_BODY = (
 )
 # 兼容旧引用：拼接版
 MENU_TEXT = MENU_TEXT_HEADER + MENU_TEXT_BODY
+
+
+# ──────── 欢迎菜单「logo / 标题下方」可扩展区块 ─────────────────────────────
+# dispatcher 在 logo 渲染成功 / 失败两个分支都会把本字符串拼到 markdown 末尾,
+# 所以即便图床没启用、logo 没拿到 URL,这里的内容也会照常显示。
+
+MENU_HEADER_EXTRA_MD = (
+    f'<qqbot-cmd-input text="更新公告" show="✨ 点击查看最近更新" reference="false"/>\n'
+)
