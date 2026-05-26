@@ -11,6 +11,9 @@ if(MSVC)
     add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 endif()
 
+# ── 元指令前缀:锁定为 "/" ────────────────────────────────────────────────
+add_compile_definitions(META_COMMAND_SIGN="/")
+
 # ── LGTBot C++ 核心（子目录/子模块）────────────────────────────────────────
 add_subdirectory(lgtbot)
 
