@@ -47,20 +47,22 @@ PAGE_KEY = 'lgtbot'
 RESTART_KEY = '__lgtbot_restart'
 
 # Dashboard 的各 action 端点(JS 侧 DASH_KEYS 与此一一对应)
-_DASH_CHECK_UPDATE_KEY     = '__lgtbot_dash_check_update'
-_DASH_DO_UPDATE_KEY        = '__lgtbot_dash_do_update'
-_DASH_CLEAR_AVATAR_KEY     = '__lgtbot_dash_clear_avatar'
-_DASH_CLEAR_AVATAR_7D_KEY  = '__lgtbot_dash_clear_avatar_7d'
-_DASH_CLEAR_GEN_KEY        = '__lgtbot_dash_clear_gen'
-_DASH_CLEAR_GEN_7D_KEY     = '__lgtbot_dash_clear_gen_7d'
-_DASH_CLEAR_MATCH_ALL_KEY  = '__lgtbot_dash_clear_match_all'
-_DASH_CLEAR_MATCH_7D_KEY   = '__lgtbot_dash_clear_match_7d'
+_DASH_CHECK_UPDATE_KEY      = '__lgtbot_dash_check_update'
+_DASH_DO_UPDATE_KEY         = '__lgtbot_dash_do_update'           # 更新桥接层
+_DASH_UPDATE_SUBMODULE_KEY  = '__lgtbot_dash_update_submodule'    # 更新 / 初始化 lgtbot 子模块
+_DASH_CLEAR_AVATAR_KEY      = '__lgtbot_dash_clear_avatar'
+_DASH_CLEAR_AVATAR_7D_KEY   = '__lgtbot_dash_clear_avatar_7d'
+_DASH_CLEAR_GEN_KEY         = '__lgtbot_dash_clear_gen'
+_DASH_CLEAR_GEN_7D_KEY      = '__lgtbot_dash_clear_gen_7d'
+_DASH_CLEAR_MATCH_ALL_KEY   = '__lgtbot_dash_clear_match_all'
+_DASH_CLEAR_MATCH_7D_KEY    = '__lgtbot_dash_clear_match_7d'
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
     RESTART_KEY,
     _DASH_CHECK_UPDATE_KEY,
     _DASH_DO_UPDATE_KEY,
+    _DASH_UPDATE_SUBMODULE_KEY,
     _DASH_CLEAR_AVATAR_KEY,
     _DASH_CLEAR_AVATAR_7D_KEY,
     _DASH_CLEAR_GEN_KEY,
@@ -196,8 +198,9 @@ def register():
 
     隐藏(被 filter wrap 屏蔽,不出现在侧边栏列表):
       · ``__lgtbot_restart`` —— 整页通用「重启 LGTBot」按钮
-      · ``__lgtbot_dash_check_update`` —— Dashboard「检查更新」
-      · ``__lgtbot_dash_do_update``    —— Dashboard「立即更新」(git pull)
+      · ``__lgtbot_dash_check_update``      —— Dashboard「检查更新」(同时查桥接层 + 子模块上游)
+      · ``__lgtbot_dash_do_update``         —— Dashboard「更新桥接层」(git pull --ff-only)
+      · ``__lgtbot_dash_update_submodule``  —— Dashboard「更新 / 初始化 lgtbot 子模块」
       · ``__lgtbot_dash_clear_avatar`` / ``_7d`` —— Dashboard 头像缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_clear_gen``    / ``_7d`` —— Dashboard 图片缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
@@ -219,14 +222,15 @@ def register():
     _register_hidden_action(RESTART_KEY, _render_restart)
 
     # Dashboard action 端点
-    _register_hidden_action(_DASH_CHECK_UPDATE_KEY,     page_dashboard.render_check_update)
-    _register_hidden_action(_DASH_DO_UPDATE_KEY,        page_dashboard.render_do_update)
-    _register_hidden_action(_DASH_CLEAR_AVATAR_KEY,     page_dashboard.render_clear_avatar)
-    _register_hidden_action(_DASH_CLEAR_AVATAR_7D_KEY,  page_dashboard.render_clear_avatar_7d)
-    _register_hidden_action(_DASH_CLEAR_GEN_KEY,        page_dashboard.render_clear_gen)
-    _register_hidden_action(_DASH_CLEAR_GEN_7D_KEY,     page_dashboard.render_clear_gen_7d)
-    _register_hidden_action(_DASH_CLEAR_MATCH_ALL_KEY,  page_dashboard.render_clear_match_all)
-    _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,   page_dashboard.render_clear_match_7d)
+    _register_hidden_action(_DASH_CHECK_UPDATE_KEY,      page_dashboard.render_check_update)
+    _register_hidden_action(_DASH_DO_UPDATE_KEY,         page_dashboard.render_do_update)
+    _register_hidden_action(_DASH_UPDATE_SUBMODULE_KEY,  page_dashboard.render_update_submodule)
+    _register_hidden_action(_DASH_CLEAR_AVATAR_KEY,      page_dashboard.render_clear_avatar)
+    _register_hidden_action(_DASH_CLEAR_AVATAR_7D_KEY,   page_dashboard.render_clear_avatar_7d)
+    _register_hidden_action(_DASH_CLEAR_GEN_KEY,         page_dashboard.render_clear_gen)
+    _register_hidden_action(_DASH_CLEAR_GEN_7D_KEY,      page_dashboard.render_clear_gen_7d)
+    _register_hidden_action(_DASH_CLEAR_MATCH_ALL_KEY,   page_dashboard.render_clear_match_all)
+    _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,    page_dashboard.render_clear_match_7d)
 
     _ensure_get_pages_filters_hidden()
 

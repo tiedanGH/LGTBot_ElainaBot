@@ -11,9 +11,31 @@
       </div>
       <div class="dash-version-actions">
         <button id="dash-check-update" class="dash-btn dash-btn-primary">🔍 检查更新</button>
-        <button id="dash-do-update" class="dash-btn dash-btn-warn" style="display:none">⬇ 立即更新</button>
       </div>
     </div>
+
+    <!-- 桥接层(本插件)更新行 -->
+    <div class="dash-update-row" id="dash-bridge-row">
+      <div class="dash-update-label">
+        <b>🔌 桥接层</b>
+        <span class="dash-update-detail" id="dash-bridge-detail">点击「检查更新」查看版本</span>
+      </div>
+      <div class="dash-update-actions">
+        <button id="dash-do-update" class="dash-btn dash-btn-warn" style="display:none">⬇ 更新桥接层</button>
+      </div>
+    </div>
+
+    <!-- 子模块 lgtbot 更新 / 初始化行 -->
+    <div class="dash-update-row" id="dash-submodule-row">
+      <div class="dash-update-label">
+        <b>🧩 <span class="dash-mono" id="dash-submodule-path">lgtbot</span></b>
+        <span class="dash-update-detail" id="dash-submodule-detail">点击「检查更新」查看 commit</span>
+      </div>
+      <div class="dash-update-actions">
+        <button id="dash-update-submodule" class="dash-btn dash-btn-warn" style="display:none">⬇ 更新子模块</button>
+      </div>
+    </div>
+
     <div id="dash-update-result" class="dash-update-result"></div>
   </section>
 

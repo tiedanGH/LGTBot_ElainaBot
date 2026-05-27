@@ -401,6 +401,25 @@ body {
 }
 .dash-update-result:empty { display: none; }
 
+/* 桥接层 / 子模块各自的更新行(版本头部下方) —— flex 行,左文字右按钮,
+   背景比 section 略浅,与下方的 stat / cache card 视觉一致 */
+.dash-update-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  margin-top: 10px; padding: 10px 12px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.dash-update-row .dash-update-label {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 12px; color: var(--text); flex-wrap: wrap;
+}
+.dash-update-row .dash-update-detail {
+  color: var(--text-muted); font-family: 'Consolas', 'Menlo', monospace;
+}
+.dash-update-row .dash-update-actions {
+  display: inline-flex; gap: 6px; flex-wrap: wrap;
+}
+
 /* ── 通用按钮族 ── */
 .dash-btn {
   background: var(--panel); color: var(--text);

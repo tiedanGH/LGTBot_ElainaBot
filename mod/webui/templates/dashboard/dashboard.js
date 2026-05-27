@@ -1,25 +1,27 @@
 /* ──── Dashboard:版本/统计/缓存/配置 ────
  * 隐藏 action 端点 key 与 webui/main.py 的 _DASH_* 常量一一对应。
  * 配置保存复用主框架 /api/config-file/save(接受 plugins/ 下绝对路径)。
- *
- * 全部 confirm / alert / 状态文案统一中文全角标点(,。:;()「」?!)。
- * 状态用 emoji + .dash-msg-ok / dash-msg-warn / dash-msg-err 颜色双重表达。
  */
 
 const DASH_KEYS = {
-  check_update:     '__lgtbot_dash_check_update',
-  do_update:        '__lgtbot_dash_do_update',
-  clear_avatar:     '__lgtbot_dash_clear_avatar',
-  clear_avatar_7d:  '__lgtbot_dash_clear_avatar_7d',
-  clear_gen:        '__lgtbot_dash_clear_gen',
-  clear_gen_7d:     '__lgtbot_dash_clear_gen_7d',
-  clear_match_all:  '__lgtbot_dash_clear_match_all',
-  clear_match_7d:   '__lgtbot_dash_clear_match_7d',
+  check_update:       '__lgtbot_dash_check_update',
+  do_update:          '__lgtbot_dash_do_update',
+  update_submodule:   '__lgtbot_dash_update_submodule',
+  clear_avatar:       '__lgtbot_dash_clear_avatar',
+  clear_avatar_7d:    '__lgtbot_dash_clear_avatar_7d',
+  clear_gen:          '__lgtbot_dash_clear_gen',
+  clear_gen_7d:       '__lgtbot_dash_clear_gen_7d',
+  clear_match_all:    '__lgtbot_dash_clear_match_all',
+  clear_match_7d:     '__lgtbot_dash_clear_match_7d',
 };
 
 /* 引擎配置绝对路径(由 dashboard-data 注入),保存请求里要原样回传 */
 let dashConfigAbsPath = '';
 let dashConfigOriginal = '';
+
+/* 缓存最近一次拿到的 submodule info —— 给「更新子模块」按钮的 confirm
+   弹窗决定文案(初始化 vs 更新),也用来拼完整 git 命令展示。 */
+let dashLastSubmoduleInfo = {};
 
 function dashFmtBytes(n) {
   if (n == null) return '—';
@@ -58,6 +60,11 @@ function dashApplyData(data) {
   } else {
     statusEl.textContent = '引擎未运行';
     statusEl.className = 'dash-badge dash-badge-warn';
+  }
+
+  /* 子模块初始状态(get_data 只填本地 commit,远端留给检查更新按钮)*/
+  if (data.submodule) {
+    dashRenderSubmoduleStatus(data.submodule);
   }
 
   /* 统计 */
@@ -140,31 +147,23 @@ async function dashCallAction(key) {
   return JSON.parse(el.textContent);
 }
 
-/* ──── 检查更新 ──── */
+/* ──── 检查更新 —— 同时拉桥接层 tags 和子模块上游 commit ──── */
 async function dashCheckUpdate() {
   const btn = document.getElementById('dash-check-update');
-  const updBtn = document.getElementById('dash-do-update');
   const resEl = document.getElementById('dash-update-result');
   btn.disabled = true;
   btn.textContent = '⏳ 检查中……';
   resEl.innerHTML = '';
+  /* 隐藏所有更新按钮,等结果回来再按需重显 */
+  document.getElementById('dash-do-update').style.display = 'none';
+  /* 注意:dash-update-submodule 不一定隐藏 —— 如果 status=missing/empty,
+     在 dashApplyData 阶段就显示了「初始化子模块」按钮。
+     这里也先隐藏,新结果回来时 dashRenderSubmoduleStatus 会重新决定。 */
+  document.getElementById('dash-update-submodule').style.display = 'none';
   try {
     const data = await dashCallAction(DASH_KEYS.check_update);
-    if (!data.success) {
-      resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(data.message || '检查失败') + '</span>';
-      updBtn.style.display = 'none';
-      return;
-    }
-    const local = dashFmtVersion(data.local_version);
-    const remote = dashFmtVersion(data.remote_version);
-    if (data.has_update) {
-      resEl.innerHTML = '<span class="dash-msg-warn">🆕 发现新版本：' +
-        '<b>' + escapeHtml(local) + '</b> → <b>' + escapeHtml(remote) + '</b></span>';
-      updBtn.style.display = '';
-    } else {
-      resEl.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本（' + escapeHtml(remote) + '）</span>';
-      updBtn.style.display = 'none';
-    }
+    dashRenderBridgeStatus(data.bridge || {});
+    dashRenderSubmoduleStatus(data.submodule || {});
   } catch (e) {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
@@ -173,9 +172,106 @@ async function dashCheckUpdate() {
   }
 }
 
-/* ──── 一键更新(git pull --ff-only) ──── */
+/* ──── 桥接层(本插件)的检测结果渲染 ──── */
+function dashRenderBridgeStatus(bridge) {
+  const detail = document.getElementById('dash-bridge-detail');
+  const btn = document.getElementById('dash-do-update');
+  if (!bridge || !bridge.success) {
+    detail.innerHTML = '<span class="dash-msg-err">❌ ' +
+      escapeHtml(bridge && bridge.error ? bridge.error : '检查失败') + '</span>';
+    btn.style.display = 'none';
+    return;
+  }
+  const local = dashFmtVersion(bridge.local_version);
+  const remote = dashFmtVersion(bridge.remote_version);
+  if (bridge.has_update) {
+    detail.innerHTML = '<span class="dash-msg-warn">🆕 本地 <b>' +
+      escapeHtml(local) + '</b> → 远端 <b>' + escapeHtml(remote) + '</b></span>';
+    btn.style.display = '';
+  } else {
+    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本（' + escapeHtml(remote) + '）</span>';
+    btn.style.display = 'none';
+  }
+}
+
+/* ──── 子模块的检测结果渲染 ────
+ * 三种情况:
+ *   1. status=missing / empty —— 红字「未初始化」,按钮文案「初始化子模块」
+ *   2. status=ok,但远端查询失败 —— 显示本地 commit + 远端错误
+ *   3. status=ok,远端查询成功 —— 本地 / 远端 commit 对比
+ *      · has_update=true  → 显示「更新子模块」按钮
+ *      · has_update=false → 隐藏按钮,绿字「已是最新」
+ * 同时把 sub 缓存到 dashLastSubmoduleInfo 给 confirm 弹窗用。
+ */
+function dashRenderSubmoduleStatus(sub) {
+  dashLastSubmoduleInfo = sub || {};
+  const detail = document.getElementById('dash-submodule-detail');
+  const btn = document.getElementById('dash-update-submodule');
+  const pathEl = document.getElementById('dash-submodule-path');
+  if (sub.path) pathEl.textContent = sub.path;
+
+  /* 未初始化:红叉 + 「初始化子模块」按钮 */
+  if (sub.status === 'missing' || sub.status === 'empty') {
+    const reason = sub.status === 'missing' ? '文件夹不存在' : '文件夹为空';
+    let html = '<span class="dash-msg-err">❌ 子模块未初始化(' + reason + ')</span>';
+    if (sub.upstream_url) {
+      html += ' · 上游 <a href="' + escapeHtml(sub.upstream_url) +
+              '" target="_blank" rel="noopener">' +
+              escapeHtml((sub.upstream_owner || '') + '/' + (sub.upstream_repo || '')) +
+              '</a>';
+    }
+    detail.innerHTML = html;
+    btn.textContent = '⬇ 初始化子模块';
+    btn.style.display = '';
+    return;
+  }
+
+  /* status=ok */
+  const local = sub.local_commit || '—';
+  const upstreamLink = sub.upstream_url
+    ? ' · 上游 <a href="' + escapeHtml(sub.upstream_url) +
+      '" target="_blank" rel="noopener">' +
+      escapeHtml((sub.upstream_owner || '') + '/' + (sub.upstream_repo || '')) +
+      '</a>'
+    : '';
+
+  /* 远端没查(初始页 get_data 不查) */
+  if (!sub.remote_commit && !sub.error) {
+    detail.innerHTML = '本地 <b class="dash-mono">' + escapeHtml(local) +
+      '</b> · 点击「检查更新」查看远端' + upstreamLink;
+    btn.style.display = 'none';
+    return;
+  }
+
+  /* 远端查询失败 */
+  if (sub.error) {
+    detail.innerHTML = '本地 <b class="dash-mono">' + escapeHtml(local) +
+      '</b> · <span class="dash-msg-err">远端查询失败：' +
+      escapeHtml(sub.error) + '</span>' + upstreamLink;
+    btn.style.display = 'none';
+    return;
+  }
+
+  /* 远端查询成功:对比 */
+  const remote = sub.remote_commit || '—';
+  if (sub.has_update) {
+    detail.innerHTML = '<span class="dash-msg-warn">🆕 本地 <b class="dash-mono">' +
+      escapeHtml(local) + '</b> → 远端 <b class="dash-mono">' +
+      escapeHtml(remote) + '</b></span>' + upstreamLink;
+    btn.textContent = '⬇ 更新子模块';
+    btn.style.display = '';
+  } else {
+    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新(本地 ' +
+      escapeHtml(local) + ' = 远端 ' + escapeHtml(remote) + ')</span>' + upstreamLink;
+    btn.style.display = 'none';
+  }
+}
+
+/* ──── 更新桥接层(git pull --ff-only) ──── */
 async function dashDoUpdate() {
-  if (!confirm('确认执行 git pull --ff-only？\n更新完成后需要重启 LGTBot 引擎或重启进程才能加载新版本。')) {
+  const cmd = 'git pull --ff-only';
+  if (!confirm('确认更新桥接层？\n\n将在插件目录下执行命令：\n  ' + cmd +
+               '\n\n更新完成后需要重启 LGTBot 引擎或重启进程才能加载新版本。')) {
     return;
   }
   const btn = document.getElementById('dash-do-update');
@@ -184,7 +280,8 @@ async function dashDoUpdate() {
   btn.textContent = '⏳ 更新中……';
   try {
     const data = await dashCallAction(DASH_KEYS.do_update);
-    let html = '';
+    let html = '<div class="dash-msg-info">执行命令：<code class="dash-mono">' +
+               escapeHtml(cmd) + '</code></div>';
     if (data.success) {
       html += '<div class="dash-msg-ok">' + escapeHtml(data.message) + '</div>';
     } else {
@@ -197,7 +294,54 @@ async function dashDoUpdate() {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
     btn.disabled = false;
-    btn.textContent = '⬇ 立即更新';
+    btn.textContent = '⬇ 更新桥接层';
+  }
+}
+
+/* ──── 更新 / 初始化 lgtbot 子模块 ──── */
+async function dashDoUpdateSubmodule() {
+  const sub = dashLastSubmoduleInfo || {};
+  const path = sub.path || 'lgtbot';
+  const isInit = (sub.status === 'missing' || sub.status === 'empty');
+  const verb = isInit ? '初始化' : '更新';
+  const cmd = 'git submodule update --init --recursive --force ' + path;
+  const tail = isInit
+    ? '\n\n首次初始化会克隆完整的 lgtbot 仓库(含 50+ 游戏插件)，通常需要 30 秒至几分钟。'
+    : '\n\n该命令会强制把本地子模块对齐到父仓库 gitlink，清除子模块内的本地修改。';
+
+  if (!confirm('确认' + verb + '子模块「' + path + '」？\n\n将在插件目录下执行命令：\n  ' +
+               cmd + tail)) {
+    return;
+  }
+
+  const btn = document.getElementById('dash-update-submodule');
+  const resEl = document.getElementById('dash-update-result');
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = isInit ? '⏳ 初始化中……' : '⏳ 更新中……';
+  try {
+    const data = await dashCallAction(DASH_KEYS.update_submodule);
+    let html = '';
+    if (data.command) {
+      html += '<div class="dash-msg-info">执行命令：<code class="dash-mono">' +
+              escapeHtml(data.command) + '</code></div>';
+    }
+    if (data.success) {
+      html += '<div class="dash-msg-ok">' + escapeHtml(data.message) + '</div>';
+    } else {
+      html += '<div class="dash-msg-err">' +
+              escapeHtml(data.message || (verb + '失败')) + '</div>';
+    }
+    if (data.stdout) html += '<pre class="dash-pre">stdout:\n' + escapeHtml(data.stdout) + '</pre>';
+    if (data.stderr) html += '<pre class="dash-pre">stderr:\n' + escapeHtml(data.stderr) + '</pre>';
+    resEl.innerHTML = html;
+    /* 成功后刷新整页 —— 本地 commit / 子模块 status 会跟着变 */
+    if (data.success) dashRefreshAll();
+  } catch (e) {
+    resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
   }
 }
 
@@ -327,6 +471,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('dash-check-update').addEventListener('click', dashCheckUpdate);
   document.getElementById('dash-do-update').addEventListener('click', dashDoUpdate);
+  document.getElementById('dash-update-submodule').addEventListener('click', dashDoUpdateSubmodule);
   document.getElementById('dash-stats-refresh').addEventListener('click', dashRefreshAll);
   document.getElementById('dash-config-save').addEventListener('click', dashSaveConfig);
   document.getElementById('dash-config-revert').addEventListener('click', dashRevertConfig);

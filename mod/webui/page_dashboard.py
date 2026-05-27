@@ -114,6 +114,162 @@ def _parse_github_owner_repo(url: str) -> tuple[str, str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 子模块(lgtbot/)状态检测 —— 读 .gitmodules 取 url/branch,然后:
+#   · 路径不存在 → status='missing'
+#   · 路径存在但无 .git → status='empty'(子模块未 init)
+#   · 否则 → status='ok',rev-parse HEAD 取本地 commit
+#
+# 上游最新 commit 通过 GitHub commits API 取。
+# ─────────────────────────────────────────────────────────────────────────
+
+# .gitmodules 唯一一项的 fallback —— 文件丢失或读取失败时仍按已知配置工作
+_SUBMODULE_FALLBACK = {
+    'path':   'lgtbot',
+    'url':    'https://github.com/Slontia/lgtbot.git',
+    'branch': 'master',
+}
+
+
+def _parse_gitmodules() -> dict:
+    """解析 ``<plugin_dir>/.gitmodules``,返回 ``{path, url, branch}`` dict。
+
+    文件不存在或解析失败时返回 ``_SUBMODULE_FALLBACK`` 兜底值,让 UI 仍能展示
+    上游链接和默认分支。该插件只配置了一个子模块(lgtbot),不实现多 submodule
+    支持以保持代码简洁;后续若加更多子模块再扩展为 list。
+    """
+    info = dict(_SUBMODULE_FALLBACK)
+    gm = os.path.join(boot.PLUGIN_DIR, '.gitmodules')
+    if not os.path.isfile(gm):
+        return info
+    try:
+        with open(gm, 'r', encoding='utf-8') as f:
+            for raw in f:
+                line = raw.strip()
+                if '=' not in line or line.startswith('#'):
+                    continue
+                k, _, v = line.partition('=')
+                k, v = k.strip(), v.strip()
+                if k in ('path', 'url', 'branch'):
+                    info[k] = v
+    except Exception as e:
+        log.debug(f'读取 .gitmodules 失败：{e}')
+    return info
+
+
+def _local_submodule_commit(sub_path: str) -> tuple[str, str]:
+    """``git -C <plugin_dir>/<sub_path> rev-parse HEAD`` 取本地 commit。
+
+    返回 ``(short_sha, full_sha)``;失败返回 ``('', '')``。
+    """
+    sub_abs = os.path.join(boot.PLUGIN_DIR, sub_path)
+    try:
+        proc = subprocess.run(
+            ['git', '-C', sub_abs, 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=5.0,
+        )
+        if proc.returncode != 0:
+            return ('', '')
+        full = (proc.stdout or '').strip()
+        return (full[:7], full) if full else ('', '')
+    except Exception as e:
+        log.debug(f'rev-parse {sub_path} HEAD 失败：{e}')
+        return ('', '')
+
+
+def _query_upstream_commit(owner: str, repo: str, branch: str) -> tuple[str, str, str]:
+    """GET GitHub ``/repos/{owner}/{repo}/commits/{branch}`` 取最新 commit。
+
+    返回 ``(short_sha, full_sha, error_message)``;失败时前两项空,error 含原因。
+    """
+    if not owner or not repo:
+        return ('', '', '上游仓库地址未配置')
+    api_url = f'https://api.github.com/repos/{owner}/{repo}/commits/{branch or "HEAD"}'
+    try:
+        req = urllib.request.Request(
+            api_url,
+            headers={
+                'User-Agent': 'LGTBot-Dashboard',
+                'Accept': 'application/vnd.github+json',
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8.0) as r:
+            data = json.loads(r.read().decode('utf-8') or '{}')
+    except urllib.error.HTTPError as e:
+        return ('', '', f'GitHub HTTP {e.code}(可能触发匿名 60 次每小时限流)')
+    except Exception as e:
+        return ('', '', f'网络错误：{e}')
+    full = data.get('sha') or ''
+    if not full:
+        return ('', '', '响应缺少 sha 字段')
+    return (full[:7], full, '')
+
+
+def _get_submodule_info(query_remote: bool = False) -> dict:
+    """汇总子模块状态。``query_remote=True`` 会调用 GitHub API 取远端 commit;
+    ``False`` 只取本地状态,适合 ``get_data()`` 首次渲染(避免拖慢页面)。
+
+    status 取值:
+      · ``ok``       —— 子模块已初始化,本地 HEAD 可读
+      · ``missing``  —— 文件夹不存在
+      · ``empty``    —— 文件夹存在但内部为空 / 无 .git(未 init)
+    """
+    cfg = _parse_gitmodules()
+    sub_path = cfg['path']
+    upstream_url = cfg['url']
+    branch = cfg['branch']
+    owner, repo = _parse_github_owner_repo(upstream_url)
+
+    info = {
+        'path': sub_path,
+        'upstream_url': upstream_url,
+        'upstream_owner': owner,
+        'upstream_repo': repo,
+        'branch': branch,
+        'status': 'ok',
+        'local_commit': '',
+        'local_commit_full': '',
+        'remote_commit': '',
+        'remote_commit_full': '',
+        'has_update': False,
+        'error': '',
+    }
+
+    sub_abs = os.path.join(boot.PLUGIN_DIR, sub_path)
+    if not os.path.isdir(sub_abs):
+        info['status'] = 'missing'
+    else:
+        # 目录是否为「子模块已 init」的标志:lgtbot/.git 存在(子模块下是文件,
+        # 指向父仓库 .git/modules/lgtbot;非子模块独立 clone 则是目录)
+        if not os.path.exists(os.path.join(sub_abs, '.git')):
+            # 目录有内容但没 .git —— 可能是 git submodule deinit 后空架子
+            try:
+                entries = list(os.scandir(sub_abs))
+            except OSError:
+                entries = []
+            info['status'] = 'empty' if not entries else 'empty'
+        else:
+            short, full = _local_submodule_commit(sub_path)
+            info['local_commit'] = short
+            info['local_commit_full'] = full
+
+    if query_remote:
+        # 远端 commit 可在任何 status 下查询(即便子模块未 init,UI 也能展示「上游
+        # 最新是 abc1234,你需要初始化子模块」)
+        short, full, err = _query_upstream_commit(owner, repo, branch)
+        info['remote_commit'] = short
+        info['remote_commit_full'] = full
+        if err:
+            info['error'] = err
+        elif info['status'] == 'ok' and full and info['local_commit_full']:
+            info['has_update'] = (full != info['local_commit_full'])
+        elif info['status'] != 'ok':
+            # 未 init / missing 都视为「有更新」—— UI 会把按钮文案切成「初始化子模块」
+            info['has_update'] = True
+
+    return info
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # 语义版本号比较 —— 接受 'v1.5.0' / '1.5.0' / 'v1.5.0-beta.1' 等形式
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -255,7 +411,11 @@ def _read_engine_config() -> tuple[str, str]:
 # ─────────────────────────────────────────────────────────────────────────
 
 def get_data() -> str:
-    """返回可嵌入 ``<script id="dashboard-data">`` 的 JSON 字符串。"""
+    """返回可嵌入 ``<script id="dashboard-data">`` 的 JSON 字符串。
+
+    ``submodule`` 字段只包含本地状态(``status`` / ``local_commit``);上游
+    commit 留给「检查更新」按钮去查,避免每次页面渲染都打 GitHub API。
+    """
     meta = _get_plugin_meta()
     cfg_text, cfg_err = _read_engine_config()
     stats, stat_errs = _query_lgtbot_stats()
@@ -264,6 +424,7 @@ def get_data() -> str:
         'version': meta.get('version', ''),
         'github_url': meta.get('github', ''),
         'engine_running': bool(boot.is_engine_running()),
+        'submodule': _get_submodule_info(query_remote=False),
         'config': {
             'abs_path': os.path.abspath(boot.CONF_PATH),
             'content': cfg_text,
@@ -295,17 +456,19 @@ def _fragment(payload: dict) -> str:
     return f'<pre id="result">{_html.escape(body)}</pre>'
 
 
-def render_check_update() -> str:
-    """GET GitHub tags 接口,挑最高语义版本号与本地 ``__plugin_meta__`` 比较。"""
+def _bridge_check_payload() -> dict:
+    """对 GitHub tags 做一次查询,返回桥接层(本插件)的版本对比 dict。"""
     meta = _get_plugin_meta()
     local_ver = meta.get('version', '') or ''
     owner, repo = _parse_github_owner_repo(meta.get('github', '') or '')
     if not owner or not repo:
-        return _fragment({
+        return {
             'success': False,
-            'message': '无法从 __plugin_meta__ 解析 GitHub 仓库地址',
             'local_version': local_ver,
-        })
+            'remote_version': '',
+            'has_update': False,
+            'error': '无法从 __plugin_meta__ 解析 GitHub 仓库地址',
+        }
     api_url = f'https://api.github.com/repos/{owner}/{repo}/tags?per_page=30'
     try:
         req = urllib.request.Request(
@@ -318,31 +481,55 @@ def render_check_update() -> str:
         with urllib.request.urlopen(req, timeout=8.0) as r:
             tags = json.loads(r.read().decode('utf-8') or '[]')
     except urllib.error.HTTPError as e:
-        return _fragment({
+        return {
             'success': False,
-            'message': f'GitHub HTTP {e.code}(可能触发匿名 60 次每小时限流)',
             'local_version': local_ver,
-        })
+            'remote_version': '',
+            'has_update': False,
+            'error': f'GitHub HTTP {e.code}(可能触发匿名 60 次每小时限流)',
+        }
     except Exception as e:
-        return _fragment({
+        return {
             'success': False,
-            'message': f'网络错误：{e}',
             'local_version': local_ver,
-        })
+            'remote_version': '',
+            'has_update': False,
+            'error': f'网络错误：{e}',
+        }
     names = [t.get('name', '') for t in tags if isinstance(t, dict)]
     latest = _pick_latest_semver(names)
     has_update = bool(latest) and _semver_gt(latest, local_ver)
-    return _fragment({
+    return {
         'success': True,
         'local_version': local_ver,
         'remote_version': latest,
         'has_update': has_update,
         'tag_count': len(names),
+        'error': '',
+    }
+
+
+def render_check_update() -> str:
+    """同时检查桥接层(本插件)与 lgtbot 子模块(上游 commit)两边的更新。
+
+    返回 ``{success, bridge, submodule}``:
+      · ``bridge``    —— 本插件 __plugin_meta__.version vs GitHub tags
+      · ``submodule`` —— 子模块本地 HEAD vs 上游 main/master HEAD,含 status
+                        (ok / missing / empty),供 UI 决定按钮文案
+    任一侧失败不影响另一侧,success 反映「两侧都没致命错误」(子模块网络失败
+    会被 UI 单独展示);整体 success 仅当桥接层成功时为 True。
+    """
+    bridge = _bridge_check_payload()
+    submodule = _get_submodule_info(query_remote=True)
+    return _fragment({
+        'success': bool(bridge.get('success')),
+        'bridge': bridge,
+        'submodule': submodule,
     })
 
 
 def render_do_update() -> str:
-    """在 ``boot.PLUGIN_DIR`` 执行 ``git pull --ff-only``。
+    """更新桥接层 —— 在 ``boot.PLUGIN_DIR`` 执行 ``git pull --ff-only``。
 
     同步阻塞 web worker 数秒(直到 git 完成);考虑到该操作极少触发,且
     ``--ff-only`` 模式下 git 不会进入交互,可接受。失败不会破坏工作区。
@@ -361,7 +548,7 @@ def render_do_update() -> str:
             timeout=60.0,
         )
     except subprocess.TimeoutExpired:
-        return _fragment({'success': False, 'message': 'git pull 超时 (超过 60 秒)'})
+        return _fragment({'success': False, 'message': 'git pull 超时(超过 60 秒)'})
     except FileNotFoundError:
         return _fragment({
             'success': False,
@@ -371,10 +558,72 @@ def render_do_update() -> str:
         return _fragment({'success': False, 'message': f'git pull 异常：{e}'})
 
     success = proc.returncode == 0
-    msg = ('✅ 更新已下载，请重启 LGTBot 引擎或重启整个进程以加载新版本'
+    msg = ('✅ 桥接层已更新，请重启 LGTBot 引擎或重启整个进程以加载新版本'
            if success else '❌ git pull 失败，请尝试手动更新。详见 stderr')
     return _fragment({
         'success': success,
+        'returncode': proc.returncode,
+        'stdout': (proc.stdout or '').strip(),
+        'stderr': (proc.stderr or '').strip(),
+        'message': msg,
+    })
+
+
+def render_update_submodule() -> str:
+    """更新或初始化 lgtbot 子模块 ——
+    ``git -C <plugin_dir> submodule update --init --recursive --force <path>``。
+
+    同一条命令兼任「初始化」(子模块文件夹不存在 / 空)和「更新」(把本地子模块
+    HEAD 强制对齐到父仓库 gitlink 记录的 commit)。``--force`` 抹掉子模块内
+    任何本地修改,这正是用户需要的「彻底回到上游版本」语义。
+
+    注意:本命令把子模块对齐到**父仓库 gitlink**,不会拉「上游 main 最新
+    commit」。要真正吃到上游最新代码,需要桥接层先 git pull(父仓库 gitlink
+    更新),再跑本命令。该工作流由 UI 引导。
+    """
+    plugin_dir = boot.PLUGIN_DIR
+    sub_cfg = _parse_gitmodules()
+    sub_path = sub_cfg['path']
+
+    if not os.path.isdir(os.path.join(plugin_dir, '.git')):
+        return _fragment({
+            'success': False,
+            'message': '插件目录不是 git 仓库(.git/ 不存在)，无法初始化子模块',
+        })
+
+    cmd = ['git', '-C', plugin_dir, 'submodule', 'update',
+           '--init', '--recursive', '--force', sub_path]
+    try:
+        # git submodule update 第一次 init 时要克隆整个 lgtbot 仓库,大概 30~60s
+        # (含 50+ 游戏插件子目录),网络慢可能更久 —— timeout 给 300s
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300.0,
+        )
+    except subprocess.TimeoutExpired:
+        return _fragment({
+            'success': False,
+            'command': ' '.join(cmd),
+            'message': 'git submodule update 超时(超过 5 分钟)，可能是网络问题',
+        })
+    except FileNotFoundError:
+        return _fragment({
+            'success': False,
+            'command': ' '.join(cmd),
+            'message': '未找到 git 命令，请确认系统已安装 git',
+        })
+    except Exception as e:
+        return _fragment({
+            'success': False,
+            'command': ' '.join(cmd),
+            'message': f'git submodule update 异常：{e}',
+        })
+
+    success = proc.returncode == 0
+    msg = ('✅ 子模块已更新，如桥接层 C++ 部分有变化需要重新 bash build.sh'
+           if success else '❌ git submodule update 失败，详见 stderr')
+    return _fragment({
+        'success': success,
+        'command': ' '.join(cmd),
         'returncode': proc.returncode,
         'stdout': (proc.stdout or '').strip(),
         'stderr': (proc.stderr or '').strip(),
