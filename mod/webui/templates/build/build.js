@@ -353,14 +353,14 @@ function buildClean() {
 /* ──── 删除 build/ 目录 ──── */
 async function buildRemove() {
   const ok1 = await dashConfirm(
-    '🗑️ 删除 build/ 目录？\n\n命令：rm -rf <plugin_dir>/build\n\n' +
+    '🗑️ 删除 build 目录？\n\n命令：rm -rf <plugin_dir>/build\n\n' +
     '⚠️ 仅删除目录，不重新编译。删除后引擎将无法启动，\n' +
     '直到下次「🚀 完整编译」。',
     {level: 'warn'}
   );
   if (!ok1) return;
   const ok2 = await dashConfirm(
-    '再次确认：永久删除 build/ 目录？\n此操作不可撤销。',
+    '再次确认：永久删除 build 目录？\n此操作不可撤销。',
     {level: 'danger'}
   );
   if (!ok2) return;

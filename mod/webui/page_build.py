@@ -3,6 +3,17 @@
 """
 「引擎编译」标签 —— 在 WebUI 内调度 bash build.sh,日志实时回显。
 
+★ 安全准则 ★
+  · **没有任何自动编译 / 自动清理 / 后台调度**。``bash build.sh`` /
+    ``--clean`` / ``rm -rf build/`` 这些破坏性动作全部通过 ``render_*``
+    端点暴露,而端点**必须用户在仪表盘点按钮 + confirm 触发**;
+    后端不在任何 @on_load、定时器或框架钩子里主动调用。
+  · ``_start_build`` / ``_kill_build`` / ``render_build_remove`` 在动手
+    之前都 ``log.info`` 一条 audit 日志,记录命令 + 路径。
+  · 上报「文件自动消失」时,先到主框架 plugin 日志找 ``[build-*]`` /
+    ``[cache-clear]`` 这些 audit 行:没有 = 不是本插件做的(可能是
+    LGTBot C++ 引擎自身、外部脚本、或 git pull 触发的文件变化)。
+
 进程模型:
   · 子进程用 ``subprocess.Popen(..., start_new_session=True)`` 独立 session,
     父进程(整个 ElainaBot 框架)退出 / 热重载都不会牵连编译进程。重新打开
@@ -627,6 +638,10 @@ def render_build_remove() -> str:
 
     Python 直接调用 rmtree(不走 subprocess),避免任何 shell 介入。
     完成后写 state.json(``kind='meta'``)让 UI 标记「已完成」。
+
+    Audit:本函数只能由用户在仪表盘点「🗑 删除 build/ 目录」按钮 + 双次
+    confirm 后触发(见 build.js::buildRemove);后端不主动调用。
+    rmtree 前后各 ``log.info`` 一条 audit 日志便于事后排查。
     """
     state = get_build_state()
     if state['running']:
@@ -637,13 +652,17 @@ def render_build_remove() -> str:
     build_dir = os.path.join(boot.PLUGIN_DIR, 'build')
     display_argv = ['rm', '-rf', 'build']  # 仅展示用,实际是 Python rmtree
     if not os.path.isdir(build_dir):
+        log.info(f'[build-remove] 跳过(目录不存在):{build_dir}')
         _write_meta_done('删除 build/ 目录 (目录原本不存在)', display_argv, 0)
         return _fragment({'success': True, 'message': 'build/ 目录不存在，无需删除', 'removed': False})
+    log.info(f'[build-remove] 开始删除:{build_dir}')
     try:
         shutil.rmtree(build_dir)
     except Exception as e:
+        log.warning(f'[build-remove] 失败:{build_dir}:{e}')
         _write_meta_done('删除 build/ 目录', display_argv, 1)
         return _fragment({'success': False, 'message': f'删除失败：{e}'})
+    log.info(f'[build-remove] 完成:{build_dir}')
     # 顺便在日志末尾留一条 audit 记录(若 build.log 不存在,append 模式会创建)
     try:
         with open(LOG_PATH, 'a', encoding='utf-8') as f:

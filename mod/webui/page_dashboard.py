@@ -3,6 +3,19 @@
 """
 「仪表盘」标签 —— 集中展示版本/统计/引擎配置/缓存,提供一键更新与缓存清理。
 
+★ 安全准则 ★
+  · **没有任何自动清理 / 自动更新 / 后台定时任务**。所有破坏性动作
+    (清缓存 / git pull / git submodule update / 删 build/ 等)都通过
+    ``render_*`` 端点暴露,而端点**必须用户在 Web UI 上点按钮 + 至少
+    一次 confirm 弹窗触发**;后端不主动调度它们,也不在任何定时器、
+    @on_load / @on_unload 钩子或框架事件回调里调用。
+  · ``_clear_dir`` / ``_clear_dir_keep_recent`` 在真正动手删之前 ``log.info``
+    一条 audit 日志(包含路径 + 删除项数),方便事后排查「为什么文件没了」。
+  · 引擎自身(LGTBot C++)可能在启动时清理过期渲染图,**那是 lgtbot 子模块
+    的行为**,不归本模块管;若服务器上 ``data/engine/images/gen`` 出现意外
+    丢失,先看 ``data/build/build.log`` 是否有 ``--clean`` / 编译 trace,
+    再看主框架 plugin 日志是否记到了本文件 audit 行(没有 = 不是我们清的)。
+
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_JS`` 从 ``templates/dashboard/`` 加载
   · ``get_data()`` 返回所有面板数据(版本、统计、缓存尺寸、引擎配置内容、
@@ -645,9 +658,16 @@ def render_update_submodule() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 
 def _clear_dir(path: str) -> tuple[bool, str, int]:
-    """递归删除 ``path`` 下全部直接子项,保留 ``path`` 本身;返回 ``(ok, msg, n)``."""
+    """递归删除 ``path`` 下全部直接子项,保留 ``path`` 本身;返回 ``(ok, msg, n)``.
+
+    Audit:本函数被调用前必然走过 UI 的两次 confirm(见 dashboard.js 的
+    ``DASH_CLEAR_PROMPTS``)。这里 ``log.info`` 一条 audit 日志便于事后排查
+    「是谁、什么时候清了哪个目录」。
+    """
     if not os.path.isdir(path):
+        log.info(f'[cache-clear] 跳过(目录不存在):{path}')
         return True, '目录不存在，无需清理', 0
+    log.info(f'[cache-clear] 开始清理:{path}')
     removed = 0
     errs: list = []
     try:
@@ -661,16 +681,24 @@ def _clear_dir(path: str) -> tuple[bool, str, int]:
             except Exception as e:
                 errs.append(f'{entry.name}:{e}')
     except Exception as e:
+        log.warning(f'[cache-clear] 扫描失败:{path}:{e}')
         return False, f'扫描目录失败：{e}', removed
     if errs:
+        log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败:{path} (删除 {removed} 项)')
         return False, ';'.join(errs[:5]), removed
+    log.info(f'[cache-clear] 完成:{path} (删除 {removed} 项)')
     return True, '清理完成', removed
 
 
 def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int]:
-    """删除 ``path`` 下 mtime 早于 ``days`` 天的直接子项(对「每对局一目录」结构有意义)。"""
+    """删除 ``path`` 下 mtime 早于 ``days`` 天的直接子项(对「每对局一目录」结构有意义)。
+
+    Audit:同 ``_clear_dir``,执行前后 INFO 日志。
+    """
     if not os.path.isdir(path):
+        log.info(f'[cache-clear] 跳过(目录不存在):{path}')
         return True, '目录不存在，无需清理', 0
+    log.info(f'[cache-clear] 开始保留近 {days} 天:{path}')
     cutoff = time.time() - days * 86400
     removed = 0
     errs: list = []
@@ -688,9 +716,12 @@ def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int]:
             except Exception as e:
                 errs.append(f'{entry.name}:{e}')
     except Exception as e:
+        log.warning(f'[cache-clear] 扫描失败:{path}:{e}')
         return False, f'扫描目录失败：{e}', removed
     if errs:
+        log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败:{path} (保留近 {days} 天, 删除 {removed} 项)')
         return False, ';'.join(errs[:5]), removed
+    log.info(f'[cache-clear] 完成保留近 {days} 天:{path} (删除 {removed} 项)')
     return True, f'已保留近 {days} 天数据', removed
 
 
