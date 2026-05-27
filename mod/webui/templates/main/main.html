@@ -43,6 +43,23 @@ __USERS_HTML__
     </div>
   </div>
 
+  <!-- 全局自定义弹窗(替代浏览器 confirm/alert/prompt)—— 各 tab 共用 ——
+       通过 main.js 的 dashConfirm/dashAlert/dashPrompt 异步函数控制显示 -->
+  <div id="dash-modal-backdrop" class="dash-modal-backdrop hidden" aria-hidden="true">
+    <div id="dash-modal" class="dash-modal level-info" role="dialog" aria-modal="true">
+      <div class="dash-modal-body">
+        <div id="dash-modal-message" class="dash-modal-message"></div>
+        <input id="dash-modal-input" class="dash-modal-input" type="text"
+               autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+               style="display:none">
+      </div>
+      <div class="dash-modal-actions">
+        <button id="dash-modal-cancel" class="dash-btn" type="button">取消</button>
+        <button id="dash-modal-ok" class="dash-btn dash-btn-primary" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+
   <script id="dashboard-data" type="application/json">__DASHBOARD_DATA__</script>
   <script id="build-data" type="application/json">__BUILD_DATA__</script>
   <script id="log-data" type="application/json">__LOG_DATA__</script>

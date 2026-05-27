@@ -63,9 +63,11 @@ function showBanner(msg, isWarning) {
 
 /* ──── 重启按钮(整页通用,标题栏右侧)──── */
 document.getElementById('restart-btn').addEventListener('click', async () => {
-  if (!confirm('确认重启 LGTBot？\n将以新进程重新加载 C++ 引擎、bridge 与全部游戏插件\n若存在进行中的对局会自动拒绝重启')) {
-    return;
-  }
+  const ok = await dashConfirm(
+    '确认重启 LGTBot?\n\n将以新进程重新加载 C++ 引擎、bridge 与全部游戏插件。\n若存在进行中的对局会自动拒绝重启。',
+    {level: 'warn'}
+  );
+  if (!ok) return;
   try {
     const r = await fetch(apiUrl(RESTART_KEY), { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -80,9 +82,151 @@ document.getElementById('restart-btn').addEventListener('click', async () => {
   }
 });
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * 全局自定义弹窗 —— 替代浏览器 confirm / alert / prompt
+ * ───────────────────────────────────────────────────────────────────────
+ * API(都返回 Promise,务必 await):
+ *   const ok    = await dashConfirm('确认删除?', {level: 'danger'});
+ *   await dashAlert('操作失败', {level: 'danger'});
+ *   const value = await dashPrompt('输入名称', {defaultValue: 'foo'});
+ *
+ * level:
+ *   · 'info'   常规操作(默认),OK 按钮 primary 蓝
+ *   · 'warn'   常规风险(橙黄色顶 banner + 橙字),OK 按钮 warn 橙
+ *   · 'danger' 严重风险 / 不可逆(红顶 banner + 粗体红字),OK 按钮 danger 红
+ *
+ * 键盘:Enter = OK,Esc = Cancel(prompt 里 input 聚焦,Enter 提交输入值)
+ * 鼠标:点 backdrop 空白 = 取消(不会穿透到 modal 内部)
+ *
+ * 视觉骨架在 main.html 末尾的 #dash-modal-backdrop,样式在 main.css。
+ * ═══════════════════════════════════════════════════════════════════════ */
+let _dashModalResolve = null;
+let _dashModalKind = 'confirm';
+const _DASH_OK_TEXT = { confirm: '确定', alert: '我知道了', prompt: '确认' };
+
+function _dashOpenModal(opts) {
+  const { message, level, kind, defaultValue, okText, cancelText } = opts;
+  return new Promise(resolve => {
+    /* 上一个 modal 还未结算就被新的覆盖时,旧 promise resolve 取消值,
+       防止上层 await 永远 stuck */
+    if (_dashModalResolve) {
+      _dashModalResolve(kind === 'prompt' ? null : false);
+      _dashModalResolve = null;
+    }
+    _dashModalResolve = resolve;
+    _dashModalKind = kind;
+
+    const backdrop = document.getElementById('dash-modal-backdrop');
+    const modal    = document.getElementById('dash-modal');
+    const msgEl    = document.getElementById('dash-modal-message');
+    const inputEl  = document.getElementById('dash-modal-input');
+    const cancelBtn = document.getElementById('dash-modal-cancel');
+    const okBtn     = document.getElementById('dash-modal-ok');
+
+    msgEl.textContent = message || '';
+    modal.className = 'dash-modal level-' + (level || 'info');
+
+    if (kind === 'prompt') {
+      inputEl.style.display = '';
+      inputEl.value = defaultValue == null ? '' : String(defaultValue);
+    } else {
+      inputEl.style.display = 'none';
+      inputEl.value = '';
+    }
+    /* alert 只要一个「我知道了」,不显示取消 */
+    cancelBtn.style.display = (kind === 'alert') ? 'none' : '';
+    okBtn.textContent     = okText     || _DASH_OK_TEXT[kind] || '确定';
+    cancelBtn.textContent = cancelText || '取消';
+    /* OK 按钮颜色随 level 切换 */
+    okBtn.className = 'dash-btn ' + (
+      level === 'danger' ? 'dash-btn-danger'
+      : level === 'warn' ? 'dash-btn-warn'
+      : 'dash-btn-primary'
+    );
+
+    backdrop.classList.remove('hidden');
+    backdrop.setAttribute('aria-hidden', 'false');
+    /* prompt 聚焦输入框便于直接打字;其它聚焦 OK 让 Enter 立刻生效 */
+    setTimeout(() => {
+      if (kind === 'prompt') { inputEl.focus(); inputEl.select(); }
+      else okBtn.focus();
+    }, 0);
+  });
+}
+
+function _dashCloseModal(value) {
+  const backdrop = document.getElementById('dash-modal-backdrop');
+  backdrop.classList.add('hidden');
+  backdrop.setAttribute('aria-hidden', 'true');
+  const r = _dashModalResolve;
+  _dashModalResolve = null;
+  if (r) r(value);
+}
+
+function dashConfirm(message, opts) {
+  const o = opts || {};
+  return _dashOpenModal({
+    message, kind: 'confirm', level: o.level,
+    okText: o.okText, cancelText: o.cancelText,
+  });
+}
+function dashAlert(message, opts) {
+  const o = opts || {};
+  return _dashOpenModal({
+    message, kind: 'alert', level: o.level, okText: o.okText,
+  });
+}
+function dashPrompt(message, opts) {
+  const o = opts || {};
+  return _dashOpenModal({
+    message, kind: 'prompt', level: o.level,
+    defaultValue: o.defaultValue,
+    okText: o.okText, cancelText: o.cancelText,
+  });
+}
+
+function _dashBindModalEvents() {
+  const backdrop  = document.getElementById('dash-modal-backdrop');
+  if (!backdrop) return;
+  const modal     = document.getElementById('dash-modal');
+  const inputEl   = document.getElementById('dash-modal-input');
+  const okBtn     = document.getElementById('dash-modal-ok');
+  const cancelBtn = document.getElementById('dash-modal-cancel');
+
+  const doOk = () => {
+    if (_dashModalKind === 'prompt') _dashCloseModal(inputEl.value);
+    else _dashCloseModal(true);
+  };
+  const doCancel = () => {
+    _dashCloseModal(_dashModalKind === 'prompt' ? null : false);
+  };
+
+  okBtn.addEventListener('click', doOk);
+  cancelBtn.addEventListener('click', doCancel);
+
+  /* 点 backdrop 空白 = 取消;modal 内部点击 stopPropagation 不冒泡 */
+  backdrop.addEventListener('mousedown', (e) => {
+    if (e.target === backdrop) doCancel();
+  });
+  modal.addEventListener('mousedown', e => e.stopPropagation());
+
+  /* 全局键盘:仅 modal 显示时拦截 Enter/Esc */
+  document.addEventListener('keydown', (e) => {
+    if (backdrop.classList.contains('hidden')) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      doOk();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      doCancel();
+    }
+  });
+}
+
 /* ──── 启动 ──── */
 window.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  _dashBindModalEvents();
   logsLoadInline();
   usersLoadInline();
   setInterval(logsRefresh, REFRESH_MS);

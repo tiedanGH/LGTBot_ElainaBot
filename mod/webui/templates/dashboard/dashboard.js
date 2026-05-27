@@ -270,10 +270,12 @@ function dashRenderSubmoduleStatus(sub) {
 /* ──── 更新桥接层(git pull --ff-only) ──── */
 async function dashDoUpdate() {
   const cmd = 'git pull --ff-only';
-  if (!confirm('确认更新桥接层？\n\n将在插件目录下执行命令：\n  ' + cmd +
-               '\n\n更新完成后需要重启 LGTBot 引擎或重启进程才能加载新版本。')) {
-    return;
-  }
+  const ok = await dashConfirm(
+    '确认更新桥接层?\n\n将在插件目录下执行命令:\n  ' + cmd +
+    '\n\n更新完成后需要重启 LGTBot 引擎或重启进程才能加载新版本。',
+    {level: 'warn'}
+  );
+  if (!ok) return;
   const btn = document.getElementById('dash-do-update');
   const resEl = document.getElementById('dash-update-result');
   btn.disabled = true;
@@ -309,10 +311,11 @@ async function dashDoUpdateSubmodule() {
     ? '\n\n首次初始化会克隆完整的 lgtbot 仓库(含 50+ 游戏插件)，通常需要 30 秒至几分钟。'
     : '\n\n该命令会强制把本地子模块对齐到父仓库 gitlink，清除子模块内的本地修改。';
 
-  if (!confirm('确认' + verb + '子模块「' + path + '」？\n\n将在插件目录下执行命令：\n  ' +
-               cmd + tail)) {
-    return;
-  }
+  const ok = await dashConfirm(
+    '确认' + verb + '子模块「' + path + '」?\n\n将在插件目录下执行命令:\n  ' + cmd + tail,
+    {level: 'warn'}
+  );
+  if (!ok) return;
 
   const btn = document.getElementById('dash-update-submodule');
   const resEl = document.getElementById('dash-update-result');
@@ -442,9 +445,14 @@ const DASH_CLEAR_KEYS = {
 async function dashClearCache(which) {
   const prompts = DASH_CLEAR_PROMPTS[which];
   if (!prompts) return;
-  /* 依次弹出每条 prompt,任一取消即中断 */
+  /* 依次弹出每条 prompt,任一取消即中断。
+     双次确认场景下最后一条用 danger(强调不可逆),前几条 warn;
+     单次确认场景直接 warn(常规风险)。 */
   for (let i = 0; i < prompts.length; i++) {
-    if (!confirm(prompts[i])) return;
+    const isLast = (i === prompts.length - 1);
+    const level = (isLast && prompts.length > 1) ? 'danger' : 'warn';
+    const ok = await dashConfirm(prompts[i], {level});
+    if (!ok) return;
   }
 
   const msgEl = document.getElementById('dash-cache-msg');
