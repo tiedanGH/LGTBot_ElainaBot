@@ -262,6 +262,42 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
 #      → 调度教学提示 task,后者再次抢同一把 Lock 排到开局公告后面 → 顺序得证。
 _pending_tip_keys: set[str] = set()
 
+# ─────────────────────────────────────────────────────────────────────────
+# 「带开局私信」游戏白名单 —— 此集合内的游戏在 cb_match_event(kind='new_game')
+# 时会被记入 _pending_dm_warn_keys,在开局公告发完后追加一条「主动私信受限」
+# 提示给用户。
+#
+# 触发逻辑:
+#   1. C++ 引擎调 cb_match_event(kind='new_game', game_name='XXX')
+#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内,key 进 _pending_dm_warn_keys
+#   3. 引擎随后调 cb_send_text_message 发出「房间已创建」公告
+#   4. _serialized_text_send 在 Lock 内调 _consume_pending_dm_warn,
+#      pop 出 key 并调度 _schedule_dm_warning —— 该 task 抢同把 Lock 排在
+#      本条之后,QQ 端先看到「房间已创建」,再看到「私信限制」提示。
+# ─────────────────────────────────────────────────────────────────────────
+_DM_LIMITED_GAMES: frozenset = frozenset({
+    '谁是牛头王',
+    '阿瓦隆',
+    'HP杀',
+    '大海战',
+    '漫漫长夜',
+    '十七步',
+    '同步麻将',
+    'wordle',
+    '德州波卡',
+    '幸运波卡',
+})
+
+# 类似 _pending_tip_keys:cb_match_event 阶段只标记 key,等开局公告
+# 通过 cb_send_text/image 发完后,在同一把 per-target Lock 内调度提示发送。
+_pending_dm_warn_keys: set[str] = set()
+
+_DM_WARNING_TEXT = (
+    '## ⚠️ 主动私信受限\n'
+    '此游戏存在**主动私信**，会受到协议限制发送失败。\n'
+    '请在游戏中**私信机器人**发送“赛况”来短暂激活私信和查看私信信息'
+)
+
 # ──────── per-target 串行化:发到同一 target 的消息按 cb 调用顺序送达 QQ ────────
 # 引入背景:旧实现 cb_send_text_message 走 helpers.run_coro_blocking 同步等 15s
 # (内部 wait_and_consume 等用户点刷新),期间 lgtbot 的 read thread 持有 Match.mutex_,
@@ -368,6 +404,52 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
     _schedule_refresh_tip(target_id, is_uid)
 
 
+# ─────────── 「带开局私信」游戏限制提示 ──────────────────────────────────
+# 结构跟上面 _consume_pending_tip / _schedule_refresh_tip 完全对称 —— 在
+# cb_match_event(kind='new_game') 阶段判定游戏名是否在 _DM_LIMITED_GAMES
+# 内并打 _pending_dm_warn_keys 标记;真正的发送时机由 _serialized_text/
+# image_send 在开局公告同步落地后调 _consume_pending_dm_warn 触发。
+
+async def _send_dm_warning(target_id: str, is_uid: bool) -> None:
+    """走标准 ``_send_text_quota_managed`` 通道发出「私信限制」提示。
+
+    与 ``_send_refresh_tip`` 同一把 per-target Lock,保证排在「房间已创建」
+    公告之后到达 QQ。
+    """
+    key = helpers.target_key(target_id, is_uid)
+    try:
+        async with _get_send_lock(key):
+            message_log.log_outgoing(target_id, is_uid, _DM_WARNING_TEXT)
+            await _send_text_quota_managed(target_id, is_uid, _DM_WARNING_TEXT, None)
+    except Exception as e:
+        log.debug(f'私信限制提示发送失败 ({target_id}): {e}')
+
+
+def _schedule_dm_warning(target_id: str, is_uid: bool) -> None:
+    """C++ 工作线程安全地把 `_send_dm_warning` 投到 asyncio loop,fire-and-forget。"""
+    loop = state.event_loop
+    if loop is None or loop.is_closed():
+        log.debug('事件循环不可用,跳过私信限制提示')
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(
+            _send_dm_warning(target_id, is_uid), loop)
+    except Exception as e:
+        log.debug(f'调度私信限制提示失败: {e}')
+
+
+def _consume_pending_dm_warn(key: str, target_id: str, is_uid: bool) -> None:
+    """若 cb_match_event 标了私信限制 key,这里弹掉并发出提示。
+
+    由 ``_serialized_text_send`` / ``_serialized_image_send`` 在开局公告
+    发送完毕后调用 —— 与 ``_consume_pending_tip`` 并列。
+    """
+    if key not in _pending_dm_warn_keys:
+        return
+    _pending_dm_warn_keys.discard(key)
+    _schedule_dm_warning(target_id, is_uid)
+
+
 # ──────── 用户信息回调（被 LGTBot 引擎调用，需返回字符串） ─────────────────
 
 def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
@@ -424,6 +506,11 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         )
         if btns:
             state.pending_buttons[key] = btns
+        # 新建房间时若该游戏带「开局私信」,先打标;待开局公告通过 cb_send_text
+        # 同步发完后,_consume_pending_dm_warn 会调度独立 task 追发「私信限制」
+        # 提示(per-target Lock 保证顺序在公告之后)。
+        if kind == 'new_game' and game_name and game_name in _DM_LIMITED_GAMES:
+            _pending_dm_warn_keys.add(key)
     elif kind == 'all_left':
         state.pending_buttons[key] = buttons.build_dissolve_buttons()
     elif kind == 'unknown_meta':
@@ -519,6 +606,7 @@ async def _serialized_text_send(key: str, target_id: str, is_uid: bool,
     async with _get_send_lock(key):
         await _send_text_quota_managed(target_id, is_uid, msg, extra_buttons)
         _consume_pending_tip(key, target_id, is_uid)
+        _consume_pending_dm_warn(key, target_id, is_uid)
 
 
 async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
@@ -653,6 +741,7 @@ async def _serialized_image_send(key: str, target_id: str, is_uid: bool,
         await _send_image_quota_managed(target_id, is_uid, data, raw_content, filename)
         if raw_content:
             _consume_pending_tip(key, target_id, is_uid)
+            _consume_pending_dm_warn(key, target_id, is_uid)
 
 
 async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filename):
