@@ -64,7 +64,7 @@ function showBanner(msg, isWarning) {
 /* ──── 重启按钮(整页通用,标题栏右侧)──── */
 document.getElementById('restart-btn').addEventListener('click', async () => {
   const ok = await dashConfirm(
-    '确认重启 LGTBot?\n\n将以新进程重新加载 C++ 引擎、bridge 与全部游戏插件。\n若存在进行中的对局会自动拒绝重启。',
+    '确认重启 LGTBot？\n\n将以新进程重新加载 C++ 引擎、bridge 与全部游戏插件。\n若存在进行中的对局会自动拒绝重启。',
     {level: 'warn'}
   );
   if (!ok) return;
@@ -78,7 +78,7 @@ document.getElementById('restart-btn').addEventListener('click', async () => {
     const isWarn = msg.includes('⚠️') || msg.includes('❌') || msg.includes('ℹ️');
     showBanner(msg, isWarn);
   } catch (e) {
-    showBanner('重启请求失败: ' + e.message, true);
+    showBanner('重启请求失败：' + e.message, true);
   }
 });
 

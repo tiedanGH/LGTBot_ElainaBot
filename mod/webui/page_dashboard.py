@@ -380,12 +380,21 @@ def _dir_size_and_count(path: str) -> dict:
     return {'bytes': total_bytes, 'count': total_count, 'exists': True}
 
 
+# cache key → 实际目录名映射。赛况缓存目录引擎用复数 ``matches``,且内部是
+# ``<match_id>_<game>/`` 子目录嵌套 PNG;头像 / 图片是扁平结构。「保留 7 天」
+# 的 mtime 比较仍按直接子项(matches/ 下就是子目录,avatar / gen 下就是文件)
+# —— _clear_dir_keep_recent 对两种结构都成立。
+_CACHE_DIRNAMES = {
+    'avatar': 'avatar',
+    'gen':    'gen',
+    'match':  'matches',
+}
+
+
 def _cache_sizes() -> dict:
-    base = boot.IMG_PATH
     return {
-        'avatar': _dir_size_and_count(os.path.join(base, 'avatar')),
-        'gen':    _dir_size_and_count(os.path.join(base, 'gen')),
-        'match':  _dir_size_and_count(os.path.join(base, 'match')),
+        key: _dir_size_and_count(_cache_dir(key))
+        for key in _CACHE_DIRNAMES
     }
 
 
@@ -538,7 +547,7 @@ def render_do_update() -> str:
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
         return _fragment({
             'success': False,
-            'message': '插件目录不是 git 仓库(.git/ 不存在)，无法 git pull',
+            'message': '插件目录不是 git 仓库 (.git/ 不存在)，无法 git pull',
         })
     try:
         proc = subprocess.run(
@@ -548,7 +557,7 @@ def render_do_update() -> str:
             timeout=60.0,
         )
     except subprocess.TimeoutExpired:
-        return _fragment({'success': False, 'message': 'git pull 超时(超过 60 秒)'})
+        return _fragment({'success': False, 'message': 'git pull 超时 (超过 60 秒)'})
     except FileNotFoundError:
         return _fragment({
             'success': False,
@@ -588,7 +597,7 @@ def render_update_submodule() -> str:
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
         return _fragment({
             'success': False,
-            'message': '插件目录不是 git 仓库(.git/ 不存在)，无法初始化子模块',
+            'message': '插件目录不是 git 仓库 (.git/ 不存在)，无法初始化子模块',
         })
 
     cmd = ['git', '-C', plugin_dir, 'submodule', 'update',
@@ -603,7 +612,7 @@ def render_update_submodule() -> str:
         return _fragment({
             'success': False,
             'command': ' '.join(cmd),
-            'message': 'git submodule update 超时(超过 5 分钟)，可能是网络问题',
+            'message': 'git submodule update 超时 (超过 5 分钟)，可能是网络问题',
         })
     except FileNotFoundError:
         return _fragment({
@@ -686,7 +695,8 @@ def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int]:
 
 
 def _cache_dir(name: str) -> str:
-    return os.path.join(boot.IMG_PATH, name)
+    """按 cache key 取实际目录路径(键 'match' → 实际目录 'matches' / 复数)。"""
+    return os.path.join(boot.IMG_PATH, _CACHE_DIRNAMES.get(name, name))
 
 
 def render_clear_avatar() -> str:

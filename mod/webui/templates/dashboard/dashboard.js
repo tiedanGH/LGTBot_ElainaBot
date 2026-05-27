@@ -185,11 +185,11 @@ function dashRenderBridgeStatus(bridge) {
   const local = dashFmtVersion(bridge.local_version);
   const remote = dashFmtVersion(bridge.remote_version);
   if (bridge.has_update) {
-    detail.innerHTML = '<span class="dash-msg-warn">🆕 本地 <b>' +
+    detail.innerHTML = '<span class="dash-msg-warn">✨ 本地 <b>' +
       escapeHtml(local) + '</b> → 远端 <b>' + escapeHtml(remote) + '</b></span>';
     btn.style.display = '';
   } else {
-    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本（' + escapeHtml(remote) + '）</span>';
+    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本 (' + escapeHtml(remote) + ')</span>';
     btn.style.display = 'none';
   }
 }
@@ -213,7 +213,7 @@ function dashRenderSubmoduleStatus(sub) {
   /* 未初始化:红叉 + 「初始化子模块」按钮 */
   if (sub.status === 'missing' || sub.status === 'empty') {
     const reason = sub.status === 'missing' ? '文件夹不存在' : '文件夹为空';
-    let html = '<span class="dash-msg-err">❌ 子模块未初始化(' + reason + ')</span>';
+    let html = '<span class="dash-msg-err">❌ 子模块未初始化 (' + reason + ')</span>';
     if (sub.upstream_url) {
       html += ' · 上游 <a href="' + escapeHtml(sub.upstream_url) +
               '" target="_blank" rel="noopener">' +
@@ -255,13 +255,13 @@ function dashRenderSubmoduleStatus(sub) {
   /* 远端查询成功:对比 */
   const remote = sub.remote_commit || '—';
   if (sub.has_update) {
-    detail.innerHTML = '<span class="dash-msg-warn">🆕 本地 <b class="dash-mono">' +
+    detail.innerHTML = '<span class="dash-msg-warn">✨ 本地 <b class="dash-mono">' +
       escapeHtml(local) + '</b> → 远端 <b class="dash-mono">' +
       escapeHtml(remote) + '</b></span>' + upstreamLink;
     btn.textContent = '⬇ 更新子模块';
     btn.style.display = '';
   } else {
-    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新(本地 ' +
+    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新 (本地 ' +
       escapeHtml(local) + ' = 远端 ' + escapeHtml(remote) + ')</span>' + upstreamLink;
     btn.style.display = 'none';
   }
@@ -271,7 +271,7 @@ function dashRenderSubmoduleStatus(sub) {
 async function dashDoUpdate() {
   const cmd = 'git pull --ff-only';
   const ok = await dashConfirm(
-    '确认更新桥接层?\n\n将在插件目录下执行命令:\n  ' + cmd +
+    '确认更新桥接层？\n\n将在插件目录下执行命令：\n  ' + cmd +
     '\n\n更新完成后需要重启 LGTBot 引擎或重启进程才能加载新版本。',
     {level: 'warn'}
   );
@@ -308,11 +308,11 @@ async function dashDoUpdateSubmodule() {
   const verb = isInit ? '初始化' : '更新';
   const cmd = 'git submodule update --init --recursive --force ' + path;
   const tail = isInit
-    ? '\n\n首次初始化会克隆完整的 lgtbot 仓库(含 50+ 游戏插件)，通常需要 30 秒至几分钟。'
+    ? '\n\n首次初始化会克隆完整的 lgtbot 仓库 (含 50+ 游戏插件)，通常需要 30 秒至几分钟。'
     : '\n\n该命令会强制把本地子模块对齐到父仓库 gitlink，清除子模块内的本地修改。';
 
   const ok = await dashConfirm(
-    '确认' + verb + '子模块「' + path + '」?\n\n将在插件目录下执行命令:\n  ' + cmd + tail,
+    '确认' + verb + '子模块「' + path + '」？\n\n将在插件目录下执行命令：\n  ' + cmd + tail,
     {level: 'warn'}
   );
   if (!ok) return;
@@ -410,7 +410,7 @@ function dashRevertConfig() {
  */
 const DASH_CLEAR_PROMPTS = {
   avatar: [
-    '清理「头像缓存」(engine/images/avatar)？\n所有头像 PNG 将被删除，引擎下次需要时会自动重新下载。',
+    '清理「头像缓存」(engine/images/avatar)？\n所有用户头像图片将被删除，引擎下次需要时会自动重新下载。',
     '再次确认：删除头像缓存，无法恢复？',
   ],
   avatar_7d: [
@@ -418,13 +418,13 @@ const DASH_CLEAR_PROMPTS = {
     '再次确认：删除 7 天前的头像缓存，无法恢复？',
   ],
   gen: [
-    '清理「图片缓存」(engine/images/gen)？\n图片在 bot 发送一次后就没用了，本次清理不影响已发出的消息。',
+    '清理「图片缓存」(engine/images/gen)？\n仅清理已发送的图片缓存，本次清理不影响已发出的消息。',
   ],
   gen_7d: [
     '仅保留最近 7 天的「图片缓存」，删除其它文件？',
   ],
   match_all: [
-    '清理「赛况缓存」全部(engine/images/match)？\n所有对局的渲染图都将被删除，历史战绩页面里的图片链接会失效。',
+    '清理「赛况缓存」全部 (engine/images/matches)？\n保存在 matches 的对局的记录将被删除，不会影响玩家战绩数据库。',
     '再次确认：删除全部赛况图，无法恢复？',
   ],
   match_7d: [

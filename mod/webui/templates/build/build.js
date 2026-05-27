@@ -102,7 +102,7 @@ function buildApplyState(state, logHtml, logSize) {
       badge.textContent = '⛔ 已终止';
       badge.className = 'dash-badge dash-badge-err';
     }
-    cmdEl.textContent = '上次任务:' + state.cmd_display;
+    cmdEl.textContent = '上次任务：' + state.cmd_display;
     /* 有 elapsed_sec(编译类 / 终止)就在右侧显示用时;meta 类瞬时完成不展示 */
     const dur = buildFmtDuration(state.elapsed_sec);
     sinceEl.textContent = dur ? '用时 ' + dur : '';
@@ -185,7 +185,7 @@ function buildStopPolling() {
    level 参数:第一次确认的视觉等级(info / warn / danger);
               二次确认 doubleConfirm 固定 danger,强调不可逆。 */
 async function buildLaunch(key, displayCmd, promptText, doubleConfirm, level) {
-  const finalPrompt = promptText + '\n\n命令:' + displayCmd;
+  const finalPrompt = promptText + '\n\n命令：' + displayCmd;
   if (!(await dashConfirm(finalPrompt, {level: level || 'warn'}))) return;
   if (doubleConfirm && !(await dashConfirm(doubleConfirm, {level: 'danger'}))) return;
   try {
@@ -196,7 +196,7 @@ async function buildLaunch(key, displayCmd, promptText, doubleConfirm, level) {
     }
     buildStartPolling();
   } catch (e) {
-    await dashAlert('❌ 请求失败:' + e.message, {level: 'danger'});
+    await dashAlert('❌ 请求失败：' + e.message, {level: 'danger'});
   }
 }
 
@@ -205,10 +205,10 @@ function buildFull() {
   buildLaunch(
     BUILD_KEYS.full,
     'bash build.sh',
-    '🚀 开始完整编译?\n\n将依次执行:\n  · 子模块 / 依赖自检\n  · CMake 配置(Release 模式)\n' +
-    '  · 编译 C++ 桥接层 + 50+ 游戏插件\n\n' +
-    '⏱ 预计耗时:2 核 CPU 约 20-30 分钟。\n' +
-    '编译在子进程中运行,可关闭网页;过程中可点「🛑 终止编译」中止。',
+    '🚀 开始完整编译？\n\n将依次执行：\n  · 子模块 / 依赖自检\n  · CMake 配置 (Release 模式)\n' +
+    '  · 编译 C++ 桥接层 + 全部游戏插件\n\n' +
+    '⏱ 预计耗时：2 核 CPU 约 20-30 分钟。\n' +
+    '编译在子进程中运行，可关闭网页；过程中可点「🛑 终止编译」中止。',
     null, 'warn'
   );
 }
@@ -218,8 +218,8 @@ function buildIncr() {
   buildLaunch(
     BUILD_KEYS.incr,
     'bash build.sh -i',
-    '⚡ 开始增量编译?\n\n跳过 CMake 配置,只重编已变化的对象。\n' +
-    '要求 build/ 目录已存在(否则失败,需先完整编译)。\n通常耗时数秒到几分钟。',
+    '⚡ 开始增量编译？\n\n跳过 CMake 配置，只重编已变化的对象。\n' +
+    '要求 build/ 目录已存在 (需先完整编译)。\n通常耗时数秒到几分钟。',
     null, 'info'
   );
 }
@@ -229,8 +229,8 @@ function buildBridge() {
   buildLaunch(
     BUILD_KEYS.bridge,
     'bash build.sh -i -t LGTBot_ElainaBot',
-    '🔌 增量编译桥接层 LGTBot_ElainaBot.so?\n\n' +
-    '只重编桥接层 .so(改完 LGTBot_ElainaBot.cc 后最常用),通常秒级完成。\n' +
+    '🔌 增量编译桥接层 LGTBot_ElainaBot？\n\n' +
+    '只重编桥接层 (改完 LGTBot_ElainaBot.cc 后最常用)，通常秒级完成。\n' +
     '要求 build/ 目录已存在。',
     null, 'info'
   );
@@ -241,7 +241,7 @@ function buildList() {
   buildLaunch(
     BUILD_KEYS.list,
     'bash build.sh --list-targets',
-    '📋 列出全部可编译目标?\n\n不执行任何编译,仅列出 CMake 已知 target,\n' +
+    '📋 列出全部可编译目标？\n\n不执行任何编译，仅列出 CMake 已知 target，\n' +
     '用于「🎯 编译指定目标」按钮里填写。结果输出在下方日志框中。',
     null, 'info'
   );
@@ -251,9 +251,9 @@ function buildList() {
 async function buildCustom() {
   /* 1. prompt 拿 target */
   const raw = await dashPrompt(
-    '请输入要编译的目标名称(参考「📋 列出可编译目标」结果):\n\n' +
-    '允许字符:字母 / 数字 / 下划线 / 连字符\n' +
-    '长度:1-63,首字符必须是字母或下划线',
+    '请输入要编译的目标名称 (参考「📋 列出可编译目标」结果)：\n\n' +
+    '允许字符：字母 / 数字 / 下划线 / 连字符\n' +
+    '长度：1-63，首字符必须是字母或下划线',
     {level: 'info'}
   );
   if (raw == null) return;  /* 用户取消 */
@@ -262,8 +262,8 @@ async function buildCustom() {
   /* 2. 前端白名单(后端有第二道闸) */
   if (!BUILD_TARGET_RE.test(target)) {
     await dashAlert(
-      '❌ 目标名称非法:' + JSON.stringify(target) + '\n' +
-      '只允许字母 / 数字 / 下划线 / 连字符,长度 1-63,首字符为字母或下划线。',
+      '❌ 目标名称非法：' + JSON.stringify(target) + '\n' +
+      '只允许字母 / 数字 / 下划线 / 连字符，长度 1-63，首字符为字母或下划线。',
       {level: 'danger'}
     );
     return;
@@ -272,15 +272,15 @@ async function buildCustom() {
   /* 3. 二次 confirm 显示完整命令 */
   const cmd = 'bash build.sh -i -t ' + target;
   const ok = await dashConfirm(
-    '🎯 确认编译目标「' + target + '」?\n\n命令:' + cmd +
-    '\n\n如果该 target 在 CMake 中不存在,bash 会报错"No rule to make target"。',
+    '🎯 确认编译目标「' + target + '」？\n\n命令：' + cmd +
+    '\n\n如果该 target 在 CMake 中不存在，bash 会报错"No rule to make target"。',
     {level: 'warn'}
   );
   if (!ok) return;
 
   /* 4. 写参数文件 —— framework /api/config-file/save 接受 plugins/ 下绝对路径 */
   if (!buildParamsPath) {
-    await dashAlert('❌ 参数文件路径未注入,无法继续(请刷新页面)', {level: 'danger'});
+    await dashAlert('❌ 参数文件路径未注入，无法继续 (请刷新页面)', {level: 'danger'});
     return;
   }
   try {
@@ -295,11 +295,11 @@ async function buildCustom() {
     });
     const wj = await r.json();
     if (!wj.success) {
-      await dashAlert('❌ 写入参数文件失败:' + (wj.message || ''), {level: 'danger'});
+      await dashAlert('❌ 写入参数文件失败：' + (wj.message || ''), {level: 'danger'});
       return;
     }
   } catch (e) {
-    await dashAlert('❌ 写参数请求失败:' + e.message, {level: 'danger'});
+    await dashAlert('❌ 写参数请求失败：' + e.message, {level: 'danger'});
     return;
   }
 
@@ -312,15 +312,15 @@ async function buildCustom() {
     }
     buildStartPolling();
   } catch (e) {
-    await dashAlert('❌ 请求失败:' + e.message, {level: 'danger'});
+    await dashAlert('❌ 请求失败：' + e.message, {level: 'danger'});
   }
 }
 
 /* ──── 终止编译 ──── */
 async function buildKill() {
   const ok = await dashConfirm(
-    '🛑 终止当前编译?\n\n将向编译进程组发送 SIGTERM(2 秒不响应升级 SIGKILL)。\n' +
-    '已编译的 .o 中间产物会保留(下次增量编译会接着用)。',
+    '🛑 终止当前编译？\n\n将向编译进程组发送 SIGTERM(2 秒不响应升级 SIGKILL)。\n' +
+    '已编译的 .o 中间产物会保留 (保留至下次增量编译)。',
     {level: 'warn'}
   );
   if (!ok) return;
@@ -333,7 +333,7 @@ async function buildKill() {
     /* 等 1s 让后端补完 finished 状态,再拉一次 */
     setTimeout(buildPullOnce, 1000);
   } catch (e) {
-    await dashAlert('❌ 请求失败:' + e.message, {level: 'danger'});
+    await dashAlert('❌ 请求失败：' + e.message, {level: 'danger'});
   }
 }
 
@@ -342,10 +342,10 @@ function buildClean() {
   buildLaunch(
     BUILD_KEYS.clean,
     'bash build.sh --clean',
-    '🧹 清理重编(--clean)?\n\n' +
-    '⚠️ 会先 rm -rf build/(删除所有 CMake 缓存和编译产物),然后从头完整编译。\n' +
-    '等同于「🚀 完整编译」的总耗时,2 核 CPU 约 20-30 分钟。',
-    '再次确认:删除 build/ 后重新完整编译?\n此操作不可撤销,所有现有 .so 都会被覆盖。',
+    '🧹 清理重编 (--clean)？\n\n' +
+    '⚠️ 会先 rm -rf build/(删除所有 CMake 缓存和编译产物)，然后从头完整编译。\n' +
+    '等同于「🚀 完整编译」的总耗时，2 核 CPU 约 20-30 分钟。',
+    '再次确认：删除 build/ 后重新完整编译？\n此操作不可撤销，所有现有 .so 都会被覆盖。',
     'warn'
   );
 }
@@ -353,14 +353,14 @@ function buildClean() {
 /* ──── 删除 build/ 目录 ──── */
 async function buildRemove() {
   const ok1 = await dashConfirm(
-    '🗑 删除 build/ 目录?\n\n命令:rm -rf <plugin_dir>/build\n\n' +
-    '⚠️ 仅删除目录,不重新编译。删除后引擎将无法启动,\n' +
+    '🗑️ 删除 build/ 目录？\n\n命令：rm -rf <plugin_dir>/build\n\n' +
+    '⚠️ 仅删除目录，不重新编译。删除后引擎将无法启动，\n' +
     '直到下次「🚀 完整编译」。',
     {level: 'warn'}
   );
   if (!ok1) return;
   const ok2 = await dashConfirm(
-    '再次确认:永久删除 build/ 目录?\n此操作不可撤销。',
+    '再次确认：永久删除 build/ 目录？\n此操作不可撤销。',
     {level: 'danger'}
   );
   if (!ok2) return;
@@ -373,7 +373,7 @@ async function buildRemove() {
     }
     buildPullOnce();
   } catch (e) {
-    await dashAlert('❌ 请求失败:' + e.message, {level: 'danger'});
+    await dashAlert('❌ 请求失败：' + e.message, {level: 'danger'});
   }
 }
 

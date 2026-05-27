@@ -113,7 +113,7 @@ def _read_state() -> dict:
     except FileNotFoundError:
         return {}
     except Exception as e:
-        log.warning(f'读 build state 失败:{e}')
+        log.warning(f'读 build state 失败：{e}')
         return {}
 
 
@@ -122,7 +122,7 @@ def _write_state(d: dict) -> None:
         with open(STATE_PATH, 'w', encoding='utf-8') as f:
             json.dump(d, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        log.warning(f'写 build state 失败:{e}')
+        log.warning(f'写 build state 失败：{e}')
 
 
 def _is_alive(pid) -> bool:
@@ -269,7 +269,7 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
     if state['running']:
         return {
             'success': False,
-            'message': f'已有编译在进行中({state["cmd_display"]}, PID {state["pid"]}),'
+            'message': f'已有编译在进行中 ({state["cmd_display"]}， PID {state["pid"]})，'
                        f'请先「终止编译」再启动新任务',
         }
 
@@ -287,7 +287,7 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
             f.write(f'[{datetime.now().isoformat(timespec="seconds")}] '
                     f'$ {" ".join(shlex.quote(a) for a in argv)}\n')
     except Exception as e:
-        return {'success': False, 'message': f'无法创建日志文件:{e}'}
+        return {'success': False, 'message': f'无法创建日志文件：{e}'}
 
     actual_cmd = _wrap_for_subprocess(argv)
     log_f = open(LOG_PATH, 'ab', buffering=0)  # binary append, unbuffered
@@ -314,10 +314,10 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
         )
     except FileNotFoundError as e:
         log_f.close()
-        return {'success': False, 'message': f'命令未找到:{e}'}
+        return {'success': False, 'message': f'命令未找到：{e}'}
     except Exception as e:
         log_f.close()
-        return {'success': False, 'message': f'启动失败:{e}'}
+        return {'success': False, 'message': f'启动失败：{e}'}
     finally:
         log_f.close()  # 子进程已 dup fd,父进程不需要持有
 
@@ -333,8 +333,8 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
         'returncode': None,
     })
 
-    log.info(f'[build] 已启动:{display} (PID {proc.pid}, kind={kind})')
-    return {'success': True, 'message': f'已启动:{display}', 'pid': proc.pid}
+    log.info(f'[build] 已启动：{display} (PID {proc.pid}， kind={kind})')
+    return {'success': True, 'message': f'已启动：{display}', 'pid': proc.pid}
 
 
 def _kill_build() -> dict:
@@ -346,12 +346,12 @@ def _kill_build() -> dict:
     try:
         pgid = os.getpgid(int(pid))
     except (ProcessLookupError, PermissionError, OSError) as e:
-        return {'success': False, 'message': f'获取进程组失败:{e}'}
+        return {'success': False, 'message': f'获取进程组失败：{e}'}
 
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError) as e:
-        return {'success': False, 'message': f'SIGTERM 失败:{e}'}
+        return {'success': False, 'message': f'SIGTERM 失败：{e}'}
 
     # 最多等 2s 让进程优雅退出;否则 SIGKILL
     for _ in range(20):
@@ -469,7 +469,7 @@ def _read_log_tail(max_bytes: int = 64 * 1024) -> str:
             data = f.read()
         return data.decode('utf-8', errors='replace')
     except Exception as e:
-        return f'[读取日志失败:{e}]\n'
+        return f'[读取日志失败：{e}]\n'
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -502,13 +502,13 @@ def _fragment(payload: dict) -> str:
 def _require_build_dir() -> tuple[bool, str]:
     """增量编译前置:build/ 必须已存在"""
     if not os.path.isdir(os.path.join(boot.PLUGIN_DIR, 'build')):
-        return False, '增量编译要求 build/ 目录已存在,请先「完整编译」'
+        return False, '增量编译要求 build/ 目录已存在，请先「完整编译」'
     return True, ''
 
 
 def _require_build_sh() -> tuple[bool, str]:
     if not os.path.isfile(os.path.join(boot.PLUGIN_DIR, 'build.sh')):
-        return False, 'build.sh 不存在,无法启动编译'
+        return False, 'build.sh 不存在，无法启动编译'
     return True, ''
 
 
@@ -573,15 +573,15 @@ def render_build_custom() -> str:
         with open(PARAMS_PATH, 'r', encoding='utf-8') as f:
             params = json.load(f)
     except FileNotFoundError:
-        return _fragment({'success': False, 'message': '目标参数文件不存在,请重新点击「编译指定目标」'})
+        return _fragment({'success': False, 'message': '目标参数文件不存在，请重新点击「编译指定目标」'})
     except Exception as e:
-        return _fragment({'success': False, 'message': f'读取目标参数失败:{e}'})
+        return _fragment({'success': False, 'message': f'读取目标参数失败：{e}'})
     target = (params.get('target') or '').strip()
     if not _validate_target_name(target):
         return _fragment({
             'success': False,
-            'message': f'目标名称非法:{target!r}(只允许字母数字下划线连字符,'
-                       f'长度 1-63,必须以字母或下划线开头)',
+            'message': f'目标名称非法：{target!r} (只允许字母数字下划线连字符，'
+                       f'长度 1-63，必须以字母或下划线开头)',
         })
     return _fragment(_start_build(
         ['bash', 'build.sh', '-i', '-t', target],
@@ -632,18 +632,18 @@ def render_build_remove() -> str:
     if state['running']:
         return _fragment({
             'success': False,
-            'message': '编译进行中,无法删除 build/(请先「终止编译」)',
+            'message': '编译进行中，无法删除 build/(请先「终止编译」)',
         })
     build_dir = os.path.join(boot.PLUGIN_DIR, 'build')
     display_argv = ['rm', '-rf', 'build']  # 仅展示用,实际是 Python rmtree
     if not os.path.isdir(build_dir):
-        _write_meta_done('删除 build/ 目录(目录原本不存在)', display_argv, 0)
-        return _fragment({'success': True, 'message': 'build/ 目录不存在,无需删除', 'removed': False})
+        _write_meta_done('删除 build/ 目录 (目录原本不存在)', display_argv, 0)
+        return _fragment({'success': True, 'message': 'build/ 目录不存在，无需删除', 'removed': False})
     try:
         shutil.rmtree(build_dir)
     except Exception as e:
         _write_meta_done('删除 build/ 目录', display_argv, 1)
-        return _fragment({'success': False, 'message': f'删除失败:{e}'})
+        return _fragment({'success': False, 'message': f'删除失败：{e}'})
     # 顺便在日志末尾留一条 audit 记录(若 build.log 不存在,append 模式会创建)
     try:
         with open(LOG_PATH, 'a', encoding='utf-8') as f:
