@@ -5,27 +5,33 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
 
 骨架与拼装:
   · ``PAGE_KEY = 'lgtbot'``  唯一对用户可见的侧边栏入口
-  · ``RESTART_KEY = '__lgtbot_restart'``  内部 action 端点,被 ``get_pages``
-    wrap 过滤,只在「重启 LGTBot」按钮 fetch 时使用
+  · 多个 ``_HIDDEN_KEYS`` —— 内部 action 端点(重启 / 检查更新 / git pull /
+    清理各缓存),通过 wrap ``web_pages.get_pages`` 从侧边栏列表过滤;前端
+    用 ``fetch(apiUrl(key))`` 触发,响应是单 HTML 片段(``<div id="msg">`` /
+    ``<pre id="result">``),JS 用 DOMParser 解析。
   · 顶部标题栏右侧放「🔁 重启 LGTBot」按钮(整页通用,不属于任一标签)
-  · 两个标签:消息日志(``page_logs``)/ 用户数据(``page_users``);各自的
-    HTML / JS / 数据生成都委托给对应模块,本文件只做组装
+  · 三个标签:仪表盘(``page_dashboard``,最左侧)/ 消息日志(``page_logs``)/
+    用户数据(``page_users``);各自的 HTML / JS / 数据生成都委托给对应模块,
+    本文件只做组装
 
 HTML / CSS / JS 全部抽到 ``templates/`` 子目录的 ``main.html`` /
 ``main.css`` / ``main.js`` 中,本文件只保留 Python 逻辑;模板在 import 时
 一次性读入并缓存,插件热重载会随之自动重新读盘。
 
-每次 HTTP 请求 ``_render_html()`` 跑一次,把两个标签的 HTML/JS 片段和数据
+每次 HTTP 请求 ``_render_html()`` 跑一次,把三个标签的 HTML/JS 片段和数据
 JSON 都拼进同一份 HTML —— 这样无论用户当前在哪个标签上,刷新都能就地更新。
 
 设计注意点:
   · ``_LazyHtmlDict.get('html')`` 返回 truthy 占位而非真调 provider,避免框架
     ``core.plugin.web_pages.get_page_html`` 的「先 truthy 后取值」双次访问
-    把 ``_render_restart`` 副作用跑两遍 → tcache double-free
-  · ``_ensure_get_pages_filters_restart`` 一次性 wrap ``web_pages.get_pages``
-    把 RESTART_KEY 从侧边栏列表里隐去,链式 wrap 不与其它插件冲突
+    把有副作用的 provider 跑两遍 → 例如 ``_render_restart`` 释放 C++ 引擎
+    导致 tcache double-free
+  · ``_ensure_get_pages_filters_hidden`` 一次性 wrap ``web_pages.get_pages``
+    把所有 ``_HIDDEN_KEYS`` 从侧边栏列表里隐去,链式 wrap 不与其它插件冲突
   · ``_render_restart`` 内部延迟 import ``dispatcher``,断开循环依赖(本模块
     被 dispatcher 间接 import)
+  · Dashboard 的「保存引擎配置」复用主框架 ``/api/config-file/save`` 端点
+    (接受 plugins/ 下绝对路径,本插件 webui 不再为此自建端点)
 """
 
 from __future__ import annotations
@@ -34,11 +40,34 @@ import html
 import os
 
 from core.plugin import web_pages
-from . import page_logs, page_users
+from . import page_dashboard, page_logs, page_users
 
 
 PAGE_KEY = 'lgtbot'
 RESTART_KEY = '__lgtbot_restart'
+
+# Dashboard 的各 action 端点(JS 侧 DASH_KEYS 与此一一对应)
+_DASH_CHECK_UPDATE_KEY     = '__lgtbot_dash_check_update'
+_DASH_DO_UPDATE_KEY        = '__lgtbot_dash_do_update'
+_DASH_CLEAR_AVATAR_KEY     = '__lgtbot_dash_clear_avatar'
+_DASH_CLEAR_AVATAR_7D_KEY  = '__lgtbot_dash_clear_avatar_7d'
+_DASH_CLEAR_GEN_KEY        = '__lgtbot_dash_clear_gen'
+_DASH_CLEAR_GEN_7D_KEY     = '__lgtbot_dash_clear_gen_7d'
+_DASH_CLEAR_MATCH_ALL_KEY  = '__lgtbot_dash_clear_match_all'
+_DASH_CLEAR_MATCH_7D_KEY   = '__lgtbot_dash_clear_match_7d'
+
+# 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
+_HIDDEN_KEYS = frozenset({
+    RESTART_KEY,
+    _DASH_CHECK_UPDATE_KEY,
+    _DASH_DO_UPDATE_KEY,
+    _DASH_CLEAR_AVATAR_KEY,
+    _DASH_CLEAR_AVATAR_7D_KEY,
+    _DASH_CLEAR_GEN_KEY,
+    _DASH_CLEAR_GEN_7D_KEY,
+    _DASH_CLEAR_MATCH_ALL_KEY,
+    _DASH_CLEAR_MATCH_7D_KEY,
+})
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 
@@ -57,14 +86,17 @@ _MAIN_JS = _load('main/main.js')
 
 
 def _render_html() -> str:
-    """每次访问页面调用,生成最新 HTML(含两个标签的内容和数据)。"""
+    """每次访问页面调用,生成最新 HTML(含三个标签的内容和数据)。"""
     return (_MAIN_HTML
             .replace('__MAIN_CSS__', _MAIN_CSS)
+            .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
             .replace('__LOGS_HTML__', page_logs.TAB_HTML)
             .replace('__USERS_HTML__', page_users.TAB_HTML)
+            .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
             .replace('__LOG_DATA__', page_logs.get_data())
             .replace('__USER_DATA__', page_users.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
+            .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
             .replace('__LOGS_JS__', page_logs.TAB_JS)
             .replace('__USERS_JS__', page_users.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
@@ -121,8 +153,8 @@ class _LazyHtmlDict(dict):
 
 # ──────── 侧边栏过滤 wrap ────────────────────────────────────────────────
 
-def _ensure_get_pages_filters_restart():
-    """把 ``web_pages.get_pages`` 包一层,从侧边栏列表里过滤掉 RESTART_KEY。
+def _ensure_get_pages_filters_hidden():
+    """把 ``web_pages.get_pages`` 包一层,从侧边栏列表里过滤掉所有 ``_HIDDEN_KEYS``。
 
     幂等(``_lgtbot_wrapped`` 标记防重复包);链式(``_lgtbot_inner`` 保留对原
     函数的引用,与其它插件后续的 wrap 兼容)。
@@ -133,7 +165,7 @@ def _ensure_get_pages_filters_restart():
     inner = cur
 
     def filtered():
-        return [p for p in inner() if p.get('key') != RESTART_KEY]
+        return [p for p in inner() if p.get('key') not in _HIDDEN_KEYS]
 
     filtered._lgtbot_wrapped = True
     filtered._lgtbot_inner = inner
@@ -142,12 +174,36 @@ def _ensure_get_pages_filters_restart():
 
 # ──────── 注册 / 注销 ────────────────────────────────────────────────────
 
-def register():
-    """在 ``web_pages._registry`` 中注册两个页面(懒渲染):
+def _register_hidden_action(key: str, provider):
+    """注册一个隐藏的 action 端点(不出现在侧边栏,只供 JS fetch 触发)。"""
+    base = {
+        'key': key,
+        'label': '',
+        'source': 'plugin',
+        'source_name': 'LGTBot_ElainaBot',
+        'html': '',
+        'html_file': '',
+        'icon': '',
+    }
+    web_pages._registry[key] = _LazyHtmlDict(base, provider)
 
-    · ``lgtbot``           —— 「LGTBot 机器人」侧边栏入口(展示双标签内容)
-    · ``__lgtbot_restart`` —— 重启 action 端点;不出现在侧边栏(由 wrap 过滤)
+
+def register():
+    """在 ``web_pages._registry`` 中注册主页与所有 action 端点。
+
+    可见:
+      · ``lgtbot`` —— 「LGTBot 机器人」侧边栏入口(展示三标签内容)
+
+    隐藏(被 filter wrap 屏蔽,不出现在侧边栏列表):
+      · ``__lgtbot_restart`` —— 整页通用「重启 LGTBot」按钮
+      · ``__lgtbot_dash_check_update`` —— Dashboard「检查更新」
+      · ``__lgtbot_dash_do_update``    —— Dashboard「立即更新」(git pull)
+      · ``__lgtbot_dash_clear_avatar`` / ``_7d`` —— Dashboard 头像缓存「清理全部 / 保留 7 天」
+      · ``__lgtbot_dash_clear_gen``    / ``_7d`` —— Dashboard 图片缓存「清理全部 / 保留 7 天」
+      · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
+        —— Dashboard 赛况缓存「清理全部 / 保留 7 天」
     """
+    # 主页(可见)
     log_base = {
         'key': PAGE_KEY,
         'label': 'LGTBot 机器人',
@@ -159,22 +215,25 @@ def register():
     }
     web_pages._registry[PAGE_KEY] = _LazyHtmlDict(log_base, _render_html)
 
-    restart_base = {
-        'key': RESTART_KEY,
-        'label': '',         # 即便过滤失效也尽量空白显示,二重保险
-        'source': 'plugin',
-        'source_name': 'LGTBot_ElainaBot',
-        'html': '',
-        'html_file': '',
-        'icon': '',
-    }
-    web_pages._registry[RESTART_KEY] = _LazyHtmlDict(restart_base, _render_restart)
+    # 重启 action 端点
+    _register_hidden_action(RESTART_KEY, _render_restart)
 
-    _ensure_get_pages_filters_restart()
+    # Dashboard action 端点
+    _register_hidden_action(_DASH_CHECK_UPDATE_KEY,     page_dashboard.render_check_update)
+    _register_hidden_action(_DASH_DO_UPDATE_KEY,        page_dashboard.render_do_update)
+    _register_hidden_action(_DASH_CLEAR_AVATAR_KEY,     page_dashboard.render_clear_avatar)
+    _register_hidden_action(_DASH_CLEAR_AVATAR_7D_KEY,  page_dashboard.render_clear_avatar_7d)
+    _register_hidden_action(_DASH_CLEAR_GEN_KEY,        page_dashboard.render_clear_gen)
+    _register_hidden_action(_DASH_CLEAR_GEN_7D_KEY,     page_dashboard.render_clear_gen_7d)
+    _register_hidden_action(_DASH_CLEAR_MATCH_ALL_KEY,  page_dashboard.render_clear_match_all)
+    _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,   page_dashboard.render_clear_match_7d)
+
+    _ensure_get_pages_filters_hidden()
 
 
 def unregister():
     web_pages.unregister_page(PAGE_KEY)
-    web_pages.unregister_page(RESTART_KEY)
+    for k in _HIDDEN_KEYS:
+        web_pages.unregister_page(k)
     # get_pages 的 wrap 不主动 unwrap:其它插件可能后续也加了包装,贸然恢复会断链。
-    # 留着的副作用仅是过滤一个已不存在的 key,无害。
+    # 留着的副作用仅是过滤一组已不存在的 key,无害。

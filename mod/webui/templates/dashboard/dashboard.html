@@ -1,0 +1,121 @@
+<div class="dashboard">
+
+  <!-- ──── 版本与更新 ──── -->
+  <section class="dash-section">
+    <h2 class="dash-section-title">📦 版本与更新</h2>
+    <div class="dash-version">
+      <div class="dash-version-info">
+        <span class="dash-version-label">当前版本</span>
+        <span id="dash-current-version" class="dash-version-num">—</span>
+        <span id="dash-engine-status" class="dash-badge">—</span>
+      </div>
+      <div class="dash-version-actions">
+        <button id="dash-check-update" class="dash-btn dash-btn-primary">🔍 检查更新</button>
+        <button id="dash-do-update" class="dash-btn dash-btn-warn" style="display:none">⬇ 立即更新</button>
+      </div>
+    </div>
+    <div id="dash-update-result" class="dash-update-result"></div>
+  </section>
+
+  <!-- ──── 数据统计 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📊 数据统计</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">查询时间</span>
+        <span id="dash-stats-time" class="dash-meta-value dash-mono">—</span>
+        <button id="dash-stats-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
+      </div>
+    </div>
+    <div class="dash-stats-grid">
+      <div class="dash-stat-card">
+        <div class="dash-stat-label">用户总数</div>
+        <div id="dash-stat-user-cache" class="dash-stat-value">—</div>
+        <div class="dash-stat-sub">user_cache.db</div>
+      </div>
+      <div class="dash-stat-card">
+        <div class="dash-stat-label">注册用户数</div>
+        <div id="dash-stat-lgt-users" class="dash-stat-value">—</div>
+        <div class="dash-stat-sub">lgtbot.db / user</div>
+      </div>
+      <div class="dash-stat-card">
+        <div class="dash-stat-label">对局总数</div>
+        <div id="dash-stat-matches" class="dash-stat-value">—</div>
+        <div class="dash-stat-sub">lgtbot.db / match</div>
+      </div>
+      <div class="dash-stat-card">
+        <div class="dash-stat-label">对局人次</div>
+        <div id="dash-stat-attendances" class="dash-stat-value">—</div>
+        <div class="dash-stat-sub">user_with_match</div>
+      </div>
+      <div class="dash-stat-card">
+        <div class="dash-stat-label">成就总数</div>
+        <div id="dash-stat-achievements" class="dash-stat-value">—</div>
+        <div class="dash-stat-sub">user_with_achievement</div>
+      </div>
+    </div>
+    <div id="dash-stats-errors" class="dash-errors" style="display:none"></div>
+  </section>
+
+  <!-- ──── 缓存清理 ──── -->
+  <section class="dash-section">
+    <h2 class="dash-section-title">🧹 缓存清理</h2>
+    <div class="dash-cache-grid">
+      <div class="dash-cache-card">
+        <div class="dash-cache-name">头像缓存</div>
+        <div class="dash-cache-path">engine/images/avatar</div>
+        <div class="dash-cache-size">
+          <span id="dash-cache-avatar-size">—</span>
+          <span class="dash-cache-count" id="dash-cache-avatar-count"></span>
+        </div>
+        <div class="dash-cache-actions">
+          <button class="dash-btn dash-btn-warn" data-clear="avatar">🧹 清理全部</button>
+          <button class="dash-btn" data-clear="avatar_7d">📅 保留 7 天</button>
+        </div>
+      </div>
+      <div class="dash-cache-card">
+        <div class="dash-cache-name">图片缓存</div>
+        <div class="dash-cache-path">engine/images/gen</div>
+        <div class="dash-cache-size">
+          <span id="dash-cache-gen-size">—</span>
+          <span class="dash-cache-count" id="dash-cache-gen-count"></span>
+        </div>
+        <div class="dash-cache-actions">
+          <button class="dash-btn dash-btn-warn" data-clear="gen">🧹 清理全部</button>
+          <button class="dash-btn" data-clear="gen_7d">📅 保留 7 天</button>
+        </div>
+      </div>
+      <div class="dash-cache-card">
+        <div class="dash-cache-name">赛况缓存</div>
+        <div class="dash-cache-path">engine/images/match</div>
+        <div class="dash-cache-size">
+          <span id="dash-cache-match-size">—</span>
+          <span class="dash-cache-count" id="dash-cache-match-count"></span>
+        </div>
+        <div class="dash-cache-actions">
+          <button class="dash-btn dash-btn-warn" data-clear="match_all">🧹 清理全部</button>
+          <button class="dash-btn" data-clear="match_7d">📅 保留 7 天</button>
+        </div>
+      </div>
+    </div>
+    <div id="dash-cache-msg" class="dash-cache-msg"></div>
+  </section>
+
+  <!-- ──── 引擎配置 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">⚙️ 引擎配置</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">文件</span>
+        <span id="dash-config-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <textarea id="dash-config-editor" class="dash-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div class="dash-editor-actions">
+      <button id="dash-config-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
+      <button id="dash-config-revert" class="dash-btn">↩ 恢复</button>
+      <span id="dash-config-msg" class="dash-config-msg"></span>
+    </div>
+  </section>
+
+</div>

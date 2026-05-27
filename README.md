@@ -89,7 +89,9 @@ cd ../.. && python3 main.py
 | **全量群适配**       | 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查）；主框架的全量群里不再追加刷新按钮，被动配额耗尽直接走主动消息                      |
 | **菜单 logo**     | 仓库自带图片作为欢迎菜单顶部图（依赖图床上传，URL 进程内缓存 23h）                                                              |
 | **昵称持久化**       | 将 username + 头像 URL 落盘 `data/user_cache.db`（SQLite + WAL，5 min 批量 flush），离线用户在排行榜里仍能正确显示昵称         |
-| **Web 面板拓展页**   | 侧边栏「LGTBot 机器人」单页多标签：消息日志（收发/群私过滤 + 自动刷新）/ 用户数据（信息表）+ 「重启」一键整进程重载                                  |
+| **Web 面板拓展页**   | 侧边栏「LGTBot 机器人」单页多标签：仪表盘（版本/统计/引擎配置/缓存）/ 消息日志（收发/群私过滤 + 自动刷新）/ 用户数据（信息表）+ 「重启」一键整进程重载              |
+| **一键更新 / 缓存清理** | 仪表盘内置 GitHub tag 版本对比 + `git pull --ff-only` 一键更新；头像 / 图片 / 赛况缓存可视化尺寸 + 二次确认清理（赛况支持「保留 7 天」）           |
+| **引擎配置在线编辑**   | 仪表盘内嵌 `data/engine/lgtbot.json` 文本编辑器(前端实时 JSON 语法校验,失败拒绝保存),后端复用主框架 `/api/config-file/save`        |
 | **在线配置**        | `data/config.yaml` 在 Web 面板「插件 → 配置」可直接编辑保存                                                        |
 | **优雅退出**        | 进行中对局拒绝释放引擎，避免数据丢失                                                                                 |
 
@@ -133,12 +135,14 @@ plugins/LGTBot_ElainaBot/
 │   ├── log_attribution.py   类级 monkey-patch ，把本插件 push 的消息在 Web 面板正确归类
 │   └── webui/               Web 面板拓展页（侧边栏「LGTBot 机器人」/ 多标签）
 │       ├── __init__.py
-│       ├── main.py          入口：页面注册 + 主页面拼装（读 templates/ 并填充占位）
+│       ├── main.py          入口：页面注册 + 主页面拼装（读 templates/ 并填充占位）+ 隐藏 action 端点路由
 │       ├── message_log.py   日志缓冲（log_incoming / log_outgoing / get_logs）
+│       ├── page_dashboard.py「仪表盘」标签 Python 逻辑（版本 / 统计 / 引擎配置 / 缓存 + 检查更新 / git pull / 缓存清理 action）
 │       ├── page_logs.py     「消息日志」标签 Python 逻辑（数据生成 + 模板加载）
 │       ├── page_users.py    「用户数据」标签 Python 逻辑（查 user_cache.db + 模板加载）
 │       └── templates/       前端模板（纯 HTML/CSS/JS,按功能分子目录）
 │           ├── main/        主骨架 / 全局 CSS / 公共 JS
+│           ├── dashboard/   「仪表盘」标签 HTML+JS
 │           ├── logs/        「消息日志」标签 HTML+JS
 │           └── users/       「用户数据」标签 HTML+JS
 │
