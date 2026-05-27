@@ -19,6 +19,7 @@ __MAIN_CSS__
 
     <div class="tabs">
       <button class="tab active" data-tab="dashboard">📊 仪表盘</button>
+      <button class="tab" data-tab="build">🛠️ 引擎编译</button>
       <button class="tab" data-tab="logs">📜 消息日志</button>
       <button class="tab" data-tab="users">👥 用户数据</button>
     </div>
@@ -27,6 +28,10 @@ __MAIN_CSS__
   <div class="page-content">
     <div id="tab-dashboard" class="tab-pane active">
 __DASHBOARD_HTML__
+    </div>
+
+    <div id="tab-build" class="tab-pane">
+__BUILD_HTML__
     </div>
 
     <div id="tab-logs" class="tab-pane">
@@ -39,12 +44,15 @@ __USERS_HTML__
   </div>
 
   <script id="dashboard-data" type="application/json">__DASHBOARD_DATA__</script>
+  <script id="build-data" type="application/json">__BUILD_DATA__</script>
   <script id="log-data" type="application/json">__LOG_DATA__</script>
   <script id="user-data" type="application/json">__USER_DATA__</script>
   <script>
 __MAIN_JS__
 
 __DASHBOARD_JS__
+
+__BUILD_JS__
 
 __LOGS_JS__
 

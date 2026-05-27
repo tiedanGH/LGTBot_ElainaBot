@@ -1,0 +1,43 @@
+<div class="build">
+  <section class="dash-section">
+    <h2 class="dash-section-title">🛠️ 引擎编译</h2>
+
+    <!-- 顶部状态条:badge + 当前命令 + 开始时间 + 终止按钮 -->
+    <div class="build-status">
+      <div class="build-status-info">
+        <span id="build-status-badge" class="dash-badge">空闲</span>
+        <span id="build-status-cmd" class="dash-mono"></span>
+        <span id="build-status-since" class="dash-meta-value"></span>
+      </div>
+      <div class="build-status-actions">
+        <button id="build-kill-btn" class="dash-btn dash-btn-danger" style="display:none">🛑 终止编译</button>
+      </div>
+    </div>
+
+    <!-- 常规编译按钮组 -->
+    <div class="build-actions">
+      <button id="build-full"   class="dash-btn dash-btn-primary">🚀 完整编译</button>
+      <button id="build-incr"   class="dash-btn dash-btn-success">⚡ 增量编译</button>
+      <button id="build-bridge" class="dash-btn dash-btn-success">🔌 增量编译桥接层</button>
+      <button id="build-list"   class="dash-btn">📋 列出可编译目标</button>
+      <button id="build-custom" class="dash-btn">🎯 编译指定目标…</button>
+    </div>
+
+    <!-- 危险操作组(单独一行,red 样式) -->
+    <div class="build-actions build-actions-danger">
+      <button id="build-clean"  class="dash-btn dash-btn-danger">🧹 清理重编(--clean)</button>
+      <button id="build-remove" class="dash-btn dash-btn-danger">🗑 删除 build/ 目录</button>
+    </div>
+
+    <!-- 日志输出 -->
+    <div class="build-log-toolbar">
+      <span class="dash-meta-label">编译日志</span>
+      <span class="dash-meta-value dash-mono" id="build-log-size">—</span>
+      <span class="build-log-toolbar-spacer"></span>
+      <label class="build-log-toggle">
+        <input type="checkbox" id="build-log-autoscroll" checked> 自动滚到底部
+      </label>
+    </div>
+    <pre id="build-log" class="build-log"></pre>
+  </section>
+</div>

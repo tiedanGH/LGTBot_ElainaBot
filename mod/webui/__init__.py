@@ -6,7 +6,11 @@ Python 模块(仅做逻辑 + 模板加载):
                    通过 ``webui.register()`` 把 PAGE_KEY 挂进框架的
                    ``web_pages._registry``,卸载时 ``webui.unregister()`` 摘除。
     page_dashboard 「仪表盘」标签(默认最左):版本/统计/引擎配置/缓存,
-                   提供检查更新、git pull、JSON 配置编辑、缓存清理等 action
+                   提供检查更新、git pull、子模块 update、JSON 配置编辑、
+                   缓存清理等 action
+    page_build     「引擎编译」标签:子进程跑 bash build.sh,跨 WebUI 进程
+                   重启仍能续看(state.json + build.log),支持中途终止;
+                   ANSI 颜色转 HTML 渲染
     page_logs      「消息日志」标签:加载 ``templates/logs.{html,js}`` + 数据生成
     page_users     「用户数据」标签:加载 ``templates/users.{html,js}`` + 数据查询
     message_log    日志缓冲(纯数据层):log_incoming / log_outgoing /
@@ -15,18 +19,25 @@ Python 模块(仅做逻辑 + 模板加载):
 前端静态模板(纯 HTML/CSS/JS,按功能分子目录):
     templates/main/        主骨架 / 全局 CSS / 公共 JS
     templates/dashboard/   「仪表盘」标签 HTML+JS
+    templates/build/       「引擎编译」标签 HTML+JS
     templates/logs/        「消息日志」标签 HTML+JS
     templates/users/       「用户数据」标签 HTML+JS
 
 action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不出
 现在侧边栏列表,仅供 JS fetch 触发):
     __lgtbot_restart                    整页通用「🔁 重启 LGTBot」按钮
-    __lgtbot_dash_check_update          Dashboard「检查更新」(GET GitHub tags)
-    __lgtbot_dash_do_update             Dashboard「立即更新」(git pull --ff-only)
-    __lgtbot_dash_clear_avatar          Dashboard 头像缓存「清理全部」
-    __lgtbot_dash_clear_gen             Dashboard 图片缓存「清理全部」
-    __lgtbot_dash_clear_match_all       Dashboard 赛况缓存「清理全部」
-    __lgtbot_dash_clear_match_7d        Dashboard 赛况缓存「保留 7 天」
+    __lgtbot_dash_check_update          Dashboard「检查更新」(同时查桥接层 / 子模块上游)
+    __lgtbot_dash_do_update             Dashboard「更新桥接层」(git pull --ff-only)
+    __lgtbot_dash_update_submodule      Dashboard「更新 / 初始化 lgtbot 子模块」
+    __lgtbot_dash_clear_avatar / _7d    Dashboard 头像缓存「清理全部 / 保留 7 天」
+    __lgtbot_dash_clear_gen    / _7d    Dashboard 图片缓存「清理全部 / 保留 7 天」
+    __lgtbot_dash_clear_match_all / _7d Dashboard 赛况缓存「清理全部 / 保留 7 天」
+    __lgtbot_dash_build_full / incr / bridge / list / custom
+                                        引擎编译 启动入口(完整 / 增量 / 桥接层 /
+                                        列出目标 / 自定义目标)
+    __lgtbot_dash_build_kill            引擎编译 终止当前进程
+    __lgtbot_dash_build_clean / remove  引擎编译 清理重编 / 删 build/ 目录
+    __lgtbot_dash_build_log             引擎编译 轮询拉日志 + 状态
 
 「重启」端点返回 ``<div id="msg">…</div>`` 片段太小,直接在 ``main.py::
 _render_restart`` 里 inline 字符串;Dashboard 端点返回的 ``<pre id="result">

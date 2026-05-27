@@ -541,3 +541,95 @@ body {
   white-space: pre-wrap; word-break: break-all;
   max-height: 200px; overflow-y: auto;
 }
+
+/* ───── 危险按钮 ─────
+   .dash-btn-danger:红色调,用于不可逆 / 破坏性操作,与 warn 区分开 */
+.dash-btn-danger {
+  background: color-mix(in srgb, #dc3545 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, #dc3545 35%, var(--border));
+  color: #dc3545;
+}
+.dash-btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #dc3545 20%, var(--panel));
+  border-color: color-mix(in srgb, #dc3545 60%, var(--border));
+}
+/* .dash-btn-success:绿色调,用于「快速 / 增量」类操作 —— 区别于 primary
+   (蓝色,常规)和 major(渐变,重型);让用户一眼能区分按钮成本量级 */
+.dash-btn-success {
+  background: color-mix(in srgb, var(--in) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--in) 35%, var(--border));
+  color: var(--in);
+}
+.dash-btn-success:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--in) 22%, var(--panel));
+  border-color: color-mix(in srgb, var(--in) 60%, var(--border));
+}
+/* .dash-badge-err:badge 的红色变体,与 .dash-msg-err 的字色一致但用作
+   实心 chip 背景 —— 编译失败 / 危险状态显示 */
+.dash-badge-err {
+  background: color-mix(in srgb, #dc3545 18%, transparent);
+  color: #dc3545;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   引擎编译 标签
+   ═════════════════════════════════════════════════════════════════════════ */
+
+.build { display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+
+.build-status {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 12px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.build-status-info {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 12px; flex-wrap: wrap; min-width: 0;
+}
+.build-status-info .dash-mono {
+  color: var(--text-muted);
+  word-break: break-all; min-width: 0;
+}
+
+/* 按钮组容器:flex-wrap 自适应窄屏 */
+.build-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.build-actions-danger {
+  margin-top: 4px; padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+/* 日志工具栏 + 日志框 */
+.build-log-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; font-size: 12px;
+}
+.build-log-toolbar-spacer { flex: 1; }
+.build-log-toggle {
+  font-size: 11px; color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+}
+.build-log-toggle input { cursor: pointer; }
+
+.build-log {
+  margin-top: 6px; padding: 12px;
+  background: #0f0f17; color: #ddd;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-family: 'Consolas', 'Menlo', 'Cascadia Code', monospace;
+  font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  height: 500px; max-height: 65vh; overflow-y: auto;
+}
+.build-log::-webkit-scrollbar { width: 10px; height: 10px; }
+.build-log::-webkit-scrollbar-track { background: #181826; }
+.build-log::-webkit-scrollbar-thumb { background: #44445a; border-radius: 5px; }
+.build-log::-webkit-scrollbar-thumb:hover { background: #5a5a72; }
+/* Dark 主题下日志框的背景已经够深,Light 主题下保持深色给 ANSI 颜色对比度 */
+:root[data-theme="light"] .build-log { color: #d0d0d0; }
+.build-log:empty::before {
+  content: '(暂无日志 —— 点击上方编译按钮开始)';
+  color: #666; font-style: italic;
+}

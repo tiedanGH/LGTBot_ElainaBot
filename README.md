@@ -78,21 +78,22 @@ cd ../.. && python3 main.py
 
 ## 关键特性
 
-| 能力              | 实现                                                                                                 |
-|-----------------|----------------------------------------------------------------------------------------------------|
-| **零配置自动加载**     | 作为 ElainaBot 插件，路径全部自包含在 `plugins/LGTBot_ElainaBot/`                                               |
-| **消息合并**        | C++ 端聚合 "@玩家 文本 + 图片" 到单条媒体消息（避免 QQ 端拆成两条）                                                         |
-| **markdown 图床** | `config.yaml` 指定单个图床上传到 image_hosting，用 markdown 内嵌，保留 `<@>` 原生 mention 和按钮；留空 / 上传失败回退 msg_type=7 |
-| **玩家头像**        | 利用 `q.qlogo.cn/qqapp/{appid}/{openid}` 直链，LGTBot 渲染头像无需额外接口                                        |
-| **回调按钮**        | `/新游戏` `/加入` 等命令自动附加交互按钮；非刷新 callback 按钮的 data 被当作用户消息派发回 LGTBot 引擎                                |
-| **欢迎菜单**        | 单独 @机器人时回复模板菜单，含「帮助 / 游戏列表 / 排行大图 / 战绩」等按钮；游戏快捷开局列表通过 `config.yaml` 字段可配置                          |
-| **全量群适配**       | 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查）；主框架的全量群里不再追加刷新按钮，被动配额耗尽直接走主动消息                      |
-| **菜单 logo**     | 仓库自带图片作为欢迎菜单顶部图（依赖图床上传，URL 进程内缓存 23h）                                                              |
-| **昵称持久化**       | 将 username + 头像 URL 落盘 `data/user_cache.db`（SQLite + WAL，5 min 批量 flush），离线用户在排行榜里仍能正确显示昵称         |
-| **Web 面板拓展页**   | 侧边栏「LGTBot 机器人」单页多标签：仪表盘（版本/统计/引擎配置/缓存）/ 消息日志（收发/群私过滤 + 自动刷新）/ 用户数据（信息表）+ 「重启」一键整进程重载              |
-| **一键更新 / 缓存清理** | 仪表盘内置 GitHub tag 版本对比 + `git pull --ff-only` 一键更新；缓存可视化尺寸 + 二次确认清理（支持保留 7 天）                       |
-| **在线配置**        | `data/config.yaml` 在 Web 面板「插件 → 配置」可直接编辑保存                                                        |
-| **优雅退出**        | 进行中对局拒绝释放引擎，避免数据丢失                                                                                 |
+| 能力              | 实现                                                                                                      |
+|-----------------|---------------------------------------------------------------------------------------------------------|
+| **零配置自动加载**     | 作为 ElainaBot 插件，路径全部自包含在 `plugins/LGTBot_ElainaBot/`                                                    |
+| **消息合并**        | C++ 端聚合 "@玩家 文本 + 图片" 到单条媒体消息（避免 QQ 端拆成两条）                                                              |
+| **markdown 图床** | `config.yaml` 指定单个图床上传到 image_hosting，用 markdown 内嵌，保留 `<@>` 原生 mention 和按钮；留空 / 上传失败回退 msg_type=7      |
+| **玩家头像**        | 利用 `q.qlogo.cn/qqapp/{appid}/{openid}` 直链，LGTBot 渲染头像无需额外接口                                             |
+| **回调按钮**        | `/新游戏` `/加入` 等命令自动附加交互按钮；非刷新 callback 按钮的 data 被当作用户消息派发回 LGTBot 引擎                                     |
+| **欢迎菜单**        | 单独 @机器人时回复模板菜单，含「帮助 / 游戏列表 / 排行大图 / 战绩」等按钮；游戏快捷开局列表通过 `config.yaml` 字段可配置                               |
+| **全量群适配**       | 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查）；主框架的全量群里不再追加刷新按钮，被动配额耗尽直接走主动消息                           |
+| **菜单 logo**     | 仓库自带图片作为欢迎菜单顶部图（依赖图床上传，URL 进程内缓存 23h）                                                                   |
+| **昵称持久化**       | 将 username + 头像 URL 落盘 `data/user_cache.db`（SQLite + WAL，5 min 批量 flush），离线用户在排行榜里仍能正确显示昵称              |
+| **Web 面板拓展页**   | 侧边栏「LGTBot 机器人」单页多标签：仪表盘（版本/统计/引擎配置/缓存）/ 引擎编译（子进程 + 实时日志）/ 消息日志（收发/群私过滤 + 自动刷新）/ 用户数据（信息表）+ 「重启」一键整进程重载 |
+| **一键更新 / 缓存清理** | 仪表盘内置 GitHub tag + 子模块 commit 双重对比；桥接层与子模块分开更新；缓存可视化尺寸 + 二次确认清理（赛况 / 头像 / 图片均支持「保留 7 天」）                |
+| **引擎编译面板**      | 完整 / 增量 / 桥接层 / 自定义目标 / 列出目标 / 清理重编 / 删 build 共 7 个按钮；子进程独立 session 跑，关闭浏览器不影响；ANSI 彩色输出 + 中途可终止        |
+| **在线配置**        | `data/config.yaml` 在 Web 面板「插件 → 配置」可直接编辑保存                                                             |
+| **优雅退出**        | 进行中对局拒绝释放引擎，避免数据丢失                                                                                      |
 
 ## QQ 协议相关限制（已知）
 
@@ -136,12 +137,14 @@ plugins/LGTBot_ElainaBot/
 │       ├── __init__.py
 │       ├── main.py          入口：页面注册 + 主页面拼装（读 templates/ 并填充占位）+ 隐藏 action 端点路由
 │       ├── message_log.py   日志缓冲（log_incoming / log_outgoing / get_logs）
-│       ├── page_dashboard.py「仪表盘」标签 Python 逻辑（版本 / 统计 / 引擎配置 / 缓存 + 检查更新 / git pull / 缓存清理 action）
+│       ├── page_dashboard.py「仪表盘」标签 Python 逻辑（版本 / 统计 / 引擎配置 / 缓存 + 检查更新 / git pull / 子模块 update / 缓存清理）
+│       ├── page_build.py    「引擎编译」标签 Python 逻辑（子进程 + state.json + build.log + ANSI 转 HTML + 7 个编译动作）
 │       ├── page_logs.py     「消息日志」标签 Python 逻辑（数据生成 + 模板加载）
 │       ├── page_users.py    「用户数据」标签 Python 逻辑（查 user_cache.db + 模板加载）
 │       └── templates/       前端模板（纯 HTML/CSS/JS,按功能分子目录）
 │           ├── main/        主骨架 / 全局 CSS / 公共 JS
 │           ├── dashboard/   「仪表盘」标签 HTML+JS
+│           ├── build/       「引擎编译」标签 HTML+JS
 │           ├── logs/        「消息日志」标签 HTML+JS
 │           └── users/       「用户数据」标签 HTML+JS
 │
@@ -160,6 +163,10 @@ plugins/LGTBot_ElainaBot/
 └── data/                    🗂 运行时数据（自动创建）
     ├── config.yaml          插件配置（Web UI 可在线编辑）
     ├── user_cache.db        用户昵称 / 头像缓存（删除可自动重建，无副作用）
+    ├── build/               引擎编译状态 + 日志（WebUI「引擎编译」标签使用）
+    │   ├── state.json       当前 / 上次编译的 PID + 命令 + 时间
+    │   ├── build.log        子进程 stdout/stderr（含 ANSI 颜色码）
+    │   └── build_target_input.json  自定义目标名临时参数（前端 POST 写入）
     └── engine/              引擎内部数据
         ├── lgtbot.json      LGTBot 引擎全局选项（首次启动写入空 JSON）
         ├── lgtbot.db        SQLite（用户 / 对局 / 排行榜）

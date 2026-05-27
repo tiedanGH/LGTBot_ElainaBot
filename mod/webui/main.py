@@ -6,13 +6,13 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
 骨架与拼装:
   · ``PAGE_KEY = 'lgtbot'``  唯一对用户可见的侧边栏入口
   · 多个 ``_HIDDEN_KEYS`` —— 内部 action 端点(重启 / 检查更新 / git pull /
-    清理各缓存),通过 wrap ``web_pages.get_pages`` 从侧边栏列表过滤;前端
-    用 ``fetch(apiUrl(key))`` 触发,响应是单 HTML 片段(``<div id="msg">`` /
-    ``<pre id="result">``),JS 用 DOMParser 解析。
+    子模块 update / 清理各缓存 / 引擎编译启停),通过 wrap ``web_pages.get_pages``
+    从侧边栏列表过滤;前端用 ``fetch(apiUrl(key))`` 触发,响应是单 HTML 片段
+    (``<div id="msg">`` / ``<pre id="result">``),JS 用 DOMParser 解析。
   · 顶部标题栏右侧放「🔁 重启 LGTBot」按钮(整页通用,不属于任一标签)
-  · 三个标签:仪表盘(``page_dashboard``,最左侧)/ 消息日志(``page_logs``)/
-    用户数据(``page_users``);各自的 HTML / JS / 数据生成都委托给对应模块,
-    本文件只做组装
+  · 四个标签:仪表盘(``page_dashboard``,最左侧)/ 引擎编译(``page_build``)/
+    消息日志(``page_logs``)/ 用户数据(``page_users``);各自的 HTML / JS /
+    数据生成都委托给对应模块,本文件只做组装
 
 HTML / CSS / JS 全部抽到 ``templates/`` 子目录的 ``main.html`` /
 ``main.css`` / ``main.js`` 中,本文件只保留 Python 逻辑;模板在 import 时
@@ -40,7 +40,7 @@ import html
 import os
 
 from core.plugin import web_pages
-from . import page_dashboard, page_logs, page_users
+from . import page_build, page_dashboard, page_logs, page_users
 
 
 PAGE_KEY = 'lgtbot'
@@ -57,6 +57,17 @@ _DASH_CLEAR_GEN_7D_KEY      = '__lgtbot_dash_clear_gen_7d'
 _DASH_CLEAR_MATCH_ALL_KEY   = '__lgtbot_dash_clear_match_all'
 _DASH_CLEAR_MATCH_7D_KEY    = '__lgtbot_dash_clear_match_7d'
 
+# 引擎编译标签的 action 端点(JS 侧 BUILD_KEYS 与此一一对应)
+_BUILD_FULL_KEY    = '__lgtbot_dash_build_full'
+_BUILD_INCR_KEY    = '__lgtbot_dash_build_incr'
+_BUILD_BRIDGE_KEY  = '__lgtbot_dash_build_bridge'
+_BUILD_LIST_KEY    = '__lgtbot_dash_build_list'
+_BUILD_CUSTOM_KEY  = '__lgtbot_dash_build_custom'
+_BUILD_KILL_KEY    = '__lgtbot_dash_build_kill'
+_BUILD_CLEAN_KEY   = '__lgtbot_dash_build_clean'
+_BUILD_REMOVE_KEY  = '__lgtbot_dash_build_remove'
+_BUILD_LOG_KEY     = '__lgtbot_dash_build_log'
+
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
     RESTART_KEY,
@@ -69,6 +80,15 @@ _HIDDEN_KEYS = frozenset({
     _DASH_CLEAR_GEN_7D_KEY,
     _DASH_CLEAR_MATCH_ALL_KEY,
     _DASH_CLEAR_MATCH_7D_KEY,
+    _BUILD_FULL_KEY,
+    _BUILD_INCR_KEY,
+    _BUILD_BRIDGE_KEY,
+    _BUILD_LIST_KEY,
+    _BUILD_CUSTOM_KEY,
+    _BUILD_KILL_KEY,
+    _BUILD_CLEAN_KEY,
+    _BUILD_REMOVE_KEY,
+    _BUILD_LOG_KEY,
 })
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -88,17 +108,20 @@ _MAIN_JS = _load('main/main.js')
 
 
 def _render_html() -> str:
-    """每次访问页面调用,生成最新 HTML(含三个标签的内容和数据)。"""
+    """每次访问页面调用,生成最新 HTML(含四个标签的内容和数据)。"""
     return (_MAIN_HTML
             .replace('__MAIN_CSS__', _MAIN_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
+            .replace('__BUILD_HTML__', page_build.TAB_HTML)
             .replace('__LOGS_HTML__', page_logs.TAB_HTML)
             .replace('__USERS_HTML__', page_users.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
+            .replace('__BUILD_DATA__', page_build.get_data())
             .replace('__LOG_DATA__', page_logs.get_data())
             .replace('__USER_DATA__', page_users.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
             .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
+            .replace('__BUILD_JS__', page_build.TAB_JS)
             .replace('__LOGS_JS__', page_logs.TAB_JS)
             .replace('__USERS_JS__', page_users.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
@@ -205,6 +228,8 @@ def register():
       · ``__lgtbot_dash_clear_gen``    / ``_7d`` —— Dashboard 图片缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
         —— Dashboard 赛况缓存「清理全部 / 保留 7 天」
+      · ``__lgtbot_dash_build_full / incr / bridge / list / custom / kill /
+         clean / remove / log`` —— 引擎编译标签的 9 个动作 + 轮询端点
     """
     # 主页(可见)
     log_base = {
@@ -231,6 +256,17 @@ def register():
     _register_hidden_action(_DASH_CLEAR_GEN_7D_KEY,      page_dashboard.render_clear_gen_7d)
     _register_hidden_action(_DASH_CLEAR_MATCH_ALL_KEY,   page_dashboard.render_clear_match_all)
     _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,    page_dashboard.render_clear_match_7d)
+
+    # 引擎编译 action 端点
+    _register_hidden_action(_BUILD_FULL_KEY,    page_build.render_build_full)
+    _register_hidden_action(_BUILD_INCR_KEY,    page_build.render_build_incr)
+    _register_hidden_action(_BUILD_BRIDGE_KEY,  page_build.render_build_bridge)
+    _register_hidden_action(_BUILD_LIST_KEY,    page_build.render_build_list)
+    _register_hidden_action(_BUILD_CUSTOM_KEY,  page_build.render_build_custom)
+    _register_hidden_action(_BUILD_KILL_KEY,    page_build.render_build_kill)
+    _register_hidden_action(_BUILD_CLEAN_KEY,   page_build.render_build_clean)
+    _register_hidden_action(_BUILD_REMOVE_KEY,  page_build.render_build_remove)
+    _register_hidden_action(_BUILD_LOG_KEY,     page_build.render_build_log)
 
     _ensure_get_pages_filters_hidden()
 
