@@ -155,6 +155,42 @@ def _build_robot_invite_link(uin: str, appid: str) -> str:
             f'?robot_uin={uin}&robot_appid={appid}&biz_type=0')
 
 
+def _auto_robot_invite_link() -> str:
+    """自动从 BotManager 拿任一已加载 bot 的 (uin, appid) 拼邀请链接。
+
+    用在没有 event 上下文的发送路径(如 callbacks._send_dm_warning,跑在
+    C++ 工作线程上拿不到具体 event.appid)。多 bot 部署时取扫到的第一个
+    非空 robot_qq;单 bot 部署等价于唯一那个。
+    """
+    uin, appid = '', ''
+    try:
+        from core.bot.manager import _bot_manager_ref
+        if _bot_manager_ref and _bot_manager_ref._bots:
+            for aid, bot in _bot_manager_ref._bots.items():
+                uin = getattr(bot, 'robot_qq', '') or ''
+                if uin:
+                    appid = aid
+                    break
+    except Exception:
+        pass
+    return _build_robot_invite_link(uin, appid)
+
+
+def build_dm_warning_buttons() -> list[list[dict]]:
+    """「私信消息限制」提示底部的单按钮一行 ——「💫 添加好友」link 跳转。
+
+    点击后 QQ 客户端打开 bot 分享页(同欢迎菜单「邀我进群」用同一个
+    ``_build_robot_invite_link``),用户可选「添加为好友」或「邀请到群」。
+    uin / appid 自动从 BotManager 抓任一活跃 bot 凭据 —— callbacks 触发点是
+    C++ 工作线程,拿不到具体的 event.appid。
+
+    省略 ``type`` 字段 → 默认 0(link 跳转);本插件按钮约定不带 ``enter``。
+    """
+    return [[
+        {'text': '💫 添加好友', 'link': _auto_robot_invite_link()},
+    ]]
+
+
 def build_menu_buttons(appid: str = '') -> list[list[dict]]:
     """组装欢迎菜单完整按钮组(每次调用都按当前 ``MENU_GAMES`` 重新渲染)。
 

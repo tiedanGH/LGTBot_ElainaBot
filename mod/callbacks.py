@@ -414,13 +414,16 @@ async def _send_dm_warning(target_id: str, is_uid: bool) -> None:
     """走标准 ``_send_text_quota_managed`` 通道发出「私信限制」提示。
 
     与 ``_send_refresh_tip`` 同一把 per-target Lock,保证排在「房间已创建」
-    公告之后到达 QQ。
+    公告之后到达 QQ。底部挂一个「💫 添加好友」link 按钮,链接是
+    ``_build_robot_invite_link`` 的同款邀请页 —— 用户点开后 QQ 客户端会让
+    他选「添加为好友」或「邀请到群」。
     """
     key = helpers.target_key(target_id, is_uid)
+    extra = buttons.build_dm_warning_buttons()
     try:
         async with _get_send_lock(key):
             message_log.log_outgoing(target_id, is_uid, _DM_WARNING_TEXT)
-            await _send_text_quota_managed(target_id, is_uid, _DM_WARNING_TEXT, None)
+            await _send_text_quota_managed(target_id, is_uid, _DM_WARNING_TEXT, extra)
     except Exception as e:
         log.debug(f'私信限制提示发送失败 ({target_id}): {e}')
 
