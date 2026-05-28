@@ -115,16 +115,37 @@ body {
 .tabs {
   display: flex; gap: 4px; margin-bottom: 14px;
   border-bottom: 1px solid var(--border);
+  /* 横向溢出可滚动 —— 桌面端不溢出时滚动条天然不显示;移动端 tab 多 / 窄
+     屏时用户可水平拖动看到被截掉的标签,而非自动换行成 2 行让顶部变高。 */
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;   /* iOS Safari 惯性滚动 */
+  scrollbar-width: thin;               /* Firefox */
+}
+/* WebKit 滚动条做得细一点,避免在 tab 行下方占太多视觉空间 */
+.tabs::-webkit-scrollbar { height: 4px; }
+.tabs::-webkit-scrollbar-track { background: transparent; }
+.tabs::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb); border-radius: 2px;
 }
 .tabs .tab {
   background: transparent; border: none; padding: 9px 18px;
   cursor: pointer; font-size: 13px; color: var(--text-muted);
   border-bottom: 2px solid transparent; margin-bottom: -1px;
   transition: color .15s, border-color .15s;
+  /* 关键两条:在窄屏 flex 收缩时,标签不被压扁也不内部换行,而是触发外层
+     .tabs 的横向滚动 —— 用户可拖动看后面的标签 */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .tabs .tab:hover { color: var(--text); }
 .tabs .tab.active {
   color: var(--accent); border-bottom-color: var(--accent); font-weight: 600;
+}
+/* 窄屏(手机)适配:字体小一点 + padding 缩一点,让一屏能多看到几个 tab,
+   超出部分仍可滑动 */
+@media (max-width: 600px) {
+  .tabs .tab { font-size: 11px; padding: 7px 10px; }
 }
 
 /* ───── 标签内容容器 ───── */
