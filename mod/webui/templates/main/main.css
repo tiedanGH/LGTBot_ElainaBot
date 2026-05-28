@@ -66,6 +66,8 @@ body {
 .page-content {
   flex: 1 1 auto;
   overflow-y: auto;
+  /* 防整页横向溢出 */
+  overflow-x: hidden;
   padding: 0 24px 24px;
 }
 .page-content::-webkit-scrollbar { width: 8px; }
@@ -146,6 +148,10 @@ body {
    超出部分仍可滑动 */
 @media (max-width: 600px) {
   .tabs .tab { font-size: 11px; padding: 7px 10px; }
+  .sticky-top { padding: 16px 12px 0; }
+  .page-content { padding: 0 12px 12px; }
+  .dash-section { padding: 12px 14px; }
+  .dash-section-meta { flex-wrap: wrap; font-size: 11px; }
 }
 
 /* ───── 标签内容容器 ───── */
@@ -388,6 +394,7 @@ body {
 .dash-meta-label { color: var(--text-faint); }
 .dash-meta-value { color: var(--text); }
 .dash-mono { font-family: 'Consolas', 'Menlo', monospace; }
+.dash-section-meta .dash-mono { word-break: break-all; min-width: 0; }
 
 /* ── 版本与更新 ── */
 .dash-version {

@@ -52,13 +52,13 @@ function dashFmtVersion(v) {
 
 function dashApplyData(data) {
   /* 版本号 + 引擎状态 */
-  document.getElementById('dash-current-version').textContent = dashFmtVersion(data.version);
+  document.getElementById('dash-current-version').textContent = data.version || '—';
   const statusEl = document.getElementById('dash-engine-status');
   if (data.engine_running) {
-    statusEl.textContent = '引擎运行中';
+    statusEl.textContent = '运行中';
     statusEl.className = 'dash-badge dash-badge-ok';
   } else {
-    statusEl.textContent = '引擎未运行';
+    statusEl.textContent = '未运行';
     statusEl.className = 'dash-badge dash-badge-warn';
   }
 

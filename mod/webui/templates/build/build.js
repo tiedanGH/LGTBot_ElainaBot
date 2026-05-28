@@ -207,7 +207,7 @@ function buildFull() {
     'bash build.sh',
     '🚀 开始完整编译？\n\n将依次执行：\n  · 子模块 / 依赖自检\n  · CMake 配置 (Release 模式)\n' +
     '  · 编译 C++ 桥接层 + 全部游戏插件\n\n' +
-    '⏱ 预计耗时：2 核 CPU 约 20-30 分钟。\n' +
+    '⏱️ 预计耗时：2 核 CPU 约 20-30 分钟。\n' +
     '编译在子进程中运行，可关闭网页；过程中可点「🛑 终止编译」中止。',
     null, 'warn'
   );
@@ -219,7 +219,7 @@ function buildIncr() {
     BUILD_KEYS.incr,
     'bash build.sh -i',
     '⚡ 开始增量编译？\n\n跳过 CMake 配置，只重编已变化的对象。\n' +
-    '要求 build/ 目录已存在 (需先完整编译)。\n通常耗时数秒到几分钟。',
+    '要求 build 目录已存在 (需先完整编译)。\n通常耗时数秒到几分钟。',
     null, 'info'
   );
 }
@@ -231,7 +231,7 @@ function buildBridge() {
     'bash build.sh -i -t LGTBot_ElainaBot',
     '🔌 增量编译桥接层 LGTBot_ElainaBot？\n\n' +
     '只重编桥接层 (改完 LGTBot_ElainaBot.cc 后最常用)，通常秒级完成。\n' +
-    '要求 build/ 目录已存在。',
+    '要求 build 目录已存在。',
     null, 'info'
   );
 }
@@ -343,9 +343,9 @@ function buildClean() {
     BUILD_KEYS.clean,
     'bash build.sh --clean',
     '🧹 清理重编 (--clean)？\n\n' +
-    '⚠️ 会先 rm -rf build/(删除所有 CMake 缓存和编译产物)，然后从头完整编译。\n' +
+    '⚠️ 会先 rm -rf build/ (删除所有 CMake 缓存和编译产物)，然后从头完整编译。\n' +
     '等同于「🚀 完整编译」的总耗时，2 核 CPU 约 20-30 分钟。',
-    '再次确认：删除 build/ 后重新完整编译？\n此操作不可撤销，所有现有 .so 都会被覆盖。',
+    '再次确认：删除 build 后重新完整编译？\n此操作不可撤销，所有现有 .so 都会被覆盖。',
     'warn'
   );
 }
