@@ -33,6 +33,8 @@ const BUILD_TARGET_RE = /^[A-Za-z_][A-Za-z0-9_\-]{0,62}$/;
 
 /* 从 build-data 取来的配置参数文件绝对路径,自定义目标时 POST 用 */
 let buildParamsPath = '';
+/* 上次「编译指定目标」用的 target 名,作为下一次 prompt 的预填值 */
+let buildLastCustomTarget = '';
 let buildPollTimer = null;
 
 function buildFmtBytes(n) {
@@ -133,6 +135,7 @@ function buildLoadInline() {
   try {
     const data = JSON.parse(document.getElementById('build-data').textContent);
     buildParamsPath = data.params_path || '';
+    buildLastCustomTarget = data.last_custom_target || '';
     buildApplyState(data.state || {}, data.log_html || '', data.log_size || 0);
     /* 进入页面时若有正在跑的编译,启动轮询 */
     if (data.state && data.state.running) buildStartPolling();
@@ -249,12 +252,12 @@ function buildList() {
 
 /* ──── 编译指定目标 ──── */
 async function buildCustom() {
-  /* 1. prompt 拿 target */
+  /* 1. prompt 拿 target —— defaultValue 用上次编译的 target 名 */
   const raw = await dashPrompt(
     '请输入要编译的目标名称 (参考「📋 列出可编译目标」结果)：\n\n' +
     '允许字符：字母 / 数字 / 下划线 / 连字符\n' +
     '长度：1-63，首字符必须是字母或下划线',
-    {level: 'info'}
+    {level: 'info', defaultValue: buildLastCustomTarget}
   );
   if (raw == null) return;  /* 用户取消 */
   const target = raw.trim();
@@ -298,6 +301,8 @@ async function buildCustom() {
       await dashAlert('❌ 写入参数文件失败：' + (wj.message || ''), {level: 'danger'});
       return;
     }
+    /* 写盘成功:本地缓存同步更新,本次会话不重刷页面也能让下一次 prompt 预填 */
+    buildLastCustomTarget = target;
   } catch (e) {
     await dashAlert('❌ 写参数请求失败：' + e.message, {level: 'danger'});
     return;

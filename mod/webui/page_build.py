@@ -487,6 +487,25 @@ def _read_log_tail(max_bytes: int = 64 * 1024) -> str:
 # 数据入口 + 9 个 action 端点
 # ─────────────────────────────────────────────────────────────────────────
 
+def _read_last_custom_target() -> str:
+    """读 PARAMS_PATH 取上一次「编译指定目标」的 target,经过白名单校验后返回;
+    任一环节失败返回空串(等价于"无历史值"——前端 prompt 不预填)。
+
+    这是 prompt 预填功能的数据源 —— 用户连续编译同一个 target 时不用重复
+    输入。文件由 buildCustom 的 framework /api/config-file/save POST 路径
+    写入,无需额外的持久化通道。
+    """
+    try:
+        with open(PARAMS_PATH, 'r', encoding='utf-8') as f:
+            params = json.load(f) or {}
+        candidate = (params.get('target') or '').strip()
+        if _validate_target_name(candidate):
+            return candidate
+    except Exception:
+        pass
+    return ''
+
+
 def get_data() -> str:
     """页面渲染时填入 ``<script id="build-data">``。"""
     state = get_build_state()
@@ -496,6 +515,7 @@ def get_data() -> str:
         'log_html': _ansi_to_html(log_text),
         'log_size': _log_size(),
         'params_path': os.path.abspath(PARAMS_PATH),
+        'last_custom_target': _read_last_custom_target(),
         'plugin_dir': boot.PLUGIN_DIR,
         'build_sh_exists': os.path.isfile(os.path.join(boot.PLUGIN_DIR, 'build.sh')),
         'build_dir_exists': os.path.isdir(os.path.join(boot.PLUGIN_DIR, 'build')),
