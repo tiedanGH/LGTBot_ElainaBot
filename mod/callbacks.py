@@ -57,6 +57,12 @@ _CRASH_APOLOGY_MD = (
 # 一条崩溃报告。通常填管理员监控的全量群 —— 该群在 QQ 后台开了全量推送权限,
 # bot 才能向它走主动消息(没 msg_id 引用)。
 CRASH_NOTIFY_GROUP: str = ''
+
+# 沙箱私信用户 openid 集合 —— 由 config.py::_apply_runtime_tunables 按 yaml 的
+# sandbox_dm_users 列表覆盖。当前 QQ 官方机器人**只有沙箱环境**的私信能发
+# 主动消息(无 msg_id 引用),正式环境私信主动消息一律被拒。所以把沙箱测试
+# 账号的 openid 填进来:这些用户的私信跳过被动配额,直接走主动消息直推
+SANDBOX_DM_USERS: frozenset = frozenset()
 # 信号编号 → 名称,日志里更可读
 _SIG_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 11: 'SIGSEGV'}
 _crash_handled = False             # 防多线程并发崩溃时重复触发善后
@@ -394,12 +400,16 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
 
     全量群里 bot 不被 5 条/msg_id 限制,refresh 按钮永远不会出现 —— 这条
     教学的整段文案(在讲怎么点刷新按钮)会变成误导。所以只清掉标记,不发送。
+    沙箱私信用户同理:配额满后直接主动直推,不依赖刷新按钮,教学同样会误导。
     """
     if key not in _pending_tip_keys:
         return
     _pending_tip_keys.discard(key)
     if (not is_uid) and helpers.is_full_volume_group(target_id):
         log.debug(f'全量群 {target_id} 跳过刷新按钮使用说明')
+        return
+    if is_uid and target_id in SANDBOX_DM_USERS:
+        log.debug(f'沙箱私信用户 {target_id} 跳过刷新按钮使用说明')
         return
     _schedule_refresh_tip(target_id, is_uid)
 
@@ -622,18 +632,31 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     key = helpers.target_key(target_id, is_uid)
     msg_preview = (msg or '')[:30].replace('\n', ' ')
 
-    consumed = quota.try_consume_ref(key)
+    # 沙箱私信用户:QQ 仅沙箱环境私信可发主动消息。逻辑与全量群完全一致 ——
+    # 前 5 次仍用 msg_id 被动回复(消耗配额),仅配额耗尽后才直接主动消息。
+    is_sandbox_dm = is_uid and (target_id in SANDBOX_DM_USERS)
     # 全量群判定:只看运行时观测到的事实(state.full_volume_groups),不再退回
     # 框架 non_at_message.* 配置 —— 配置可能与 QQ 后台权限不同步,误判会让
     # 非全量群也走主动消息(QQ 必拒,把 bot 的配额烧掉)。
     is_full = (not is_uid) and helpers.is_full_volume_group(target_id)
+    # 主动直推资格(全量群 / 沙箱私信):配额满后可直接主动消息、不挂刷新按钮。
+    # 注意"资格"不代表跳过被动配额 —— 前 5 次照常 try_consume_ref 走 msg_id。
+    is_active_push = is_full or is_sandbox_dm
 
+    consumed = quota.try_consume_ref(key)
     if consumed is None:
-        if is_full:
-            # 全量群配额满 → 直接主动消息,不等刷新按钮
-            log.info(f'⚡ [全量直推] {key} 配额已满，走主动消息: {msg_preview!r}')
+        if is_active_push:
+            # 全量群 / 沙箱私信:配额满 → 直接主动消息,不等刷新按钮
+            tag = '私信直推' if is_sandbox_dm else '全量直推'
+            log.info(f'⚡ [{tag}] {key} 配额已满，走主动消息: {msg_preview!r}')
+        elif is_uid and not quota.has_valid_ref(key):
+            # 普通私信 + 无有效 msg_id(从未私信过 / 已超 5 分钟过期):正式环境
+            # 主动私信必拒 → 直接丢弃,只留一行 audit 日志。
+            log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃: {msg_preview!r}')
+            return
         else:
-            # 非全量群:配额满 → 阻塞等待，不预先尝试发送（直接发也会被 QQ 拒）
+            # 群聊配额满 / 普通私信配额满(5 分钟内仍有引用) → 阻塞等待刷新,
+            # 不预先尝试发送(直接发也会被 QQ 拒)。
             wait_start = time.monotonic()
             log.info(f'⏳ [配额已满] {key} 已用 {quota.REF_QUOTA}/{quota.REF_QUOTA}，'
                      f'阻塞等待刷新按钮 ≤{quota.REFRESH_WAIT_TIMEOUT:.0f}s | 待发: {msg_preview!r}')
@@ -642,18 +665,17 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
             if consumed is None:
                 # 等待超时 → 改走主动消息(无 msg_id/event_id)。
                 # bot 若在该群/用户上有主动 quota 还能落地,语义更干净。
-                # consumed 仍为 None,继续往下走全量群分支共享的主动消息路径。
                 log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送主动消息')
             else:
                 log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发文本')
 
-    # 准备 sender / kwargs。consumed 仍为 None 即主动路径(全量直推 / 刷新超时兜底)。
+    # 准备 sender / kwargs。consumed 仍为 None 即主动路径(全量直推 / 沙箱直推 / 刷新超时兜底)。
     if consumed is not None:
         ref_type, ref_value, count, ref_appid = consumed
         sender = helpers.get_sender(ref_appid)
         kwargs = {ref_type: ref_value}
     else:
-        # 全量群主动路径:无 ref / 无 appid;用任一可用 sender,kwargs 空
+        # 主动路径:无 ref / 无 appid;用任一可用 sender,kwargs 空
         sender = helpers.get_sender('')
         count = 0
         kwargs = {}
@@ -662,9 +684,9 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
         return
 
     # 第 4 条起追加刷新按钮;第 5 条（达到上限）用「⚠️ 最终刷新」加强提示。
-    # 全量群从不追加(bot 不被 5 条/msg_id 限制,这个教学按钮没意义)。
+    # 主动直推(全量群 / 沙箱私信)从不追加(bot 不被 5 条/msg_id 限制)。
     btns = list(extra_buttons) if extra_buttons else []
-    if not is_full and count >= quota.REFRESH_BUTTON_THRESHOLD:
+    if not is_active_push and count >= quota.REFRESH_BUTTON_THRESHOLD:
         is_last = (count >= quota.REF_QUOTA)
         btns.append(quota.build_refresh_button(is_last=is_last))
         tag = '⚠️' if is_last else '🔄'
@@ -756,16 +778,25 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
       B. 媒体兜底：图床未启用 / 上传失败时走原有 msg_type=7 路径（content
          字段需 humanize mentions，无法挂按钮）
 
-    全量群配额耗尽时不等刷新按钮,直接主动消息(``ref_type=''`` 透传到下游)。
+    主动直推(全量群 / 沙箱私信)时不等刷新按钮,直接主动消息(``ref_type=''``
+    透传到下游)。私信无有效 msg_id 时直接丢弃(同 _send_text_quota_managed)。
     """
     key = helpers.target_key(target_id, is_uid)
-    consumed = quota.try_consume_ref(key)
-    # 同 _send_text_quota_managed: 只看运行时观测,不退回框架配置
+    # 沙箱私信 / 全量群:前 5 次仍走 msg_id 被动回复,仅配额耗尽后主动直推
+    # (逻辑同 _send_text_quota_managed,详见那里的注释)
+    is_sandbox_dm = is_uid and (target_id in SANDBOX_DM_USERS)
     is_full = (not is_uid) and helpers.is_full_volume_group(target_id)
+    is_active_push = is_full or is_sandbox_dm
 
+    consumed = quota.try_consume_ref(key)
     if consumed is None:
-        if is_full:
-            log.info(f'⚡ [全量直推] {key} 配额已满，图片走主动消息')
+        if is_active_push:
+            tag = '私信直推' if is_sandbox_dm else '全量直推'
+            log.info(f'⚡ [{tag}] {key} 配额已满，图片走主动消息')
+        elif is_uid and not quota.has_valid_ref(key):
+            # 普通私信无有效 msg_id(从未私信过 / 已超 5 分钟):直接丢弃
+            log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃图片')
+            return
         else:
             wait_start = time.monotonic()
             log.info(f'⏳ [配额已满] {key} 已用 {quota.REF_QUOTA}/{quota.REF_QUOTA}，'
@@ -779,8 +810,9 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
             else:
                 log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发图片')
 
-    # 准备 sender / ref tuple。consumed 仍为 None 即全量群主动路径,
-    # 用空 ref_type/ref_value 透传到下游,下游靠 ref_type 为空切换 kwargs={}。
+    # 准备 sender / ref tuple。consumed 仍为 None 即主动路径(全量直推 / 沙箱
+    # 直推 / 刷新超时兜底),用空 ref_type/ref_value 透传到下游,下游靠 ref_type
+    # 为空切换 kwargs={}。
     if consumed is not None:
         ref_type, ref_value, count, ref_appid = consumed
         sender = helpers.get_sender(ref_appid)
@@ -797,7 +829,7 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
     if image_url:
         if await _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
                                       raw_content, image_url, data, count,
-                                      is_full=is_full):
+                                      is_full=is_active_push):
             return
         # markdown 发送失败（极少见，比如域名未报备被 QQ 拒）→ 落回 media
 
@@ -810,8 +842,9 @@ async def _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
                                *, is_full: bool = False) -> bool:
     """构造 markdown 文本 + 图片 + 按钮，调 send_to_*。成功返回 True。
 
-    ``ref_type=''`` 表示主动消息(全量群配额耗尽路径):kwargs 留空,
-    不带 msg_id/event_id。``is_full=True`` 时同样跳过刷新按钮追加。
+    ``ref_type=''`` 表示主动消息(全量群 / 沙箱私信 / 配额耗尽超时路径):
+    kwargs 留空,不带 msg_id/event_id。``is_full=True``(调用方传 is_active_push,
+    即全量群或沙箱私信)时同样跳过刷新按钮追加。
     """
     width, height = uploader.get_image_size(data)
     parts = []

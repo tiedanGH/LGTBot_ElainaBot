@@ -98,6 +98,27 @@ def try_consume_ref(key: str):
         return (ref['ref_type'], ref['ref_value'], ref['count'], ref.get('appid', ''))
 
 
+def has_valid_ref(key: str) -> bool:
+    """是否存在**未过期**的引用(不管配额是否已用完)。
+
+    用来区分 ``try_consume_ref`` 返回 ``None`` 的两种原因:
+      · ``True``  —— 引用存在且在 TTL 内,只是 ``count`` 已达 5(配额满);
+                    此时值得等用户刷新(私信 / 群聊都按原逻辑等待 + 超时强发)
+      · ``False`` —— 无引用 / 已过期;私信场景下没有有效 msg_id,主动消息正式
+                    环境必拒,等待也是白等 → 调用方应直接丢弃
+
+    顺带清掉已过期的 ref(与 ``try_consume_ref`` 的过期处理一致)。
+    """
+    with _ref_lock:
+        ref = _active_ref.get(key)
+        if not ref:
+            return False
+        if time.time() > ref['expires_at']:
+            _active_ref.pop(key, None)
+            return False
+        return True
+
+
 async def wait_and_consume(key: str, timeout: float = REFRESH_WAIT_TIMEOUT):
     """配额满时调用：阻塞等待 ≤ timeout 秒新引用到达，再取一次配额。
 

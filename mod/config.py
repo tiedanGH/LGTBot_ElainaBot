@@ -8,6 +8,7 @@
   · image_hosting: str               markdown 图片内嵌使用的单个图床名（留空 = 禁用）
   · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
   · crash_notify_group: str          严重问题通知群 openid（崩溃时向此群主动推报告）
+  · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（这些用户私信走主动消息直推）
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ DEFAULT_CONFIG = {
     'image_hosting': '',
     'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
     'crash_notify_group': '',
+    'sandbox_dm_users': [],
 }
 CONFIG_COMMENTS = {
     'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
@@ -37,6 +39,7 @@ CONFIG_COMMENTS = {
     'image_hosting': '游戏图片走 markdown 内嵌时使用的图床（可选值：cos / nature / bilibili / chatglm / ukaka / xingye）。上传失败回退 msg_type=7',
     'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
     'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
+    'sandbox_dm_users': '沙箱测试用户 openid 列表，列表内用户私信走主动消息直推（仅沙箱私信可发主动消息）',
 }
 
 
@@ -162,3 +165,18 @@ def _apply_runtime_tunables(cfg: dict):
         new = notify_group or '(未配置)'
         log.info(f'crash_notify_group: {old} → {new}')
         _callbacks.CRASH_NOTIFY_GROUP = notify_group
+
+    # 沙箱私信用户 openid 列表 —— 列表内用户私信跳过被动配额,直接主动直推。
+    # 非法 / 缺失 → 空集合(所有私信按正式环境规则:无有效 msg_id 直接丢弃)。
+    # callbacks.SANDBOX_DM_USERS 在 _send_text/image_quota_managed 里读取。
+    raw_sandbox = cfg.get('sandbox_dm_users', None)
+    if isinstance(raw_sandbox, list):
+        sandbox_set = frozenset(
+            str(u).strip() for u in raw_sandbox if str(u).strip())
+    else:
+        if raw_sandbox is not None:
+            log.warning(f'sandbox_dm_users 应为字符串列表，已忽略 (got {type(raw_sandbox).__name__})')
+        sandbox_set = frozenset()
+    if _callbacks.SANDBOX_DM_USERS != sandbox_set:
+        log.info(f'sandbox_dm_users: {len(_callbacks.SANDBOX_DM_USERS)} → {len(sandbox_set)} 人')
+        _callbacks.SANDBOX_DM_USERS = sandbox_set
