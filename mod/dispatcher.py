@@ -312,11 +312,14 @@ async def lgtbot_dispatch(event, match):
         userdb.mark_dirty(uid, name=getattr(event, 'username', '') or '', avatar=avatar)
 
     # 用户消息 → 用 msg_id 刷新被动引用配额（5 条新额度）
+    #
+    # ⚠️ 两条分支**必须互斥**:msg_id 带场景,群消息产生的 msg_id 拿去发该用户私信会触发 QQ 端 `请求参数 msg_id 无效或越权`。
+    # 使用 ``elif event.is_direct``,``u:<uid>`` 只会接收真正私信场景的 msg_id。
     appid_str = event.appid or ''
     if event.message_id:
         if event.is_group and gid:
             quota.refresh_ref(helpers.target_key(gid, False), 'msg_id', event.message_id, appid_str)
-        if uid:
+        elif event.is_direct and uid:
             quota.refresh_ref(helpers.target_key(uid, True), 'msg_id', event.message_id, appid_str)
 
     # 空消息（仅 @bot）→ 回欢迎菜单，不进 LGTBot 引擎
@@ -380,10 +383,12 @@ async def lgtbot_interaction_relay(event, match):
     if not event.event_id:
         return
     appid_str = event.appid or ''
+    # event_id 同样带场景(见上方消息派发处的注释):群里点按钮产生的 event_id
+    # 不能用于该用户私信,所以两条分支必须互斥。
     if event.is_group and event.group_id:
         quota.refresh_ref(helpers.target_key(event.group_id, False),
                           'event_id', event.event_id, appid_str)
-    if event.user_id:
+    elif event.is_direct and event.user_id:
         quota.refresh_ref(helpers.target_key(event.user_id, True),
                           'event_id', event.event_id, appid_str)
 
@@ -426,11 +431,12 @@ async def lgtbot_interaction_dispatch(event, match):
         userdb.mark_dirty(uid, name=getattr(event, 'username', '') or '', avatar=avatar)
 
     appid_str = event.appid or ''
+    # 互斥分支同 lgtbot_interaction_relay:event_id 不能跨场景使用
     if event.event_id:
         if event.is_group and gid:
             quota.refresh_ref(helpers.target_key(gid, False),
                               'event_id', event.event_id, appid_str)
-        if uid:
+        elif event.is_direct and uid:
             quota.refresh_ref(helpers.target_key(uid, True),
                               'event_id', event.event_id, appid_str)
 
