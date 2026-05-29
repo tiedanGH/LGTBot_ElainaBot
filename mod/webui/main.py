@@ -56,6 +56,7 @@ _DASH_CLEAR_GEN_KEY         = '__lgtbot_dash_clear_gen'
 _DASH_CLEAR_GEN_7D_KEY      = '__lgtbot_dash_clear_gen_7d'
 _DASH_CLEAR_MATCH_ALL_KEY   = '__lgtbot_dash_clear_match_all'
 _DASH_CLEAR_MATCH_7D_KEY    = '__lgtbot_dash_clear_match_7d'
+_DASH_RELOAD_CONFIG_KEY     = '__lgtbot_dash_reload_config'        # 插件配置热重载
 
 # 引擎编译标签的 action 端点(JS 侧 BUILD_KEYS 与此一一对应)
 _BUILD_FULL_KEY    = '__lgtbot_dash_build_full'
@@ -80,6 +81,7 @@ _HIDDEN_KEYS = frozenset({
     _DASH_CLEAR_GEN_7D_KEY,
     _DASH_CLEAR_MATCH_ALL_KEY,
     _DASH_CLEAR_MATCH_7D_KEY,
+    _DASH_RELOAD_CONFIG_KEY,
     _BUILD_FULL_KEY,
     _BUILD_INCR_KEY,
     _BUILD_BRIDGE_KEY,
@@ -228,6 +230,7 @@ def register():
       · ``__lgtbot_dash_clear_gen``    / ``_7d`` —— Dashboard 图片缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
         —— Dashboard 赛况缓存「清理全部 / 保留 7 天」
+      · ``__lgtbot_dash_reload_config`` —— Dashboard「插件配置」热重载 yaml 到运行时
       · ``__lgtbot_dash_build_full / incr / bridge / list / custom / kill /
          clean / remove / log`` —— 引擎编译标签的 9 个动作 + 轮询端点
     """
@@ -256,6 +259,7 @@ def register():
     _register_hidden_action(_DASH_CLEAR_GEN_7D_KEY,      page_dashboard.render_clear_gen_7d)
     _register_hidden_action(_DASH_CLEAR_MATCH_ALL_KEY,   page_dashboard.render_clear_match_all)
     _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,    page_dashboard.render_clear_match_7d)
+    _register_hidden_action(_DASH_RELOAD_CONFIG_KEY,     page_dashboard.render_reload_config)
 
     # 引擎编译 action 端点
     _register_hidden_action(_BUILD_FULL_KEY,    page_build.render_build_full)

@@ -13,6 +13,7 @@ const DASH_KEYS = {
   clear_gen_7d:       '__lgtbot_dash_clear_gen_7d',
   clear_match_all:    '__lgtbot_dash_clear_match_all',
   clear_match_7d:     '__lgtbot_dash_clear_match_7d',
+  reload_config:      '__lgtbot_dash_reload_config',
 };
 
 /* 引擎配置绝对路径(由 dashboard-data 注入),保存请求里要原样回传 */
@@ -492,6 +493,63 @@ async function dashClearCache(which) {
   }
 }
 
+/* ──── 插件配置热重载 ────
+ * 按当前 data/config.yaml 重新下发到运行时(不重启插件、不重启引擎)。
+ * admin_uids 改动需重启 LGTBot 引擎才能生效,UI 上单独显示一条警示。
+ */
+async function dashReloadConfig() {
+  const ok = await dashConfirm(
+    '确认按当前 data/config.yaml 热重载？\n\n' +
+    '会立即把 yaml 里的运行时可调字段 (配额秒数、图床、菜单游戏、崩溃通知群、' +
+    '沙箱白名单) 重新下发，**不重启插件、不重启引擎**。\n\n' +
+    '注意：admin_uids 变更需重启 LGTBot 引擎才能生效 (C++ 侧只在 start() 时读一次)。',
+    {level: 'warn'}
+  );
+  if (!ok) return;
+  const btn = document.getElementById('dash-reload-config');
+  const msgEl = document.getElementById('dash-reload-config-msg');
+  btn.disabled = true;
+  btn.textContent = '⏳ 重载中……';
+  msgEl.innerHTML = '';
+  try {
+    const data = await dashCallAction(DASH_KEYS.reload_config);
+    if (!data.success) {
+      msgEl.innerHTML = '<div class="dash-msg-err">❌ ' +
+                        escapeHtml(data.message || '热重载失败') + '</div>';
+      return;
+    }
+    const parts = [];
+    parts.push('<div class="dash-msg-ok">' +
+               escapeHtml(data.message || '已重载') + '</div>');
+    if (data.changes && data.changes.length) {
+      const items = data.changes.map(c =>
+        '<li><code class="dash-mono">' + escapeHtml(c.field) + '</code>: ' +
+        '<span class="dash-msg-info">' +
+        escapeHtml(JSON.stringify(c.before)) + '</span> → ' +
+        '<b>' + escapeHtml(JSON.stringify(c.after)) + '</b></li>'
+      );
+      parts.push('<ul class="dash-pluginconf-changes">' + items.join('') + '</ul>');
+    } else {
+      parts.push('<div class="dash-msg-info">(运行时参数与 yaml 一致，无变化)</div>');
+    }
+    parts.push('<div class="dash-msg-info">📋 当前 admin_uids: ' +
+               (data.admin_count || 0) + ' 人</div>');
+    if (data.note) {
+      parts.push('<div class="dash-msg-warn">⚠️ ' + escapeHtml(data.note) + '</div>');
+    }
+    msgEl.innerHTML = parts.join('');
+    /* 引擎配置编辑器(下方的 ⚙️ 引擎配置)与本次热重载无关 —— 那是 lgtbot.json,
+       不是 config.yaml;但页面顶部数据(版本/统计/缓存)可能因 menu_game_buttons
+       变化而需要刷新。保险起见整页刷一次。 */
+    dashRefreshAll();
+  } catch (e) {
+    msgEl.innerHTML = '<div class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔁 热重载配置';
+  }
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   dashLoadInline();
 
@@ -501,6 +559,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dash-stats-refresh').addEventListener('click', dashRefreshAll);
   document.getElementById('dash-config-save').addEventListener('click', dashSaveConfig);
   document.getElementById('dash-config-revert').addEventListener('click', dashRevertConfig);
+  document.getElementById('dash-reload-config').addEventListener('click', dashReloadConfig);
 
   /* 编辑器脏标记:用户改过且与原文不同 → dirty;复位即清除。
      dashRefreshAll 据此判定是否覆盖编辑器内容,避免刷新统计时把编辑中的

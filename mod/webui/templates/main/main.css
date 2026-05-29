@@ -555,6 +555,43 @@ body {
 }
 .dash-cache-msg { margin-top: 12px; font-size: 12px; min-height: 16px; }
 
+/* ── 插件配置(主框架编辑入口 + 热重载) ── */
+.dash-pluginconf-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.dash-pluginconf-card {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.dash-pluginconf-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.dash-pluginconf-desc {
+  font-size: 12px; color: var(--text-muted); line-height: 1.55; margin: 0;
+}
+.dash-pluginconf-desc code {
+  background: var(--panel); padding: 0 4px; border-radius: 3px;
+  font-family: 'Consolas', 'Menlo', monospace; font-size: 11px;
+}
+.dash-pluginconf-actions {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;
+}
+/* a.dash-btn 默认带下划线,这里去掉让锚点视觉等同于 button */
+a.dash-btn { text-decoration: none; }
+.dash-pluginconf-msg {
+  font-size: 12px; min-height: 16px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.dash-pluginconf-changes {
+  list-style: none; padding: 6px 10px; margin: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11px; color: var(--text-muted); line-height: 1.7;
+}
+.dash-pluginconf-changes li {
+  white-space: nowrap; overflow-x: auto;
+}
+
 /* ── 消息色彩(检查更新/保存配置/缓存清理 共用) ── */
 .dash-msg-ok { color: var(--in); }
 .dash-msg-warn { color: var(--img); }

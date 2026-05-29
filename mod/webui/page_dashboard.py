@@ -758,3 +758,89 @@ def render_clear_match_all() -> str:
 def render_clear_match_7d() -> str:
     ok, msg, n = _clear_dir_keep_recent(_cache_dir('match'), days=7)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 插件配置热重载 —— 调 config.load_plugin_config() 重新读 data/config.yaml,
+# 把可调字段(quota / uploader / buttons / callbacks 上的运行时常量)重新下发,
+# 不动 LGTBot C++ 引擎本身(进而保留所有进行中的游戏)。
+#
+# 限制:admin_uids 只在 LGTBot.start() 时一次性传给 C++ 侧,运行时不可改;
+# 这里读出来仅用于「告诉用户当前 yaml 里有几个 admin」,UI 上明确提示该字段
+# 改动需要重启 LGTBot 引擎才能生效。
+# ─────────────────────────────────────────────────────────────────────────
+
+def _snapshot_runtime_tunables() -> dict:
+    """拍快照:把 config._apply_runtime_tunables 会覆盖的 Python 侧运行时常量
+    全部读出,返回可 JSON 化的 dict。前后两次快照对比即得到本次热重载的
+    diff,供日志输出与 UI 展示。
+    """
+    from .. import quota as _quota, uploader as _uploader, buttons as _buttons, callbacks as _callbacks
+    return {
+        'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
+        'image_hosting': _uploader.SELECTED_BACKEND or '',
+        'menu_game_buttons': list(_buttons.MENU_GAMES),
+        'crash_notify_group': _callbacks.CRASH_NOTIFY_GROUP or '',
+        'sandbox_dm_users': sorted(_callbacks.SANDBOX_DM_USERS),
+    }
+
+
+def render_reload_config() -> str:
+    """按当前 data/config.yaml 热重载所有 Python 侧可调字段,不重启插件/引擎。
+
+    流程:
+      1. 拍前快照 → 调 ``config.load_plugin_config()`` (内部已 log.info 各字段
+         变化) → 拍后快照
+      2. 算 diff,把变化字段以 INFO 日志逐项输出 + 总结一行
+      3. 返回 JSON 含 ``changes`` 数组、当前值、admin_count、警示 note 给前端
+    """
+    from .. import config as _config
+    log.info('=' * 60)
+    log.info('🔁 [reload-config] 开始热重载插件配置')
+
+    before = _snapshot_runtime_tunables()
+    try:
+        admins_str = _config.load_plugin_config()
+    except Exception as e:
+        log.error(f'🔁 [reload-config] 失败: {e}')
+        log.info('=' * 60)
+        return _fragment({
+            'success': False,
+            'message': f'热重载失败: {e}',
+        })
+    after = _snapshot_runtime_tunables()
+
+    # 列出变化字段。比较列表 / 集合用 != 即可(已规范化为可哈希 / 可比类型)
+    changes: list = []
+    for field, new_val in after.items():
+        old_val = before[field]
+        if old_val != new_val:
+            changes.append({
+                'field': field,
+                'before': old_val,
+                'after': new_val,
+            })
+
+    admin_count = len([u for u in (admins_str or '').split(',') if u.strip()])
+
+    # 日志:逐项 + 总结。load_plugin_config 内部已经分散打了「xxx: A → B」的
+    # info,这里再来一份汇总,便于事后看一行就知道本次重载触发了哪些变化。
+    if changes:
+        log.info(f'🔁 [reload-config] 运行时参数变化 {len(changes)} 项:')
+        for c in changes:
+            log.info(f'   · {c["field"]}: {c["before"]!r} → {c["after"]!r}')
+    else:
+        log.info('🔁 [reload-config] 运行时参数无变化(yaml 与运行时一致)')
+    log.info(f'   · admin_uids: 当前 yaml 中 {admin_count} 人 '
+             f'(C++ 引擎只在 start() 时读一次，改动需重启引擎才能生效)')
+    log.info('🔁 [reload-config] 完成')
+    log.info('=' * 60)
+
+    return _fragment({
+        'success': True,
+        'changes': changes,
+        'current': after,
+        'admin_count': admin_count,
+        'message': '✅ 已按 config.yaml 重新下发到运行时',
+        'note': 'admin_uids 改动需重启 LGTBot 引擎才能生效 (C++ 侧仅在 start() 时读一次)',
+    })
