@@ -554,6 +554,7 @@ body {
   margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;
 }
 .dash-cache-msg { margin-top: 12px; font-size: 12px; min-height: 16px; }
+.dash-cache-msg:empty { display: none; }
 
 /* ── 插件配置(主框架编辑入口 + 热重载) ── */
 .dash-pluginconf-grid {
