@@ -159,7 +159,9 @@ def _get_hosting():
 # 重传一次也无所谓。
 # ─────────────────────────────────────────────────────────────────────────
 
-_URL_CACHE_TTL = 30.0          # content-hash → URL 的缓存 TTL(秒)
+# 由 config.py 在加载 / 重载时写入。**单位:秒**;0 = 关闭去重(每次都重新上传,
+# 仅保留 filename 唯一化保护 cos_key);负数由 config.py 自动归 0。默认 60s。
+URL_CACHE_TTL: float = 60.0
 _URL_CACHE_MAX = 256           # 缓存条目上限,超出按 expires_at 删最早
 _inflight: dict[str, asyncio.Future] = {}      # sha1(data) → 正在跑的 Future
 _url_cache_v2: dict[str, dict] = {}            # sha1(data) → {url, expires_at}
@@ -230,22 +232,30 @@ async def _do_upload(data: bytes, filename: str, user_id: str = '') -> str | Non
 
 
 async def upload_image(data: bytes, filename: str, user_id: str = '') -> str | None:
-    """用 config.yaml 指定的单个图床上传,带 **content-hash 去重** + **in-flight 互斥**。
+    """用 config.yaml 指定的单个图床上传。
 
-    并发安全保证:
-      · 同一份 ``data`` 在 ``_URL_CACHE_TTL`` 秒内多次请求 → 命中 URL cache
-        直接返回,**不打图床**
-      · 同一份 ``data`` 并发请求(尚未拿到结果)→ 第二个及后续 await 同一个
-        Future,backend **只被调用一次**
-      · 不同 ``data`` 并发请求 → 各自独立 Future,**完全并发,无锁等待**
+    无论 ``URL_CACHE_TTL`` 是否为 0,filename 都会被改写成 ``<base>_<sha1[:8]>.ext``
+    传给 backend —— filename 唯一化是 size 错配 bug 的根治手段,不可关闭。
 
-    filename 唯一化:调用 backend 时把传入 filename 改成 ``<base>_<sha1[:8]>.ext``,
-    彻底规避 image_hosting 模块按「user_id + ts(秒)+ base + dim」生成 cos_key
-    可能引发的两个不同 data 撞同一 key 的覆盖 bug。
+    当 ``URL_CACHE_TTL > 0``(默认 30s),启用:
+      · content-hash URL cache —— 同一份 data 在 TTL 内复用 URL,**不打图床**
+      · in-flight Future 互斥 —— 同一份 data 并发请求时,**backend 只被调一次**
+      · 不同 data 各自独立 Future,完全并发,**无全局锁、无速度退化**
+
+    当 ``URL_CACHE_TTL == 0``(配置关闭去重),每次都直接走 ``_do_upload``,
+    不读不写缓存、不参与 in-flight 互斥 —— 同份 data 并发会有重复上传,但
+    由于 filename 唯一化保证不同 data 必不撞 cos_key,**size 错配 bug
+    仍被阻断**;运营关闭去重时只损失带宽,不损失正确性。
 
     失败 / 未配置 → 返回 None。
     """
     h = hashlib.sha1(data).hexdigest()
+    unique = _unique_filename(filename, h)
+
+    # ── 去重已关闭(TTL==0)→ 直通 _do_upload,不读不写 cache / inflight ──
+    if URL_CACHE_TTL <= 0:
+        return await _do_upload(data, unique, user_id)
+
     now = _time.monotonic()
 
     # 1. URL 缓存命中 → 直接返回
@@ -263,10 +273,9 @@ async def upload_image(data: bytes, filename: str, user_id: str = '') -> str | N
     fut = loop.create_future()
     _inflight[h] = fut
     try:
-        unique = _unique_filename(filename, h)
         url = await _do_upload(data, unique, user_id)
         if url:
-            _url_cache_v2[h] = {'url': url, 'expires_at': now + _URL_CACHE_TTL}
+            _url_cache_v2[h] = {'url': url, 'expires_at': now + URL_CACHE_TTL}
             _gc_url_cache_v2(now)
         if not fut.done():
             fut.set_result(url)

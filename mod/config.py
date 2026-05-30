@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """插件配置（data/config.yaml）—— 通过 ElainaBot 标准配置体系存取。
 
-字段：
+字段（按 yaml 中出现顺序）：
   · admin_uids: list[str]            LGTBot 内部管理员 openid 列表
-  · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
   · image_hosting: str               markdown 图片内嵌使用的单个图床名（留空 = 禁用）
-  · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
+  · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
+  · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
   · crash_notify_group: str          严重问题通知群 openid（崩溃时向此群主动推报告）
   · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（这些用户私信走主动消息直推）
+  · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
 """
 
 from __future__ import annotations
@@ -27,19 +28,21 @@ _DEFAULT_MENU_GAMES = [
 
 DEFAULT_CONFIG = {
     'admin_uids': [],
-    'refresh_wait_timeout': 15.0,
     'image_hosting': '',
-    'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
+    'refresh_wait_timeout': 15.0,
+    'image_upload_dedup_ttl': 60.0,
     'crash_notify_group': '',
     'sandbox_dm_users': [],
+    'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
 }
 CONFIG_COMMENTS = {
     'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
-    'refresh_wait_timeout': '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
     'image_hosting': '游戏图片走 markdown 内嵌时使用的图床（可选值：cos / nature / bilibili / chatglm / ukaka / xingye）。上传失败回退 msg_type=7',
-    'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
+    'refresh_wait_timeout': '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
+    'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
     'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
     'sandbox_dm_users': '沙箱测试用户 openid 列表，列表内用户私信走主动消息直推（仅沙箱私信可发主动消息）',
+    'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
 }
 
 
@@ -107,21 +110,16 @@ def load_plugin_config() -> str:
 
 
 def _apply_runtime_tunables(cfg: dict):
-    """把 config.yaml 中的可调字段下发到对应运行时模块"""
+    """把 config.yaml 中的可调字段下发到对应运行时模块。
+
+    下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
+    ``load_plugin_config`` 处理,不在此函数内):
+      image_hosting → refresh_wait_timeout → image_upload_dedup_ttl →
+      crash_notify_group → sandbox_dm_users → menu_game_buttons
+    """
     from . import quota, uploader, buttons as _buttons, callbacks as _callbacks
 
-    timeout = cfg.get('refresh_wait_timeout', 15.0)
-    try:
-        timeout_f = float(timeout)
-    except (TypeError, ValueError):
-        log.warning(f'refresh_wait_timeout 应为数值，已忽略 (got {timeout!r})')
-    else:
-        if timeout_f <= 0:
-            log.warning(f'refresh_wait_timeout 应为正数，已忽略 (got {timeout_f})')
-        elif quota.REFRESH_WAIT_TIMEOUT != timeout_f:
-            log.info(f'refresh_wait_timeout: {quota.REFRESH_WAIT_TIMEOUT}s → {timeout_f}s')
-            quota.REFRESH_WAIT_TIMEOUT = timeout_f
-
+    # ── image_hosting ─────────────────────────────────────────────────────
     backend = cfg.get('image_hosting', '')
     if not isinstance(backend, str):
         log.warning(f'image_hosting 应为字符串，已忽略 (got {backend!r})')
@@ -137,24 +135,40 @@ def _apply_runtime_tunables(cfg: dict):
         log.info(f'image_hosting: {old} → {new}')
         uploader.SELECTED_BACKEND = backend
 
-    # 欢迎菜单的游戏快捷按钮列表 —— 非法 / 缺失时回退到默认 6 个,buttons.py
-    # 的 build_menu_buttons() 每次调用都读这个列表,所以下发后下一次回欢迎菜单
-    # 即生效。
-    raw_games = cfg.get('menu_game_buttons', None)
-    if raw_games is None:
-        games = list(_buttons.DEFAULT_MENU_GAMES)
-    elif isinstance(raw_games, list):
-        games = [str(g).strip() for g in raw_games if str(g).strip()]
+    # ── refresh_wait_timeout ──────────────────────────────────────────────
+    timeout = cfg.get('refresh_wait_timeout', 15.0)
+    try:
+        timeout_f = float(timeout)
+    except (TypeError, ValueError):
+        log.warning(f'refresh_wait_timeout 应为数值，已忽略 (got {timeout!r})')
     else:
-        log.warning(f'menu_game_buttons 应为字符串列表，已忽略 (got {type(raw_games).__name__})')
-        games = list(_buttons.DEFAULT_MENU_GAMES)
-    if _buttons.MENU_GAMES != games:
-        log.info(f'menu_game_buttons: {len(_buttons.MENU_GAMES)} → {len(games)} 个游戏')
-        _buttons.MENU_GAMES = games
+        if timeout_f <= 0:
+            log.warning(f'refresh_wait_timeout 应为正数，已忽略 (got {timeout_f})')
+        elif quota.REFRESH_WAIT_TIMEOUT != timeout_f:
+            log.info(f'refresh_wait_timeout: {quota.REFRESH_WAIT_TIMEOUT}s → {timeout_f}s')
+            quota.REFRESH_WAIT_TIMEOUT = timeout_f
 
-    # 严重问题通知群 openid —— 引擎崩溃时往这里推送主动消息。
-    # 非 str 或空白 → 视为未配置(空字符串);callbacks.CRASH_NOTIFY_GROUP
-    # 在崩溃善后路径里读这个值,empty 跳过推送。
+    # ── image_upload_dedup_ttl ────────────────────────────────────────────
+    # 同份图片重复上传去重 TTL。0 = 关闭去重(每次都重新上传,仍保留 filename
+    # 唯一化避免 cos_key 冲突);负数自动归 0;非数值忽略保留旧值。
+    raw_ttl = cfg.get('image_upload_dedup_ttl', 60.0)
+    try:
+        ttl_f = float(raw_ttl)
+    except (TypeError, ValueError):
+        log.warning(f'image_upload_dedup_ttl 应为数值，已忽略 (got {raw_ttl!r})')
+    else:
+        if ttl_f < 0:
+            log.info(f'image_upload_dedup_ttl 负数已归 0 (关闭去重) (原值 {ttl_f})')
+            ttl_f = 0.0
+        if uploader.URL_CACHE_TTL != ttl_f:
+            old_desc = '关闭' if uploader.URL_CACHE_TTL <= 0 else f'{uploader.URL_CACHE_TTL}s'
+            new_desc = '关闭' if ttl_f <= 0 else f'{ttl_f}s'
+            log.info(f'image_upload_dedup_ttl: {old_desc} → {new_desc}')
+            uploader.URL_CACHE_TTL = ttl_f
+
+    # ── crash_notify_group ────────────────────────────────────────────────
+    # 引擎崩溃时往这里推送主动消息。非 str 或空白 → 视为未配置(空字符串);
+    # callbacks.CRASH_NOTIFY_GROUP 在崩溃善后路径里读这个值,empty 跳过推送。
     raw_notify = cfg.get('crash_notify_group', '')
     if not isinstance(raw_notify, str):
         log.warning(f'crash_notify_group 应为字符串，已忽略 (got {type(raw_notify).__name__})')
@@ -166,9 +180,9 @@ def _apply_runtime_tunables(cfg: dict):
         log.info(f'crash_notify_group: {old} → {new}')
         _callbacks.CRASH_NOTIFY_GROUP = notify_group
 
-    # 沙箱私信用户 openid 列表 —— 列表内用户私信跳过被动配额,直接主动直推。
-    # 非法 / 缺失 → 空集合(所有私信按正式环境规则:无有效 msg_id 直接丢弃)。
-    # callbacks.SANDBOX_DM_USERS 在 _send_text/image_quota_managed 里读取。
+    # ── sandbox_dm_users ──────────────────────────────────────────────────
+    # 列表内用户私信跳过被动配额,直接主动直推。非法 / 缺失 → 空集合(所有
+    # 私信按正式环境规则:无有效 msg_id 直接丢弃)。
     raw_sandbox = cfg.get('sandbox_dm_users', None)
     if isinstance(raw_sandbox, list):
         sandbox_set = frozenset(
@@ -180,3 +194,18 @@ def _apply_runtime_tunables(cfg: dict):
     if _callbacks.SANDBOX_DM_USERS != sandbox_set:
         log.info(f'sandbox_dm_users: {len(_callbacks.SANDBOX_DM_USERS)} → {len(sandbox_set)} 人')
         _callbacks.SANDBOX_DM_USERS = sandbox_set
+
+    # ── menu_game_buttons ─────────────────────────────────────────────────
+    # 非法 / 缺失时回退到默认 6 个;buttons.build_menu_buttons() 每次调用都
+    # 读这个列表,所以下发后下一次回欢迎菜单即生效。
+    raw_games = cfg.get('menu_game_buttons', None)
+    if raw_games is None:
+        games = list(_buttons.DEFAULT_MENU_GAMES)
+    elif isinstance(raw_games, list):
+        games = [str(g).strip() for g in raw_games if str(g).strip()]
+    else:
+        log.warning(f'menu_game_buttons 应为字符串列表，已忽略 (got {type(raw_games).__name__})')
+        games = list(_buttons.DEFAULT_MENU_GAMES)
+    if _buttons.MENU_GAMES != games:
+        log.info(f'menu_game_buttons: {len(_buttons.MENU_GAMES)} → {len(games)} 个游戏')
+        _buttons.MENU_GAMES = games

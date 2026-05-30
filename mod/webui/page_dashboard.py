@@ -959,12 +959,14 @@ def _snapshot_runtime_tunables() -> dict:
     diff,供日志输出与 UI 展示。
     """
     from .. import quota as _quota, uploader as _uploader, buttons as _buttons, callbacks as _callbacks
+    # 字段顺序与 config.DEFAULT_CONFIG / yaml 一致,便于 UI 上直观对照
     return {
-        'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
         'image_hosting': _uploader.SELECTED_BACKEND or '',
-        'menu_game_buttons': list(_buttons.MENU_GAMES),
+        'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
+        'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
         'crash_notify_group': _callbacks.CRASH_NOTIFY_GROUP or '',
         'sandbox_dm_users': sorted(_callbacks.SANDBOX_DM_USERS),
+        'menu_game_buttons': list(_buttons.MENU_GAMES),
     }
 
 

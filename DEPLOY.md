@@ -127,32 +127,42 @@ python3 main.py         # 启动主框架，自动加载插件
 
 ## 5. 配置 `data/config.yaml`
 
-首次启动时插件会自动生成下面这份模板：
+首次启动时插件会自动生成下面这份模板（字段顺序与 yaml 输出一致）：
 
 ```yaml
 # LGTBot 内部管理员 openid 列表（不同于 ElainaBot 的 owner_ids）
-#   这些用户可执行 LGTBot 管理命令（如 %帮助 等）
-#   留空则该机器人无 LGTBot 管理员；可在 Web 面板「日志」查 user_id
 admin_uids: []
-# 被动消息配额（5条）耗尽时，等待用户点击「刷新」按钮的最长秒数
-#   超时后改走主动消息（不再尝试用过期 msg_id 强发，避免必拒）
-#   推荐 5–30 秒：过短玩家来不及点，过长命令响应延迟明显
-refresh_wait_timeout: 15.0
-# 游戏图片走 markdown 内嵌时使用的图床（依赖主框架 image_hosting 模块）
-#   留空 = 不启用图床，所有图片直接以 msg_type=7 媒体消息发送
-#   可选值：cos / nature / bilibili / chatglm / ukaka / xingye
-#   只尝试指定的这一个图床，上传失败立即回退 msg_type=7
+# 游戏图片走 markdown 内嵌时使用的图床。留空 = 不启用图床，所有图片直接以 msg_type=7 发送
 image_hosting: ''
+# 被动消息配额（5条）耗尽时等待用户点击「刷新」按钮的最长秒数，超时改走主动消息
+refresh_wait_timeout: 15.0
+# 同份图片重复上传去重 TTL（秒），并发请求共享上传结果；0 = 关闭去重，负数自动归 0
+image_upload_dedup_ttl: 60.0
+# 严重问题通知群 openid，引擎崩溃时向此群主动推送崩溃报告；留空 = 不推送
+crash_notify_group: ''
+# 沙箱测试用户 openid 列表，列表内用户私信走主动消息直推
+sandbox_dm_users: []
+# 欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致
+menu_game_buttons:
+  - '数字蜂巢'
+  - '天赋云巢'
+  - '炼金术士'
+  - '差值投标'
+  - '决胜五子'
+  - '彩虹奇兵'
 ```
 
-**配置项说明：**
+**配置项说明（按 yaml 字段顺序）：**
 
-| 字段                     | 类型          | 默认     | 说明                                                                                                     |
-|------------------------|-------------|--------|--------------------------------------------------------------------------------------------------------|
-| `admin_uids`           | `list[str]` | `[]`   | LGTBot 内部管理员的 QQ openid 列表                                                                             |
-| `refresh_wait_timeout` | `float`     | `15.0` | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                         |
-| `image_hosting`        | `str`       | `''`   | markdown 图片内嵌使用的图床（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`），留空 = 直接走 msg_type=7 |
-| `crash_notify_group`   | `str`       | `''`   | 严重问题通知群 openid —— 引擎崩溃时向此群主动推送崩溃报告。留空 = 不推送。该群需给本 bot 开了全量推送权限,主动消息才能落地                                |
+| 字段                       | 类型          | 默认     | 说明                                                                                                           |
+|--------------------------|-------------|--------|--------------------------------------------------------------------------------------------------------------|
+| `admin_uids`             | `list[str]` | `[]`   | LGTBot 内部管理员的 QQ openid 列表                                                                                   |
+| `image_hosting`          | `str`       | `''`   | markdown 图片内嵌使用的图床（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`），留空 = 直接走 msg_type=7       |
+| `refresh_wait_timeout`   | `float`     | `15.0` | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                               |
+| `image_upload_dedup_ttl` | `float`     | `60.0` | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用 |
+| `crash_notify_group`     | `str`       | `''`   | 严重问题通知群 openid —— 引擎崩溃时向此群主动推送崩溃报告。留空 = 不推送。该群需给本 bot 开了全量推送权限,主动消息才能落地                                      |
+| `sandbox_dm_users`       | `list[str]` | `[]`   | 沙箱测试用户 openid 列表，列表内用户的私信走主动消息直推（仅沙箱环境的私信能发主动消息）                                                             |
+| `menu_game_buttons`      | `list[str]` | (6 项)  | 欢迎菜单里「游戏快捷开局」按钮列表，每行最多 3 个；游戏名需与 `/游戏列表` 输出一致                                                                |
 
 > 💡 **图床（可选）**：启用 ElainaBot 主框架的 `image_hosting` 模块并配置目标图床后，把图床名填到本插件 `config.yaml` 的 `image_hosting` 字段
 > 本插件就会用 markdown `![](url)` 内嵌发送游戏图片（保留原生 `<@>` 提及和按钮）。**仅尝试指定的这一个图床**，上传失败立即回退 `msg_type=7` 媒体
