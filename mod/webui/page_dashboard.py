@@ -587,8 +587,11 @@ def render_do_update() -> str:
                         '把当前目录建成 git 工作树，再进行更新。'),
         })
     try:
+        # 显式带 ``origin main`` 而非裸 ``git pull --ff-only``:
+        # 裸 pull 会报「There is no tracking information for the current branch」。
+        # 显式参数同时也保证手动 clone 的开发者无论当前在哪个分支都从上游 main 拉。
         proc = subprocess.run(
-            ['git', '-C', plugin_dir, 'pull', '--ff-only'],
+            ['git', '-C', plugin_dir, 'pull', '--ff-only', 'origin', 'main'],
             capture_output=True,
             text=True,
             timeout=60.0,
@@ -820,6 +823,13 @@ def render_init_repo() -> str:
                 'message': '❌ git reset 失败，详见 stages 输出',
             })
         fallback_to_main = True
+
+    # 6. 把 main 分支的 upstream 设为 origin/main
+    # 此步失败不算致命(``render_do_update`` 已显式带 ``origin main`` 兜底),
+    # 只记一条 stage 让用户看到。
+    run_stage('git branch -u origin/main',
+              ['git', '-C', plugin_dir, 'branch',
+               '--set-upstream-to=origin/main', 'main'], timeout=10.0)
 
     log.info(f'[init-repo] 完成 plugin_dir={plugin_dir} '
              f'tag={version_tag_used or "(fallback origin/main)"}')
