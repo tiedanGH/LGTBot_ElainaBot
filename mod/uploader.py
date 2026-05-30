@@ -17,6 +17,8 @@ COS bucket CDN 与 Nature 的 download.nature.qq.com 是最易过审的目标。
 """
 
 from __future__ import annotations
+import asyncio
+import os
 import struct
 import hashlib
 import time as _time
@@ -134,8 +136,70 @@ def _get_hosting():
         return None
 
 
-async def upload_image(data: bytes, filename: str, user_id: str = '') -> str | None:
-    """用 config.yaml 指定的单个图床上传。失败 / 未配置 → 返回 None。"""
+# ──────── 并发安全 + 去重上传 ─────────────────────────────────────────────
+# 解决两个独立 bug,同一份机制覆盖:
+#
+#  (A) **filename 唯一化** —— 根治 cos_key 冲突
+#      主框架 image_hosting 的 COS storage key 是
+#         {prefix}{user_id}/{ts(秒级)}/{base}_{W}x{H}.ext
+#      lgtbot 引擎对游戏图常用固定 filename (e.g. 'match.png') 且渲染图尺寸
+#      常一致(同一游戏的棋盘 / 卡牌);两个不同群同时玩同款游戏时 user_id=''
+#      也相同 → cos_key 完全一样 → 后写覆盖,两条消息拿到同 URL 但 size 是
+#      各自本地从原 data 算的 → 出现「size 数字对得上 X 图但 URL 加载出来
+#      是 Y 图」的现象。把 base 部分加上 sha1(data)[:8] 后 cos_key 必然按
+#      内容隔离,内容相同则 key 相同(COS 端去重,符合预期)。
+#
+#  (B) **in-flight Future 去重 + 短 TTL URL cache** —— 避免同一份 data 被
+#      并发上传多次(菜单 logo / 多群同时拉同一份图等场景)。dict 操作是
+#      µs 级,不构成阻塞;不同 data 各自走独立 Future,完全并发,**没有
+#      全局锁**,满足「多群同时游戏不互锁、不影响上传速度」要求。
+#
+# _url_cache_v2 / _inflight 是模块级 dict,不挂 boot._get_persistent():
+# 热重载时 in-flight 协程随旧模块销毁,新模块开始干净状态,30s 缓存丢了
+# 重传一次也无所谓。
+# ─────────────────────────────────────────────────────────────────────────
+
+_URL_CACHE_TTL = 30.0          # content-hash → URL 的缓存 TTL(秒)
+_URL_CACHE_MAX = 256           # 缓存条目上限,超出按 expires_at 删最早
+_inflight: dict[str, asyncio.Future] = {}      # sha1(data) → 正在跑的 Future
+_url_cache_v2: dict[str, dict] = {}            # sha1(data) → {url, expires_at}
+
+
+def _unique_filename(filename: str, sha1_hex: str) -> str:
+    """在 filename 的 base 段后追加 ``_<sha1[:8]>``,扩展名保留。
+
+    空 filename 用 ``image.png`` 兜底。**保留原 base** 让 COS 上的对象路径
+    仍然可读(便于人工排查),只是末尾多了 8 字符内容哈希,保证不同 data
+    的对象 key 必然不同。
+    """
+    base, ext = os.path.splitext(filename or 'image.png')
+    if not ext:
+        ext = '.png'
+    return f'{base}_{sha1_hex[:8]}{ext}'
+
+
+def _gc_url_cache_v2(now: float) -> None:
+    """轻量清理:删过期条目;若仍超 ``_URL_CACHE_MAX`` 删 expires_at 最早的几条。
+
+    O(n) 一遍扫,30s TTL + 256 上限下 n 极小,不构成性能问题。
+    """
+    expired = [k for k, v in _url_cache_v2.items() if v['expires_at'] <= now]
+    for k in expired:
+        _url_cache_v2.pop(k, None)
+    overflow = len(_url_cache_v2) - _URL_CACHE_MAX
+    if overflow > 0:
+        oldest = sorted(_url_cache_v2.items(), key=lambda kv: kv[1]['expires_at'])
+        for k, _ in oldest[:overflow]:
+            _url_cache_v2.pop(k, None)
+
+
+async def _do_upload(data: bytes, filename: str, user_id: str = '') -> str | None:
+    """实际调用图床上传 —— ``upload_image()`` 的内部实现,**不带去重缓存**。
+
+    保留以前 ``upload_image`` 的全部 backend 调度逻辑,只剥离出来供新的
+    去重包装层(``upload_image``)调用。直接调本函数会绕过缓存与 in-flight
+    互斥,**仅供同模块内部使用**。
+    """
     backend = SELECTED_BACKEND
     if not backend:
         return None
@@ -163,6 +227,57 @@ async def upload_image(data: bytes, filename: str, user_id: str = '') -> str | N
         log.info(f'图床 {backend} 上传成功: {url}')
         return url
     return None
+
+
+async def upload_image(data: bytes, filename: str, user_id: str = '') -> str | None:
+    """用 config.yaml 指定的单个图床上传,带 **content-hash 去重** + **in-flight 互斥**。
+
+    并发安全保证:
+      · 同一份 ``data`` 在 ``_URL_CACHE_TTL`` 秒内多次请求 → 命中 URL cache
+        直接返回,**不打图床**
+      · 同一份 ``data`` 并发请求(尚未拿到结果)→ 第二个及后续 await 同一个
+        Future,backend **只被调用一次**
+      · 不同 ``data`` 并发请求 → 各自独立 Future,**完全并发,无锁等待**
+
+    filename 唯一化:调用 backend 时把传入 filename 改成 ``<base>_<sha1[:8]>.ext``,
+    彻底规避 image_hosting 模块按「user_id + ts(秒)+ base + dim」生成 cos_key
+    可能引发的两个不同 data 撞同一 key 的覆盖 bug。
+
+    失败 / 未配置 → 返回 None。
+    """
+    h = hashlib.sha1(data).hexdigest()
+    now = _time.monotonic()
+
+    # 1. URL 缓存命中 → 直接返回
+    ent = _url_cache_v2.get(h)
+    if ent is not None and ent['expires_at'] > now:
+        return ent['url']
+
+    # 2. 已有 in-flight 协程在上传同份 data → 共享同一个 Future
+    fut = _inflight.get(h)
+    if fut is not None:
+        return await fut
+
+    # 3. 占位 Future,实际跑上传
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    _inflight[h] = fut
+    try:
+        unique = _unique_filename(filename, h)
+        url = await _do_upload(data, unique, user_id)
+        if url:
+            _url_cache_v2[h] = {'url': url, 'expires_at': now + _URL_CACHE_TTL}
+            _gc_url_cache_v2(now)
+        if not fut.done():
+            fut.set_result(url)
+        return url
+    except Exception as e:
+        if not fut.done():
+            fut.set_exception(e)
+        raise
+    finally:
+        # in-flight 标记尽快清掉,让后续请求要么命中 cache 要么发起新一轮
+        _inflight.pop(h, None)
 
 
 # ──────── 带缓存的上传（用于固定图片，如菜单 logo） ───────────────────────
