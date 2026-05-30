@@ -50,6 +50,7 @@ RESTART_KEY = '__lgtbot_restart'
 _DASH_CHECK_UPDATE_KEY      = '__lgtbot_dash_check_update'
 _DASH_DO_UPDATE_KEY         = '__lgtbot_dash_do_update'           # 更新桥接层
 _DASH_UPDATE_SUBMODULE_KEY  = '__lgtbot_dash_update_submodule'    # 更新 / 初始化 lgtbot 子模块
+_DASH_INIT_REPO_KEY         = '__lgtbot_dash_init_repo'           # 市场用户:把插件目录初始化为 git 仓库
 _DASH_CLEAR_AVATAR_KEY      = '__lgtbot_dash_clear_avatar'
 _DASH_CLEAR_AVATAR_7D_KEY   = '__lgtbot_dash_clear_avatar_7d'
 _DASH_CLEAR_GEN_KEY         = '__lgtbot_dash_clear_gen'
@@ -75,6 +76,7 @@ _HIDDEN_KEYS = frozenset({
     _DASH_CHECK_UPDATE_KEY,
     _DASH_DO_UPDATE_KEY,
     _DASH_UPDATE_SUBMODULE_KEY,
+    _DASH_INIT_REPO_KEY,
     _DASH_CLEAR_AVATAR_KEY,
     _DASH_CLEAR_AVATAR_7D_KEY,
     _DASH_CLEAR_GEN_KEY,
@@ -226,6 +228,7 @@ def register():
       · ``__lgtbot_dash_check_update``      —— Dashboard「检查更新」(同时查桥接层 + 子模块上游)
       · ``__lgtbot_dash_do_update``         —— Dashboard「更新桥接层」(git pull --ff-only)
       · ``__lgtbot_dash_update_submodule``  —— Dashboard「更新 / 初始化 lgtbot 子模块」
+      · ``__lgtbot_dash_init_repo``         —— Dashboard 市场用户「把插件目录初始化为 git 仓库」
       · ``__lgtbot_dash_clear_avatar`` / ``_7d`` —— Dashboard 头像缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_clear_gen``    / ``_7d`` —— Dashboard 图片缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
@@ -253,6 +256,7 @@ def register():
     _register_hidden_action(_DASH_CHECK_UPDATE_KEY,      page_dashboard.render_check_update)
     _register_hidden_action(_DASH_DO_UPDATE_KEY,         page_dashboard.render_do_update)
     _register_hidden_action(_DASH_UPDATE_SUBMODULE_KEY,  page_dashboard.render_update_submodule)
+    _register_hidden_action(_DASH_INIT_REPO_KEY,         page_dashboard.render_init_repo)
     _register_hidden_action(_DASH_CLEAR_AVATAR_KEY,      page_dashboard.render_clear_avatar)
     _register_hidden_action(_DASH_CLEAR_AVATAR_7D_KEY,   page_dashboard.render_clear_avatar_7d)
     _register_hidden_action(_DASH_CLEAR_GEN_KEY,         page_dashboard.render_clear_gen)

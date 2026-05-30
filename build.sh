@@ -94,13 +94,21 @@ if [[ $INCREMENTAL -eq 1 ]]; then
 else
 
 # ── 子模块检查 ───────────────────────────────────────────────────────────
+# lgtbot 上游 .gitmodules 把 7 个嵌套子模块都登记成 ssh (git@github.com:...)
 if [[ ! -f "lgtbot/CMakeLists.txt" ]]; then
     echo "[!] lgtbot/ 子模块为空，尝试初始化..."
     if [[ -d "../../.git" ]] || [[ -d ".git" ]]; then
-        git submodule update --init --recursive lgtbot || true
+        git -c url.https://github.com/.insteadOf=git@github.com: \
+            -c url.https://github.com/.insteadOf=ssh://git@github.com/ \
+            submodule update --init --recursive lgtbot || true
+    else
+        echo "[!] 当前目录不是 git 仓库 (.git/ 不存在)。"
+        echo "    若是从插件市场下载,请先在主框架 Web 面板"
+        echo "    『LGTBot 机器人 → 仪表盘 → 📥 初始化为 git 仓库』完成初始化,"
+        echo "    再重新运行 bash build.sh。"
     fi
     if [[ ! -f "lgtbot/CMakeLists.txt" ]]; then
-        echo "[!] 请手动准备 lgtbot/ 源码 (https://github.com/slontia/lgtbot)"
+        echo "[!] 需先准备 lgtbot/ 源码 (https://github.com/slontia/lgtbot)"
         exit 1
     fi
 fi

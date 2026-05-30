@@ -35,17 +35,34 @@ sudo yum install -y \
 
 ## 2. 准备 lgtbot 源码
 
-`lgtbot/` 是 lgtbot 上游仓库的 git 子模块。如果该目录为空：
+### 2.1 从插件市场安装 (推荐路径)
+
+主框架插件市场下载到的 zip **不包含 `.git/`**(`web/tools/_market/install.py` 解压时显式过滤)，所以 `git` 命令都无法运行。但插件自带一键修复入口:
+
+1. 确保系统已装 git 客户端 (`git --version` 能跑就行，无需 SSH key)
+2. 启动主框架，访问 Web 面板 →「LGTBot 机器人 → 仪表盘」
+3. 「📦 版本与更新」→ 桥接层行点 **「📥 初始化为 git 仓库」**
+   - 后端执行 `git init -b main` → `remote add origin` → `fetch --tags --depth 50` → `reset --mixed v<当前版本>`
+   - `reset --mixed` 只动 index 不动工作区， `data/`、`build/`、`lgtbot/` 全保留
+4. 同一面板 → 子模块行点 **「⬇ 初始化子模块」**
+   - 后端用 `git -c url.https://...insteadOf=git@github.com:` **临时改写 SSH→HTTPS**，递归生效到 lgtbot 嵌套的 7 个子模块，**不需要 SSH key**
+5. 切到「引擎编译」tab → 「🛠 完整编译」
+
+### 2.2 从源仓库 clone (开发者路径)
+
+如果你自己 clone 了本仓库到 `plugins/LGTBot_ElainaBot/`，`lgtbot/` 是上游的 git 子模块。若该目录为空:
 
 ```bash
 cd plugins/LGTBot_ElainaBot
 git clone --recursive https://github.com/slontia/lgtbot.git lgtbot
 ```
 
-或在已有 git 仓库中：
+或在已有 git 仓库中:
 ```bash
 git submodule update --init --recursive plugins/LGTBot_ElainaBot/lgtbot
 ```
+
+注:lgtbot 上游的 `.gitmodules` 把嵌套子模块全部登记为 SSH url。如果你没 SSH key,改用 dashboard 的「⬇ 初始化子模块」按钮(已内置 SSH→HTTPS 改写),或者手动加 `-c url."https://github.com/".insteadOf="git@github.com:"` 给上面的 `git submodule update`。
 
 ---
 
@@ -184,6 +201,7 @@ rm -rf plugins/LGTBot_ElainaBot
 | 现象                                                                 | 排查                                                                                                                                                                                                                                                                                                                     |
 |--------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `LGTBot_ElainaBot C++ 扩展未编译或导入失败`                                  | 重跑 `bash build.sh`；查看 `plugins/LGTBot_ElainaBot/LGTBot_ElainaBot.so` 是否存在                                                                                                                                                                                                                                              |
+| `git pull` / `git submodule update` 报错 / build.sh 提示「.git/ 不存在」    | 从插件市场安装的目录里没有 `.git/`(市场显式过滤)。打开仪表盘 → 桥接层行点「📥 初始化为 git 仓库」一键修复;再点「⬇ 初始化子模块」拉 lgtbot(已内置 SSH→HTTPS 改写,无需 SSH key)。详见 §2.1                                                                                                                                                                                              |
 | `libbot_core.so: cannot open shared object file`                   | `LGTBot_ElainaBot.so` 链接 `libbot_core.so` 但 ld.so 默认不搜 `build/`。本插件已用 `ctypes.CDLL` 在 import 阶段预加载 `build/lib*.so`；若仍报错，确认 `build/libbot_core.so` 存在，或手动 `LD_LIBRARY_PATH=plugins/LGTBot_ElainaBot/build python3 main.py`                                                                                              |
 | `ImportError: undefined symbol: ...boost::python...`               | Boost.Python 与编译时的 Python 版本不匹配 — `bash build.sh --clean` 重编译                                                                                                                                                                                                                                                          |
 | `Load mod failed: ... undefined symbol: _ZN6google10LogMessage...` | glog 符号不可见。本插件已在 `main.py` 用 `RTLD_GLOBAL` 解决；若仍出现，确认未 `--no-glog` 编译，或试 `LD_PRELOAD=$(ldconfig -p \| grep libglog \| awk '{print $4}' \| head -1) python3 main.py`                                                                                                                                                    |

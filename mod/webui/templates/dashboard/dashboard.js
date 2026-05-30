@@ -14,7 +14,13 @@ const DASH_KEYS = {
   clear_match_all:    '__lgtbot_dash_clear_match_all',
   clear_match_7d:     '__lgtbot_dash_clear_match_7d',
   reload_config:      '__lgtbot_dash_reload_config',
+  init_repo:          '__lgtbot_dash_init_repo',
 };
+
+/* 插件目录的 git 状态 ——
+ *   'ok'     = .git 存在,「更新桥接层」按钮走 dashDoUpdate
+ *   'no_git' = 市场下载场景,按钮文案切「📥 初始化为 git 仓库」,走 dashInitRepo */
+let dashRepoStatus = 'ok';
 
 /* 引擎配置绝对路径(由 dashboard-data 注入),保存请求里要原样回传 */
 let dashConfigAbsPath = '';
@@ -65,7 +71,19 @@ function dashApplyData(data) {
 
   /* 子模块初始状态(get_data 只填本地 commit,远端留给检查更新按钮)*/
   if (data.submodule) {
+    dashRepoStatus = data.submodule.repo_status || 'ok';
     dashRenderSubmoduleStatus(data.submodule);
+  }
+  /* 桥接层 placeholder: no_git 时主动把按钮切到「初始化」状态;ok 时保持
+     HTML 初始文案「点击「检查更新」查看版本」+ 按钮隐藏。 */
+  if (dashRepoStatus === 'no_git') {
+    const bDetail = document.getElementById('dash-bridge-detail');
+    const bBtn = document.getElementById('dash-do-update');
+    bDetail.innerHTML = '<span class="dash-msg-warn">⚠️ 未检测到 .git/ '
+                      + '(可能从插件市场安装)。点击右侧按钮把当前目录'
+                      + '初始化为 git 仓库，方可使用更新功能。</span>';
+    bBtn.textContent = '📥 初始化为 git 仓库';
+    bBtn.style.display = '';
   }
 
   /* 统计 */
@@ -163,6 +181,10 @@ async function dashCheckUpdate() {
   document.getElementById('dash-update-submodule').style.display = 'none';
   try {
     const data = await dashCallAction(DASH_KEYS.check_update);
+    // 检查更新结果里也带 repo_status (submodule info 自带);同步给桥接层渲染
+    if (data.submodule) {
+      dashRepoStatus = data.submodule.repo_status || 'ok';
+    }
     dashRenderBridgeStatus(data.bridge || {});
     dashRenderSubmoduleStatus(data.submodule || {});
   } catch (e) {
@@ -177,6 +199,21 @@ async function dashCheckUpdate() {
 function dashRenderBridgeStatus(bridge) {
   const detail = document.getElementById('dash-bridge-detail');
   const btn = document.getElementById('dash-do-update');
+
+  /* 最高优先级: 插件目录不是 git 仓库 → 把这一行整个切到「初始化」分支,
+     不展示版本对比信息(也对比不了,本地没 git history) */
+  if (dashRepoStatus === 'no_git') {
+    detail.innerHTML = '<span class="dash-msg-warn">⚠️ 未检测到 .git/ '
+                     + '(可能从插件市场安装)。点击右侧按钮把当前目录'
+                     + '初始化为 git 仓库,方可使用更新功能。</span>';
+    btn.textContent = '📥 初始化为 git 仓库';
+    btn.style.display = '';
+    return;
+  }
+
+  /* 正常路径: 显式还原按钮文案(防止用户之前看到过初始化按钮文案残留) */
+  btn.textContent = '⬇ 更新桥接层';
+
   if (!bridge || !bridge.success) {
     detail.innerHTML = '<span class="dash-msg-err">❌ ' +
       escapeHtml(bridge && bridge.error ? bridge.error : '检查失败') + '</span>';
@@ -299,6 +336,71 @@ async function dashDoUpdate() {
     btn.disabled = false;
     btn.textContent = '⬇ 更新桥接层';
   }
+}
+
+/* ──── 把插件目录初始化为 git 仓库(市场用户专用) ──── */
+async function dashInitRepo() {
+  const ok = await dashConfirm(
+    '把当前插件目录初始化为 git 仓库?\n\n' +
+    '将在插件目录下依次执行:\n' +
+    '  · git init -b main\n' +
+    '  · git remote add origin <插件 GitHub URL>\n' +
+    '  · git fetch origin --tags --depth 50\n' +
+    '  · git reset --mixed v<当前版本> (失败则 fallback origin/main)\n\n' +
+    '只动 index，不动工作区文件 —— data/、build/、lgtbot/ 全部保留。\n\n' +
+    '需要本机已安装 git 客户端。',
+    {level: 'danger'}
+  );
+  if (!ok) return;
+  const btn = document.getElementById('dash-do-update');
+  const resEl = document.getElementById('dash-update-result');
+  btn.disabled = true;
+  btn.textContent = '⏳ 初始化中……';
+  resEl.innerHTML = '';
+  try {
+    const data = await dashCallAction(DASH_KEYS.init_repo);
+    const parts = [];
+    if (data.success) {
+      parts.push('<div class="dash-msg-ok">' + escapeHtml(data.message) + '</div>');
+      if (data.fallback_to_main) {
+        parts.push('<div class="dash-msg-warn">ℹ️ 当前版本 tag 在远端不存在,' +
+                   '已 fallback 到 origin/main</div>');
+      }
+    } else {
+      parts.push('<div class="dash-msg-err">❌ ' +
+                 escapeHtml(data.message || '初始化失败') + '</div>');
+    }
+    if (Array.isArray(data.stages) && data.stages.length) {
+      const items = data.stages.map(s => {
+        const label = escapeHtml(s[0] || '');
+        const rc = s[1];
+        const out = (s[2] || '') + (s[3] ? (s[2] ? '\n' : '') + s[3] : '');
+        return '<li><code class="dash-mono">' + label + '</code> (rc=' +
+               escapeHtml(String(rc)) + ')' +
+               (out ? '<pre class="dash-pre">' + escapeHtml(out) + '</pre>' : '') +
+               '</li>';
+      });
+      parts.push('<ul class="dash-pluginconf-changes">' + items.join('') + '</ul>');
+    }
+    resEl.innerHTML = parts.join('');
+    /* 成功 → 整页刷新,dashRepoStatus 会回到 'ok',按钮自动切回「检查更新」流程 */
+    if (data.success) dashRefreshAll();
+  } catch (e) {
+    resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
+  } finally {
+    btn.disabled = false;
+    /* 按当前状态决定文案: 成功 → 走 'ok' 文案;失败 → 保持 no_git 文案让用户重试 */
+    btn.textContent = (dashRepoStatus === 'no_git'
+                        ? '📥 初始化为 git 仓库'
+                        : '⬇ 更新桥接层');
+  }
+}
+
+/* 桥接层行按钮的分发器: 按 dashRepoStatus 决定调哪个 handler。
+   一个 button 元素 + 一个 click listener,handler 根据状态分支。 */
+async function dashBridgeButtonClick() {
+  if (dashRepoStatus === 'no_git') return dashInitRepo();
+  return dashDoUpdate();
 }
 
 /* ──── 更新 / 初始化 lgtbot 子模块 ──── */
@@ -554,7 +656,7 @@ window.addEventListener('DOMContentLoaded', () => {
   dashLoadInline();
 
   document.getElementById('dash-check-update').addEventListener('click', dashCheckUpdate);
-  document.getElementById('dash-do-update').addEventListener('click', dashDoUpdate);
+  document.getElementById('dash-do-update').addEventListener('click', dashBridgeButtonClick);
   document.getElementById('dash-update-submodule').addEventListener('click', dashDoUpdateSubmodule);
   document.getElementById('dash-stats-refresh').addEventListener('click', dashRefreshAll);
   document.getElementById('dash-config-save').addEventListener('click', dashSaveConfig);

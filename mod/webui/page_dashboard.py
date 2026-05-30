@@ -135,6 +135,19 @@ def _parse_github_owner_repo(url: str) -> tuple[str, str]:
 # 上游最新 commit 通过 GitHub commits API 取。
 # ─────────────────────────────────────────────────────────────────────────
 
+# 给 git 命令注入的 SSH→HTTPS url 改写 ——
+# lgtbot 上游 .gitmodules 把 7 个嵌套子模块都登记成 ``git@github.com:...`` 形式,
+# 市场用户没 SSH key 就会卡住。下面这两条 ``-c url.<https>.insteadOf=<ssh>`` 在**本次
+# git 子进程内临时生效**,不污染用户 ``~/.gitconfig`` 也不动 .gitmodules 文件,
+# 递归 init 时同样会作用到嵌套子模块。同时覆盖两种 ssh 写法:
+#   · ``git@github.com:owner/repo.git``        ← scp-like 短写法
+#   · ``ssh://git@github.com/owner/repo.git``  ← 完整 ssh:// 形式
+_GITHUB_SSH_TO_HTTPS_ARGS = [
+    '-c', 'url.https://github.com/.insteadOf=git@github.com:',
+    '-c', 'url.https://github.com/.insteadOf=ssh://git@github.com/',
+]
+
+
 # .gitmodules 唯一一项的 fallback —— 文件丢失或读取失败时仍按已知配置工作
 _SUBMODULE_FALLBACK = {
     'path':   'lgtbot',
@@ -221,10 +234,15 @@ def _get_submodule_info(query_remote: bool = False) -> dict:
     """汇总子模块状态。``query_remote=True`` 会调用 GitHub API 取远端 commit;
     ``False`` 只取本地状态,适合 ``get_data()`` 首次渲染(避免拖慢页面)。
 
-    status 取值:
+    status 取值(子模块自身):
       · ``ok``       —— 子模块已初始化,本地 HEAD 可读
       · ``missing``  —— 文件夹不存在
       · ``empty``    —— 文件夹存在但内部为空 / 无 .git(未 init)
+
+    repo_status 取值(**插件目录自身**,与子模块独立):
+      · ``ok``     —— ``<plugin_dir>/.git`` 存在,可正常 git pull / submodule update
+      · ``no_git`` —— 插件市场 zip 下载场景,根目录无 .git;前端据此把桥接层
+                     行的「更新桥接层」按钮文案换成「初始化为 git 仓库」
     """
     cfg = _parse_gitmodules()
     sub_path = cfg['path']
@@ -239,6 +257,9 @@ def _get_submodule_info(query_remote: bool = False) -> dict:
         'upstream_repo': repo,
         'branch': branch,
         'status': 'ok',
+        # 插件目录本身的 git 状态 —— 与子模块状态独立,市场用户解压 zip 后是 'no_git'
+        'repo_status': ('ok' if os.path.isdir(os.path.join(boot.PLUGIN_DIR, '.git'))
+                        else 'no_git'),
         'local_commit': '',
         'local_commit_full': '',
         'remote_commit': '',
@@ -349,6 +370,7 @@ def _query_lgtbot_stats() -> tuple[dict, list]:
     errors: list = []
     if not os.path.isfile(boot.DB_PATH):
         errors.append(f'lgtbot.db 不存在：{boot.DB_PATH}')
+        errors.append('数据库将在引擎启动时自动创建。**请注意：卸载本插件时数据库将被删除，请手动做好数据备份！**')
         return stats, errors
     uri = f'file:{boot.DB_PATH}?mode=ro'
     conn = None
@@ -560,7 +582,9 @@ def render_do_update() -> str:
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
         return _fragment({
             'success': False,
-            'message': '插件目录不是 git 仓库 (.git/ 不存在)，无法 git pull',
+            'message': ('插件目录不是 git 仓库 (.git/ 不存在)。'
+                        '若是从插件市场下载安装，请先点击「📥 初始化为 git 仓库」'
+                        '把当前目录建成 git 工作树，再进行更新。'),
         })
     try:
         proc = subprocess.run(
@@ -610,10 +634,16 @@ def render_update_submodule() -> str:
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
         return _fragment({
             'success': False,
-            'message': '插件目录不是 git 仓库 (.git/ 不存在)，无法初始化子模块',
+            'message': ('插件目录不是 git 仓库 (.git/ 不存在)。'
+                        '若是从插件市场下载安装，请先点击「📥 初始化为 git 仓库」'
+                        '把当前目录建成 git 工作树，再初始化子模块。'),
         })
 
-    cmd = ['git', '-C', plugin_dir, 'submodule', 'update',
+    # ``_GITHUB_SSH_TO_HTTPS_ARGS`` 必须在子命令(``submodule``)之前传给 git ——
+    # ``git -c <k>=<v> <subcmd>`` 是 git 的标准用法,会递归到嵌套子模块。lgtbot
+    # 上游 .gitmodules 全是 SSH,没这个改写市场用户绝对拉不到。
+    cmd = ['git', '-C', plugin_dir, *_GITHUB_SSH_TO_HTTPS_ARGS,
+           'submodule', 'update',
            '--init', '--recursive', '--force', sub_path]
     try:
         # git submodule update 第一次 init 时要克隆整个 lgtbot 仓库,大概 30~60s
@@ -650,6 +680,159 @@ def render_update_submodule() -> str:
         'stdout': (proc.stdout or '').strip(),
         'stderr': (proc.stderr or '').strip(),
         'message': msg,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 把当前插件目录初始化为 git 工作仓库 —— 给「从插件市场下载」的用户用
+#
+# 主框架插件市场(``web/tools/_market/install.py``)在解压 zip 时显式过滤掉
+# ``/.git/`` 子目录,所以市场用户拿到的目录没有任何 git 元信息,既不能
+# ``git pull`` 更新桥接层,也跑不了 ``git submodule update --init`` 把 lgtbot
+# 拉下来。本函数原地建仓:``git init`` + ``remote add`` + 浅 fetch + ``reset
+# --mixed v<version>``,**保留工作区所有文件不动**(用户的 data/、build/、
+# lgtbot/ 都不会被擦)。完成后 git status 会显示大量 M(zip 解压版与 tag
+# 内容可能字节级有差异),这是预期 —— 后续 ``git pull --ff-only`` 仍能 ff
+# 那些 unmodified 的文件,modified 文件保留。
+# ─────────────────────────────────────────────────────────────────────────
+
+def _git_run(cmd: list, timeout: float = 60.0):
+    """跑一条 git 命令,返回 ``CompletedProcess``。捕获常见异常包成同形态对象,
+    让 ``render_init_repo`` 单一返回路径处理 ok / 各类错误。
+    """
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def render_init_repo() -> str:
+    """把 ``boot.PLUGIN_DIR`` 原地变成与上游同步的 git 仓库。
+
+    步骤:
+      1. ``git --version`` 探测 —— 没装 git 直接报友好错误
+      2. 若 ``.git/`` 已存在 —— 报「已初始化」,防止重复点击
+      3. ``git init -b main`` (``-b main`` 避免老版本 git 默认 master,
+         省一次 rename)
+      4. ``git remote add origin <__plugin_meta__['github']>``
+         —— 从插件元数据读 URL,不硬编码
+      5. ``git fetch origin --tags --depth 50``
+         —— 浅 fetch 拿 tag 和最近 50 个 commit,足够后续 ``git pull``
+      6. ``git reset --mixed v<version>`` —— 把 HEAD 和 index 指向当前版本对应
+         的 tag;若 tag 不存在(dev 版),fallback 到 ``origin/main``。``--mixed``
+         **只动 index 不动工作区**,所以用户的 data / build / lgtbot 全保留。
+    """
+    plugin_dir = boot.PLUGIN_DIR
+
+    # 1. git 客户端探测
+    try:
+        proc = _git_run(['git', '--version'], timeout=5.0)
+    except FileNotFoundError:
+        return _fragment({
+            'success': False,
+            'message': '未找到 git 命令，请先安装 git 客户端再使用本功能',
+        })
+    except Exception as e:
+        return _fragment({'success': False, 'message': f'探测 git 异常：{e}'})
+    if proc.returncode != 0:
+        return _fragment({
+            'success': False,
+            'message': f'git --version 失败 (rc={proc.returncode}): '
+                       f'{(proc.stderr or proc.stdout or "").strip()}',
+        })
+
+    # 2. 已是仓库 → 拒绝重复操作
+    if os.path.isdir(os.path.join(plugin_dir, '.git')):
+        return _fragment({
+            'success': False,
+            'message': '插件目录已经是 git 仓库 (.git/ 已存在)，无需重复初始化。'
+                       '如需更新请用「⬇ 更新桥接层」按钮。',
+        })
+
+    # 3. 读元数据拿 github URL + 当前版本
+    meta = _get_plugin_meta()
+    github_url = (meta.get('github') or '').strip()
+    version = (meta.get('version') or '').strip()
+    if not github_url:
+        return _fragment({
+            'success': False,
+            'message': '__plugin_meta__ 中未配置 github 字段，无法确定 remote',
+        })
+    # GitHub URL 不带 .git 后缀也能 clone,但加上更标准
+    remote_url = github_url if github_url.endswith('.git') else github_url + '.git'
+    target_tag = f'v{version}' if version else ''
+
+    # 4. git init -b main → remote add → fetch → reset
+    stages: list = []   # [(label, returncode, stdout, stderr)] 失败时全部回传给前端
+
+    def run_stage(label: str, cmd: list, timeout: float = 60.0) -> bool:
+        try:
+            p = _git_run(cmd, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stages.append((label, -1, '', f'{label} 超时 ({timeout:.0f}s)'))
+            return False
+        except Exception as e:
+            stages.append((label, -1, '', f'{label} 异常: {e}'))
+            return False
+        stages.append((label, p.returncode,
+                       (p.stdout or '').strip(), (p.stderr or '').strip()))
+        return p.returncode == 0
+
+    if not run_stage('git init',
+                     ['git', '-C', plugin_dir, 'init', '-b', 'main'], timeout=10.0):
+        return _fragment({
+            'success': False,
+            'stages': stages,
+            'message': '❌ git init 失败，详见 stages 输出',
+        })
+    if not run_stage('git remote add',
+                     ['git', '-C', plugin_dir, 'remote', 'add', 'origin', remote_url],
+                     timeout=10.0):
+        return _fragment({
+            'success': False,
+            'stages': stages,
+            'message': '❌ git remote add 失败，详见 stages 输出',
+        })
+    if not run_stage('git fetch --tags --depth 50',
+                     ['git', '-C', plugin_dir, 'fetch', 'origin',
+                      '--tags', '--depth', '50'], timeout=120.0):
+        return _fragment({
+            'success': False,
+            'stages': stages,
+            'message': '❌ git fetch 失败 (网络问题 / 仓库不可达?)，详见 stages',
+        })
+
+    # 5. reset --mixed 到当前版本 tag;失败 fallback 到 origin/main
+    fallback_to_main = False
+    version_tag_used = ''
+    if target_tag and run_stage(f'git reset --mixed {target_tag}',
+                                ['git', '-C', plugin_dir, 'reset', '--mixed',
+                                 target_tag], timeout=30.0):
+        version_tag_used = target_tag
+    else:
+        # tag 不存在 / reset 失败 → 退到 origin/main
+        if target_tag:
+            stages.append((f'tag {target_tag} 不可用',
+                           -1, '', 'fallback 到 origin/main'))
+        if not run_stage('git reset --mixed origin/main',
+                         ['git', '-C', plugin_dir, 'reset', '--mixed',
+                          'origin/main'], timeout=30.0):
+            return _fragment({
+                'success': False,
+                'stages': stages,
+                'message': '❌ git reset 失败，详见 stages 输出',
+            })
+        fallback_to_main = True
+
+    log.info(f'[init-repo] 完成 plugin_dir={plugin_dir} '
+             f'tag={version_tag_used or "(fallback origin/main)"}')
+    return _fragment({
+        'success': True,
+        'stages': stages,
+        'version_tag_used': version_tag_used,
+        'fallback_to_main': fallback_to_main,
+        'remote_url': remote_url,
+        'message': (f'✅ 已把插件目录初始化为 git 仓库 '
+                    f'(HEAD = {version_tag_used or "origin/main"})。'
+                    f'工作区文件全部保留，可继续使用「⬇ 更新桥接层」'
+                    f'和「⬇ 初始化子模块」按钮。'),
     })
 
 
