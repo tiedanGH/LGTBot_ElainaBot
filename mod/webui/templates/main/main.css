@@ -584,6 +584,8 @@ a.dash-btn { text-decoration: none; }
   font-size: 12px; min-height: 16px;
   display: flex; flex-direction: column; gap: 4px;
 }
+/* 无内容时整块隐藏(包括 min-height + gap),写入文案后自动显现。 */
+.dash-pluginconf-msg:empty { display: none; }
 .dash-pluginconf-changes {
   list-style: none; padding: 6px 10px; margin: 0;
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
