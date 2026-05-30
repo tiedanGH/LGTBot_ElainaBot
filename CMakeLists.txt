@@ -20,7 +20,22 @@ add_subdirectory(lgtbot)
 # ── 依赖查找 ─────────────────────────────────────────────────────────────────
 find_package(CURL REQUIRED)
 
-# Python 3：优先匹配当前运行的解释器
+# Python 3：优先匹配 PATH 里 `python3` 软链指向的解释器
+#
+# 默认 find_package(Python3) 的 FIND_STRATEGY=VERSION 会扫所有版本选**最高**那个,
+# 装了 deadsnakes 的 python3.13 后会被强行选到,跟系统 libboost-python-dev
+# (只为发行版默认 Python 编译)对不上 → 下面 Boost.Python 查找处 FATAL_ERROR。
+#
+# build.sh 通过 -DPython3_EXECUTABLE=... 显式指定到 boost-python ABI 兼容版本;
+# 直接调 cmake 不经 build.sh 时,这里 fallback 到 `python3` 软链(通常系统默认)。
+# 用户显式传 -DPython3_EXECUTABLE 时,下面 if 不会覆盖。
+if(NOT Python3_EXECUTABLE)
+    find_program(_LGT_PYTHON3 NAMES python3)
+    if(_LGT_PYTHON3)
+        set(Python3_EXECUTABLE "${_LGT_PYTHON3}")
+        message(STATUS "Python3 fallback (PATH python3): ${Python3_EXECUTABLE}")
+    endif()
+endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 message(STATUS "Python3: ${Python3_VERSION}  include=${Python3_INCLUDE_DIRS}")
 

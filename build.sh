@@ -171,6 +171,73 @@ if [[ ${#need[@]} -gt 0 ]]; then
 fi
 echo "✅ 依赖齐全"
 
+# ── Python 3 兼容版本探测 ─────────────────────────────────────────────────
+# CMake find_package(Python3) 默认 VERSION 策略会选系统**最高版本**(可能扫到
+# deadsnakes 装的 python3.13),但发行版的 libboost-python-dev 只为系统默认
+# Python 编译(22.04→3.10,24.04→3.12,Debian 12→3.11)。两者错配 → 找不到
+# libboost_python<XYZ>.so → 在 CMakeLists 的 Boost.Python 查找处 FATAL_ERROR。
+#
+# 本段扫 /usr/lib/.../libboost_python<XYZ>.so 提取 ABI 版本(310 / 312 等),
+# 反推应用的 Python 解释器,显式 -DPython3_EXECUTABLE 传给 cmake,避免错配。
+# 优先级:PYTHON3 环境变量 > 扫到的 boost-python ABI 匹配 > $(command -v python3) 兜底
+PY3_EXE=""
+if [[ -n "${PYTHON3:-}" ]]; then
+    PY3_EXE=$(command -v "$PYTHON3" || true)
+    if [[ -z "$PY3_EXE" ]]; then
+        echo "[!] 环境变量 PYTHON3=$PYTHON3 找不到对应可执行文件"
+        exit 1
+    fi
+    echo "── Python 选择 ────────"
+    echo "[i] 用户指定 PYTHON3=$PYTHON3 → $PY3_EXE"
+else
+    # 扫已安装的 libboost_python<XYZ>.so,收集 ABI 版本号
+    _BP_VERS=()
+    for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /usr/local/lib /usr/local/lib64; do
+        [[ -d "$d" ]] || continue
+        while IFS= read -r so; do
+            v=$(basename "$so" | sed -nE 's/^libboost_python([0-9]+)\..*/\1/p')
+            [[ -n "$v" ]] && _BP_VERS+=("$v")
+        done < <(find "$d" -maxdepth 1 -name 'libboost_python[0-9]*.so*' 2>/dev/null)
+    done
+    # 去重 + 数值降序(高版本优先,例如 312 优先于 310)
+    if [[ ${#_BP_VERS[@]} -gt 0 ]]; then
+        IFS=$'\n' _BP_VERS=($(printf '%s\n' "${_BP_VERS[@]}" | sort -urn))
+        unset IFS
+    fi
+    echo "── Python 选择 ────────"
+    if [[ ${#_BP_VERS[@]} -gt 0 ]]; then
+        echo "[i] 系统已安装 boost-python ABI: ${_BP_VERS[*]}"
+    fi
+    # 对每个 ABI 版本查找匹配解释器:310 → python3.10
+    for ver in "${_BP_VERS[@]}"; do
+        if [[ "$ver" =~ ^([0-9])([0-9]+)$ ]]; then
+            py_ver="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+            cand=$(command -v "python$py_ver" || true)
+            if [[ -n "$cand" ]]; then
+                PY3_EXE="$cand"
+                echo "[i] 匹配 libboost_python${ver} → 选用 python$py_ver ($PY3_EXE)"
+                break
+            else
+                echo "[i] libboost_python${ver} 存在,但找不到 python$py_ver 解释器"
+            fi
+        fi
+    done
+    # 兜底:没有任何 ABI 匹配,退回到 $(command -v python3)
+    if [[ -z "$PY3_EXE" ]]; then
+        PY3_EXE=$(command -v python3 || true)
+        if [[ -z "$PY3_EXE" ]]; then
+            echo "[!] 找不到 python3"; exit 1
+        fi
+        if [[ ${#_BP_VERS[@]} -gt 0 ]]; then
+            echo "[!] 未找到与 boost-python ABI(${_BP_VERS[*]})匹配的 Python 解释器"
+            echo "    回退到默认 python3 ($PY3_EXE),后续 CMake 可能仍报 Boost.Python 找不到"
+            echo "    可手动安装匹配的 Python: 例如 ABI=310 → sudo apt install python3.10 python3.10-dev"
+        else
+            echo "[i] 系统无 libboost_python<XYZ>.so,使用默认 python3 ($PY3_EXE) 让 CMake 兜底报错"
+        fi
+    fi
+fi
+
 # ── 清理 ─────────────────────────────────────────────────────────────────
 if [[ $CLEAN -eq 1 ]]; then
     echo "── 清理 build/ ────────"
@@ -193,6 +260,7 @@ EOF
 
 echo "── CMake 配置 ─────────"
 cmake -S . -B build \
+    -DPython3_EXECUTABLE="$PY3_EXE" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DWITH_GCOV="$WITH_GCOV" \
     -DWITH_ASAN="$WITH_ASAN" \
