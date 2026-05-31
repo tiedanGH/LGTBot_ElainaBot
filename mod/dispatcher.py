@@ -147,31 +147,52 @@ async def lgtbot_query_user(event, match):
 # 抢在被派回 LGTBot 引擎之前响应,免得引擎不认得这俩元指令报「未预料的元指令」。
 
 _UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
+# 首次访问时写入的默认内容
 _DEFAULT_UPDATE_NOTICE = '暂无更新公告'
+
+_TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
+# 首次访问时写入的默认 Q&A
+_DEFAULT_TROUBLESHOOTING = (
+    'Q：为什么 bot 只回了几条就停了？\n'
+    'A：QQ 协议限制 —— 普通群里 bot 对同一条消息最多回 5 条，且仅 5 分钟内有效；私信场景同理。\n'
+    '   ▸ 群主可@bot发送「全量申请」，并根据提示开通全量权限，bot 在全量群可推送主动消息，不受限制\n'
+    '   ▸ 私信主动消息有名额限制，目前只内测对部分游戏开放，如有需求请联系开发者铁蛋\n'
+    '\n'
+    'Q：游戏中部分图片显示不出来/加载失败？\n'
+    'A：极少数情况下图床偶发故障，导致已上传图片访问失败。可在游戏中发送「赛况」查看当前游戏进展'
+)
+
+
+def _read_txt_with_default(path: str, default: str, label: str) -> str:
+    """实时读取 ``path`` 内容,文件不存在时用 ``default`` 创建并返回。
+
+    · 读取成功但内容为空(全空白)→ 按 ``default`` 兜底
+    · 任何异常吞掉返回 ``default``,handler 不会因文件 IO 问题崩
+    · 每次调用都重新打开文件 —— 这就是「热更新」:管理员直接编辑 txt,
+      下条命令就拿到新内容,无需重启进程
+    """
+    try:
+        if not os.path.isfile(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(default)
+            return default
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read().rstrip()
+        return content or default
+    except Exception as e:
+        log.warning(f'读取 {label} 异常: {e}')
+        return default
 
 
 def _read_update_notice() -> str:
-    """实时读取 ``data/update_notice.txt`` 内容。
+    return _read_txt_with_default(
+        _UPDATE_NOTICE_PATH, _DEFAULT_UPDATE_NOTICE, 'update_notice.txt')
 
-    · 文件不存在时自动建,写入默认 ``暂无更新公告``,返回默认值。
-    · 读取成功但内容为空(只有空白字符)同样按默认值兜底。
-    · 任何异常吞掉返回默认值,handler 不会因文件 IO 问题崩。
 
-    每次调用都重新打开文件 —— 这就是「热更新」:管理员直接编辑 txt,下条命令
-    就拿到新内容,无需重启进程。
-    """
-    try:
-        if not os.path.isfile(_UPDATE_NOTICE_PATH):
-            os.makedirs(os.path.dirname(_UPDATE_NOTICE_PATH), exist_ok=True)
-            with open(_UPDATE_NOTICE_PATH, 'w', encoding='utf-8') as f:
-                f.write(_DEFAULT_UPDATE_NOTICE)
-            return _DEFAULT_UPDATE_NOTICE
-        with open(_UPDATE_NOTICE_PATH, 'r', encoding='utf-8') as f:
-            content = f.read().rstrip()
-        return content or _DEFAULT_UPDATE_NOTICE
-    except Exception as e:
-        log.warning(f'读取 update_notice.txt 异常: {e}')
-        return _DEFAULT_UPDATE_NOTICE
+def _read_troubleshooting() -> str:
+    return _read_txt_with_default(
+        _TROUBLESHOOTING_PATH, _DEFAULT_TROUBLESHOOTING, 'troubleshooting.txt')
 
 
 @handler(r'^菜单$',
@@ -244,6 +265,34 @@ async def lgtbot_update_notice(event, match):
         '---\n'
         '\n'
         f'```公告详情\n{notice}\n```'
+    )
+    await event.reply(md)
+
+
+@handler(r'^疑难解答$',
+         name='LGTBot 疑难解答',
+         desc='读取 data/troubleshooting.txt 实时返回常见问题与解答',
+         priority=50,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_troubleshooting(event, match):
+    """收到「疑难解答」(文本或按钮)→ 把 txt 文件内容包在代码块里 reply。
+
+    结构与 ``lgtbot_update_notice`` 完全对称(标题 + 分隔线 + 代码块),
+    管理员通过编辑 ``data/troubleshooting.txt`` 热更新内容。首次访问时
+    文件不存在,会自动用 ``_DEFAULT_TROUBLESHOOTING`` 中预置的 Q&A 创建。
+    """
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    content = _read_troubleshooting()
+    md = (
+        '## ❓ 疑难解答\n'
+        '\n'
+        '---\n'
+        '\n'
+        f'```常见问题\n{content}\n```'
     )
     await event.reply(md)
 

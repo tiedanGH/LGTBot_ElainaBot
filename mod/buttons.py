@@ -253,22 +253,21 @@ _NAV_HOME_LINK = 'https://tiedan.site/'
 
 
 def build_more_features_buttons() -> list[list[dict]]:
-    """「更多功能」子菜单 4 行按钮设计"""
+    """「更多功能」子菜单"""
     return [
-        # Row 1: 更新公告
         [
             {'text': '📢 更新公告', 'data': '更新公告', 'type': 1, 'style': 4},
         ],
-        # Row 2: 本群排行 / 我的战绩
         [
             {'text': '🏆 本群排行', 'data': '/排行大图 本群', 'type': 2, 'style': 1},
             {'text': '📊 我的战绩', 'data': '/战绩',         'type': 2, 'style': 1},
         ],
-        # Row 3: 导航主页(单按钮一行)
         [
             {'text': '🌠 导航网站主页', 'link': _NAV_HOME_LINK},
         ],
-        # Row 4: 问题反馈 / 关于框架
+        [
+            {'text': '❓ 疑难解答', 'data': '疑难解答', 'type': 2, 'style': 1},
+        ],
         [
             {'text': '🛠️ 问题反馈', 'link': _ISSUES_LINK},
             {'text': 'ℹ️ 关于框架',  'data': '/关于', 'type': 2, 'style': 0},
