@@ -257,20 +257,14 @@ def build_more_features_buttons() -> list[list[dict]]:
     return [
         [
             {'text': '📢 更新公告', 'data': '更新公告', 'type': 1, 'style': 4},
-        ],
-        [
-            {'text': '🏆 本群排行', 'data': '/排行大图 本群', 'type': 2, 'style': 1},
-            {'text': '📊 我的战绩', 'data': '/战绩',         'type': 2, 'style': 1},
-        ],
-        [
-            {'text': '🌠 导航网站主页', 'link': _NAV_HOME_LINK},
-        ],
-        [
-            {'text': '❓ 疑难解答', 'data': '疑难解答', 'type': 2, 'style': 1},
+            {'text': '❓ 疑难解答', 'data': '疑难解答', 'type': 1, 'style': 1},
         ],
         [
             {'text': '🛠️ 问题反馈', 'link': _ISSUES_LINK},
-            {'text': 'ℹ️ 关于框架',  'data': '/关于', 'type': 2, 'style': 0},
+            {'text': 'ℹ️ 关于框架',  'data': '/关于', 'type': 2, 'style': 1},
+        ],
+        [
+            {'text': '🌠 导航网站主页', 'link': _NAV_HOME_LINK},
         ],
     ]
 
@@ -288,10 +282,26 @@ MENU_TEXT_BODY = (
 MENU_TEXT = MENU_TEXT_HEADER + MENU_TEXT_BODY
 
 
+# ──────── markdown 内联指令链接(<qqbot-cmd-input>)生成工具 ─────────────────
+# QQ 官方机器人 markdown 支持 ``<qqbot-cmd-input>`` 自定义标签:
+# 点击后客户端显示 ``show`` 文案,把 ``text`` 回填到输入框
+
+def cmd_input(text: str, show: str, reference: bool = False) -> str:
+    """生成 markdown 行内 ``<qqbot-cmd-input>`` 标签。
+
+    Args:
+        text:       点击后回填给输入框的指令文本(如 ``/排行大图 本群``)
+        show:       客户端上显示的按钮文案,可含 emoji(如 ``🏆 本群排行``)
+        reference:  发送时是否引用原消息;本插件默认 False
+    """
+    ref = 'true' if reference else 'false'
+    return f'<qqbot-cmd-input text="{text}" show="{show}" reference="{ref}"/>'
+
+
 # ──────── 欢迎菜单「logo / 标题下方」可扩展区块 ─────────────────────────────
 # dispatcher 在 logo 渲染成功 / 失败两个分支都会把本字符串拼到 markdown 末尾,
 # 所以即便图床没启用、logo 没拿到 URL,这里的内容也会照常显示。
 
 MENU_HEADER_EXTRA_MD = (
-    f'<qqbot-cmd-input text="更新公告" show="✨ 点击查看最近更新" reference="false"/>\n'
+    cmd_input('更新公告', '✨ 点击查看最近更新') + '\n'
 )

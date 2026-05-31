@@ -241,6 +241,9 @@ async def lgtbot_more_features(event, match):
         '\n'
         '---\n'
         '\n'
+        f'{buttons.cmd_input("/排行大图 本群", "🏆 本群排行")} | {buttons.cmd_input("/战绩", "📊 我的战绩")}\n'
+        f'{buttons.cmd_input("/随机游戏", "🎲 随机游戏")} | {buttons.cmd_input("/规则", "📖 查询规则")}\n'
+        f'{buttons.cmd_input("/游戏信息", "查看本群房间")} | {buttons.cmd_input("/赛事列表", "查询房间列表")}\n'
     )
     await event.reply(md, buttons=buttons.build_more_features_buttons())
 
