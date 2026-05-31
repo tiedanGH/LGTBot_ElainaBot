@@ -297,7 +297,7 @@ async def lgtbot_troubleshooting(event, match):
         '\n'
         f'```常见问题\n{content}\n```'
     )
-    await event.reply(md, buttons=buttons.build_troubleshooting_buttons())
+    await event.reply(md, buttons=buttons.build_support_buttons())
 
 
 # ──────── /关于 抢占(优于系统插件的同名指令) ───────────────────────────────

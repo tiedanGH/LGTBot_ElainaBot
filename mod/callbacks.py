@@ -197,7 +197,8 @@ async def _try_send_crash_apology(target_id: str, is_uid: bool) -> None:
     """
     try:
         page_logs.log_outgoing(target_id, is_uid, _CRASH_APOLOGY_MD)
-        await _send_text_quota_managed(target_id, is_uid, _CRASH_APOLOGY_MD, None)
+        await _send_text_quota_managed(target_id, is_uid, _CRASH_APOLOGY_MD,
+                                       buttons.build_support_buttons())
     except Exception as e:
         log.warning(f'崩溃道歉发送失败 ({target_id}): {e}')
 

@@ -251,13 +251,18 @@ _QUESTIONNAIRE_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
 _NAV_HOME_LINK = 'https://tiedan.site/'
 
 
-def build_troubleshooting_buttons() -> list[list[dict]]:
-    """疑难解答消息底部引导按钮:官方群聊 + 问题反馈。
+def build_support_buttons() -> list[list[dict]]:
+    """官方群聊 + 问题反馈按钮组 —— 求助 / 反馈类消息底部统一引导。
 
-    复用欢迎菜单底部同款的 ``_OFFICIAL_GROUP_LINK`` / ``_QUESTIONNAIRE_LINK``,链接
-    button 默认 ``type=0``,QQ 协议下点击直接跳转。挂在 dispatcher 的
-    ``lgtbot_troubleshooting`` reply 末尾,让用户看完 Q&A 后能一键跳到群里
-    或反馈表单继续追问。
+    复用欢迎菜单底部同款的 ``_OFFICIAL_GROUP_LINK`` / ``_QUESTIONNAIRE_LINK``,
+    都是 link 按钮(默认 ``type=0``),点击直接跳转外部 URL,**不依赖 bot 进程
+    存活**;因此在崩溃道歉等"进程即将 execv 重启"的场景下也安全可挂(callback
+    按钮 type=1/2 在 execv 后无法 ack,但 link 按钮跟客户端打开浏览器一样不受
+    影响)。
+
+    当前调用方:
+      · dispatcher.lgtbot_troubleshooting —— 疑难解答 Q&A 末尾
+      · callbacks._try_send_crash_apology —— 引擎崩溃道歉末尾
     """
     return [[
         {'text': '💬 官方群聊', 'link': _OFFICIAL_GROUP_LINK},
