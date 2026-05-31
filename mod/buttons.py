@@ -246,10 +246,23 @@ def build_menu_buttons(appid: str = '') -> list[list[dict]]:
 # 由 dispatcher 的 ``lgtbot_more_features`` handler 在用户点击「更多功能」按钮
 # / 直接发送「更多功能」文本时回复。
 
-# 问题反馈链接 —— 默认走 LGTBot_ElainaBot 仓库的 issues 页;有更专门的反馈
-# 入口可以改这里。
-_ISSUES_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
+# 问题反馈问卷链接 —— 默认指向腾讯文档表单,方便统一收集反馈
+_QUESTIONNAIRE_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
 _NAV_HOME_LINK = 'https://tiedan.site/'
+
+
+def build_troubleshooting_buttons() -> list[list[dict]]:
+    """疑难解答消息底部引导按钮:官方群聊 + 问题反馈。
+
+    复用欢迎菜单底部同款的 ``_OFFICIAL_GROUP_LINK`` / ``_QUESTIONNAIRE_LINK``,链接
+    button 默认 ``type=0``,QQ 协议下点击直接跳转。挂在 dispatcher 的
+    ``lgtbot_troubleshooting`` reply 末尾,让用户看完 Q&A 后能一键跳到群里
+    或反馈表单继续追问。
+    """
+    return [[
+        {'text': '💬 官方群聊', 'link': _OFFICIAL_GROUP_LINK},
+        {'text': '🛠️ 问题反馈', 'link': _QUESTIONNAIRE_LINK},
+    ]]
 
 
 def build_more_features_buttons() -> list[list[dict]]:
@@ -260,7 +273,7 @@ def build_more_features_buttons() -> list[list[dict]]:
             {'text': '❓ 疑难解答', 'data': '疑难解答', 'type': 1, 'style': 1},
         ],
         [
-            {'text': '🛠️ 问题反馈', 'link': _ISSUES_LINK},
+            {'text': '🛠️ 问题反馈', 'link': _QUESTIONNAIRE_LINK},
             {'text': 'ℹ️ 关于框架',  'data': '/关于', 'type': 2, 'style': 1},
         ],
         [
