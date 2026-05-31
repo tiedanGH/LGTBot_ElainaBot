@@ -44,7 +44,10 @@ _state.plugin_ctx = _ctx_mod.ctx
 from plugins.LGTBot_ElainaBot.mod import boot              # noqa: F401  C++ 引擎与路径
 from plugins.LGTBot_ElainaBot.mod import userdb            # noqa: F401  用户昵称 / 头像 SQLite
 from plugins.LGTBot_ElainaBot.mod.webui import main as webui  # noqa: F401  Web 面板侧边栏页面入口
-from plugins.LGTBot_ElainaBot.mod.webui import message_log # noqa: F401  日志缓冲(callbacks / dispatcher 直接调用)
+# page_logs 既是日志缓冲(callbacks / dispatcher 调 log_incoming/log_outgoing),
+# 也是「消息日志」tab 的页面模块,合并后单一文件入口。webui.main 已 import 它,
+# 这里早 import 是为了确保 callbacks/dispatcher 调用时数据层已就位。
+from plugins.LGTBot_ElainaBot.mod.webui import page_logs  # noqa: F401
 from plugins.LGTBot_ElainaBot.mod import dispatcher        # noqa: F401  @handler 注册（消息派发 + INTERACTION）
 from plugins.LGTBot_ElainaBot.mod import callbacks         # C++ 回调（被 LGTBot_ElainaBot.start 注入）
 from plugins.LGTBot_ElainaBot.mod import config as _config

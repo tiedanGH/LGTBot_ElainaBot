@@ -35,6 +35,7 @@ def _load(name: str) -> str:
 
 
 TAB_HTML = _load('config/config.html')
+TAB_CSS = _load('config/config.css')
 TAB_JS = _load('config/config.js')
 
 

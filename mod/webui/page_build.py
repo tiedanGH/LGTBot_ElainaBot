@@ -80,6 +80,7 @@ def _load(name: str) -> str:
 
 
 TAB_HTML = _load('build/build.html')
+TAB_CSS = _load('build/build.css')
 TAB_JS = _load('build/build.js')
 
 

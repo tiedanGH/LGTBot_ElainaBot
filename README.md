@@ -138,17 +138,18 @@ plugins/LGTBot_ElainaBot/
 │   └── webui/               Web 面板拓展页（侧边栏「LGTBot 机器人」/ 多标签）
 │       ├── __init__.py
 │       ├── main.py          入口：页面注册 + 主页面拼装（读 templates/ 并填充占位）+ 隐藏 action 端点路由
-│       ├── message_log.py   日志缓冲（log_incoming / log_outgoing / get_logs）
-│       ├── page_dashboard.py「仪表盘」标签 Python 逻辑（版本 / 统计 / 引擎配置 / 缓存 + 检查更新 / git pull / 子模块 update / 缓存清理）
-│       ├── page_build.py    「引擎编译」标签 Python 逻辑（子进程 + state.json + build.log + ANSI 转 HTML + 7 个编译动作）
-│       ├── page_logs.py     「消息日志」标签 Python 逻辑（数据生成 + 模板加载）
-│       ├── page_users.py    「用户数据」标签 Python 逻辑（查 user_cache.db + 模板加载）
-│       └── templates/       前端模板（纯 HTML/CSS/JS,按功能分子目录）
-│           ├── main/        主骨架 / 全局 CSS / 公共 JS
-│           ├── dashboard/   「仪表盘」标签 HTML+JS
-│           ├── build/       「引擎编译」标签 HTML+JS
-│           ├── logs/        「消息日志」标签 HTML+JS
-│           └── users/       「用户数据」标签 HTML+JS
+│       ├── page_dashboard.py「仪表盘」标签：版本 / 统计 / 缓存清理 + 检查更新 / git pull / 子模块 update / 缓存清理
+│       ├── page_config.py   「配置管理」标签：插件和引擎全部配置的内置编辑器 + 热重载
+│       ├── page_build.py    「引擎编译」标签：子进程 + state.json + build.log + ANSI 转 HTML + 编译动作
+│       ├── page_logs.py     「消息日志」标签 + 日志缓冲数据层（log_incoming / log_outgoing / get_logs / clear_logs）
+│       ├── page_users.py    「用户数据」标签：查 user_cache.db + 模板加载
+│       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
+│           ├── main/        主骨架 / 全局 + 通用 CSS / 公共 JS
+│           ├── dashboard/   「仪表盘」标签 HTML / CSS / JS
+│           ├── config/      「配置管理」标签 HTML / CSS / JS
+│           ├── build/       「引擎编译」标签 HTML / CSS / JS
+│           ├── logs/        「消息日志」标签 HTML / CSS / JS
+│           └── users/       「用户数据」标签 HTML / CSS / JS
 │
 ├── _images/                 仓库内置静态资源
 │   └── logo_transparent_colorful.png   欢迎菜单顶部 logo

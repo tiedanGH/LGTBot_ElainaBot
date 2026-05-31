@@ -1,0 +1,63 @@
+
+/* ───── 消息日志:filters & list ───── */
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.filters button {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.filters button:hover { background: var(--hover); border-color: var(--border-2); }
+.filters button.active {
+  background: var(--accent); color: var(--accent-text); border-color: var(--accent);
+}
+.filters .spacer { flex: 1; }
+.filters .stats { font-size: 12px; color: var(--text-muted); font-family: monospace; }
+
+.log-list {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.log-row {
+  display: grid; grid-template-columns: 76px 56px 200px 1fr;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); gap: 10px;
+  align-items: start; font-size: 12px;
+}
+.log-row:last-child { border-bottom: none; }
+.log-row:hover { background: var(--panel-2); }
+.log-row .time { color: var(--text-faint); font-family: 'Consolas', monospace; }
+.log-row .dir { font-weight: 600; font-size: 11px; }
+.log-row.in .dir { color: var(--in); }
+.log-row.out .dir { color: var(--out); }
+.log-row .who {
+  color: var(--text-muted); font-family: 'Consolas', monospace;
+  word-break: break-all; font-size: 11px;
+}
+.log-row .content {
+  color: var(--text); word-break: break-word;
+  white-space: pre-wrap; line-height: 1.5;
+}
+.log-row .img-mark { color: var(--img); font-weight: 600; }
+.log-row .kind-tag {
+  display: inline-block; padding: 0 5px; border-radius: 2px; font-size: 9px;
+  background: var(--tag-bg); color: var(--tag-text); margin-right: 4px;
+}
+.log-list .empty {
+  padding: 48px; text-align: center; color: var(--text-faint); font-size: 13px;
+}
+
+/* 移动端:窄屏下 4 列网格挤不下(76+56+200 = 332px,留给 content 的空间为负),
+   重排为两行 —— 第一行 time / dir / who 平铺,第二行 content 独占整宽。
+   分隔线沿用 .log-row 自带的 border-bottom,无需额外加。 */
+@media (max-width: 600px) {
+  .log-row {
+    grid-template-columns: auto auto 1fr;
+    grid-template-areas:
+      "time dir  who"
+      "content content content";
+    gap: 4px 10px;
+  }
+  .log-row .time    { grid-area: time; }
+  .log-row .dir     { grid-area: dir; }
+  .log-row .who     { grid-area: who; }
+  .log-row .content { grid-area: content; }
+}

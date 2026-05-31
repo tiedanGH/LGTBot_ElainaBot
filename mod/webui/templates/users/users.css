@@ -1,0 +1,129 @@
+/* ───── 用户数据:toolbar / 分页 / 搜索 / 表格 ───── */
+.users-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.users-toolbar .query-time-wrap,
+.users-toolbar .users-total-wrap {
+  font-size: 12px; color: var(--text-muted);
+}
+.users-toolbar #users-query-time,
+.users-toolbar #users-total { font-family: monospace; color: var(--text); }
+.users-toolbar .spacer { flex: 1; }
+
+/* 分页控件(在「刷新数据」按钮左侧)*/
+.pagination {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+}
+.pagination button {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+  font-size: 14px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background .15s, border-color .15s;
+}
+.pagination button:hover:not(:disabled) {
+  background: var(--hover); border-color: var(--border-2);
+}
+.pagination button:disabled { opacity: .4; cursor: not-allowed; }
+.pagination input[type="number"] {
+  width: 48px; height: 28px; text-align: center;
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; font-size: 12px;
+  -moz-appearance: textfield;
+}
+.pagination input[type="number"]::-webkit-outer-spin-button,
+.pagination input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.pagination .page-total {
+  color: var(--text-muted); font-family: monospace; padding: 0 4px;
+}
+
+.users-toolbar #users-refresh {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  transition: background .15s, border-color .15s;
+}
+.users-toolbar #users-refresh:hover {
+  background: var(--hover); border-color: var(--border-2);
+}
+.users-toolbar #users-refresh:disabled { opacity: .5; cursor: wait; }
+
+/* 搜索框(放在工具栏中间,可同时匹配 name / openid)*/
+.users-toolbar #users-search {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 10px; border-radius: 6px; font-size: 12px;
+  min-width: 220px; max-width: 320px; flex: 0 1 280px;
+  transition: border-color .15s, background .15s;
+}
+.users-toolbar #users-search::placeholder { color: var(--text-faint); }
+.users-toolbar #users-search:focus {
+  border-color: var(--accent); outline: none;
+  background: var(--panel);
+}
+
+/* 用户列表网格(默认 1 列,屏幕够宽时变 2 列)
+   关键:.users-section-right 的 base "display: none" 必须放在 @media 之前;
+   两条规则同特异性 (0,1,0),后写者赢 —— 若 base 放在 @media 后,即便
+   屏幕够宽,@media 里的 display:block 也会被 base 覆盖回 none,直接
+   表现为「2 列模式右侧不显示」。 */
+.users-grid {
+  display: grid; grid-template-columns: 1fr; gap: 16px;
+}
+.users-section-right { display: none; }
+@media (min-width: 1200px) {
+  .users-grid { grid-template-columns: 1fr 1fr; }
+  .users-section-right { display: block; }
+}
+
+.users-section {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden; box-shadow: var(--shadow);
+}
+
+/* 表头:单行四列「序号 / 用户 / OpenID / 上次活跃」,列宽与 user-row 对齐 */
+.users-header {
+  background: var(--panel-2); color: var(--text-muted);
+  font-weight: 600; font-size: 11px;
+  border-bottom: 1px solid var(--border);
+}
+.users-header .header-row {
+  display: grid; grid-template-columns: 6% 30% 40% 24%;
+}
+.users-header .header-row > div {
+  padding: 8px 12px; text-align: center;
+}
+
+/* 用户行 */
+.user-row {
+  display: grid; grid-template-columns: 6% 30% 40% 24%;
+  align-items: center; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: 12px;
+  transition: background .15s;
+}
+.user-row:last-child { border-bottom: none; }
+.user-row:hover { background: var(--panel-2); }
+.user-row > div { padding: 4px 12px; }
+.user-row .col-idx {
+  text-align: center; color: var(--text-muted); font-family: monospace;
+}
+.user-row .col-user {
+  display: flex; align-items: center; gap: 10px;
+  word-break: break-word; min-width: 0;
+}
+.user-row .col-user .user-name { min-width: 0; word-break: break-word; }
+.user-row .col-openid {
+  text-align: center; font-family: monospace; word-break: break-all;
+}
+.user-row .col-seen {
+  text-align: center; font-family: monospace; color: var(--text-muted);
+  word-break: keep-all;
+}
+.user-row .avatar-img {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  background: var(--panel-2); border: 1px solid var(--border); object-fit: cover;
+}
+.user-row.empty {
+  grid-template-columns: 1fr;
+  text-align: center; color: var(--text-faint); padding: 36px !important;
+}

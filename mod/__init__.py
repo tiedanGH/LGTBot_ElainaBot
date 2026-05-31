@@ -31,9 +31,13 @@
                       让本插件 push 在主框架 Web 面板归类到「LGTBot 消息派发」
                       而不是默认的 'proactive'
     webui/            Web 面板拓展页(侧边栏「LGTBot 机器人」单页多标签):
-                      ├─ main.py        页面注册 + 主骨架渲染
-                      ├─ message_log.py 日志缓冲(log_incoming/log_outgoing)
-                      ├─ page_logs.py   「消息日志」标签数据 + 模板加载
-                      ├─ page_users.py  「用户数据」标签数据 + 模板加载
-                      └─ templates/     纯前端资源,按 main/logs/users 分子目录
+                      ├─ main.py         页面注册 + 主骨架渲染
+                      ├─ page_dashboard  「仪表盘」标签
+                      ├─ page_config     「配置管理」标签 + 热重载 action
+                      ├─ page_build      「引擎编译」标签
+                      ├─ page_logs       「消息日志」标签 + 日志缓冲数据层
+                      │                  (log_incoming / log_outgoing / get_logs)
+                      ├─ page_users      「用户数据」标签
+                      └─ templates/      纯前端资源,按 main / dashboard / config /
+                                         build / logs / users 分子目录
 """

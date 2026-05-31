@@ -144,17 +144,9 @@ body {
 .tabs .tab.active {
   color: var(--accent); border-bottom-color: var(--accent); font-weight: 600;
 }
-/* 窄屏(手机)适配:字体小一点 + padding 缩一点,让一屏能多看到几个 tab,
-   超出部分仍可滑动 */
-@media (max-width: 600px) {
-  .tabs .tab { font-size: 11px; padding: 7px 10px; }
-  .sticky-top { padding: 16px 12px 0; }
-  .page-content { padding: 0 12px 12px; }
-  .dash-section { padding: 12px 14px; }
-  .dash-section-meta { flex-wrap: wrap; font-size: 11px; }
-  /* section 间垂直 gap 缩到 12px,跟桌面端 16px 形成更紧凑的移动端节奏 */
-  .dashboard, .config-tab { gap: 12px; }
-}
+/* 窄屏(手机)适配的样式集中在本文件末尾的 @media 块中 —— 必须在所有 desktop
+   规则之后,否则后写的非媒体查询规则(同 specificity)会反向覆盖 mobile。
+   见文件底部 ``@media (max-width: 600px)``。 */
 
 /* ───── 标签内容容器 ───── */
 .tab-pane { display: none; }
@@ -171,199 +163,6 @@ body {
   background: var(--bg);
   padding: 8px 0;
   margin-bottom: 4px;
-}
-
-/* ───── 消息日志:filters & list ───── */
-.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.filters button {
-  background: var(--panel); border: 1px solid var(--border); color: var(--text);
-  padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
-  transition: background .15s, border-color .15s, color .15s;
-}
-.filters button:hover { background: var(--hover); border-color: var(--border-2); }
-.filters button.active {
-  background: var(--accent); color: var(--accent-text); border-color: var(--accent);
-}
-.filters .spacer { flex: 1; }
-.filters .stats { font-size: 12px; color: var(--text-muted); font-family: monospace; }
-
-.log-list {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: var(--shadow);
-}
-.log-row {
-  display: grid; grid-template-columns: 76px 56px 200px 1fr;
-  padding: 8px 12px; border-bottom: 1px solid var(--border); gap: 10px;
-  align-items: start; font-size: 12px;
-}
-.log-row:last-child { border-bottom: none; }
-.log-row:hover { background: var(--panel-2); }
-.log-row .time { color: var(--text-faint); font-family: 'Consolas', monospace; }
-.log-row .dir { font-weight: 600; font-size: 11px; }
-.log-row.in .dir { color: var(--in); }
-.log-row.out .dir { color: var(--out); }
-.log-row .who {
-  color: var(--text-muted); font-family: 'Consolas', monospace;
-  word-break: break-all; font-size: 11px;
-}
-.log-row .content {
-  color: var(--text); word-break: break-word;
-  white-space: pre-wrap; line-height: 1.5;
-}
-.log-row .img-mark { color: var(--img); font-weight: 600; }
-.log-row .kind-tag {
-  display: inline-block; padding: 0 5px; border-radius: 2px; font-size: 9px;
-  background: var(--tag-bg); color: var(--tag-text); margin-right: 4px;
-}
-.log-list .empty {
-  padding: 48px; text-align: center; color: var(--text-faint); font-size: 13px;
-}
-
-/* 移动端:窄屏下 4 列网格挤不下(76+56+200 = 332px,留给 content 的空间为负),
-   重排为两行 —— 第一行 time / dir / who 平铺,第二行 content 独占整宽。
-   分隔线沿用 .log-row 自带的 border-bottom,无需额外加。 */
-@media (max-width: 600px) {
-  .log-row {
-    grid-template-columns: auto auto 1fr;
-    grid-template-areas:
-      "time dir  who"
-      "content content content";
-    gap: 4px 10px;
-  }
-  .log-row .time    { grid-area: time; }
-  .log-row .dir     { grid-area: dir; }
-  .log-row .who     { grid-area: who; }
-  .log-row .content { grid-area: content; }
-}
-
-/* ───── 用户数据:toolbar / 分页 / 搜索 / 表格 ───── */
-.users-toolbar {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-}
-.users-toolbar .query-time-wrap,
-.users-toolbar .users-total-wrap {
-  font-size: 12px; color: var(--text-muted);
-}
-.users-toolbar #users-query-time,
-.users-toolbar #users-total { font-family: monospace; color: var(--text); }
-.users-toolbar .spacer { flex: 1; }
-
-/* 分页控件(在「刷新数据」按钮左侧)*/
-.pagination {
-  display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
-}
-.pagination button {
-  background: var(--panel); border: 1px solid var(--border); color: var(--text);
-  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
-  font-size: 14px; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: background .15s, border-color .15s;
-}
-.pagination button:hover:not(:disabled) {
-  background: var(--hover); border-color: var(--border-2);
-}
-.pagination button:disabled { opacity: .4; cursor: not-allowed; }
-.pagination input[type="number"] {
-  width: 48px; height: 28px; text-align: center;
-  background: var(--panel); border: 1px solid var(--border); color: var(--text);
-  border-radius: 6px; font-size: 12px;
-  -moz-appearance: textfield;
-}
-.pagination input[type="number"]::-webkit-outer-spin-button,
-.pagination input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none; margin: 0;
-}
-.pagination .page-total {
-  color: var(--text-muted); font-family: monospace; padding: 0 4px;
-}
-
-.users-toolbar #users-refresh {
-  background: var(--panel); border: 1px solid var(--border); color: var(--text);
-  padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
-  transition: background .15s, border-color .15s;
-}
-.users-toolbar #users-refresh:hover {
-  background: var(--hover); border-color: var(--border-2);
-}
-.users-toolbar #users-refresh:disabled { opacity: .5; cursor: wait; }
-
-/* 搜索框(放在工具栏中间,可同时匹配 name / openid)*/
-.users-toolbar #users-search {
-  background: var(--panel); border: 1px solid var(--border); color: var(--text);
-  padding: 5px 10px; border-radius: 6px; font-size: 12px;
-  min-width: 220px; max-width: 320px; flex: 0 1 280px;
-  transition: border-color .15s, background .15s;
-}
-.users-toolbar #users-search::placeholder { color: var(--text-faint); }
-.users-toolbar #users-search:focus {
-  border-color: var(--accent); outline: none;
-  background: var(--panel);
-}
-
-/* 用户列表网格(默认 1 列,屏幕够宽时变 2 列)
-   关键:.users-section-right 的 base "display: none" 必须放在 @media 之前;
-   两条规则同特异性 (0,1,0),后写者赢 —— 若 base 放在 @media 后,即便
-   屏幕够宽,@media 里的 display:block 也会被 base 覆盖回 none,直接
-   表现为「2 列模式右侧不显示」。 */
-.users-grid {
-  display: grid; grid-template-columns: 1fr; gap: 16px;
-}
-.users-section-right { display: none; }
-@media (min-width: 1200px) {
-  .users-grid { grid-template-columns: 1fr 1fr; }
-  .users-section-right { display: block; }
-}
-
-.users-section {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  overflow: hidden; box-shadow: var(--shadow);
-}
-
-/* 表头:单行四列「序号 / 用户 / OpenID / 上次活跃」,列宽与 user-row 对齐 */
-.users-header {
-  background: var(--panel-2); color: var(--text-muted);
-  font-weight: 600; font-size: 11px;
-  border-bottom: 1px solid var(--border);
-}
-.users-header .header-row {
-  display: grid; grid-template-columns: 6% 30% 40% 24%;
-}
-.users-header .header-row > div {
-  padding: 8px 12px; text-align: center;
-}
-
-/* 用户行 */
-.user-row {
-  display: grid; grid-template-columns: 6% 30% 40% 24%;
-  align-items: center; padding: 6px 0;
-  border-bottom: 1px solid var(--border); font-size: 12px;
-  transition: background .15s;
-}
-.user-row:last-child { border-bottom: none; }
-.user-row:hover { background: var(--panel-2); }
-.user-row > div { padding: 4px 12px; }
-.user-row .col-idx {
-  text-align: center; color: var(--text-muted); font-family: monospace;
-}
-.user-row .col-user {
-  display: flex; align-items: center; gap: 10px;
-  word-break: break-word; min-width: 0;
-}
-.user-row .col-user .user-name { min-width: 0; word-break: break-word; }
-.user-row .col-openid {
-  text-align: center; font-family: monospace; word-break: break-all;
-}
-.user-row .col-seen {
-  text-align: center; font-family: monospace; color: var(--text-muted);
-  word-break: keep-all;
-}
-.user-row .avatar-img {
-  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
-  background: var(--panel-2); border: 1px solid var(--border); object-fit: cover;
-}
-.user-row.empty {
-  grid-template-columns: 1fr;
-  text-align: center; color: var(--text-faint); padding: 36px !important;
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
@@ -399,57 +198,6 @@ body {
 .dash-mono { font-family: 'Consolas', 'Menlo', monospace; }
 .dash-section-meta .dash-mono { word-break: break-all; min-width: 0; }
 
-/* ── 版本与更新 ── */
-.dash-version {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; flex-wrap: wrap;
-}
-.dash-version-info { display: inline-flex; align-items: center; gap: 10px; }
-.dash-version-label { color: var(--text-muted); font-size: 12px; }
-.dash-version-num {
-  font-size: 18px; font-weight: 600; color: var(--text);
-  font-family: 'Consolas', 'Menlo', monospace;
-}
-.dash-version-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; }
-
-.dash-badge {
-  display: inline-block; padding: 2px 8px; border-radius: 10px;
-  font-size: 11px; font-weight: 500;
-  background: var(--tag-bg); color: var(--tag-text);
-}
-.dash-badge-ok {
-  background: color-mix(in srgb, var(--in) 18%, transparent);
-  color: var(--in);
-}
-.dash-badge-warn {
-  background: color-mix(in srgb, var(--img) 18%, transparent);
-  color: var(--img);
-}
-
-.dash-update-result {
-  margin-top: 12px; font-size: 12px;
-  /* 空时不占垂直空间;有内容时自然撑开 */
-}
-.dash-update-result:empty { display: none; }
-
-/* 桥接层 / 子模块各自的更新行(版本头部下方) —— flex 行,左文字右按钮,
-   背景比 section 略浅,与下方的 stat / cache card 视觉一致 */
-.dash-update-row {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; flex-wrap: wrap;
-  margin-top: 10px; padding: 10px 12px;
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
-}
-.dash-update-row .dash-update-label {
-  display: inline-flex; align-items: center; gap: 10px;
-  font-size: 12px; color: var(--text); flex-wrap: wrap;
-}
-.dash-update-row .dash-update-detail {
-  color: var(--text-muted); font-family: 'Consolas', 'Menlo', monospace;
-}
-.dash-update-row .dash-update-actions {
-  display: inline-flex; gap: 6px; flex-wrap: wrap;
-}
 
 /* ── 通用按钮族 ── */
 .dash-btn {
@@ -479,130 +227,6 @@ body {
   border-color: color-mix(in srgb, var(--img) 50%, var(--border));
 }
 .dash-btn-small { padding: 4px 10px; font-size: 11px; }
-
-/* ── 统计 grid ── */
-.dash-stats-grid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-}
-.dash-stat-card {
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
-}
-.dash-stat-label {
-  font-size: 11px; color: var(--text-muted); font-weight: 500;
-}
-.dash-stat-value {
-  font-size: 24px; font-weight: 600; color: var(--accent);
-  font-family: 'Consolas', 'Menlo', monospace;
-  line-height: 1.2;
-}
-.dash-stat-sub {
-  font-size: 10px; color: var(--text-faint);
-  font-family: 'Consolas', 'Menlo', monospace;
-}
-.dash-errors {
-  margin-top: 12px; padding: 10px 12px;
-  background: color-mix(in srgb, var(--img) 10%, var(--panel-2));
-  border: 1px solid color-mix(in srgb, var(--img) 25%, var(--border));
-  border-radius: 6px;
-  font-size: 11px; color: var(--img); line-height: 1.6;
-  font-family: 'Consolas', 'Menlo', monospace;
-}
-
-/* ── 引擎配置编辑器 ── */
-.dash-editor {
-  width: 100%; min-height: 240px;
-  background: var(--panel-2); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px;
-  padding: 10px 12px;
-  font-family: 'Consolas', 'Menlo', monospace; font-size: 12px;
-  line-height: 1.5;
-  resize: vertical;
-  transition: border-color .15s;
-}
-.dash-editor:focus { outline: none; border-color: var(--accent); }
-.dash-editor-actions {
-  margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-}
-.dash-config-msg {
-  font-size: 12px; flex: 1; min-width: 100px;
-}
-
-/* ── 缓存 grid ── */
-.dash-cache-grid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-.dash-cache-card {
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;
-}
-.dash-cache-name {
-  font-size: 13px; font-weight: 600; color: var(--text);
-}
-.dash-cache-path {
-  font-size: 10px; color: var(--text-faint);
-  font-family: 'Consolas', 'Menlo', monospace;
-}
-.dash-cache-size {
-  font-size: 18px; font-weight: 600; color: var(--accent);
-  font-family: 'Consolas', 'Menlo', monospace;
-  margin-top: 4px;
-}
-.dash-cache-count {
-  font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: 6px;
-}
-.dash-cache-actions {
-  margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;
-}
-.dash-cache-msg { margin-top: 12px; font-size: 12px; min-height: 16px; }
-.dash-cache-msg:empty { display: none; }
-
-/* ── 插件配置(主框架编辑入口 + 热重载) ── */
-.dash-pluginconf-grid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-}
-.dash-pluginconf-card {
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
-}
-.dash-pluginconf-title {
-  font-size: 13px; font-weight: 600; color: var(--text);
-}
-.dash-pluginconf-desc {
-  font-size: 12px; color: var(--text-muted); line-height: 1.55; margin: 0;
-}
-.dash-pluginconf-desc code {
-  background: var(--panel); padding: 0 4px; border-radius: 3px;
-  font-family: 'Consolas', 'Menlo', monospace; font-size: 11px;
-}
-.dash-pluginconf-actions {
-  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;
-}
-/* config tab 专属:让 desc 段 / 按钮组下方留出与「标题→描述」同款 12px 呼吸,
-   避免「bot 收到…」「LGTBot C++ 引擎的…」等描述文字 / 「前往插件模块」按钮组
-   紧贴下方 textarea。双栏 .dash-pluginconf-card 场景靠 card 内部 gap 处理
-   间距,这里用 .config-tab 父选择器 scope 防 spillover。 */
-.config-tab .dash-pluginconf-desc,
-.config-tab .dash-pluginconf-actions { margin-bottom: 12px; }
-/* a.dash-btn 默认带下划线,这里去掉让锚点视觉等同于 button */
-a.dash-btn { text-decoration: none; }
-.dash-pluginconf-msg {
-  font-size: 12px; min-height: 16px;
-  display: flex; flex-direction: column; gap: 4px;
-}
-/* 无内容时整块隐藏(包括 min-height + gap),写入文案后自动显现。 */
-.dash-pluginconf-msg:empty { display: none; }
-.dash-pluginconf-changes {
-  list-style: none; padding: 6px 10px; margin: 0;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-  font-size: 11px; color: var(--text-muted); line-height: 1.7;
-}
-.dash-pluginconf-changes li {
-  white-space: nowrap; overflow-x: auto;
-}
 
 /* ── 消息色彩(检查更新/保存配置/缓存清理 共用) ── */
 .dash-msg-ok { color: var(--in); }
@@ -720,64 +344,28 @@ a.dash-btn { text-decoration: none; }
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
-   引擎编译 标签
+   窄屏(手机)适配 —— 集中放在文件末尾
+   ─────────────────────────────────────────────────────────────────────────
+   理由:CSS cascade 同 specificity 走 source order,后写者赢。因此移动端
+   ``@media`` 必须出现在被覆写的 desktop 规则**之后**,否则像
+   ``.dash-section { padding: 16px 18px }`` 这种放在文件中段的桌面规则会
+   反向把 ``@media { .dash-section { padding: 12px 14px } }`` 覆盖掉。
+   本块统一处理跨 tab 通用的窄屏调整;子文件(dashboard.css / logs.css /
+   等)内的 @media 只管该 tab 自己的细节(如 .log-row 重排)。
    ═════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  /* 顶部导航 / 内容滚动区:padding 收紧 */
+  .tabs .tab { font-size: 11px; padding: 7px 10px; }
+  .sticky-top { padding: 16px 12px 0; }
+  .page-content { padding: 0 12px 12px; }
 
-.build { display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+  /* 卡片内 padding 收紧 + meta 行允许折行 */
+  .dash-section { padding: 12px 14px; }
+  .dash-section-meta { flex-wrap: wrap; font-size: 11px; }
 
-.build-status {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; flex-wrap: wrap;
-  margin-bottom: 12px; padding: 10px 12px;
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
-}
-.build-status-info {
-  display: inline-flex; align-items: center; gap: 10px;
-  font-size: 12px; flex-wrap: wrap; min-width: 0;
-}
-.build-status-info .dash-mono {
-  color: var(--text-muted);
-  word-break: break-all; min-width: 0;
-}
-
-/* 按钮组容器:flex-wrap 自适应窄屏 */
-.build-actions {
-  display: flex; gap: 8px; flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-.build-actions-danger {
-  margin-top: 4px; padding-top: 12px;
-  border-top: 1px dashed var(--border);
-}
-
-/* 日志工具栏 + 日志框 */
-.build-log-toolbar {
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 14px; font-size: 12px;
-}
-.build-log-toolbar-spacer { flex: 1; }
-.build-log-toggle {
-  font-size: 11px; color: var(--text-muted);
-  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
-}
-.build-log-toggle input { cursor: pointer; }
-
-.build-log {
-  margin-top: 6px; padding: 12px;
-  background: #0f0f17; color: #ddd;
-  border: 1px solid var(--border); border-radius: 6px;
-  font-family: 'Consolas', 'Menlo', 'Cascadia Code', monospace;
-  font-size: 12px; line-height: 1.5;
-  white-space: pre-wrap; word-break: break-word;
-  height: 500px; max-height: 65vh; overflow-y: auto;
-}
-.build-log::-webkit-scrollbar { width: 10px; height: 10px; }
-.build-log::-webkit-scrollbar-track { background: #181826; }
-.build-log::-webkit-scrollbar-thumb { background: #44445a; border-radius: 5px; }
-.build-log::-webkit-scrollbar-thumb:hover { background: #5a5a72; }
-/* Dark 主题下日志框的背景已经够深,Light 主题下保持深色给 ANSI 颜色对比度 */
-:root[data-theme="light"] .build-log { color: #d0d0d0; }
-.build-log:empty::before {
-  content: '(暂无日志 —— 点击上方编译按钮开始)';
-  color: #666; font-style: italic;
+  /* 通用 tab 容器(目前 .dashboard 与 .config-tab 共享同款 flex column 布局)
+     —— section 之间的垂直间距 16px → 12px。任何新 tab 容器只要套用同款
+     selector list,会自动跟着收紧。 */
+  .dashboard,
+  .config-tab { gap: 8px; }
 }

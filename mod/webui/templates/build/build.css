@@ -1,0 +1,62 @@
+/* ═════════════════════════════════════════════════════════════════════════
+   引擎编译 标签
+   ═════════════════════════════════════════════════════════════════════════ */
+
+.build { display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+
+.build-status {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 12px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+}
+.build-status-info {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 12px; flex-wrap: wrap; min-width: 0;
+}
+.build-status-info .dash-mono {
+  color: var(--text-muted);
+  word-break: break-all; min-width: 0;
+}
+
+/* 按钮组容器:flex-wrap 自适应窄屏 */
+.build-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.build-actions-danger {
+  margin-top: 4px; padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+/* 日志工具栏 + 日志框 */
+.build-log-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; font-size: 12px;
+}
+.build-log-toolbar-spacer { flex: 1; }
+.build-log-toggle {
+  font-size: 11px; color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+}
+.build-log-toggle input { cursor: pointer; }
+
+.build-log {
+  margin-top: 6px; padding: 12px;
+  background: #0f0f17; color: #ddd;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-family: 'Consolas', 'Menlo', 'Cascadia Code', monospace;
+  font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  height: 500px; max-height: 65vh; overflow-y: auto;
+}
+.build-log::-webkit-scrollbar { width: 10px; height: 10px; }
+.build-log::-webkit-scrollbar-track { background: #181826; }
+.build-log::-webkit-scrollbar-thumb { background: #44445a; border-radius: 5px; }
+.build-log::-webkit-scrollbar-thumb:hover { background: #5a5a72; }
+/* Dark 主题下日志框的背景已经够深,Light 主题下保持深色给 ANSI 颜色对比度 */
+:root[data-theme="light"] .build-log { color: #d0d0d0; }
+.build-log:empty::before {
+  content: '(暂无日志 —— 点击上方编译按钮开始)';
+  color: #666; font-style: italic;
+}

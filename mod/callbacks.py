@@ -29,7 +29,7 @@ import time
 
 from core.base.logger import get_logger, PLUGIN
 from . import state, quota, helpers, boot, uploader, userdb, buttons, log_attribution
-from .webui import message_log
+from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -196,7 +196,7 @@ async def _try_send_crash_apology(target_id: str, is_uid: bool) -> None:
     注意不能挂额外按钮 —— 进程马上要 execv 重启,任何 callback 都会落空。
     """
     try:
-        message_log.log_outgoing(target_id, is_uid, _CRASH_APOLOGY_MD)
+        page_logs.log_outgoing(target_id, is_uid, _CRASH_APOLOGY_MD)
         await _send_text_quota_managed(target_id, is_uid, _CRASH_APOLOGY_MD, None)
     except Exception as e:
         log.warning(f'崩溃道歉发送失败 ({target_id}): {e}')
@@ -248,7 +248,7 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
         '\n'
         '> 💡 此消息为自动推送，请尽快联系开发者排查修复'
     )
-    message_log.log_outgoing(notify_group, False, md)
+    page_logs.log_outgoing(notify_group, False, md)
     try:
         with log_attribution.mark_outbound():
             await sender.send_to_group(notify_group, md)
@@ -366,7 +366,7 @@ async def _send_refresh_tip(target_id: str, is_uid: bool) -> None:
     key = helpers.target_key(target_id, is_uid)
     try:
         async with _get_send_lock(key):
-            message_log.log_outgoing(target_id, is_uid, msg)
+            page_logs.log_outgoing(target_id, is_uid, msg)
             await _send_text_quota_managed(target_id, is_uid, msg, extra)
     except Exception as e:
         log.debug(f'消息回复限制说明发送失败 ({target_id}): {e}')
@@ -432,7 +432,7 @@ async def _send_dm_warning(target_id: str, is_uid: bool) -> None:
     extra = buttons.build_dm_warning_buttons()
     try:
         async with _get_send_lock(key):
-            message_log.log_outgoing(target_id, is_uid, _DM_WARNING_TEXT)
+            page_logs.log_outgoing(target_id, is_uid, _DM_WARNING_TEXT)
             await _send_text_quota_managed(target_id, is_uid, _DM_WARNING_TEXT, extra)
     except Exception as e:
         log.debug(f'私信限制提示发送失败 ({target_id}): {e}')
@@ -593,7 +593,7 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """
     key = helpers.target_key(target_id, is_uid)
     extra_buttons = state.pending_buttons.pop(key, None)
-    message_log.log_outgoing(target_id, is_uid, msg)
+    page_logs.log_outgoing(target_id, is_uid, msg)
 
     loop = state.event_loop
     if loop is None or loop.is_closed():
@@ -733,7 +733,7 @@ def cb_send_image_message(target_id: str, is_uid: bool, image_path: str, content
 
     raw_content = content or ''
     # 日志展示用 humanize 版（更可读），实际发送时再按通道决定是否 humanize
-    message_log.log_outgoing(
+    page_logs.log_outgoing(
         target_id, is_uid,
         helpers.humanize_mentions(raw_content), image=True,
     )

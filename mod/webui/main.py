@@ -117,6 +117,11 @@ def _render_html() -> str:
     """每次访问页面调用,生成最新 HTML(含四个标签的内容和数据)。"""
     return (_MAIN_HTML
             .replace('__MAIN_CSS__', _MAIN_CSS)
+            .replace('__DASHBOARD_CSS__', page_dashboard.TAB_CSS)
+            .replace('__CONFIG_CSS__', page_config.TAB_CSS)
+            .replace('__BUILD_CSS__', page_build.TAB_CSS)
+            .replace('__LOGS_CSS__', page_logs.TAB_CSS)
+            .replace('__USERS_CSS__', page_users.TAB_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
             .replace('__CONFIG_HTML__', page_config.TAB_HTML)
             .replace('__BUILD_HTML__', page_build.TAB_HTML)

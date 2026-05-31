@@ -30,6 +30,7 @@ def _load(name: str) -> str:
 
 
 TAB_HTML = _load('users/users.html')
+TAB_CSS = _load('users/users.css')
 TAB_JS = _load('users/users.js')
 
 

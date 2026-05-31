@@ -2,26 +2,29 @@
 
 Python 模块(仅做逻辑 + 模板加载):
     main           页面注册入口 + 主页面拼装(读 templates/main.{html,css,js}
-                   并填充各标签的 HTML/JS 片段与数据 JSON)。`@on_load` 时
+                   并填充各标签的 HTML/JS/CSS 片段与数据 JSON)。`@on_load` 时
                    通过 ``webui.register()`` 把 PAGE_KEY 挂进框架的
                    ``web_pages._registry``,卸载时 ``webui.unregister()`` 摘除。
-    page_dashboard 「仪表盘」标签(默认最左):版本/统计/引擎配置/缓存,
-                   提供检查更新、git pull、子模块 update、JSON 配置编辑、
-                   缓存清理等 action
+    page_dashboard 「仪表盘」标签(默认最左):版本/统计/缓存清理,提供检查更新、
+                   git pull、子模块 update、缓存清理等 action
+    page_config    「配置管理」标签:4 块编辑器(config.yaml / update_notice.txt
+                   / troubleshooting.txt / lgtbot.json)+ 热重载 action
     page_build     「引擎编译」标签:子进程跑 bash build.sh,跨 WebUI 进程
                    重启仍能续看(state.json + build.log),支持中途终止;
                    ANSI 颜色转 HTML 渲染
-    page_logs      「消息日志」标签:加载 ``templates/logs.{html,js}`` + 数据生成
-    page_users     「用户数据」标签:加载 ``templates/users.{html,js}`` + 数据查询
-    message_log    日志缓冲(纯数据层):log_incoming / log_outgoing /
-                   get_logs / clear_logs;被 callbacks 与 dispatcher 直接调用
+    page_logs      「消息日志」标签 + 日志缓冲数据层。除了渲染消息日志页面,还
+                   暴露 log_incoming / log_outgoing / get_logs / clear_logs,被
+                   callbacks 与 dispatcher 在收发消息路径直接调用 —— deque 与
+                   锁挂在 ``boot._get_persistent`` 上跨重载共享。
+    page_users     「用户数据」标签:加载 ``templates/users/`` + 数据查询
 
-前端静态模板(纯 HTML/CSS/JS,按功能分子目录):
-    templates/main/        主骨架 / 全局 CSS / 公共 JS
-    templates/dashboard/   「仪表盘」标签 HTML+JS
-    templates/build/       「引擎编译」标签 HTML+JS
-    templates/logs/        「消息日志」标签 HTML+JS
-    templates/users/       「用户数据」标签 HTML+JS
+前端静态模板(纯 HTML / CSS / JS,按功能分子目录):
+    templates/main/        主骨架 / 全局 + 通用 CSS / 公共 JS
+    templates/dashboard/   「仪表盘」标签 HTML / CSS / JS
+    templates/config/      「配置管理」标签 HTML / CSS / JS
+    templates/build/       「引擎编译」标签 HTML / CSS / JS
+    templates/logs/        「消息日志」标签 HTML / CSS / JS
+    templates/users/       「用户数据」标签 HTML / CSS / JS
 
 action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不出
 现在侧边栏列表,仅供 JS fetch 触发):

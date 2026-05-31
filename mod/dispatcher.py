@@ -23,7 +23,7 @@ from core.message.event import (
 )
 
 from . import state, quota, helpers, boot, buttons, uploader, userdb
-from .webui import message_log
+from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -77,7 +77,7 @@ async def _send_welcome_menu(event) -> None:
         await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
         uid = event.user_id or ''
         gid = event.group_id or event.channel_id or ''
-        message_log.log_outgoing(gid or uid, not (event.is_group and gid),
+        page_logs.log_outgoing(gid or uid, not (event.is_group and gid),
                                  '[欢迎菜单]')
     except Exception as e:
         log.warning(f'菜单回复失败: {e}')
@@ -217,7 +217,7 @@ async def lgtbot_welcome_menu(event, match):
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
     label = '(菜单按钮)' if event.is_interaction else '菜单'
-    message_log.log_incoming(uid, gid if event.is_group else '', label)
+    page_logs.log_incoming(uid, gid if event.is_group else '', label)
     await _send_welcome_menu(event)
 
 
@@ -376,7 +376,7 @@ async def lgtbot_dispatch(event, match):
 
     # 空消息（仅 @bot）→ 回欢迎菜单，不进 LGTBot 引擎
     if not content:
-        message_log.log_incoming(uid, gid, '(空消息：触发欢迎菜单)')
+        page_logs.log_incoming(uid, gid, '(空消息：触发欢迎菜单)')
         await _send_welcome_menu(event)
         return
 
@@ -384,7 +384,7 @@ async def lgtbot_dispatch(event, match):
     # LGTBot_ElainaBot.cc::ClassifyMatchEvent）—— 此处不再做命令模式匹配,
     # 这样 /新游戏 触发的「先解散后新建」两条消息也不会把按钮挂错位置。
 
-    message_log.log_incoming(uid, gid if event.is_group else '', content)
+    page_logs.log_incoming(uid, gid if event.is_group else '', content)
 
     # 派发给 C++ 引擎（独立线程，避免 C++ match-lock 与 asyncio loop 互锁）
     try:
@@ -492,7 +492,7 @@ async def lgtbot_interaction_dispatch(event, match):
             quota.refresh_ref(helpers.target_key(uid, True),
                               'event_id', event.event_id, appid_str)
 
-    message_log.log_incoming(uid, gid if event.is_group else '', content)
+    page_logs.log_incoming(uid, gid if event.is_group else '', content)
 
     try:
         if event.is_group and gid:

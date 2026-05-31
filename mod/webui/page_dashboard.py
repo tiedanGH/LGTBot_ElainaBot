@@ -56,6 +56,7 @@ def _load(name: str) -> str:
 
 
 TAB_HTML = _load('dashboard/dashboard.html')
+TAB_CSS = _load('dashboard/dashboard.css')
 TAB_JS = _load('dashboard/dashboard.js')
 
 

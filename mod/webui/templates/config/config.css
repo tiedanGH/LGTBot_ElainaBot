@@ -1,0 +1,67 @@
+/* config 标签专属样式 —— .dash-editor / .dash-pluginconf-* 系列。
+   共享 base 在 main.css(.dash-section / .dash-btn / .dash-msg-* / 等)。 */
+
+/* ── 引擎配置编辑器 ── */
+.dash-editor {
+  width: 100%; min-height: 240px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'Consolas', 'Menlo', monospace; font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color .15s;
+}
+.dash-editor:focus { outline: none; border-color: var(--accent); }
+.dash-editor-actions {
+  margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.dash-config-msg {
+  font-size: 12px; flex: 1; min-width: 100px;
+}
+
+
+/* ── 插件配置(主框架编辑入口 + 热重载) ── */
+.dash-pluginconf-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.dash-pluginconf-card {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.dash-pluginconf-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.dash-pluginconf-desc {
+  font-size: 12px; color: var(--text-muted); line-height: 1.55; margin: 0;
+}
+.dash-pluginconf-desc code {
+  background: var(--panel); padding: 0 4px; border-radius: 3px;
+  font-family: 'Consolas', 'Menlo', monospace; font-size: 11px;
+}
+.dash-pluginconf-actions {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;
+}
+/* config tab 专属:让 desc 段 / 按钮组下方留出与「标题→描述」同款 12px 呼吸,
+   避免「bot 收到…」「LGTBot C++ 引擎的…」等描述文字 / 「前往插件模块」按钮组
+   紧贴下方 textarea。双栏 .dash-pluginconf-card 场景靠 card 内部 gap 处理
+   间距,这里用 .config-tab 父选择器 scope 防 spillover。 */
+.config-tab .dash-pluginconf-desc,
+.config-tab .dash-pluginconf-actions { margin-bottom: 12px; }
+/* a.dash-btn 默认带下划线,这里去掉让锚点视觉等同于 button */
+a.dash-btn { text-decoration: none; }
+.dash-pluginconf-msg {
+  font-size: 12px; min-height: 16px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+/* 无内容时整块隐藏(包括 min-height + gap),写入文案后自动显现。 */
+.dash-pluginconf-msg:empty { display: none; }
+.dash-pluginconf-changes {
+  list-style: none; padding: 6px 10px; margin: 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11px; color: var(--text-muted); line-height: 1.7;
+}
+.dash-pluginconf-changes li {
+  white-space: nowrap; overflow-x: auto;
+}
