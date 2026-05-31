@@ -152,6 +152,8 @@ body {
   .page-content { padding: 0 12px 12px; }
   .dash-section { padding: 12px 14px; }
   .dash-section-meta { flex-wrap: wrap; font-size: 11px; }
+  /* section 间垂直 gap 缩到 12px,跟桌面端 16px 形成更紧凑的移动端节奏 */
+  .dashboard, .config-tab { gap: 12px; }
 }
 
 /* ───── 标签内容容器 ───── */
@@ -371,7 +373,8 @@ body {
    自动适配。所有 dash-* class 都加前缀,避免和其它标签的类名冲突。
    ═════════════════════════════════════════════════════════════════════════ */
 
-.dashboard { display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+.dashboard,
+.config-tab { display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
 
 .dash-section {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -578,6 +581,12 @@ body {
 .dash-pluginconf-actions {
   display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;
 }
+/* config tab 专属:让 desc 段 / 按钮组下方留出与「标题→描述」同款 12px 呼吸,
+   避免「bot 收到…」「LGTBot C++ 引擎的…」等描述文字 / 「前往插件模块」按钮组
+   紧贴下方 textarea。双栏 .dash-pluginconf-card 场景靠 card 内部 gap 处理
+   间距,这里用 .config-tab 父选择器 scope 防 spillover。 */
+.config-tab .dash-pluginconf-desc,
+.config-tab .dash-pluginconf-actions { margin-bottom: 12px; }
 /* a.dash-btn 默认带下划线,这里去掉让锚点视觉等同于 button */
 a.dash-btn { text-decoration: none; }
 .dash-pluginconf-msg {
