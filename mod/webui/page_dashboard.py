@@ -618,6 +618,70 @@ def render_do_update() -> str:
     })
 
 
+def render_do_update_force() -> str:
+    """强制更新桥接层 —— ``git fetch origin`` + ``git reset --hard origin/main``。
+
+    用于普通 `git pull` 因工作区有本地修改报「would be overwritten by merge」
+    时的兜底。**会丢弃所有已 tracked 文件的本地改动**(被 .gitignore 排除的
+    ``data/`` / ``build/`` / ``lgtbot/`` 等运行时目录不受影响)。前端在普通
+    更新失败后弹一个按钮调本端点,带 danger 级双 confirm 警示用户。
+    """
+    plugin_dir = boot.PLUGIN_DIR
+    if not os.path.isdir(os.path.join(plugin_dir, '.git')):
+        return _fragment({
+            'success': False,
+            'message': ('插件目录不是 git 仓库 (.git/ 不存在)。'
+                        '请先点击「📥 初始化为 git 仓库」。'),
+        })
+
+    stages: list = []
+
+    def run_stage(label: str, cmd: list, timeout: float = 60.0) -> bool:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stages.append((label, -1, '', f'{label} 超时 ({timeout:.0f}s)'))
+            return False
+        except FileNotFoundError:
+            stages.append((label, -1, '', '未找到 git 命令'))
+            return False
+        except Exception as e:
+            stages.append((label, -1, '', f'{label} 异常: {e}'))
+            return False
+        stages.append((label, p.returncode,
+                       (p.stdout or '').strip(), (p.stderr or '').strip()))
+        return p.returncode == 0
+
+    # 1. fetch 拉远端最新 ref(包括 origin/main),浅 fetch 防大体量
+    if not run_stage('git fetch origin',
+                     ['git', '-C', plugin_dir, 'fetch', 'origin', '--depth', '50'],
+                     timeout=60.0):
+        return _fragment({
+            'success': False,
+            'stages': stages,
+            'message': '❌ git fetch 失败，网络或仓库配置问题，详见 stages',
+        })
+
+    # 2. reset --hard 覆盖工作区到 origin/main(丢弃所有本地修改)
+    if not run_stage('git reset --hard origin/main',
+                     ['git', '-C', plugin_dir, 'reset', '--hard', 'origin/main'],
+                     timeout=30.0):
+        return _fragment({
+            'success': False,
+            'stages': stages,
+            'message': '❌ git reset --hard 失败，详见 stages',
+        })
+
+    log.warning(f'[do-update-force] 强制更新完成 plugin_dir={plugin_dir} '
+                f'(本地未提交修改已丢弃)')
+    return _fragment({
+        'success': True,
+        'stages': stages,
+        'message': ('✅ 桥接层已强制更新到 origin/main。'
+                    '本地未提交的修改已丢弃。请重启 LGTBot 引擎或整进程以加载新版本。'),
+    })
+
+
 def render_update_submodule() -> str:
     """更新或初始化 lgtbot 子模块 ——
     ``git -C <plugin_dir> submodule update --init --recursive --force <path>``。

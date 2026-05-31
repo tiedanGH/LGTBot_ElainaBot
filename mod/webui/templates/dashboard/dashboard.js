@@ -6,6 +6,7 @@
 const DASH_KEYS = {
   check_update:       '__lgtbot_dash_check_update',
   do_update:          '__lgtbot_dash_do_update',
+  do_update_force:    '__lgtbot_dash_do_update_force',
   update_submodule:   '__lgtbot_dash_update_submodule',
   clear_avatar:       '__lgtbot_dash_clear_avatar',
   clear_avatar_7d:    '__lgtbot_dash_clear_avatar_7d',
@@ -305,9 +306,9 @@ function dashRenderSubmoduleStatus(sub) {
   }
 }
 
-/* ──── 更新桥接层(git pull --ff-only) ──── */
+/* ──── 更新桥接层(git pull --ff-only origin main) ──── */
 async function dashDoUpdate() {
-  const cmd = 'git pull --ff-only';
+  const cmd = 'git pull --ff-only origin main';
   const ok = await dashConfirm(
     '确认更新桥接层？\n\n将在插件目录下执行命令：\n  ' + cmd +
     '\n\n更新完成后需要重启 LGTBot 引擎或重启进程才能加载新版本。',
@@ -329,12 +330,87 @@ async function dashDoUpdate() {
     }
     if (data.stdout) html += '<pre class="dash-pre">stdout:\n' + escapeHtml(data.stdout) + '</pre>';
     if (data.stderr) html += '<pre class="dash-pre">stderr:\n' + escapeHtml(data.stderr) + '</pre>';
+    /* 失败时附加「💥 强制更新」按钮 —— 典型场景:工作区脏 (`would be
+       overwritten by merge`) / 本地与远端分叉无法 ff 等。本插件多数用户
+       不会主动 commit,远端有新版时本地几乎一定脏,所以兜底按钮是常用路径。 */
+    if (!data.success) {
+      html += '<div class="dash-update-force-row" style="margin-top:10px">' +
+              '<button id="dash-do-update-force" class="dash-btn dash-btn-warn">' +
+              '💥 强制更新 (丢弃本地修改)' +
+              '</button>' +
+              '<span class="dash-msg-warn" style="margin-left:8px;font-size:12px">' +
+              '会执行 git reset --hard origin/main，本地未提交的代码改动将丢失' +
+              '</span></div>';
+    }
     resEl.innerHTML = html;
+    /* 把刚渲染进 DOM 的强制更新按钮绑事件(每次失败都会重新注入,所以
+       不能用一次性 addEventListener 注册到固定 id) */
+    const forceBtn = document.getElementById('dash-do-update-force');
+    if (forceBtn) forceBtn.addEventListener('click', dashDoUpdateForce);
   } catch (e) {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
     btn.disabled = false;
     btn.textContent = '⬇ 更新桥接层';
+  }
+}
+
+/* ──── 强制更新桥接层(丢弃本地修改) ────
+ * 普通 git pull 失败的兜底:fetch + reset --hard origin/main。会覆盖工作区
+ * 已 tracked 的文件;data/、build/、lgtbot/ 因 .gitignore 排除不受影响。
+ * danger 级双 confirm,避免误触丢失代码改动。 */
+async function dashDoUpdateForce() {
+  const cmd = 'git fetch origin && git reset --hard origin/main';
+  const ok1 = await dashConfirm(
+    '⚠️ 确认强制更新桥接层？\n\n将执行：\n  ' + cmd +
+    '\n\n会**丢弃所有未提交的本地修改** (已 tracked 文件)。\n' +
+    'data/、build/、lgtbot/ 等运行时目录因被 .gitignore 排除不受影响。',
+    {level: 'warn'}
+  );
+  if (!ok1) return;
+  const ok2 = await dashConfirm(
+    '再次确认：已 tracked 文件的本地改动将永久丢失，无法恢复。\n\n' +
+    '若不确定，请先手动 git stash 备份你的改动后再执行。',
+    {level: 'danger'}
+  );
+  if (!ok2) return;
+
+  const forceBtn = document.getElementById('dash-do-update-force');
+  const resEl = document.getElementById('dash-update-result');
+  if (forceBtn) {
+    forceBtn.disabled = true;
+    forceBtn.textContent = '⏳ 强制更新中……';
+  }
+  try {
+    const data = await dashCallAction(DASH_KEYS.do_update_force);
+    let html = '<div class="dash-msg-info">执行命令：<code class="dash-mono">' +
+               escapeHtml(cmd) + '</code></div>';
+    if (data.success) {
+      html += '<div class="dash-msg-ok">' + escapeHtml(data.message) + '</div>';
+    } else {
+      html += '<div class="dash-msg-err">' + escapeHtml(data.message || '强制更新失败') + '</div>';
+    }
+    /* 后端返回的 stages 是 (label, rc, stdout, stderr) 元组列表 —— 同 init-repo */
+    if (Array.isArray(data.stages) && data.stages.length) {
+      const items = data.stages.map(s => {
+        const label = escapeHtml(s[0] || '');
+        const rc = s[1];
+        const out = (s[2] || '') + (s[3] ? (s[2] ? '\n' : '') + s[3] : '');
+        return '<li><code class="dash-mono">' + label + '</code> (rc=' +
+               escapeHtml(String(rc)) + ')' +
+               (out ? '<pre class="dash-pre">' + escapeHtml(out) + '</pre>' : '') +
+               '</li>';
+      });
+      html += '<ul class="dash-pluginconf-changes">' + items.join('') + '</ul>';
+    }
+    resEl.innerHTML = html;
+  } catch (e) {
+    resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
+  } finally {
+    if (forceBtn) {
+      forceBtn.disabled = false;
+      forceBtn.textContent = '💥 强制更新 (丢弃本地修改)';
+    }
   }
 }
 
