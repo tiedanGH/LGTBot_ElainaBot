@@ -1,0 +1,96 @@
+<div class="config-tab">
+
+  <!-- ──── 插件配置 (config.yaml) ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🔧 插件配置</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">文件</span>
+        <span id="cfg-yaml-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <p class="dash-pluginconf-desc">
+      也可使用主框架自带的插件管理编辑器(支持注释保留 + 字段顺序对齐):
+    </p>
+    <div class="dash-pluginconf-actions">
+      <a class="dash-btn dash-btn-primary" href="/web/plugins" target="_blank" rel="noopener">📝 前往主框架插件模块编辑</a>
+    </div>
+    <textarea id="cfg-yaml-editor" class="dash-editor" spellcheck="false"
+              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div class="dash-editor-actions">
+      <button id="cfg-yaml-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
+      <button id="cfg-yaml-revert" class="dash-btn">↩ 恢复</button>
+      <button id="cfg-yaml-reload" class="dash-btn dash-btn-warn">🔁 热重载配置</button>
+      <span id="cfg-yaml-msg" class="dash-config-msg"></span>
+    </div>
+    <!-- 热重载详细结果(diff / 警示),空时通过 .dash-pluginconf-msg:empty 自动隐藏 -->
+    <div id="cfg-yaml-reload-result" class="dash-pluginconf-msg"></div>
+  </section>
+
+  <!-- ──── 更新公告 (update_notice.txt) ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📢 更新公告</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">文件</span>
+        <span id="cfg-notice-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <p class="dash-pluginconf-desc">
+      bot 收到「更新公告」指令(文本或菜单按钮)时,按代码块原样展示本文件内容。
+      <b>每次调用都重新读盘,即改即生效</b>,无需重启。
+    </p>
+    <textarea id="cfg-notice-editor" class="dash-editor" spellcheck="false"
+              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div class="dash-editor-actions">
+      <button id="cfg-notice-save" class="dash-btn dash-btn-primary">💾 保存</button>
+      <button id="cfg-notice-revert" class="dash-btn">↩ 恢复</button>
+      <span id="cfg-notice-msg" class="dash-config-msg"></span>
+    </div>
+  </section>
+
+  <!-- ──── 疑难解答 (troubleshooting.txt) ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">❓ 疑难解答</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">文件</span>
+        <span id="cfg-trouble-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <p class="dash-pluginconf-desc">
+      bot 收到「疑难解答」指令时按代码块原样展示。建议用 Q&A 格式:每条问题
+      和回答之间空一行。<b>每次调用都重新读盘,即改即生效</b>。
+    </p>
+    <textarea id="cfg-trouble-editor" class="dash-editor" spellcheck="false"
+              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div class="dash-editor-actions">
+      <button id="cfg-trouble-save" class="dash-btn dash-btn-primary">💾 保存</button>
+      <button id="cfg-trouble-revert" class="dash-btn">↩ 恢复</button>
+      <span id="cfg-trouble-msg" class="dash-config-msg"></span>
+    </div>
+  </section>
+
+  <!-- ──── 引擎配置 (lgtbot.json) ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">⚙️ 引擎配置</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">文件</span>
+        <span id="cfg-engine-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <p class="dash-pluginconf-desc">
+      LGTBot C++ 引擎的 JSON 配置,启动时一次性读取。
+      <b>保存后需重启 LGTBot 引擎或整进程才能生效</b>。
+    </p>
+    <textarea id="cfg-engine-editor" class="dash-editor" spellcheck="false"
+              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div class="dash-editor-actions">
+      <button id="cfg-engine-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
+      <button id="cfg-engine-revert" class="dash-btn">↩ 恢复</button>
+      <span id="cfg-engine-msg" class="dash-config-msg"></span>
+    </div>
+  </section>
+
+</div>

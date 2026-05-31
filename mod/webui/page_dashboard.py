@@ -434,24 +434,9 @@ def _cache_sizes() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 引擎配置文件读取 —— 原文返回,JSON 校验放到 JS 侧;保存走主框架
-# ``/api/config-file/save`` 端点(已支持 .json 扩展,接受 plugins/ 下绝对路径)
-# ─────────────────────────────────────────────────────────────────────────
-
-def _read_engine_config() -> tuple[str, str]:
-    """返回 ``(原文, 错误信息)``。boot._ensure_lgtbot_conf 保证文件存在。"""
-    path = boot.CONF_PATH
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return f.read(), ''
-    except FileNotFoundError:
-        return '{}\n', ''
-    except Exception as e:
-        return '', str(e)
-
-
-# ─────────────────────────────────────────────────────────────────────────
 # 数据入口 —— 每次页面渲染调用一次
+# (注:插件配置 / 引擎配置 / 更新公告 / 疑难解答 的编辑器全部搬迁到「⚙️ 配置
+# 管理」tab,见 mod/webui/page_config.py,本文件不再 read lgtbot.json / yaml)
 # ─────────────────────────────────────────────────────────────────────────
 
 def get_data() -> str:
@@ -461,7 +446,6 @@ def get_data() -> str:
     commit 留给「检查更新」按钮去查,避免每次页面渲染都打 GitHub API。
     """
     meta = _get_plugin_meta()
-    cfg_text, cfg_err = _read_engine_config()
     stats, stat_errs = _query_lgtbot_stats()
     payload = {
         'query_time': int(time.time()),
@@ -469,11 +453,6 @@ def get_data() -> str:
         'github_url': meta.get('github', ''),
         'engine_running': bool(boot.is_engine_running()),
         'submodule': _get_submodule_info(query_remote=False),
-        'config': {
-            'abs_path': os.path.abspath(boot.CONF_PATH),
-            'content': cfg_text,
-            'read_error': cfg_err,
-        },
         'stats': {
             'user_cache_total': userdb.count_users(),
             **stats,
@@ -1017,89 +996,6 @@ def render_clear_match_7d() -> str:
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 插件配置热重载 —— 调 config.load_plugin_config() 重新读 data/config.yaml,
-# 把可调字段(quota / uploader / buttons / callbacks 上的运行时常量)重新下发,
-# 不动 LGTBot C++ 引擎本身(进而保留所有进行中的游戏)。
-#
-# 限制:admin_uids 只在 LGTBot.start() 时一次性传给 C++ 侧,运行时不可改;
-# 这里读出来仅用于「告诉用户当前 yaml 里有几个 admin」,UI 上明确提示该字段
-# 改动需要重启 LGTBot 引擎才能生效。
-# ─────────────────────────────────────────────────────────────────────────
-
-def _snapshot_runtime_tunables() -> dict:
-    """拍快照:把 config._apply_runtime_tunables 会覆盖的 Python 侧运行时常量
-    全部读出,返回可 JSON 化的 dict。前后两次快照对比即得到本次热重载的
-    diff,供日志输出与 UI 展示。
-    """
-    from .. import quota as _quota, uploader as _uploader, buttons as _buttons, callbacks as _callbacks
-    # 字段顺序与 config.DEFAULT_CONFIG / yaml 一致,便于 UI 上直观对照
-    return {
-        'image_hosting': _uploader.SELECTED_BACKEND or '',
-        'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
-        'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
-        'crash_notify_group': _callbacks.CRASH_NOTIFY_GROUP or '',
-        'sandbox_dm_users': sorted(_callbacks.SANDBOX_DM_USERS),
-        'menu_game_buttons': list(_buttons.MENU_GAMES),
-    }
-
-
-def render_reload_config() -> str:
-    """按当前 data/config.yaml 热重载所有 Python 侧可调字段,不重启插件/引擎。
-
-    流程:
-      1. 拍前快照 → 调 ``config.load_plugin_config()`` (内部已 log.info 各字段
-         变化) → 拍后快照
-      2. 算 diff,把变化字段以 INFO 日志逐项输出 + 总结一行
-      3. 返回 JSON 含 ``changes`` 数组、当前值、admin_count、警示 note 给前端
-    """
-    from .. import config as _config
-    log.info('=' * 60)
-    log.info('🔁 [reload-config] 开始热重载插件配置')
-
-    before = _snapshot_runtime_tunables()
-    try:
-        admins_str = _config.load_plugin_config()
-    except Exception as e:
-        log.error(f'🔁 [reload-config] 失败: {e}')
-        log.info('=' * 60)
-        return _fragment({
-            'success': False,
-            'message': f'热重载失败: {e}',
-        })
-    after = _snapshot_runtime_tunables()
-
-    # 列出变化字段。比较列表 / 集合用 != 即可(已规范化为可哈希 / 可比类型)
-    changes: list = []
-    for field, new_val in after.items():
-        old_val = before[field]
-        if old_val != new_val:
-            changes.append({
-                'field': field,
-                'before': old_val,
-                'after': new_val,
-            })
-
-    admin_count = len([u for u in (admins_str or '').split(',') if u.strip()])
-
-    # 日志:逐项 + 总结。load_plugin_config 内部已经分散打了「xxx: A → B」的
-    # info,这里再来一份汇总,便于事后看一行就知道本次重载触发了哪些变化。
-    if changes:
-        log.info(f'🔁 [reload-config] 运行时参数变化 {len(changes)} 项:')
-        for c in changes:
-            log.info(f'   · {c["field"]}: {c["before"]!r} → {c["after"]!r}')
-    else:
-        log.info('🔁 [reload-config] 运行时参数无变化(yaml 与运行时一致)')
-    log.info(f'   · admin_uids: 当前 yaml 中 {admin_count} 人 '
-             f'(C++ 引擎只在 start() 时读一次，改动需重启引擎才能生效)')
-    log.info('🔁 [reload-config] 完成')
-    log.info('=' * 60)
-
-    return _fragment({
-        'success': True,
-        'changes': changes,
-        'current': after,
-        'admin_count': admin_count,
-        'message': '✅ 已按 config.yaml 重新下发到运行时',
-        'note': 'admin_uids 改动需重启 LGTBot 引擎才能生效 (C++ 侧仅在 start() 时读一次)',
-    })
+# 注:render_reload_config + _snapshot_runtime_tunables 已搬迁到
+# mod/webui/page_config.py(随「配置管理」tab 一起)。action key
+# ``__lgtbot_dash_reload_config`` 不变,webui/main.py 中由 page_config 注册。

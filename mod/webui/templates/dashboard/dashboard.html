@@ -79,37 +79,6 @@
     <div id="dash-stats-errors" class="dash-errors" style="display:none"></div>
   </section>
 
-  <!-- ──── 插件配置 ──── -->
-  <section class="dash-section">
-    <h2 class="dash-section-title">🔧 插件配置</h2>
-    <div class="dash-pluginconf-grid">
-      <!-- 左:跳转到主框架插件管理页编辑 data/config.yaml -->
-      <div class="dash-pluginconf-card">
-        <div class="dash-pluginconf-title">📝 编辑插件配置</div>
-        <p class="dash-pluginconf-desc">
-          前往主框架 插件模块 页面打开 <code class="dash-mono">data/config.yaml</code><br>
-          可修改管理员名单、配额等待秒数、图床、欢迎菜单游戏、崩溃通知群、沙箱私信白名单等字段。
-        </p>
-        <div class="dash-pluginconf-actions">
-          <a class="dash-btn dash-btn-primary" href="/web/plugins" target="_blank" rel="noopener">📝 前往插件模块修改插件配置</a>
-        </div>
-      </div>
-      <!-- 右:不重启插件、不重启引擎,按当前 yaml 重新下发到运行时 -->
-      <div class="dash-pluginconf-card">
-        <div class="dash-pluginconf-title">🔁 热重载配置</div>
-        <p class="dash-pluginconf-desc">
-          按磁盘上当前的 <code class="dash-mono">config.yaml</code> 重新下发到运行时，
-          <b>不重启插件、不重启引擎</b>。注意 <code class="dash-mono">admin_uids</code>
-          变更需重启 LGTBot 引擎才能生效。
-        </p>
-        <div class="dash-pluginconf-actions">
-          <button id="dash-reload-config" class="dash-btn dash-btn-warn">🔁 热重载配置</button>
-        </div>
-        <div id="dash-reload-config-msg" class="dash-pluginconf-msg"></div>
-      </div>
-    </div>
-  </section>
-
   <!-- ──── 缓存清理 ──── -->
   <section class="dash-section">
     <h2 class="dash-section-title">🧹 缓存清理</h2>
@@ -154,21 +123,7 @@
     <div id="dash-cache-msg" class="dash-cache-msg"></div>
   </section>
 
-  <!-- ──── 引擎配置 ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title">⚙️ 引擎配置</h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">文件</span>
-        <span id="dash-config-path" class="dash-meta-value dash-mono">—</span>
-      </div>
-    </div>
-    <textarea id="dash-config-editor" class="dash-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-    <div class="dash-editor-actions">
-      <button id="dash-config-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
-      <button id="dash-config-revert" class="dash-btn">↩ 恢复</button>
-      <span id="dash-config-msg" class="dash-config-msg"></span>
-    </div>
-  </section>
+  <!-- 注:插件配置 / 引擎配置 / 更新公告 / 疑难解答 编辑器全部搬迁到
+       「⚙️ 配置管理」tab,见 templates/config/config.html -->
 
 </div>

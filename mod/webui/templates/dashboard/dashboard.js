@@ -14,18 +14,15 @@ const DASH_KEYS = {
   clear_gen_7d:       '__lgtbot_dash_clear_gen_7d',
   clear_match_all:    '__lgtbot_dash_clear_match_all',
   clear_match_7d:     '__lgtbot_dash_clear_match_7d',
-  reload_config:      '__lgtbot_dash_reload_config',
   init_repo:          '__lgtbot_dash_init_repo',
 };
+/* 注:reload_config / dash-config-* / dash-reload-config 全部搬迁到「配置管理」
+   tab,见 templates/config/config.js (CFG_KEYS.reload_config) */
 
 /* 插件目录的 git 状态 ——
  *   'ok'     = .git 存在,「更新桥接层」按钮走 dashDoUpdate
  *   'no_git' = 市场下载场景,按钮文案切「📥 初始化为 git 仓库」,走 dashInitRepo */
 let dashRepoStatus = 'ok';
-
-/* 引擎配置绝对路径(由 dashboard-data 注入),保存请求里要原样回传 */
-let dashConfigAbsPath = '';
-let dashConfigOriginal = '';
 
 /* 缓存最近一次拿到的 submodule info —— 给「更新子模块」按钮的 confirm
    弹窗决定文案(初始化 vs 更新),也用来拼完整 git 命令展示。 */
@@ -104,19 +101,6 @@ function dashApplyData(data) {
     errsBox.style.display = 'block';
   } else {
     errsBox.style.display = 'none';
-  }
-
-  /* 引擎配置(只在没有未保存改动时刷新编辑器内容) */
-  const cfg = data.config || {};
-  dashConfigAbsPath = cfg.abs_path || '';
-  dashConfigOriginal = cfg.content || '';
-  document.getElementById('dash-config-path').textContent = dashConfigAbsPath || '—';
-  const editor = document.getElementById('dash-config-editor');
-  if (!editor.dataset.dirty) {
-    editor.value = dashConfigOriginal;
-  }
-  if (cfg.read_error) {
-    dashShowConfigMsg('读取失败：' + cfg.read_error, 'err');
   }
 
   /* 缓存尺寸 */
@@ -541,60 +525,9 @@ async function dashDoUpdateSubmodule() {
   }
 }
 
-/* ──── 保存引擎配置 ──── */
-function dashShowConfigMsg(msg, kind) {
-  const el = document.getElementById('dash-config-msg');
-  el.textContent = msg;
-  el.className = 'dash-config-msg dash-msg-' + (kind || 'info');
-}
-
-async function dashSaveConfig() {
-  const editor = document.getElementById('dash-config-editor');
-  const text = editor.value;
-  /* 前置 JSON 语法校验 —— 失败直接红字,不发请求 */
-  try {
-    JSON.parse(text);
-  } catch (e) {
-    dashShowConfigMsg('JSON 格式错误：' + e.message, 'err');
-    return;
-  }
-  if (!dashConfigAbsPath) {
-    dashShowConfigMsg('配置文件路径未知，无法保存', 'err');
-    return;
-  }
-  const btn = document.getElementById('dash-config-save');
-  btn.disabled = true;
-  try {
-    const r = await fetch('/api/config-file/save' + TOKEN_QS, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        path: dashConfigAbsPath,
-        content: text,
-        format: 'json',
-      }),
-    });
-    const data = await r.json();
-    if (data.success) {
-      dashShowConfigMsg('✅ 配置已保存，需重启 LGTBot 引擎后才能生效', 'ok');
-      dashConfigOriginal = text;
-      delete editor.dataset.dirty;
-    } else {
-      dashShowConfigMsg('❌ ' + (data.message || '保存失败'), 'err');
-    }
-  } catch (e) {
-    dashShowConfigMsg('❌ 请求失败：' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-function dashRevertConfig() {
-  const editor = document.getElementById('dash-config-editor');
-  editor.value = dashConfigOriginal;
-  delete editor.dataset.dirty;
-  dashShowConfigMsg('已恢复至上次加载内容', 'info');
-}
+/* 注:dashShowConfigMsg / dashSaveConfig / dashRevertConfig 已搬迁至
+   templates/config/config.js (cfgSave / cfgRevert / cfgShowMsg) —— 那里支持
+   4 块编辑器(yaml / notice / trouble / engine),不再受限于"引擎配置"一项。 */
 
 /* ──── 缓存清理 ──── */
 /* DASH_CLEAR_PROMPTS:每个 which → confirm 文案数组,统一双次确认。
@@ -671,84 +604,18 @@ async function dashClearCache(which) {
   }
 }
 
-/* ──── 插件配置热重载 ────
- * 按当前 data/config.yaml 重新下发到运行时(不重启插件、不重启引擎)。
- * admin_uids 改动需重启 LGTBot 引擎才能生效,UI 上单独显示一条警示。
- */
-async function dashReloadConfig() {
-  const ok = await dashConfirm(
-    '确认按当前 data/config.yaml 热重载？\n\n' +
-    '会立即把 yaml 里的运行时可调字段 (配额秒数、图床、菜单游戏、崩溃通知群、' +
-    '沙箱白名单) 重新下发，**不重启插件、不重启引擎**。\n\n' +
-    '注意：admin_uids 变更需重启 LGTBot 引擎才能生效 (C++ 侧只在 start() 时读一次)。',
-    {level: 'warn'}
-  );
-  if (!ok) return;
-  const btn = document.getElementById('dash-reload-config');
-  const msgEl = document.getElementById('dash-reload-config-msg');
-  btn.disabled = true;
-  btn.textContent = '⏳ 重载中……';
-  msgEl.innerHTML = '';
-  try {
-    const data = await dashCallAction(DASH_KEYS.reload_config);
-    if (!data.success) {
-      msgEl.innerHTML = '<div class="dash-msg-err">❌ ' +
-                        escapeHtml(data.message || '热重载失败') + '</div>';
-      return;
-    }
-    const parts = [];
-    parts.push('<div class="dash-msg-ok">' +
-               escapeHtml(data.message || '已重载') + '</div>');
-    if (data.changes && data.changes.length) {
-      const items = data.changes.map(c =>
-        '<li><code class="dash-mono">' + escapeHtml(c.field) + '</code>: ' +
-        '<span class="dash-msg-info">' +
-        escapeHtml(JSON.stringify(c.before)) + '</span> → ' +
-        '<b>' + escapeHtml(JSON.stringify(c.after)) + '</b></li>'
-      );
-      parts.push('<ul class="dash-pluginconf-changes">' + items.join('') + '</ul>');
-    } else {
-      parts.push('<div class="dash-msg-info">(运行时参数与 yaml 一致，无变化)</div>');
-    }
-    parts.push('<div class="dash-msg-info">📋 当前 admin_uids: ' +
-               (data.admin_count || 0) + ' 人</div>');
-    if (data.note) {
-      parts.push('<div class="dash-msg-warn">⚠️ ' + escapeHtml(data.note) + '</div>');
-    }
-    msgEl.innerHTML = parts.join('');
-    /* 引擎配置编辑器(下方的 ⚙️ 引擎配置)与本次热重载无关 —— 那是 lgtbot.json,
-       不是 config.yaml;但页面顶部数据(版本/统计/缓存)可能因 menu_game_buttons
-       变化而需要刷新。保险起见整页刷一次。 */
-    dashRefreshAll();
-  } catch (e) {
-    msgEl.innerHTML = '<div class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</div>';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🔁 热重载配置';
-  }
-}
+/* 注:dashReloadConfig 已搬到 templates/config/config.js 的 cfgReloadConfig,
+   action key 不变(__lgtbot_dash_reload_config),webui/main.py 中 provider
+   现在是 page_config.render_reload_config。 */
 
 window.addEventListener('DOMContentLoaded', () => {
   dashLoadInline();
 
   document.getElementById('dash-check-update').addEventListener('click', dashCheckUpdate);
+  /* 桥接层行按钮: dashRepoStatus 决定调 dashInitRepo 还是 dashDoUpdate */
   document.getElementById('dash-do-update').addEventListener('click', dashBridgeButtonClick);
   document.getElementById('dash-update-submodule').addEventListener('click', dashDoUpdateSubmodule);
   document.getElementById('dash-stats-refresh').addEventListener('click', dashRefreshAll);
-  document.getElementById('dash-config-save').addEventListener('click', dashSaveConfig);
-  document.getElementById('dash-config-revert').addEventListener('click', dashRevertConfig);
-  document.getElementById('dash-reload-config').addEventListener('click', dashReloadConfig);
-
-  /* 编辑器脏标记:用户改过且与原文不同 → dirty;复位即清除。
-     dashRefreshAll 据此判定是否覆盖编辑器内容,避免刷新统计时把编辑中的
-     文本擦掉。 */
-  document.getElementById('dash-config-editor').addEventListener('input', (e) => {
-    if (e.target.value !== dashConfigOriginal) {
-      e.target.dataset.dirty = '1';
-    } else {
-      delete e.target.dataset.dirty;
-    }
-  });
 
   /* 缓存清理按钮(委托) */
   document.querySelectorAll('[data-clear]').forEach(btn => {

@@ -40,7 +40,7 @@ import html
 import os
 
 from core.plugin import web_pages
-from . import page_build, page_dashboard, page_logs, page_users
+from . import page_build, page_config, page_dashboard, page_logs, page_users
 
 
 PAGE_KEY = 'lgtbot'
@@ -118,15 +118,18 @@ def _render_html() -> str:
     return (_MAIN_HTML
             .replace('__MAIN_CSS__', _MAIN_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
+            .replace('__CONFIG_HTML__', page_config.TAB_HTML)
             .replace('__BUILD_HTML__', page_build.TAB_HTML)
             .replace('__LOGS_HTML__', page_logs.TAB_HTML)
             .replace('__USERS_HTML__', page_users.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
+            .replace('__CONFIG_DATA__', page_config.get_data())
             .replace('__BUILD_DATA__', page_build.get_data())
             .replace('__LOG_DATA__', page_logs.get_data())
             .replace('__USER_DATA__', page_users.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
             .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
+            .replace('__CONFIG_JS__', page_config.TAB_JS)
             .replace('__BUILD_JS__', page_build.TAB_JS)
             .replace('__LOGS_JS__', page_logs.TAB_JS)
             .replace('__USERS_JS__', page_users.TAB_JS)
@@ -267,7 +270,8 @@ def register():
     _register_hidden_action(_DASH_CLEAR_GEN_7D_KEY,      page_dashboard.render_clear_gen_7d)
     _register_hidden_action(_DASH_CLEAR_MATCH_ALL_KEY,   page_dashboard.render_clear_match_all)
     _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,    page_dashboard.render_clear_match_7d)
-    _register_hidden_action(_DASH_RELOAD_CONFIG_KEY,     page_dashboard.render_reload_config)
+    # 注:_DASH_RELOAD_CONFIG_KEY 历史 key 不变(JS / 文档兼容),provider 已搬到 page_config
+    _register_hidden_action(_DASH_RELOAD_CONFIG_KEY,     page_config.render_reload_config)
 
     # 引擎编译 action 端点
     _register_hidden_action(_BUILD_FULL_KEY,    page_build.render_build_full)
