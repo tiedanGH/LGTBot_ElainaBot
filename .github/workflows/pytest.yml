@@ -1,0 +1,40 @@
+name: pytest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ElainaBot_v2 framework
+        uses: actions/checkout@v4
+        with:
+          repository: ElainaCore/ElainaBot_v2
+          path: ElainaBot_v2
+
+      - name: Checkout LGTBot_ElainaBot plugin
+        uses: actions/checkout@v4
+        with:
+          path: ElainaBot_v2/plugins/LGTBot_ElainaBot
+          submodules: false   # tests do not need the lgtbot C++ submodule
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          cd ElainaBot_v2
+          pip install -r requirements.txt
+          pip install -r plugins/LGTBot_ElainaBot/tests/requirements-test.txt
+
+      - name: Run pytest
+        # PYTHONPATH=. lets `from core.base.logger import ...` find the framework.
+        run: |
+          cd ElainaBot_v2
+          PYTHONPATH=. python -m pytest plugins/LGTBot_ElainaBot/tests/ -v --tb=short
