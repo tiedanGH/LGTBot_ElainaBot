@@ -591,7 +591,7 @@ async function dashClearCache(which) {
   try {
     const data = await dashCallAction(DASH_CLEAR_KEYS[which]);
     if (data.success) {
-      msgEl.textContent = '✅ ' + (data.message || '清理完成') + '(删除 ' + (data.removed || 0) + ' 项)';
+      msgEl.textContent = '✅ ' + (data.message || '清理完成') + ' (删除 ' + (data.removed || 0) + ' 项)';
       msgEl.className = 'dash-cache-msg dash-msg-ok';
       dashRefreshAll();
     } else {

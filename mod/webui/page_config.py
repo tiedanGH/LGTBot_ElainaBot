@@ -47,6 +47,13 @@ _CONFIG_YAML_PATH = os.path.join(boot.DATA_DIR, 'config.yaml')
 _UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 
+# 跨重载共享:存上次热重载后 yaml 里的 admin_uids 逗号串。每次 reload 比较
+# 当前 yaml 内的 admin_uids 与该值,**仅在真的变化时**给前端返回那条
+# 「需重启引擎」note —— 否则保持 reload 面板安静,不再每次都吓用户一跳。
+# 首次 reload 时 key 不存在,保守视作"未变"(用户可凭页面上 admin_count
+# 数字自行判断),后续每次都准确。
+_PERSISTENT_LAST_ADMINS_KEY = 'cfg_last_loaded_admins'
+
 
 def _read_file(path: str) -> tuple[str, str]:
     """读任意文本文件,返回 ``(content, error_msg)``。文件不存在 → 空内容、无错误。
@@ -162,6 +169,10 @@ def render_reload_config() -> str:
     log.info('=' * 60)
     log.info('🔁 [reload-config] 开始热重载插件配置')
 
+    _p = boot._get_persistent()
+    # 上次 reload 后落档的 admin 串(首次 reload 时 key 不存在,拿到 None)
+    before_admins = _p.get(_PERSISTENT_LAST_ADMINS_KEY)
+
     before = _snapshot_runtime_tunables()
     try:
         admins_str = _config.load_plugin_config()
@@ -187,23 +198,35 @@ def render_reload_config() -> str:
 
     admin_count = len([u for u in (admins_str or '').split(',') if u.strip()])
 
+    # 落档当前 admins —— 下次 reload 用作 before 对照
+    _p[_PERSISTENT_LAST_ADMINS_KEY] = admins_str
+    # 仅当**记录过 before** 且**真的变化**时,才视为 admin 改动 —— 首次 reload
+    # 没有 before,保守视作"未变"避免每次都误报
+    admin_changed = (before_admins is not None and before_admins != admins_str)
+
     # 日志:逐项 + 总结
     if changes:
         log.info(f'🔁 [reload-config] 运行时参数变化 {len(changes)} 项:')
         for c in changes:
             log.info(f'   · {c["field"]}: {c["before"]!r} → {c["after"]!r}')
     else:
-        log.info('🔁 [reload-config] 运行时参数无变化(yaml 与运行时一致)')
-    log.info(f'   · admin_uids: 当前 yaml 中 {admin_count} 人 '
-             f'(C++ 引擎只在 start() 时读一次,改动需重启引擎才能生效)')
+        log.info('🔁 [reload-config] 运行时参数无变化 (yaml 与运行时一致)')
+    if admin_changed:
+        log.warning(f'⚠️ [reload-config] admin_uids 已变化 ({before_admins!r} → {admins_str!r})，需重启 LGTBot 引擎才能生效')
+    else:
+        log.info(f'   · admin_uids: 当前 yaml 中 {admin_count} 人 (未变化)')
     log.info('🔁 [reload-config] 完成')
     log.info('=' * 60)
 
-    return _fragment({
+    payload = {
         'success': True,
         'changes': changes,
         'current': after,
         'admin_count': admin_count,
+        'admin_changed': admin_changed,
         'message': '✅ 已按 config.yaml 重新下发到运行时',
-        'note': 'admin_uids 改动需重启 LGTBot 引擎才能生效(C++ 侧仅在 start() 时读一次)',
-    })
+    }
+    # 仅 admin 真变化时附 note —— 前端 ``if (data.note)`` 才显示「⚠️」一行
+    if admin_changed:
+        payload['note'] = 'admin_uids 改动需重启 LGTBot 引擎才能生效 (C++ 侧仅在 start() 时读一次)'
+    return _fragment(payload)

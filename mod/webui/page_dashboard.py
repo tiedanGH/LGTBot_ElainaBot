@@ -106,7 +106,7 @@ def _get_plugin_meta() -> dict:
                     and isinstance(node.value, ast.Dict)):
                 return ast.literal_eval(node.value) or {}
     except Exception as e:
-        log.debug(f'AST 解析 main.py 失败：{e}')
+        log.debug(f'AST 解析 main.py 失败: {e}')
     return {}
 
 
@@ -179,7 +179,7 @@ def _parse_gitmodules() -> dict:
                 if k in ('path', 'url', 'branch'):
                     info[k] = v
     except Exception as e:
-        log.debug(f'读取 .gitmodules 失败：{e}')
+        log.debug(f'读取 .gitmodules 失败: {e}')
     return info
 
 
@@ -222,7 +222,7 @@ def _query_upstream_commit(owner: str, repo: str, branch: str) -> tuple[str, str
         with urllib.request.urlopen(req, timeout=8.0) as r:
             data = json.loads(r.read().decode('utf-8') or '{}')
     except urllib.error.HTTPError as e:
-        return ('', '', f'GitHub HTTP {e.code}(可能触发匿名 60 次每小时限流)')
+        return ('', '', f'GitHub HTTP {e.code} (可能触发匿名 60 次每小时限流)')
     except Exception as e:
         return ('', '', f'网络错误：{e}')
     full = data.get('sha') or ''
@@ -355,8 +355,7 @@ def _semver_gt(a: str, b: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────
 
 # 4 个 COUNT 查询。SELECT COUNT 不写库,只读 URI 连接也不允许写;
-# SQLite 在 read-only 模式下不会创建 -shm/-wal 旁路文件,符合用户「无需
-# WAL」要求(同时不影响主引擎自身在写时使用 WAL)。
+# SQLite 在 read-only 模式下不会创建 -shm/-wal 旁路文件
 _LGTBOT_STAT_SQL = {
     'lgtbot_users':              'SELECT COUNT(*) FROM user',
     'lgtbot_matches':            'SELECT COUNT(*) FROM match',
@@ -916,14 +915,14 @@ def _clear_dir(path: str) -> tuple[bool, str, int]:
                     os.remove(entry.path)
                 removed += 1
             except Exception as e:
-                errs.append(f'{entry.name}:{e}')
+                errs.append(f'{entry.name}: {e}')
     except Exception as e:
-        log.warning(f'[cache-clear] 扫描失败:{path}:{e}')
+        log.warning(f'[cache-clear] 扫描失败: {path}:{e}')
         return False, f'扫描目录失败：{e}', removed
     if errs:
-        log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败:{path} (删除 {removed} 项)')
+        log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败: {path} (删除 {removed} 项)')
         return False, ';'.join(errs[:5]), removed
-    log.info(f'[cache-clear] 完成:{path} (删除 {removed} 项)')
+    log.info(f'[cache-clear] 完成: {path} (删除 {removed} 项)')
     return True, '清理完成', removed
 
 
@@ -933,9 +932,9 @@ def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int]:
     Audit:同 ``_clear_dir``,执行前后 INFO 日志。
     """
     if not os.path.isdir(path):
-        log.info(f'[cache-clear] 跳过(目录不存在):{path}')
+        log.info(f'[cache-clear] 跳过 (目录不存在):{path}')
         return True, '目录不存在，无需清理', 0
-    log.info(f'[cache-clear] 开始保留近 {days} 天:{path}')
+    log.info(f'[cache-clear] 开始保留近 {days} 天: {path}')
     cutoff = time.time() - days * 86400
     removed = 0
     errs: list = []
@@ -953,12 +952,12 @@ def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int]:
             except Exception as e:
                 errs.append(f'{entry.name}:{e}')
     except Exception as e:
-        log.warning(f'[cache-clear] 扫描失败:{path}:{e}')
+        log.warning(f'[cache-clear] 扫描失败: {path}:{e}')
         return False, f'扫描目录失败：{e}', removed
     if errs:
-        log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败:{path} (保留近 {days} 天, 删除 {removed} 项)')
+        log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败: {path} (保留近 {days} 天，删除 {removed} 项)')
         return False, ';'.join(errs[:5]), removed
-    log.info(f'[cache-clear] 完成保留近 {days} 天:{path} (删除 {removed} 项)')
+    log.info(f'[cache-clear] 完成保留近 {days} 天: {path} (删除 {removed} 项)')
     return True, f'已保留近 {days} 天数据', removed
 
 
@@ -995,8 +994,3 @@ def render_clear_match_all() -> str:
 def render_clear_match_7d() -> str:
     ok, msg, n = _clear_dir_keep_recent(_cache_dir('match'), days=7)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
-
-
-# 注:render_reload_config + _snapshot_runtime_tunables 已搬迁到
-# mod/webui/page_config.py(随「配置管理」tab 一起)。action key
-# ``__lgtbot_dash_reload_config`` 不变,webui/main.py 中由 page_config 注册。

@@ -9,10 +9,12 @@
         <span id="cfg-yaml-path" class="dash-meta-value dash-mono">—</span>
       </div>
     </div>
-    <p class="dash-pluginconf-desc">
-      也可使用主框架自带的插件管理编辑器 (支持可视化编辑):
-    </p>
-    <div class="dash-pluginconf-actions">
+    <!-- 桌面端:描述文字 + 「前往主框架编辑」按钮并排在同一行;
+         移动端(<600px):.cfg-yaml-tip-row 切 flex-direction:column 自动堆叠成两行 -->
+    <div class="cfg-yaml-tip-row">
+      <p class="dash-pluginconf-desc">
+        也可使用主框架自带的插件管理编辑器（支持可视化编辑）：
+      </p>
       <a class="dash-btn dash-btn-primary" href="/web/plugins" target="_blank" rel="noopener">📝 前往主框架插件模块编辑</a>
     </div>
     <textarea id="cfg-yaml-editor" class="dash-editor" spellcheck="false"
@@ -37,8 +39,7 @@
       </div>
     </div>
     <p class="dash-pluginconf-desc">
-      bot 收到「更新公告」指令时，按代码块展示本文件内容。
-      <b>每次调用都重新读盘，修改立即生效</b>。
+      bot 收到「更新公告」指令时，按代码块展示本文件内容。<b>每次调用都重新读盘，修改立即生效</b>。
     </p>
     <textarea id="cfg-notice-editor" class="dash-editor" spellcheck="false"
               autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
@@ -59,8 +60,7 @@
       </div>
     </div>
     <p class="dash-pluginconf-desc">
-      bot 收到「疑难解答」指令时，按代码块展示本文件内容。
-      <b>每次调用都重新读盘，修改立即生效</b>。
+      bot 收到「疑难解答」指令时，按代码块展示本文件内容。<b>每次调用都重新读盘，修改立即生效</b>。
     </p>
     <textarea id="cfg-trouble-editor" class="dash-editor" spellcheck="false"
               autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
@@ -81,8 +81,7 @@
       </div>
     </div>
     <p class="dash-pluginconf-desc">
-      LGTBot C++ 引擎的 JSON 配置，启动时一次性读取。
-      <b>保存后需重启 LGTBot 引擎或整进程才能生效</b>。
+      LGTBot C++ 引擎的 JSON 配置，启动时一次性读取。<b>保存后需重启 LGTBot 引擎或整进程才能生效</b>。
     </p>
     <textarea id="cfg-engine-editor" class="dash-editor" spellcheck="false"
               autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>

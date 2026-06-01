@@ -49,13 +49,27 @@
    间距,这里用 .config-tab 父选择器 scope 防 spillover。 */
 .config-tab .dash-pluginconf-desc,
 .config-tab .dash-pluginconf-actions { margin-bottom: 12px; }
+
+/* 「插件配置」编辑器顶部的提示行 —— 描述文字 + 「前往主框架编辑」按钮在桌面端
+   横向并排,通过 .cfg-yaml-tip-row 这一行 flex 容器承载;窄屏(≤600px)切到
+   column,描述在上、按钮在下。row 自身负责 12px 底部呼吸,内部 desc 不再带
+   自己的 margin-bottom(被 row 统一管)。 */
+.cfg-yaml-tip-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.cfg-yaml-tip-row .dash-pluginconf-desc { margin-bottom: 0; }
+@media (max-width: 600px) {
+  .cfg-yaml-tip-row { flex-direction: column; align-items: flex-start; }
+}
 /* a.dash-btn 默认带下划线,这里去掉让锚点视觉等同于 button */
 a.dash-btn { text-decoration: none; }
 .dash-pluginconf-msg {
+  margin-top: 10px;
   font-size: 12px; min-height: 16px;
   display: flex; flex-direction: column; gap: 4px;
 }
-/* 无内容时整块隐藏(包括 min-height + gap),写入文案后自动显现。 */
+/* 无内容时整块隐藏(包括 margin-top + min-height + gap),写入文案后自动显现。 */
 .dash-pluginconf-msg:empty { display: none; }
 .dash-pluginconf-changes {
   list-style: none; padding: 6px 10px; margin: 0;
