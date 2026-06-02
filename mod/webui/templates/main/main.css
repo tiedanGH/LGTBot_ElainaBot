@@ -117,9 +117,8 @@ body {
 .tabs {
   display: flex; gap: 4px; margin-bottom: 14px;
   border-bottom: 1px solid var(--border);
-  /* 横向溢出可滚动 —— 桌面端不溢出时滚动条天然不显示;移动端 tab 多 / 窄
-     屏时用户可水平拖动看到被截掉的标签,而非自动换行成 2 行让顶部变高。 */
-  overflow-x: auto;
+  overflow-x: auto;                    /* 横向溢出可滚动 */
+  overflow-y: hidden;                  /* 显式锁定纵向不滚动 */
   flex-wrap: nowrap;
   -webkit-overflow-scrolling: touch;   /* iOS Safari 惯性滚动 */
   scrollbar-width: thin;               /* Firefox */
