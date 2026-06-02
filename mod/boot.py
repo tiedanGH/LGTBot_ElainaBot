@@ -17,7 +17,6 @@ import os
 import sys
 import ctypes
 import glob
-import shutil
 
 from core.base.logger import get_logger, PLUGIN
 
@@ -40,42 +39,8 @@ CONF_PATH  = os.path.join(ENGINE_DIR, 'lgtbot.json')
 USER_CACHE_DB = os.path.join(DATA_DIR, 'user_cache.db')
 
 
-# ──────── 旧版数据迁移（一次性）───────────────────────────────────────────
-# 老版本把 lgtbot.db / images/ 直接放在 data/ 根，与插件用户数据混在一起。
-# 现在统一搬到 data/engine/，让 data/ 根目录只剩 config.yaml / user_cache.db
-# 这种「插件级」资源。迁移规则：
-#   · 旧路径存在 + 新路径不存在 → shutil.move 一次到位
-#   · 新路径已存在 → 跳过（视为已迁移完成，不强删旧路径，让用户自行清理）
-#   · 任何异常 → log.warning 不阻塞启动
-# Linux 上 shutil.move 等价 rename，对已被 SQLite / engine 打开的 fd 无副作用
-# （inode 不变）；Windows 不支持本插件，无需考虑文件占用。
-
-def _migrate_legacy_paths():
-    """一次性把老版本 data/ 根下的引擎数据搬入 data/engine/"""
-    pairs = [
-        (os.path.join(DATA_DIR, 'lgtbot.db'),     os.path.join(ENGINE_DIR, 'lgtbot.db')),
-        (os.path.join(DATA_DIR, 'lgtbot.db-wal'), os.path.join(ENGINE_DIR, 'lgtbot.db-wal')),
-        (os.path.join(DATA_DIR, 'lgtbot.db-shm'), os.path.join(ENGINE_DIR, 'lgtbot.db-shm')),
-        (os.path.join(DATA_DIR, 'images'),        os.path.join(ENGINE_DIR, 'images')),
-    ]
-    for src, dst in pairs:
-        if not os.path.exists(src):
-            continue
-        if os.path.exists(dst):
-            # 新路径已就位（含本次 mkdir(ENGINE_DIR) 后的空目录），不强迁
-            continue
-        try:
-            shutil.move(src, dst)
-            log.info(f'迁移引擎数据: {src} → {dst}')
-        except Exception as e:
-            log.warning(f'迁移失败 {src} → {dst}: {e}')
-
-
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(ENGINE_DIR, exist_ok=True)
-# 迁移必须在 mkdir(IMG_PATH) 之前 —— 否则 engine/images/ 已存在会让
-# shutil.move(data/images, engine/images) 退化成「移动到子目录」而非重命名
-_migrate_legacy_paths()
 os.makedirs(IMG_PATH, exist_ok=True)
 
 
