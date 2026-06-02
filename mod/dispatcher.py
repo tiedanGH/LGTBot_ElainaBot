@@ -195,7 +195,7 @@ def _read_troubleshooting() -> str:
         _TROUBLESHOOTING_PATH, _DEFAULT_TROUBLESHOOTING, 'troubleshooting.txt')
 
 
-@handler(r'^菜单$',
+@handler(r'^/?菜单$',
          name='LGTBot 欢迎菜单',
          desc='触发欢迎菜单 (等同于单独 @bot)',
          priority=50,
@@ -221,7 +221,7 @@ async def lgtbot_welcome_menu(event, match):
     await _send_welcome_menu(event)
 
 
-@handler(r'^更多功能$',
+@handler(r'^/?更多功能$',
          name='LGTBot 更多功能',
          desc='展示「更多功能」子菜单',
          priority=50,
@@ -248,7 +248,7 @@ async def lgtbot_more_features(event, match):
     await event.reply(md, buttons=buttons.build_more_features_buttons())
 
 
-@handler(r'^更新公告$',
+@handler(r'^/?更新公告$',
          name='LGTBot 更新公告',
          desc='读取 data/update_notice.txt 实时返回公告内容',
          priority=50,
@@ -272,7 +272,7 @@ async def lgtbot_update_notice(event, match):
     await event.reply(md)
 
 
-@handler(r'^疑难解答$',
+@handler(r'^/?疑难解答$',
          name='LGTBot 疑难解答',
          desc='读取 data/troubleshooting.txt 实时返回常见问题与解答',
          priority=50,
