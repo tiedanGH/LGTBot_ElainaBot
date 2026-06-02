@@ -31,6 +31,7 @@
 #include <csetjmp>
 #include <cstring>
 #include <ctime>
+#include <exception>       // std::set_terminate
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>      // mkdir
@@ -335,8 +336,64 @@ void SigAbrtHandler(int sig, siginfo_t* /*info*/, void* /*ucontext*/) {
     raise(sig);
 }
 
+// ──────── 第三道防线:std::set_terminate handler ──────────────────────────
+// 处理 SIGSEGV/SigAbrtHandler 兜不住的崩溃路径:C++ 异常 unwind 找不到 catch
+// → c++ runtime 调 std::terminate()。已知触发点:lgtbot 上游
+// match_child_client.cc::WaitForResponse_ 从 pipe 反序列化 protobuf 时,脏数据
+// 被解释成 16 亿元素长度,RepeatedPtrFieldBase::InternalExtend 抛 std::bad_alloc
+//
+// 默认 terminate 行为是调 abort(),走 glibc「双杀」逻辑:即便 SigAbrtHandler
+// 接住了第一次 raise(SIGABRT),abort() 也会强制把 handler 重置回 SIG_DFL 再
+// raise 一次,确保进程死亡。所以唯一可靠的接管点就是这个 terminate_handler ——
+// 它在异常 unwind 失败时由 c++ runtime 直接调用,**早于** abort()/SIGABRT 链路
+// 启动,有机会跳过 abort() 直接 execv 自启。
+//
+// 与 SigAbrtHandler(只在 post-SEGV 状态下接管)互补:本 handler 覆盖所有未捕获
+// 的 C++ 异常路径,无论之前有没有 SEGV。
+//
+// 必须永不返回(返回会让 c++ runtime 兜底调 abort())。只用 async-signal-safe
+// 路径:write/execv/_exit,绝不碰 Python C API(异常上下文 GIL 状态不可知)
+// 或 malloc(heap 可能已坏)。
+[[noreturn]] void OnCxxTerminate() noexcept {
+    // 防递归:execv 失败后哪怕只是个偶然又触发 terminate,第二次直接 _exit
+    // 让 supervisor 兜底,避免无限循环占用 CPU。
+    static volatile sig_atomic_t s_in_terminate = 0;
+    if (s_in_terminate) {
+        static const char nested[] = "[LGTBot] nested terminate, _exit\n";
+        ssize_t r = write(STDERR_FILENO, nested, sizeof(nested) - 1);
+        (void)r;
+        _exit(134);
+    }
+    s_in_terminate = 1;
+
+    static const char banner[] =
+        "\n[LGTBot] std::terminate trapped (uncaught C++ exception), forcing execv self-restart\n";
+    ssize_t r = write(STDERR_FILENO, banner, sizeof(banner) - 1);
+    (void)r;
+
+    // 把 SIGABRT/SIGSEGV/SIGBUS handler 全部重置成 SIG_DFL,以防 execv 失败
+    // 落回 abort 链路时又被我们自己的 handler 卷进双杀流程。
+    std::signal(SIGABRT, SIG_DFL);
+    std::signal(SIGSEGV, SIG_DFL);
+    std::signal(SIGBUS,  SIG_DFL);
+
+    if (g_exec_argv_ready && g_exec_path[0] && g_exec_argv[0]) {
+        execv(g_exec_path, g_exec_argv);
+        // execv 失败极罕见(sys.executable 失踪 / 文件系统只读等)
+        static const char fail[] = "[LGTBot] execv failed in terminate handler\n";
+        r = write(STDERR_FILENO, fail, sizeof(fail) - 1);
+        (void)r;
+    } else {
+        static const char noargs[] = "[LGTBot] no execv args stashed in terminate handler\n";
+        r = write(STDERR_FILENO, noargs, sizeof(noargs) - 1);
+        (void)r;
+    }
+    // 128 + SIGABRT(6) = 134,供 systemd / supervisor 识别异常退出语义
+    _exit(134);
+}
+
 // Python 启动时把 sys.executable + sys.argv 喂进来,固化到静态 buffer
-// 供 SigAbrtHandler 在 heap 已坏时使用。
+// 供 SigAbrtHandler / OnCxxTerminate 在 heap 已坏 / 异常上下文里使用。
 void SetRestartArgs(const std::string& exec_path, boost::python::list argv) {
     // ── 主程序路径 ──────────────────────────────────────────────
     size_t exec_len = exec_path.size();
@@ -857,6 +914,17 @@ bool ReleaseBotIfNoProcessingGames()
 BOOST_PYTHON_MODULE(LGTBot_ElainaBot)
 {
     namespace python = boost::python;
+
+    // 第一时间装好 C++ 异常 terminate 兜底 —— 从本 .so import 起就生效,不依赖
+    // 后续 Start() 调用。处理 lgtbot 内部抛了 std::bad_alloc 等却没人 catch 的
+    // 场景(典型触发点是上游 match_child_client.cc 从 pipe 反序列化 protobuf
+    // 时碰到脏数据,详情见 OnCxxTerminate 注释)。
+    //
+    // execv 实际生效仍需 Python 侧调用 set_restart_args() 把 sys.executable /
+    // sys.argv 喂进来;在此之前的早期崩溃(import 阶段) OnCxxTerminate 退化到
+    // _exit(134),让 systemd / supervisor 兜底重启。
+    std::set_terminate(OnCxxTerminate);
+
     python::def("start",                          Start);
     python::def("on_private_message",             OnPrivateMessage);
     python::def("on_public_message",              OnPublicMessage);
