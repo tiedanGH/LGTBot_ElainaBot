@@ -94,6 +94,14 @@ async def _setup():
     # 旧引擎那条路径上 dispatcher 仍会 mark_dirty，flusher 必须就位）
     userdb.start_flusher(_state.event_loop)
 
+    # 上一轮 C++ 异常 (std::terminate) 路径若留下了 pending_apology_* marker,
+    # 现在干净进程已经就绪,调度异步补发道歉 + 通知群推送（5s 延后,避开 boot 抖动）。
+    # 无 marker 时函数 no-op,失败不阻断后续引擎启动。
+    try:
+        callbacks.recover_pending_apologies()
+    except Exception as e:
+        log.warning(f'扫描待补发道歉异常: {e}')
+
     # ── 热重载检测：上一轮的引擎可能还活着 ─────────────────────────────────
     # 若此时再调 LGTBot_ElainaBot.start()，C++ 会覆盖 g_bot_core，旧引擎实例被丢弃，
     # 进行中的游戏全部失联（玩家命令进入新引擎找不到 match）。

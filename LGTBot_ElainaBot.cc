@@ -336,6 +336,91 @@ void SigAbrtHandler(int sig, siginfo_t* /*info*/, void* /*ucontext*/) {
     raise(sig);
 }
 
+// ──────── execv 前夜:写「待补发道歉」marker 文件 ─────────────────────────
+// OnCxxTerminate 不敢碰 Python(异常上下文 + heap 边缘);但用户体验上,玩家
+// 仍然该收到一句"游戏崩了"的道歉,管理员群也该收到崩溃通知。折衷:崩溃的
+// 这一刻只用 async-signal-safe syscall 把"该发什么、发给谁"写到一个 marker
+// 文件,execv 重启后由干净进程的 Python 侧扫这个目录,读出来异步补发。
+//
+// 文件:`<g_crash_dump_dir>/pending_apology_<sec>_<pid>_<tid>.txt`
+// 格式 (Python 侧 callbacks.py::_parse_apology_marker 配套解析):
+//
+//   sig=cxx_terminate
+//   is_uid=0
+//   ts=1780439222
+//   uid_len=10
+//   uid=<10 字节原文>
+//   gid_len=8
+//   gid=<8 字节原文>
+//   msg_len=12
+//   msg=<12 字节原文,可含 \n / 任意字节>
+//
+// uid/gid/msg 走 length-prefix 是因为 user message 可能含换行 / 二进制字节,
+// 不想在 async-signal-safe 上下文里写 escape 代码。
+//
+// 所有调用都是 async-signal-safe:mkdir/clock_gettime/getpid/syscall/open/
+// write/close,以及上面已有的 as_write_* 手写工具(只调 write(2))。
+inline void WriteApologyMarker() noexcept {
+    if (g_crash_dump_dir[0] == '\0') return;
+    (void)mkdir(g_crash_dump_dir, 0755);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    pid_t pid = getpid();
+    pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
+
+    // 拼路径:<dir>/pending_apology_<sec>_<pid>_<tid>.txt
+    char path[1024];
+    size_t len = 0;
+    auto try_append = [&](const char* s) -> bool {
+        size_t n = std::strlen(s);
+        if (len + n + 1 > sizeof(path)) return false;
+        std::memcpy(path + len, s, n);
+        len += n;
+        path[len] = '\0';
+        return true;
+    };
+    char numbuf[24];
+    if (!try_append(g_crash_dump_dir)) return;
+    if (!try_append("/pending_apology_")) return;
+    if (!try_append(as_uint_to_dec((unsigned long)ts.tv_sec, numbuf + sizeof(numbuf)))) return;
+    if (!try_append("_")) return;
+    if (!try_append(as_uint_to_dec((unsigned long)pid, numbuf + sizeof(numbuf)))) return;
+    if (!try_append("_")) return;
+    if (!try_append(as_uint_to_dec((unsigned long)tid, numbuf + sizeof(numbuf)))) return;
+    if (!try_append(".txt")) return;
+
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return;
+
+    as_write_str(fd, "sig=cxx_terminate\n");
+    as_write_str(fd, "is_uid=");
+    as_write_uint(fd, (unsigned long)t_crash_is_uid);
+    as_write_str(fd, "\nts=");
+    as_write_uint(fd, (unsigned long)ts.tv_sec);
+
+    size_t ul = std::strlen(t_crash_uid);
+    as_write_str(fd, "\nuid_len=");
+    as_write_uint(fd, (unsigned long)ul);
+    as_write_str(fd, "\nuid=");
+    as_write_n(fd, t_crash_uid, ul);
+
+    size_t gl = std::strlen(t_crash_gid);
+    as_write_str(fd, "\ngid_len=");
+    as_write_uint(fd, (unsigned long)gl);
+    as_write_str(fd, "\ngid=");
+    as_write_n(fd, t_crash_gid, gl);
+
+    size_t ml = std::strlen(t_crash_msg);
+    as_write_str(fd, "\nmsg_len=");
+    as_write_uint(fd, (unsigned long)ml);
+    as_write_str(fd, "\nmsg=");
+    as_write_n(fd, t_crash_msg, ml);
+
+    as_write_str(fd, "\n");
+    close(fd);
+}
+
 // ──────── 第三道防线:std::set_terminate handler ──────────────────────────
 // 处理 SIGSEGV/SigAbrtHandler 兜不住的崩溃路径:C++ 异常 unwind 找不到 catch
 // → c++ runtime 调 std::terminate()。已知触发点:lgtbot 上游
@@ -370,6 +455,9 @@ void SigAbrtHandler(int sig, siginfo_t* /*info*/, void* /*ucontext*/) {
         "\n[LGTBot] std::terminate trapped (uncaught C++ exception), forcing execv self-restart\n";
     ssize_t r = write(STDERR_FILENO, banner, sizeof(banner) - 1);
     (void)r;
+
+    // 把崩溃上下文写到 marker 文件,execv 后干净进程会扫到并补发道歉 + 通知。
+    WriteApologyMarker();
 
     // 把 SIGABRT/SIGSEGV/SIGBUS handler 全部重置成 SIG_DFL,以防 execv 失败
     // 落回 abort 链路时又被我们自己的 handler 卷进双杀流程。

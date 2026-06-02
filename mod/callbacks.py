@@ -63,8 +63,14 @@ CRASH_NOTIFY_GROUP: str = ''
 # 主动消息(无 msg_id 引用),正式环境私信主动消息一律被拒。所以把沙箱测试
 # 账号的 openid 填进来:这些用户的私信跳过被动配额,直接走主动消息直推
 SANDBOX_DM_USERS: frozenset = frozenset()
-# 信号编号 → 名称,日志里更可读
-_SIG_NAMES = {6: 'SIGABRT', 7: 'SIGBUS', 11: 'SIGSEGV'}
+# 信号编号 → 名称,日志里更可读。
+# 数字 key 对应 SigSegvHandler 路径(C++ bridge 直接传 int);字符串 key
+# 对应 OnCxxTerminate 写入 marker 文件里的 sig=<kind> 字段(目前只有
+# cxx_terminate 一种,std::terminate / uncaught C++ exception 路径)。
+_SIG_NAMES = {
+    6: 'SIGABRT', 7: 'SIGBUS', 11: 'SIGSEGV',
+    'cxx_terminate': 'C++ 异常未捕获',
+}
 _crash_handled = False             # 防多线程并发崩溃时重复触发善后
 
 
@@ -255,6 +261,163 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
             await sender.send_to_group(notify_group, md)
     except Exception as e:
         log.warning(f'崩溃通知群推送失败 ({notify_group}): {e}')
+
+
+# ──────── 上一轮 C++ terminate 路径补发道歉/通知 ─────────────────────────
+# 触发流:lgtbot 内部抛 std::bad_alloc 等 C++ 异常未被 catch → OnCxxTerminate
+# 在 LGTBot_ElainaBot.cc 内执行:
+#   1. async-signal-safe 写 marker 文件
+#      `<plugin_dir>/LGTBot_CRASH_DUMPS/pending_apology_<sec>_<pid>_<tid>.txt`
+#   2. execv 重启整进程
+# 新进程 @on_load 调本模块 ``recover_pending_apologies``,异步补发道歉 + 通知,
+# 然后删 marker。
+#
+# 与 SigSegvHandler → cb_lgtbot_crashed 路径互补:那条路径是「崩溃当下同步发」,
+# 这条是「崩溃后重启再补发」—— 因为 OnCxxTerminate 跑在 c++ 异常上下文里,
+# Python C API / heap 都不可信,只能落地到文件再让干净进程接力。
+_PENDING_APOLOGY_PREFIX = 'pending_apology_'
+_PENDING_APOLOGY_SUFFIX = '.txt'
+# 启动后延迟 5s 再补发 —— 让 @on_load 完成、bot manager 就绪、网络通畅
+_BELATED_APOLOGY_DELAY_S = 5.0
+
+
+def recover_pending_apologies() -> None:
+    """启动时调一次。扫 LGTBot_CRASH_DUMPS/pending_apology_*.txt,有就异步补发。
+
+    必须在 ``state.event_loop`` 已就绪后调用(我们的协程要走它)。
+    不阻塞调用方 —— 每个 marker 是独立的 ``run_coroutine_threadsafe`` 投递。
+    """
+    dump_dir = os.path.join(boot.PLUGIN_DIR, 'LGTBot_CRASH_DUMPS')
+    if not os.path.isdir(dump_dir):
+        return
+    try:
+        names = sorted(
+            n for n in os.listdir(dump_dir)
+            if n.startswith(_PENDING_APOLOGY_PREFIX) and n.endswith(_PENDING_APOLOGY_SUFFIX)
+        )
+    except OSError as e:
+        log.warning(f'扫描崩溃 marker 目录失败 ({dump_dir}): {e}')
+        return
+    if not names:
+        return
+
+    loop = state.event_loop
+    if loop is None or loop.is_closed():
+        log.warning(f'event_loop 未就绪,延后补发 {len(names)} 条道歉(marker 保留)')
+        return
+
+    log.warning('=' * 60)
+    log.warning(f'⏪ 发现 {len(names)} 个上一轮 C++ 异常未捕获的待补发道歉,启动后将异步补发')
+    log.warning('=' * 60)
+    for name in names:
+        path = os.path.join(dump_dir, name)
+        try:
+            info = _parse_apology_marker(path)
+        except Exception as e:
+            log.error(f'解析崩溃 marker 失败 {name}: {e},移到 .bad/')
+            _quarantine_marker(path)
+            continue
+        try:
+            asyncio.run_coroutine_threadsafe(_belated_apology(path, info), loop)
+        except Exception as e:
+            log.error(f'调度补发任务失败 ({name}): {e}')
+
+
+def _parse_apology_marker(path: str) -> dict:
+    """解析 KV + length-prefix 格式;返回 {sig, is_uid(bool), ts, uid, gid, msg}。
+
+    格式约定见 ``LGTBot_ElainaBot.cc::WriteApologyMarker`` 注释。``*_len=N``
+    后紧跟的一行 ``<name>=<N 字节原文>\\n``,N 字节内可含任意字节(换行 / 二进制)。
+    """
+    with open(path, 'rb') as f:
+        raw = f.read()
+    result: dict = {}
+    i = 0
+    n = len(raw)
+    while i < n:
+        nl = raw.find(b'\n', i)
+        if nl < 0:
+            break
+        line = raw[i:nl]
+        i = nl + 1
+        eq = line.find(b'=')
+        if eq < 0:
+            continue
+        key = line[:eq].decode('ascii', errors='replace')
+        value = line[eq + 1:]
+        if key.endswith('_len'):
+            try:
+                length = int(value)
+            except ValueError:
+                continue
+            name = key[:-4]
+            prefix = name.encode('ascii') + b'='
+            if not raw[i:].startswith(prefix):
+                continue
+            i += len(prefix)
+            payload = raw[i:i + length]
+            i += length
+            if i < n and raw[i:i + 1] == b'\n':
+                i += 1
+            result[name] = payload.decode('utf-8', errors='replace')
+        else:
+            result[key] = value.decode('utf-8', errors='replace')
+    # is_uid 规范化为 bool
+    result['is_uid'] = (result.get('is_uid', '0') == '1')
+    return result
+
+
+async def _belated_apology(marker_path: str, info: dict) -> None:
+    """异步补发道歉 + 通知。无论成功失败都删 marker,避免反复打扰玩家/管理员。"""
+    await asyncio.sleep(_BELATED_APOLOGY_DELAY_S)
+    try:
+        uid: str = info.get('uid', '') or ''
+        gid: str = info.get('gid', '') or ''
+        is_uid: bool = bool(info.get('is_uid', False))
+        msg: str = info.get('msg', '') or ''
+        sig_kind: str = info.get('sig', 'cxx_terminate') or 'cxx_terminate'
+        sig_name = _SIG_NAMES.get(sig_kind, sig_kind)
+        target = (f'用户 {uid}' if is_uid else f'群聊 {gid} 用户 {uid}')
+        preview = msg[:80].replace('\n', ' ')
+        msg_len = len(preview)
+
+        log.error('=' * 60)
+        log.error(f'⏪ 补发上次崩溃道歉 ({sig_name})')
+        log.error(f'   触发源: {target}')
+        log.error(f'   消息内容: {preview!r}')
+        log.error(f'   marker: {os.path.basename(marker_path)}')
+        log.error('=' * 60)
+
+        coros = []
+        notify_group = CRASH_NOTIFY_GROUP
+        if notify_group:
+            coros.append(_try_send_crash_notification(
+                notify_group, sig_name, uid, gid, is_uid, msg_len))
+        target_id = uid if is_uid else gid
+        if target_id:
+            coros.append(_try_send_crash_apology(target_id, is_uid))
+        if coros:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*coros, return_exceptions=True),
+                    timeout=_CRASH_SEND_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                log.warning(f'补发道歉超时 (>{_CRASH_SEND_TIMEOUT_S:.0f}s): {os.path.basename(marker_path)}')
+    except Exception as e:
+        log.error(f'补发道歉异常: {e}')
+    finally:
+        try:
+            os.remove(marker_path)
+        except OSError as e:
+            log.warning(f'删除 marker 失败 {marker_path}: {e}')
+
+
+def _quarantine_marker(path: str) -> None:
+    """格式损坏的 marker 改名 .bad,避免下次启动反复尝试解析。"""
+    try:
+        os.rename(path, path + '.bad')
+    except OSError:
+        pass
 
 
 # ──────── 「刷新按钮使用说明」教学提示(game_started 触发,紧跟开局公告发出) ────
