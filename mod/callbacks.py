@@ -52,6 +52,16 @@ _CRASH_APOLOGY_MD = (
     '\n'
     '崩溃报告已自动转发至官方群，非常抱歉给您带来不便，我们会尽快修复 🌹'
 )
+# 补发路径(OnCxxTerminate marker)专用文案:发出时进程已经重启完成,原本
+# 「30 秒后自动重启」会误导玩家以为还要等 —— 改成「已恢复服务」更贴合实情。
+_CRASH_APOLOGY_MD_BELATED = (
+    '## 💥 游戏模块发生致命错误\n'
+    '\n'
+    'LGT-Bot 引擎发生未预料的崩溃，**进行中的对局已丢失**。\n'
+    '机器人已自动重启恢复服务，现在可以继续使用 ✅\n'
+    '\n'
+    '崩溃报告已自动转发至官方群，非常抱歉给您带来不便，我们会尽快修复 🌹'
+)
 # 严重问题通知群 openid —— 由 config.py::_apply_runtime_tunables 按 yaml 配置覆盖。
 # 空字符串 = 不推送。设了的话,引擎崩溃时除了给玩家发道歉,还向此群主动推送
 # 一条崩溃报告。通常填管理员监控的全量群 —— 该群在 QQ 后台开了全量推送权限,
@@ -196,14 +206,22 @@ async def _post_send_countdown(sig_name: str) -> None:
         log.error(f'os.execv 失败，等待 supervisor 兜底: {e}')
 
 
-async def _try_send_crash_apology(target_id: str, is_uid: bool) -> None:
+async def _try_send_crash_apology(target_id: str, is_uid: bool,
+                                  *, is_belated: bool = False) -> None:
     """走标准发送通道把道歉送达 —— 复用现有 quota/sender 设施。
 
-    注意不能挂额外按钮 —— 进程马上要 execv 重启,任何 callback 都会落空。
+    ``is_belated=True`` 走 ``_CRASH_APOLOGY_MD_BELATED`` —— 这条路径下进程已经
+    重启完成,「30 秒后自动重启」不再适用,改为「已恢复服务」。SIGSEGV 路径
+    保持默认 False,文案不变。
+
+    SIGSEGV 路径下注意不挂额外按钮 —— 进程马上要 execv 重启,任何 callback 都
+    会落空;补发路径下进程已稳定,挂按钮其实安全,但为了文案一致这里也共用
+    同一组 build_support_buttons(那组本身是 link 按钮,不依赖回调)。
     """
+    md = _CRASH_APOLOGY_MD_BELATED if is_belated else _CRASH_APOLOGY_MD
     try:
-        page_logs.log_outgoing(target_id, is_uid, _CRASH_APOLOGY_MD)
-        await _send_text_quota_managed(target_id, is_uid, _CRASH_APOLOGY_MD,
+        page_logs.log_outgoing(target_id, is_uid, md)
+        await _send_text_quota_managed(target_id, is_uid, md,
                                        buttons.build_support_buttons())
     except Exception as e:
         log.warning(f'崩溃道歉发送失败 ({target_id}): {e}')
@@ -211,12 +229,17 @@ async def _try_send_crash_apology(target_id: str, is_uid: bool) -> None:
 
 async def _try_send_crash_notification(notify_group: str, sig_name: str,
                                        uid: str, gid: str, is_uid: bool,
-                                       msg_len: int) -> None:
+                                       msg_len: int,
+                                       *, is_belated: bool = False) -> None:
     """向严重问题通知群推送一条**主动消息**汇报崩溃。
 
     用 ``sender.send_to_group(group_id, content)`` 不带 ``msg_id``/``event_id``
     走 push API —— 仅在通知群 QQ 后台给本 bot 开了「全量推送」权限时能落地。
     没权限就会被 QQ 拒,这里只打 warning 不报错,30s 后 execv 照常进行。
+
+    ``is_belated=True`` 走补发路径(OnCxxTerminate marker):此时进程已经重启
+    完成,把「进程将在 N 秒后自动重启」这行替换为「机器人已自动重启恢复服务」,
+    避免管理员误以为还在等。SIGSEGV 路径默认 False,文案不变。
 
     **安全约束:** 本消息走 bot 自己的 appid 发出,QQ 风控同样适用 —— 因此
     **不把触发崩溃的用户原文(preview)拼进 markdown**,避免用户故意发违规/
@@ -237,6 +260,11 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
     else:
         target_block = f'群聊 {gid}\n用户 {uid}'
 
+    if is_belated:
+        status_line = '机器人已自动重启恢复服务 ✅'
+    else:
+        status_line = f'进程将在 **{_LGTBOT_CRASH_DELAY_S:.0f} 秒**后自动重启···'
+
     md = (
         '$$\\textcolor{red}{\\Huge\\text{错误推送}}$$'
         '\n'
@@ -251,7 +279,7 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
         f'- 消息长度: {msg_len} 字符（详见服务端日志）\n'
         '```\n'
         '\n'
-        f'进程将在 **{_LGTBOT_CRASH_DELAY_S:.0f} 秒**后自动重启···\n'
+        f'{status_line}\n'
         '\n'
         '> 💡 此消息为自动推送，请尽快联系开发者排查修复'
     )
@@ -392,10 +420,12 @@ async def _belated_apology(marker_path: str, info: dict) -> None:
         notify_group = CRASH_NOTIFY_GROUP
         if notify_group:
             coros.append(_try_send_crash_notification(
-                notify_group, sig_name, uid, gid, is_uid, msg_len))
+                notify_group, sig_name, uid, gid, is_uid, msg_len,
+                is_belated=True))
         target_id = uid if is_uid else gid
         if target_id:
-            coros.append(_try_send_crash_apology(target_id, is_uid))
+            coros.append(_try_send_crash_apology(target_id, is_uid,
+                                                 is_belated=True))
         if coros:
             try:
                 await asyncio.wait_for(
