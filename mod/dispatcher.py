@@ -150,6 +150,12 @@ _UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
 # 首次访问时写入的默认内容
 _DEFAULT_UPDATE_NOTICE = '暂无更新公告'
 
+# 「重要更新」置顶区域 —— 与「更新公告」配合显示在常规代码块的**上方**。
+# 与 update_notice 的关键区别:
+#   · 内容为空 / 文件不存在 → 完全不渲染该区块(避免出现空白小标题)
+#   · 不自动写入默认占位 —— 这是"按需添加的置顶提示",平时应处于"不存在"状态
+_IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
+
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 # 首次访问时写入的默认 Q&A
 _DEFAULT_TROUBLESHOOTING = (
@@ -188,6 +194,23 @@ def _read_txt_with_default(path: str, default: str, label: str) -> str:
 def _read_update_notice() -> str:
     return _read_txt_with_default(
         _UPDATE_NOTICE_PATH, _DEFAULT_UPDATE_NOTICE, 'update_notice.txt')
+
+
+def _read_important_update() -> str:
+    """读 ``important_update.txt`` 并 strip。文件缺失 / 内容全空白 → 返回 ``''``。
+
+    跟 ``_read_txt_with_default`` 不同:**不自动创建**也不返回默认值 —— 这是
+    "按需置顶提示",不该有自动写入的占位文件污染 ``data/``。空返回让
+    ``lgtbot_update_notice`` 把整个「重要更新」区块跳过,不留空标题。
+    """
+    if not os.path.isfile(_IMPORTANT_UPDATE_PATH):
+        return ''
+    try:
+        with open(_IMPORTANT_UPDATE_PATH, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception as e:
+        log.warning(f'读取 important_update.txt 失败: {e}')
+        return ''
 
 
 def _read_troubleshooting() -> str:
@@ -254,21 +277,27 @@ async def lgtbot_more_features(event, match):
          priority=50,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_update_notice(event, match):
-    """收到「更新公告」(文本或按钮)→ 把 txt 文件内容包在代码块里 reply。"""
+    """收到「更新公告」(文本或按钮)→ 把 txt 文件内容包在代码块里 reply。
+
+    若 ``important_update.txt`` 非空,在常规「公告详情」代码块上方再渲染一个
+    ``重要更新`` 代码块作为置顶提示;为空时该区块不出现,UI 与旧版完全一致。
+    """
     if event.is_interaction:
         try:
             await event.ack_interaction(code=0)
         except Exception:
             pass
     notice = _read_update_notice()
-    # 代码块包裹 —— 保留换行 / 缩进 / 特殊字符原样显示,管理员可以贴格式化文本
-    md = (
-        '## 📢 更新公告\n'
-        '\n'
-        '---\n'
-        '\n'
-        f'```公告详情\n{notice}\n```'
-    )
+    important = _read_important_update()
+    # 代码块包裹 —— 保留换行 / 缩进 / 特殊字符原样显示,管理员可以贴格式化文本。
+    # 「重要更新」代码块标题与「公告详情」对称,留出代码块标签作小标题,QQ
+    # 客户端会显著区分两段内容。
+    parts = ['## 📢 更新公告', '', '---', '']
+    if important:
+        parts.append(f'```重要更新\n{important}\n```')
+        parts.append('')
+    parts.append(f'```公告详情\n{notice}\n```')
+    md = '\n'.join(parts)
     await event.reply(md)
 
 

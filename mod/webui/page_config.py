@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-「配置管理」标签 —— 四块编辑器集中管理本插件的所有用户可编辑文本/配置:
+「配置管理」标签 —— 五块编辑器集中管理本插件的所有用户可编辑文本/配置:
 
-  1. 🔧 插件配置 (data/config.yaml)        + 「前往插件模块」link + 热重载按钮
-  2. 📢 更新公告 (data/update_notice.txt)  保存即时热加载(下次指令触发就生效)
-  3. ❓ 疑难解答 (data/troubleshooting.txt) 同上
-  4. ⚙️ 引擎配置 (data/engine/lgtbot.json)  保存后需重启 LGTBot 引擎才能生效
+  1. 🔧 插件配置 (data/config.yaml)         + 「前往插件模块」link + 热重载按钮
+  2. ⚠️ 重要更新 (data/important_update.txt) 置顶提示,空则不渲染区块
+  3. 📢 更新公告 (data/update_notice.txt)    保存即时热加载(下次指令触发就生效)
+  4. ❓ 疑难解答 (data/troubleshooting.txt)  同上
+  5. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
 
 保存全部走主框架 ``/api/config-file/save`` 端点(yaml/json/text format)——
 不在本插件自建 POST endpoint,复用主框架的注释保留 + 格式校验逻辑。
@@ -44,6 +45,7 @@ TAB_JS = _load('config/config.js')
 # ─────────────────────────────────────────────────────────────────────────
 
 _CONFIG_YAML_PATH = os.path.join(boot.DATA_DIR, 'config.yaml')
+_IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
 _UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 
@@ -95,10 +97,11 @@ def _read_engine_config() -> tuple[str, str]:
 def get_data() -> str:
     """返回可嵌入 ``<script id="config-data">`` 的 JSON 字符串。
 
-    四块编辑器的 abs_path / content / read_error 一次性提供,前端 cfgApplyData
+    五块编辑器的 abs_path / content / read_error 一次性提供,前端 cfgApplyData
     据此填充各个 textarea 与路径显示行。
     """
     cfg_content, cfg_err = _read_file(_CONFIG_YAML_PATH)
+    important_content, important_err = _read_file(_IMPORTANT_UPDATE_PATH)
     notice_content, notice_err = _read_file(_UPDATE_NOTICE_PATH)
     trouble_content, trouble_err = _read_file(_TROUBLESHOOTING_PATH)
     engine_content, engine_err = _read_engine_config()
@@ -108,6 +111,11 @@ def get_data() -> str:
             'abs_path': os.path.abspath(_CONFIG_YAML_PATH),
             'content': cfg_content,
             'read_error': cfg_err,
+        },
+        'important_update': {
+            'abs_path': os.path.abspath(_IMPORTANT_UPDATE_PATH),
+            'content': important_content,
+            'read_error': important_err,
         },
         'update_notice': {
             'abs_path': os.path.abspath(_UPDATE_NOTICE_PATH),

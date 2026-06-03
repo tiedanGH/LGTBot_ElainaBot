@@ -21,6 +21,12 @@ const cfgEditors = {
     msgId: 'cfg-yaml-msg', saveBtnId: 'cfg-yaml-save', revertBtnId: 'cfg-yaml-revert',
     saveHint: '，请点「🔁 热重载配置」即时下发到运行时',
   },
+  important: {
+    absPath: '', original: '', format: 'text',
+    editorId: 'cfg-important-editor', pathId: 'cfg-important-path',
+    msgId: 'cfg-important-msg', saveBtnId: 'cfg-important-save', revertBtnId: 'cfg-important-revert',
+    saveHint: '，下次发送「更新公告」指令时即生效；留空则不渲染该区块',
+  },
   notice: {
     absPath: '', original: '', format: 'text',
     editorId: 'cfg-notice-editor', pathId: 'cfg-notice-path',
@@ -44,6 +50,7 @@ const cfgEditors = {
 function cfgApplyData(data) {
   const map = {
     yaml: data.config_yaml,
+    important: data.important_update,
     notice: data.update_notice,
     trouble: data.troubleshooting,
     engine: data.engine_config,
