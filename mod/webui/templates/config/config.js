@@ -180,8 +180,10 @@ async function cfgReloadConfig() {
     } else {
       parts.push('<div class="dash-msg-info">（运行时参数与 yaml 一致，无变化）</div>');
     }
-    parts.push('<div class="dash-msg-info">📋 当前 admin_uids: ' +
-               (data.admin_count || 0) + ' 人</div>');
+    if (data.admin_changed) {
+      parts.push('<div class="dash-msg-info">📋 当前 admin_uids: ' +
+                 (data.admin_count || 0) + ' 人</div>');
+    }
     if (data.note) {
       parts.push('<div class="dash-msg-warn">⚠️ ' + escapeHtml(data.note) + '</div>');
     }
