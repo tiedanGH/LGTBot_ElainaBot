@@ -80,6 +80,7 @@ SANDBOX_DM_USERS: frozenset = frozenset()
 _SIG_NAMES = {
     6: 'SIGABRT', 7: 'SIGBUS', 11: 'SIGSEGV',
     'cxx_terminate': 'C++ 异常未捕获',
+    'sigabrt': 'SIGABRT (堆损坏 / double-free)',
 }
 _crash_handled = False             # 防多线程并发崩溃时重复触发善后
 
@@ -308,6 +309,16 @@ _PENDING_APOLOGY_SUFFIX = '.txt'
 # 启动后延迟 5s 再补发 —— 让 @on_load 完成、bot manager 就绪、网络通畅
 _BELATED_APOLOGY_DELAY_S = 5.0
 
+# ── 崩溃死循环熔断 ─────────────────────────────────────────────────────────
+# C++ 侧 abort-class handler(SigAbrtHandler / OnCxxTerminate)在 execv 前往
+# `LGTBot_CRASH_DUMPS/abort_restart_history` 追加一行重启时间戳。若 heap 腐败
+# 是确定性的,会每次重启又立刻 abort → 紧凑 execv 死循环。check_crash_loop()
+# 在 @on_load 读历史:窗口内重启 ≥ 阈值则判定死循环,暂停启动引擎(主框架仍
+# 运行)+ 告警,并清空历史 —— 人工修复后存盘触发热重载即自动复位重试。
+_ABORT_HISTORY_NAME = 'abort_restart_history'
+_CRASH_LOOP_WINDOW_S = 120.0       # 统计窗口
+_CRASH_LOOP_THRESHOLD = 4          # 窗口内重启达到该次数即熔断
+
 
 def recover_pending_apologies() -> None:
     """启动时调一次。扫 LGTBot_CRASH_DUMPS/pending_apology_*.txt,有就异步补发。
@@ -448,6 +459,102 @@ def _quarantine_marker(path: str) -> None:
         os.rename(path, path + '.bad')
     except OSError:
         pass
+
+
+def check_crash_loop() -> bool:
+    """读 abort_restart_history,判断是否进入崩溃死循环。返回 True = 已熔断。
+
+    调用方(``main.py @on_load``)在 True 时应**跳过启动 LGTBot 引擎**,让主框架
+    保持运行但暂停游戏功能,避免无限 execv 烧 CPU。
+
+    熔断时清空历史 —— 引擎不启动 ⇒ 无 lgtbot 线程 ⇒ 不会再 abort,死循环被打断;
+    管理员修复后在 Web 面板存盘触发热重载,@on_load 再跑时历史已空,自动重试启动。
+    必须在 ``state.event_loop`` 就绪后调用(告警协程要走它)。
+    """
+    path = os.path.join(boot.PLUGIN_DIR, 'LGTBot_CRASH_DUMPS', _ABORT_HISTORY_NAME)
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            raw = f.read()
+    except OSError as e:
+        log.warning(f'读取 abort_restart_history 失败: {e}')
+        return False
+
+    now = time.time()
+    recent = []
+    for line in raw.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            t = float(line)
+        except ValueError:
+            continue
+        if 0 <= now - t <= _CRASH_LOOP_WINDOW_S:
+            recent.append(t)
+
+    if len(recent) >= _CRASH_LOOP_THRESHOLD:
+        # 熔断:清空历史(下次热重载重新计数),告警,返回 True
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        log.critical('=' * 60)
+        log.critical(f'🛑 检测到 LGTBot 崩溃死循环：{_CRASH_LOOP_WINDOW_S:.0f}s 内自动重启 {len(recent)} 次')
+        log.critical('   ▸ 已暂停启动 LGTBot 引擎（主框架保持运行），避免无限 execv')
+        log.critical('   ▸ 查看 LGTBot_CRASH_DUMPS/ 下最新 crash_*.log 排查根因')
+        log.critical('   ▸ 修复后在 Web 面板保存任意配置触发热重载即可恢复引擎')
+        log.critical('=' * 60)
+        loop = state.event_loop
+        if loop is not None and not loop.is_closed():
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _alert_crash_loop_tripped(len(recent)), loop)
+            except Exception as e:
+                log.warning(f'调度崩溃熔断告警失败: {e}')
+        return True
+
+    # 未熔断:把历史裁剪成 recent 写回,防止文件无限增长
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            if recent:
+                f.write('\n'.join(str(int(t)) for t in recent) + '\n')
+    except OSError as e:
+        log.warning(f'裁剪 abort_restart_history 失败: {e}')
+    return False
+
+
+async def _alert_crash_loop_tripped(count: int) -> None:
+    """向通知群推送一条「崩溃死循环已熔断」主动消息。无通知群 / 无 sender 时静默跳过。"""
+    notify_group = CRASH_NOTIFY_GROUP
+    if not notify_group:
+        return
+    sender = helpers.get_sender('')
+    if sender is None:
+        log.warning('无可用 sender，跳过崩溃熔断告警')
+        return
+    md = (
+        '$$\\textcolor{red}{\\Huge\\text{严重告警}}$$'
+        '\n'
+        '## 🛑 LGT-Bot 崩溃死循环已熔断\n'
+        '\n'
+        f'> 引擎在 {_CRASH_LOOP_WINDOW_S:.0f} 秒内自动重启 {count} 次，停止尝试重启\n'
+        '\n'
+        '```当前状态\n'
+        '- 主框架仍在运行，但游戏功能发生致命错误无法启动\n'
+        '- 已自动保存 backtrace 用于崩溃排查\n'
+        '- 需在后台手动重启引擎才能恢复游戏模块运行\n'
+        '```\n'
+        '\n'
+        '> 💡 此消息为自动推送，请尽快联系开发者排查修复'
+    )
+    page_logs.log_outgoing(notify_group, False, md)
+    try:
+        with log_attribution.mark_outbound():
+            await sender.send_to_group(notify_group, md)
+    except Exception as e:
+        log.warning(f'崩溃熔断告警推送失败 ({notify_group}): {e}')
 
 
 # ──────── 「刷新按钮使用说明」教学提示(game_started 触发,紧跟开局公告发出) ────

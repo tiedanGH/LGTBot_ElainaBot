@@ -97,10 +97,9 @@ thread_local volatile sig_atomic_t t_crash_is_uid = 0;
 // 留 1024 字节足够装绝对路径 + 后缀。空字符串 = 推导失败,dump 跳过。
 char g_crash_dump_dir[1024] = {0};
 
-// ──────── post-SEGV SIGABRT 兜底所需的全局状态 ─────────────────────────────
-// 背景见下方 InstallSigSegvHandler 上方的大段注释。在这里前向声明是因为
-// SigSegvHandler 自身要在 siglongjmp 之前置 g_post_segv = 1,而处理器函数
-// 定义在文件靠前位置;后续 SigAbrtHandler / SetRestartArgs 才用到这些 buffer。
+// ──────── SIGABRT / terminate execv 自启所需的全局状态 ──────────────────────
+// SetRestartArgs 把 sys.executable + sys.argv 固化进这些静态 buffer,SigAbrtHandler
+// / OnCxxTerminate 在 heap 已坏时无需任何分配即可直接 execv。
 static constexpr size_t kExecPathMax = 4096;
 static constexpr size_t kExecArgvBufMax = 16384;
 static constexpr int    kExecArgvMax = 64;
@@ -108,7 +107,6 @@ char g_exec_path[kExecPathMax] = {0};
 char g_exec_argv_buf[kExecArgvBufMax] = {0};
 char* g_exec_argv[kExecArgvMax + 1] = {nullptr};
 volatile sig_atomic_t g_exec_argv_ready = 0;
-volatile sig_atomic_t g_post_segv = 0;
 volatile sig_atomic_t g_already_aborting = 0;
 
 // ──────── async-signal-safe 串行写工具 ──────────────────────────────────────
@@ -212,7 +210,7 @@ inline void DumpCrashToFile(int sig, siginfo_t* info) {
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd < 0) return;
 
-    as_write_str(fd, "=== LGTBot SEGV captured ===\n");
+    as_write_str(fd, "=== LGTBot crash captured ===\n");
     as_write_str(fd, "time_sec: ");  as_write_uint(fd, (unsigned long)ts.tv_sec);
     as_write_str(fd, "\ntime_nsec: "); as_write_uint(fd, (unsigned long)ts.tv_nsec);
     as_write_str(fd, "\nsignal: ");  as_write_uint(fd, (unsigned long)sig);
@@ -252,12 +250,6 @@ void SigSegvHandler(int sig, siginfo_t* info, void* /*ucontext*/)
         ssize_t r = write(STDERR_FILENO, banner, sizeof(banner) - 1);
         (void)r;
 
-        // 进入「post-SEGV doomed」状态:heap 现在可能已损坏,任何后续 malloc/
-        // free(包括其他工作线程退出时的 tcache_thread_shutdown)都可能触发
-        // double-free → SIGABRT。在 longjmp 之前先把这个 flag 立起来,SigAbrt
-        // Handler 一旦看到就立即 execv 自启,避免主线程 30s 倒计时跑不完。
-        g_post_segv = 1;
-
         // 在 longjmp 之前把栈和上下文落盘 —— 即便后续 backtrace 自己再次出错
         // (nested SEGV) 也会被 handler 二次进入时 t_sigsegv_armed==0 分支
         // 走 SIG_DFL 终结,跟改造前等价,不比 baseline 更差。
@@ -287,19 +279,27 @@ inline void DeriveCrashDumpDir(const char* game_path) {
 }
 
 // ──────── 二次崩溃兜底:SIGABRT 拦截 + 预存 execv 参数 ───────────────────────
-// 背景:SEGV 后 lgtbot 内部状态损坏,任何后续 malloc/free 都可能触发 double-free
-//   1. ``Start`` 时 Python 把 ``sys.executable`` + ``sys.argv`` 通过
-//      ``set_restart_args`` 喂进来,在静态 buffer 里固化成 C 串,避免 SIGABRT
-//      handler 临时分配触发二次崩溃。
-//   2. SigSegvHandler 在 siglongjmp 之前置 ``g_post_segv = 1``。
-//   3. 加装 SigAbrtHandler:`g_post_segv == 1` 时立刻 ``execv()`` 整进程自启
-//      (execv 是 async-signal-safe,不分配也不依赖 heap),其他情况走 SIG_DFL。
-// 这样无论 30s 倒计时跑没跑完,只要进程出 SIGABRT 都能保证自启,玩家最多损失「道歉消息送达」这一点。
-// 全局状态 (g_exec_path / g_exec_argv / g_post_segv / g_already_aborting) 在
-// 文件靠前的全局变量区已声明 —— SigSegvHandler 也要置 g_post_segv。
+// 任何 SIGABRT 都意味着进程必死(glibc abort 的「双杀」逻辑:即便 handler 接住
+// 第一次 raise,abort 也会把 handler 重置成 SIG_DFL 再 raise 一次)。所以一律
+// execv 整进程自启 —— 永远比陪葬强。已知三种 abort 来源:
+//   1. SEGV 后 heap 损坏,工作线程退出时 tcache_thread_shutdown double-free;
+//   2. **静默 heap 腐败(无前置 SEGV)** 同样在 tcache_thread_shutdown 暴露;
+//   3. 其它 assert / abort()。
+//
+// 关键前置(Start 时 Python 调 set_restart_args):把 sys.executable + sys.argv
+// 固化进静态 buffer,handler 在 heap 已坏时无需任何分配即可 execv。
+//
+// 死循环熔断:若 heap 腐败是确定性的,会每次重启又立刻 abort → 紧凑 execv 死
+// 循环烧 CPU。handler 经 WriteApologyMarker 往 abort_restart_history 追加一行
+// 时间戳,Python 启动时 callbacks.check_crash_loop() 读历史,窗口内超阈值就暂停
+// 启动引擎(主框架保持运行)并告警,人工修复后热重载即复位。
+//
+// 全局状态 (g_exec_path / g_exec_argv / g_already_aborting) 在文件靠前已声明。
 
-void SigAbrtHandler(int sig, siginfo_t* /*info*/, void* /*ucontext*/) {
-    // 防 handler 自己 abort 进死循环
+inline void WriteApologyMarker(const char* sig_kind) noexcept;  // 定义见下方
+
+void SigAbrtHandler(int sig, siginfo_t* info, void* /*ucontext*/) {
+    // 防 handler 自己再 abort 进死循环(仅 execv 失败 fallback 路径可能触发)
     if (g_already_aborting) {
         std::signal(sig, SIG_DFL);
         raise(sig);
@@ -307,18 +307,21 @@ void SigAbrtHandler(int sig, siginfo_t* /*info*/, void* /*ucontext*/) {
     }
     g_already_aborting = 1;
 
-    // 非 post-SEGV 状态:正常 abort(比如其他错误用 assert),交还默认动作
-    if (!g_post_segv) {
-        std::signal(sig, SIG_DFL);
-        raise(sig);
-        return;
-    }
-
-    // post-SEGV abort: heap 已坏,趁还能跑系统调用立刻 execv 自启
     static const char banner[] =
-        "\n[LGTBot] post-SEGV SIGABRT trapped, forcing execv self-restart\n";
+        "\n[LGTBot] SIGABRT trapped, forcing execv self-restart\n";
     ssize_t r = write(STDERR_FILENO, banner, sizeof(banner) - 1);
     (void)r;
+
+    // 先落 marker + 重启时间戳(便宜、低故障风险),再尝试 backtrace dump
+    // —— 放弃 core 换 uptime;backtrace 万一在腐败 heap 上二次出错,补发 marker
+    // 与熔断计数也已先保住。两者都是 async-signal-safe。
+    WriteApologyMarker("sigabrt");
+    DumpCrashToFile(sig, info);
+
+    // 重置三个 handler 为默认,防 execv 失败回落 abort 链路时再被自己卷入双杀
+    std::signal(SIGABRT, SIG_DFL);
+    std::signal(SIGSEGV, SIG_DFL);
+    std::signal(SIGBUS,  SIG_DFL);
 
     if (g_exec_argv_ready && g_exec_path[0] && g_exec_argv[0]) {
         execv(g_exec_path, g_exec_argv);
@@ -360,7 +363,7 @@ void SigAbrtHandler(int sig, siginfo_t* /*info*/, void* /*ucontext*/) {
 //
 // 所有调用都是 async-signal-safe:mkdir/clock_gettime/getpid/syscall/open/
 // write/close,以及上面已有的 as_write_* 手写工具(只调 write(2))。
-inline void WriteApologyMarker() noexcept {
+inline void WriteApologyMarker(const char* sig_kind) noexcept {
     if (g_crash_dump_dir[0] == '\0') return;
     (void)mkdir(g_crash_dump_dir, 0755);
 
@@ -393,7 +396,9 @@ inline void WriteApologyMarker() noexcept {
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd < 0) return;
 
-    as_write_str(fd, "sig=cxx_terminate\n");
+    as_write_str(fd, "sig=");
+    as_write_str(fd, sig_kind);
+    as_write_str(fd, "\n");
     as_write_str(fd, "is_uid=");
     as_write_uint(fd, (unsigned long)t_crash_is_uid);
     as_write_str(fd, "\nts=");
@@ -419,6 +424,28 @@ inline void WriteApologyMarker() noexcept {
 
     as_write_str(fd, "\n");
     close(fd);
+
+    // 追加一行重启时间戳到 abort_restart_history,供 Python 启动时
+    // check_crash_loop() 做崩溃死循环熔断。复用 ts(本次崩溃时刻)。
+    char hist[1056];
+    size_t hl = 0;
+    auto hist_append = [&](const char* s) -> bool {
+        size_t n = std::strlen(s);
+        if (hl + n + 1 > sizeof(hist)) return false;
+        std::memcpy(hist + hl, s, n);
+        hl += n;
+        hist[hl] = '\0';
+        return true;
+    };
+    if (hist_append(g_crash_dump_dir) && hist_append("/abort_restart_history")) {
+        int hfd = open(hist, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (hfd >= 0) {
+            char nb[24];
+            as_write_str(hfd, as_uint_to_dec((unsigned long)ts.tv_sec, nb + sizeof(nb)));
+            as_write_str(hfd, "\n");
+            close(hfd);
+        }
+    }
 }
 
 // ──────── 第三道防线:std::set_terminate handler ──────────────────────────
@@ -457,7 +484,7 @@ inline void WriteApologyMarker() noexcept {
     (void)r;
 
     // 把崩溃上下文写到 marker 文件,execv 后干净进程会扫到并补发道歉 + 通知。
-    WriteApologyMarker();
+    WriteApologyMarker("cxx_terminate");
 
     // 把 SIGABRT/SIGSEGV/SIGBUS handler 全部重置成 SIG_DFL,以防 execv 失败
     // 落回 abort 链路时又被我们自己的 handler 卷进双杀流程。

@@ -16,7 +16,7 @@ __plugin_meta__ = {
     'name': 'LGTBot 机器人',
     'author': '铁蛋',
     'description': '基于 C++ 的 LGTBot 游戏裁判机器人',
-    'version': '2.1.9',
+    'version': '2.1.10',
     'github': 'https://github.com/tiedanGH/LGTBot_ElainaBot',
 }
 
@@ -101,6 +101,14 @@ async def _setup():
         callbacks.recover_pending_apologies()
     except Exception as e:
         log.warning(f'扫描待补发道歉异常: {e}')
+
+    # 崩溃死循环熔断:若 abort 类崩溃在短窗口内反复 execv 自启,暂停启动引擎,
+    # 主框架保持运行 + 告警,避免无限 execv 烧 CPU。修复后热重载自动复位重试。
+    try:
+        if callbacks.check_crash_loop():
+            return
+    except Exception as e:
+        log.warning(f'崩溃死循环检测异常: {e}')
 
     # ── 热重载检测：上一轮的引擎可能还活着 ─────────────────────────────────
     # 若此时再调 LGTBot_ElainaBot.start()，C++ 会覆盖 g_bot_core，旧引擎实例被丢弃，
