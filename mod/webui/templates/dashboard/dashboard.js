@@ -190,7 +190,7 @@ function dashRenderBridgeStatus(bridge) {
   if (dashRepoStatus === 'no_git') {
     detail.innerHTML = '<span class="dash-msg-warn">⚠️ 未检测到 .git/ '
                      + '(可能从插件市场安装)。点击右侧按钮把当前目录'
-                     + '初始化为 git 仓库,方可使用更新功能。</span>';
+                     + '初始化为 git 仓库，方可使用更新功能。</span>';
     btn.textContent = '📥 初始化为 git 仓库';
     btn.style.display = '';
     return;
@@ -423,7 +423,7 @@ async function dashInitRepo() {
     if (data.success) {
       parts.push('<div class="dash-msg-ok">' + escapeHtml(data.message) + '</div>');
       if (data.fallback_to_main) {
-        parts.push('<div class="dash-msg-warn">ℹ️ 当前版本 tag 在远端不存在,' +
+        parts.push('<div class="dash-msg-warn">ℹ️ 当前版本 tag 在远端不存在，' +
                    '已 fallback 到 origin/main</div>');
       }
     } else {

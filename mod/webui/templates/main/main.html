@@ -16,6 +16,8 @@ __BUILD_CSS__
 __LOGS_CSS__
 
 __USERS_CSS__
+
+__BACKUP_CSS__
   </style>
 </head>
 <body>
@@ -32,6 +34,7 @@ __USERS_CSS__
       <button class="tab active" data-tab="dashboard">📊 仪表盘</button>
       <button class="tab" data-tab="config">⚙️ 配置管理</button>
       <button class="tab" data-tab="build">🛠️ 引擎编译</button>
+      <button class="tab" data-tab="backup">💾 数据备份</button>
       <button class="tab" data-tab="logs">📜 消息日志</button>
       <button class="tab" data-tab="users">👥 用户数据</button>
     </div>
@@ -48,6 +51,10 @@ __CONFIG_HTML__
 
     <div id="tab-build" class="tab-pane">
 __BUILD_HTML__
+    </div>
+
+    <div id="tab-backup" class="tab-pane">
+__BACKUP_HTML__
     </div>
 
     <div id="tab-logs" class="tab-pane">
@@ -81,6 +88,7 @@ __USERS_HTML__
   <script id="build-data" type="application/json">__BUILD_DATA__</script>
   <script id="log-data" type="application/json">__LOG_DATA__</script>
   <script id="user-data" type="application/json">__USER_DATA__</script>
+  <script id="backup-data" type="application/json">__BACKUP_DATA__</script>
   <script>
 __MAIN_JS__
 
@@ -93,6 +101,8 @@ __BUILD_JS__
 __LOGS_JS__
 
 __USERS_JS__
+
+__BACKUP_JS__
   </script>
 </body>
 </html>

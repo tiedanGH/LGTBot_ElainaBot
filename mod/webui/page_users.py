@@ -37,7 +37,7 @@ TAB_JS = _load('users/users.js')
 def get_data() -> str:
     """返回 ``{query_time, total, users}`` JSON,可嵌入 ``<script id="user-data">``。
 
-    ``total`` 来自 ``userdb.count_users()``,反映 DB + _pending 的去重总数,
+    ``total`` 来自 ``userdb.count_users()``,反映 DB + _pending 的去重总数，
     与 ``users`` 列表长度可能不同(后者最多 1000 条)。前端用 total 显示
     「总用户: N」,用 users 渲染当前页。
     """

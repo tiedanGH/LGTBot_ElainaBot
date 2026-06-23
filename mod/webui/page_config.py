@@ -4,7 +4,7 @@
 「配置管理」标签 —— 五块编辑器集中管理本插件的所有用户可编辑文本/配置:
 
   1. 🔧 插件配置 (data/config.yaml)         + 「前往插件模块」link + 热重载按钮
-  2. ⚠️ 重要更新 (data/important_update.txt) 置顶提示,空则不渲染区块
+  2. ⚠️ 重要更新 (data/important_update.txt) 置顶提示，空则不渲染区块
   3. 📢 更新公告 (data/update_notice.txt)    保存即时热加载(下次指令触发就生效)
   4. ❓ 疑难解答 (data/troubleshooting.txt)  同上
   5. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
@@ -13,7 +13,7 @@
 不在本插件自建 POST endpoint,复用主框架的注释保留 + 格式校验逻辑。
 
 「热重载配置」按钮调 ``__lgtbot_dash_reload_config`` action,逻辑从原本的
-``page_dashboard`` 搬迁到本文件(保留 action key 不变,JS 调用兼容)。
+``page_dashboard`` 搬迁到本文件(保留 action key 不变，JS 调用兼容)。
 """
 
 from __future__ import annotations
@@ -58,12 +58,12 @@ _PERSISTENT_LAST_ADMINS_KEY = 'cfg_last_loaded_admins'
 
 
 def _read_file(path: str) -> tuple[str, str]:
-    """读任意文本文件,返回 ``(content, error_msg)``。文件不存在 → 空内容、无错误。
+    """读任意文本文件，返回 ``(content, error_msg)``。文件不存在 → 空内容、无错误。
 
     用于 update_notice.txt / troubleshooting.txt / config.yaml 这种"用户可编辑"
     文件:首次访问 web 面板时若文件还没生成(dispatcher 的 _read_* 没被触发过),
-    显示空 textarea 让用户主动写入,不在这里做隐式 default 注入(那是 dispatcher
-    handler 的责任,不应在 UI 渲染路径里副作用 IO)。
+    显示空 textarea 让用户主动写入，不在这里做隐式 default 注入(那是 dispatcher
+    handler 的责任，不应在 UI 渲染路径里副作用 IO)。
     """
     if not os.path.isfile(path):
         return '', ''
@@ -77,7 +77,7 @@ def _read_file(path: str) -> tuple[str, str]:
 def _read_engine_config() -> tuple[str, str]:
     """读 lgtbot.json,跟原 page_dashboard 同源行为。
 
-    ``boot._ensure_lgtbot_conf`` 保证启动时文件已存在。万一缺失,返回 ``{}\\n``
+    ``boot._ensure_lgtbot_conf`` 保证启动时文件已存在。万一缺失，返回 ``{}\\n``
     让 textarea 至少展示有效 JSON 而非空白(避免用户保存空文件导致引擎启动出错)。
     """
     path = boot.CONF_PATH
@@ -97,7 +97,7 @@ def _read_engine_config() -> tuple[str, str]:
 def get_data() -> str:
     """返回可嵌入 ``<script id="config-data">`` 的 JSON 字符串。
 
-    五块编辑器的 abs_path / content / read_error 一次性提供,前端 cfgApplyData
+    五块编辑器的 abs_path / content / read_error 一次性提供，前端 cfgApplyData
     据此填充各个 textarea 与路径显示行。
     """
     cfg_content, cfg_err = _read_file(_CONFIG_YAML_PATH)
@@ -150,7 +150,7 @@ def _fragment(payload: dict) -> str:
 def _snapshot_runtime_tunables() -> dict:
     """快照 config._apply_runtime_tunables 会覆盖的 Python 侧运行时常量。
 
-    字段顺序与 config.DEFAULT_CONFIG / yaml 一致,便于 UI 上直观对照。
+    字段顺序与 config.DEFAULT_CONFIG / yaml 一致，便于 UI 上直观对照。
     前后两次快照的 diff 即得到本次热重载的实际变化。
     """
     from .. import quota as _quota, uploader as _uploader, buttons as _buttons, callbacks as _callbacks
@@ -165,7 +165,7 @@ def _snapshot_runtime_tunables() -> dict:
 
 
 def render_reload_config() -> str:
-    """按当前 ``data/config.yaml`` 热重载所有 Python 侧可调字段,不重启插件/引擎。
+    """按当前 ``data/config.yaml`` 热重载所有 Python 侧可调字段，不重启插件/引擎。
 
     流程:
       1. 拍前快照 → 调 ``config.load_plugin_config()`` (内部已 log.info 各字段

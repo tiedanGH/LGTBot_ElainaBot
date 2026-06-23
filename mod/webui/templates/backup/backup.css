@@ -1,0 +1,98 @@
+/* ───── 数据备份 tab 专属样式 ─────
+   特定布局:状态卡 grid + 备份表格 + 操作 toolbar。 */
+
+/* ── 顶部 4 卡状态网格(最近备份 / 总数 / 占用 / 自动间隔) ── */
+.backup-status-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 12px;
+}
+.backup-status-card {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.backup-status-label {
+  font-size: 12px; color: var(--text-muted); font-weight: 500;
+}
+.backup-status-value {
+  font-size: 18px; font-weight: 600; color: var(--accent);
+  font-family: 'Consolas', 'Menlo', monospace;
+  word-break: break-all;
+}
+.backup-status-sub {
+  font-size: 11px; color: var(--text-faint);
+}
+
+/* ── 「立即备份 / 刷新」操作条 ── */
+.backup-actions-bar {
+  margin-top: 14px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.backup-action-msg {
+  font-size: 12px; flex: 1; min-width: 120px;
+}
+/* :empty 隐藏 —— 跟 dash-cache-msg 同样的处理,避免操作前撑出空白行 */
+.backup-action-msg:empty { display: none; }
+
+/* ── 备份列表表格 ── */
+.backup-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel);
+}
+.backup-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  min-width: 600px;     /* 列再窄就触发水平滚动而不是挤压 */
+}
+.backup-table thead {
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.backup-table th {
+  text-align: left; padding: 10px 14px;
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+}
+.backup-table td {
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.backup-table tbody tr:last-child td { border-bottom: none; }
+.backup-table tbody tr:hover { background: var(--hover); }
+
+.backup-col-name { width: 50%; word-break: break-all; }
+.backup-col-time { width: 18%; color: var(--text-muted); font-size: 12px; }
+.backup-col-size {
+  width: 12%; color: var(--text); font-family: 'Consolas', 'Menlo', monospace;
+}
+.backup-col-ops {
+  width: 20%; white-space: nowrap;
+}
+.backup-col-ops .dash-btn { margin-right: 4px; }
+
+.backup-empty td {
+  text-align: center; padding: 32px 16px;
+  color: var(--text-faint); font-size: 13px;
+}
+
+/* ── 内容说明列表 ── */
+.backup-content-list {
+  list-style: disc; padding-left: 24px; margin: 8px 0;
+  color: var(--text); font-size: 13px; line-height: 1.8;
+}
+.backup-content-list code {
+  background: var(--panel-2); padding: 0 6px; border-radius: 3px;
+  font-size: 12px;
+}
+.backup-content-note {
+  margin-top: 10px; padding: 10px 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; color: var(--text-muted); line-height: 1.7;
+}
+
+/* ── 移动端微调 ── */
+@media (max-width: 600px) {
+  .backup-status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .backup-status-card { padding: 10px 12px; }
+  .backup-status-value { font-size: 15px; }
+  .backup-table th, .backup-table td { padding: 8px 10px; font-size: 12px; }
+}

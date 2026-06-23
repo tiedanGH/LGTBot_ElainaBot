@@ -172,7 +172,8 @@ body {
    ═════════════════════════════════════════════════════════════════════════ */
 
 .dashboard,
-.config-tab { display: flex; flex-direction: column; gap: 16px; padding-top: 4px; }
+.config-tab,
+.backup { display: flex; flex-direction: column; gap: 24px; padding-top: 4px; }
 
 .dash-section {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -362,9 +363,10 @@ body {
   .dash-section { padding: 12px 14px; }
   .dash-section-meta { flex-wrap: wrap; font-size: 11px; }
 
-  /* 通用 tab 容器(目前 .dashboard 与 .config-tab 共享同款 flex column 布局)
-     —— section 之间的垂直间距 16px → 12px。任何新 tab 容器只要套用同款
-     selector list,会自动跟着收紧。 */
+  /* 通用 tab 容器(.dashboard / .config-tab / .backup 共享同款 flex column 布局)
+     —— section 之间的垂直间距桌面 24px → 移动 10px,任何新 tab 容器只要
+     套用同款 selector list,会自动跟着收紧。 */
   .dashboard,
-  .config-tab { gap: 8px; }
+  .config-tab,
+  .backup { gap: 10px; }
 }

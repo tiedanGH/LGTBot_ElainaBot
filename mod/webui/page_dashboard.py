@@ -1,19 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-「仪表盘」标签 —— 集中展示版本/统计/引擎配置/缓存,提供一键更新与缓存清理。
+「仪表盘」标签 —— 集中展示版本/统计/引擎配置/缓存，提供一键更新与缓存清理。
 
 ★ 安全准则 ★
   · **没有任何自动清理 / 自动更新 / 后台定时任务**。所有破坏性动作
     (清缓存 / git pull / git submodule update / 删 build/ 等)都通过
-    ``render_*`` 端点暴露,而端点**必须用户在 Web UI 上点按钮 + 至少
-    一次 confirm 弹窗触发**;后端不主动调度它们,也不在任何定时器、
+    ``render_*`` 端点暴露，而端点**必须用户在 Web UI 上点按钮 + 至少
+    一次 confirm 弹窗触发**;后端不主动调度它们，也不在任何定时器、
     @on_load / @on_unload 钩子或框架事件回调里调用。
   · ``_clear_dir`` / ``_clear_dir_keep_recent`` 在真正动手删之前 ``log.info``
     一条 audit 日志(包含路径 + 删除项数),方便事后排查「为什么文件没了」。
-  · 引擎自身(LGTBot C++)可能在启动时清理过期渲染图,**那是 lgtbot 子模块
+  · 引擎自身(LGTBot C++)可能在启动时清理过期渲染图，**那是 lgtbot 子模块
     的行为**,不归本模块管;若服务器上 ``data/engine/images/gen`` 出现意外
-    丢失,先看 ``data/build/build.log`` 是否有 ``--clean`` / 编译 trace,
+    丢失，先看 ``data/build/build.log`` 是否有 ``--clean`` / 编译 trace,
     再看主框架 plugin 日志是否记到了本文件 audit 行(没有 = 不是我们清的)。
 
 Python 侧职责:
@@ -160,7 +160,7 @@ _SUBMODULE_FALLBACK = {
 def _parse_gitmodules() -> dict:
     """解析 ``<plugin_dir>/.gitmodules``,返回 ``{path, url, branch}`` dict。
 
-    文件不存在或解析失败时返回 ``_SUBMODULE_FALLBACK`` 兜底值,让 UI 仍能展示
+    文件不存在或解析失败时返回 ``_SUBMODULE_FALLBACK`` 兜底值，让 UI 仍能展示
     上游链接和默认分支。该插件只配置了一个子模块(lgtbot),不实现多 submodule
     支持以保持代码简洁;后续若加更多子模块再扩展为 list。
     """
@@ -206,7 +206,7 @@ def _local_submodule_commit(sub_path: str) -> tuple[str, str]:
 def _query_upstream_commit(owner: str, repo: str, branch: str) -> tuple[str, str, str]:
     """GET GitHub ``/repos/{owner}/{repo}/commits/{branch}`` 取最新 commit。
 
-    返回 ``(short_sha, full_sha, error_message)``;失败时前两项空,error 含原因。
+    返回 ``(short_sha, full_sha, error_message)``;失败时前两项空，error 含原因。
     """
     if not owner or not repo:
         return ('', '', '上游仓库地址未配置')
@@ -233,16 +233,16 @@ def _query_upstream_commit(owner: str, repo: str, branch: str) -> tuple[str, str
 
 def _get_submodule_info(query_remote: bool = False) -> dict:
     """汇总子模块状态。``query_remote=True`` 会调用 GitHub API 取远端 commit;
-    ``False`` 只取本地状态,适合 ``get_data()`` 首次渲染(避免拖慢页面)。
+    ``False`` 只取本地状态，适合 ``get_data()`` 首次渲染(避免拖慢页面)。
 
     status 取值(子模块自身):
-      · ``ok``       —— 子模块已初始化,本地 HEAD 可读
+      · ``ok``       —— 子模块已初始化，本地 HEAD 可读
       · ``missing``  —— 文件夹不存在
       · ``empty``    —— 文件夹存在但内部为空 / 无 .git(未 init)
 
     repo_status 取值(**插件目录自身**,与子模块独立):
-      · ``ok``     —— ``<plugin_dir>/.git`` 存在,可正常 git pull / submodule update
-      · ``no_git`` —— 插件市场 zip 下载场景,根目录无 .git;前端据此把桥接层
+      · ``ok``     —— ``<plugin_dir>/.git`` 存在，可正常 git pull / submodule update
+      · ``no_git`` —— 插件市场 zip 下载场景，根目录无 .git;前端据此把桥接层
                      行的「更新桥接层」按钮文案换成「初始化为 git 仓库」
     """
     cfg = _parse_gitmodules()
@@ -312,7 +312,7 @@ def _semver_tuple(v: str) -> tuple:
     """规范化版本号为可比较元组。
 
     返回 ``(major, minor, patch, pre_tuple)``:
-      · 无 pre-release 时 ``pre_tuple = ('~',)`` —— ``'~'`` 大于任何字母,
+      · 无 pre-release 时 ``pre_tuple = ('~',)`` —— ``'~'`` 大于任何字母，
         让「正式版」永远大于带 pre-release 的版本(语义化版本规范)
       · 解析失败的段 → 0,无法成为 winner
     """
@@ -365,7 +365,7 @@ _LGTBOT_STAT_SQL = {
 
 
 def _query_lgtbot_stats() -> tuple[dict, list]:
-    """返回 ``(stats_dict, errors_list)``;表缺失或查询异常时,对应 stat 为 ``None``。"""
+    """返回 ``(stats_dict, errors_list)``;表缺失或查询异常时，对应 stat 为 ``None``。"""
     stats: dict = {k: None for k in _LGTBOT_STAT_SQL}
     errors: list = []
     if not os.path.isfile(boot.DB_PATH):
@@ -443,7 +443,7 @@ def get_data() -> str:
     """返回可嵌入 ``<script id="dashboard-data">`` 的 JSON 字符串。
 
     ``submodule`` 字段只包含本地状态(``status`` / ``local_commit``);上游
-    commit 留给「检查更新」按钮去查,避免每次页面渲染都打 GitHub API。
+    commit 留给「检查更新」按钮去查，避免每次页面渲染都打 GitHub API。
     """
     meta = _get_plugin_meta()
     stats, stat_errs = _query_lgtbot_stats()
@@ -480,7 +480,7 @@ def _fragment(payload: dict) -> str:
 
 
 def _bridge_check_payload() -> dict:
-    """对 GitHub tags 做一次查询,返回桥接层(本插件)的版本对比 dict。"""
+    """对 GitHub tags 做一次查询，返回桥接层(本插件)的版本对比 dict。"""
     meta = _get_plugin_meta()
     local_ver = meta.get('version', '') or ''
     owner, repo = _parse_github_owner_repo(meta.get('github', '') or '')
@@ -539,7 +539,7 @@ def render_check_update() -> str:
       · ``bridge``    —— 本插件 __plugin_meta__.version vs GitHub tags
       · ``submodule`` —— 子模块本地 HEAD vs 上游 main/master HEAD,含 status
                         (ok / missing / empty),供 UI 决定按钮文案
-    任一侧失败不影响另一侧,success 反映「两侧都没致命错误」(子模块网络失败
+    任一侧失败不影响另一侧，success 反映「两侧都没致命错误」(子模块网络失败
     会被 UI 单独展示);整体 success 仅当桥接层成功时为 True。
     """
     bridge = _bridge_check_payload()
@@ -554,8 +554,8 @@ def render_check_update() -> str:
 def render_do_update() -> str:
     """更新桥接层 —— 在 ``boot.PLUGIN_DIR`` 执行 ``git pull --ff-only``。
 
-    同步阻塞 web worker 数秒(直到 git 完成);考虑到该操作极少触发,且
-    ``--ff-only`` 模式下 git 不会进入交互,可接受。失败不会破坏工作区。
+    同步阻塞 web worker 数秒(直到 git 完成);考虑到该操作极少触发，且
+    ``--ff-only`` 模式下 git 不会进入交互，可接受。失败不会破坏工作区。
     """
     plugin_dir = boot.PLUGIN_DIR
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
@@ -603,7 +603,7 @@ def render_do_update_force() -> str:
     用于普通 `git pull` 因工作区有本地修改报「would be overwritten by merge」
     时的兜底。**会丢弃所有已 tracked 文件的本地改动**(被 .gitignore 排除的
     ``data/`` / ``build/`` / ``lgtbot/`` 等运行时目录不受影响)。前端在普通
-    更新失败后弹一个按钮调本端点,带 danger 级双 confirm 警示用户。
+    更新失败后弹一个按钮调本端点，带 danger 级双 confirm 警示用户。
     """
     plugin_dir = boot.PLUGIN_DIR
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
@@ -667,10 +667,10 @@ def render_update_submodule() -> str:
 
     同一条命令兼任「初始化」(子模块文件夹不存在 / 空)和「更新」(把本地子模块
     HEAD 强制对齐到父仓库 gitlink 记录的 commit)。``--force`` 抹掉子模块内
-    任何本地修改,这正是用户需要的「彻底回到上游版本」语义。
+    任何本地修改，这正是用户需要的「彻底回到上游版本」语义。
 
     注意:本命令把子模块对齐到**父仓库 gitlink**,不会拉「上游 main 最新
-    commit」。要真正吃到上游最新代码,需要桥接层先 git pull(父仓库 gitlink
+    commit」。要真正吃到上游最新代码，需要桥接层先 git pull(父仓库 gitlink
     更新),再跑本命令。该工作流由 UI 引导。
     """
     plugin_dir = boot.PLUGIN_DIR
@@ -743,7 +743,7 @@ def render_update_submodule() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 
 def _git_run(cmd: list, timeout: float = 60.0):
-    """跑一条 git 命令,返回 ``CompletedProcess``。捕获常见异常包成同形态对象,
+    """跑一条 git 命令，返回 ``CompletedProcess``。捕获常见异常包成同形态对象，
     让 ``render_init_repo`` 单一返回路径处理 ok / 各类错误。
     """
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -894,7 +894,7 @@ def render_init_repo() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 
 def _clear_dir(path: str) -> tuple[bool, str, int]:
-    """递归删除 ``path`` 下全部直接子项,保留 ``path`` 本身;返回 ``(ok, msg, n)``.
+    """递归删除 ``path`` 下全部直接子项，保留 ``path`` 本身;返回 ``(ok, msg, n)``.
 
     Audit:本函数被调用前必然走过 UI 的两次 confirm(见 dashboard.js 的
     ``DASH_CLEAR_PROMPTS``)。这里 ``log.info`` 一条 audit 日志便于事后排查

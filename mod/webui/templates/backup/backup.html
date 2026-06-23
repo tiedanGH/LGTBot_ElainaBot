@@ -1,0 +1,78 @@
+<div class="backup">
+
+  <!-- ──── 状态卡 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">💾 数据备份</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">备份目录</span>
+        <span id="backup-dir" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+
+    <div class="backup-status-grid">
+      <div class="backup-status-card">
+        <div class="backup-status-label">最近一次备份</div>
+        <div id="backup-latest-time" class="backup-status-value">—</div>
+        <div id="backup-latest-meta" class="backup-status-sub">—</div>
+      </div>
+      <div class="backup-status-card">
+        <div class="backup-status-label">备份总数</div>
+        <div id="backup-total-count" class="backup-status-value">—</div>
+        <div id="backup-total-meta" class="backup-status-sub">—</div>
+      </div>
+      <div class="backup-status-card">
+        <div class="backup-status-label">总占用</div>
+        <div id="backup-total-size" class="backup-status-value">—</div>
+        <div class="backup-status-sub">磁盘空间</div>
+      </div>
+      <div class="backup-status-card">
+        <div class="backup-status-label">自动备份</div>
+        <div id="backup-auto-interval" class="backup-status-value">—</div>
+        <div class="backup-status-sub">启动 60s 后检查最新备份</div>
+      </div>
+    </div>
+
+    <div class="backup-actions-bar">
+      <button id="backup-create-btn" class="dash-btn dash-btn-primary">💾 立即备份</button>
+      <button id="backup-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新列表</button>
+      <span id="backup-action-msg" class="backup-action-msg"></span>
+    </div>
+  </section>
+
+  <!-- ──── 备份列表 ──── -->
+  <section class="dash-section">
+    <h2 class="dash-section-title">📂 备份列表</h2>
+    <div class="backup-table-wrap">
+      <table class="backup-table">
+        <thead>
+          <tr>
+            <th class="backup-col-name">备份文件</th>
+            <th class="backup-col-time">时间</th>
+            <th class="backup-col-size">大小</th>
+            <th class="backup-col-ops">操作</th>
+          </tr>
+        </thead>
+        <tbody id="backup-table-body">
+          <tr class="backup-empty"><td colspan="4">尚未创建任何备份</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ──── 内容说明 ──── -->
+  <section class="dash-section">
+    <h2 class="dash-section-title">📋 备份内容说明</h2>
+    <ul class="backup-content-list">
+      <li><code class="dash-mono">data/engine/lgtbot.db</code> &mdash; LGTBot 核心数据库：对局战绩、用户成就</li>
+      <li><code class="dash-mono">data/engine/lgtbot.json</code> &mdash; LGTBot 引擎配置</li>
+      <li><code class="dash-mono">data/config.yaml</code> &mdash; 插件配置（管理员名单 / 沙箱白名单 / 图床等）</li>
+      <li><code class="dash-mono">data/update_notice.txt</code> / <code class="dash-mono">important_update.txt</code> / <code class="dash-mono">troubleshooting.txt</code> &mdash; 自定义文本（公告、疑难解答）</li>
+    </ul>
+    <p class="backup-content-note">
+      <b>不包含</b>：<code class="dash-mono">data/engine/images/</code> 渲染图缓存、<code class="dash-mono">build/</code> 编译产物。
+      备份文件保存在 <b>主框架数据目录</b>，即使在插件市场卸载本插件，备份也会完整保留 — 重新安装后可在本面板「↩ 恢复」回卸载前的状态。
+    </p>
+  </section>
+
+</div>

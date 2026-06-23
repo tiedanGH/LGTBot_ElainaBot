@@ -6,26 +6,26 @@
 ★ 安全准则 ★
   · **没有任何自动编译 / 自动清理 / 后台调度**。``bash build.sh`` /
     ``--clean`` / ``rm -rf build/`` 这些破坏性动作全部通过 ``render_*``
-    端点暴露,而端点**必须用户在仪表盘点按钮 + confirm 触发**;
+    端点暴露，而端点**必须用户在仪表盘点按钮 + confirm 触发**;
     后端不在任何 @on_load、定时器或框架钩子里主动调用。
   · ``_start_build`` / ``_kill_build`` / ``render_build_remove`` 在动手
-    之前都 ``log.info`` 一条 audit 日志,记录命令 + 路径。
-  · 上报「文件自动消失」时,先到主框架 plugin 日志找 ``[build-*]`` /
+    之前都 ``log.info`` 一条 audit 日志，记录命令 + 路径。
+  · 上报「文件自动消失」时，先到主框架 plugin 日志找 ``[build-*]`` /
     ``[cache-clear]`` 这些 audit 行:没有 = 不是本插件做的(可能是
     LGTBot C++ 引擎自身、外部脚本、或 git pull 触发的文件变化)。
 
 进程模型:
   · 子进程用 ``subprocess.Popen(..., start_new_session=True)`` 独立 session,
     父进程(整个 ElainaBot 框架)退出 / 热重载都不会牵连编译进程。重新打开
-    Web UI 时,从 ``data/build/state.json`` 取 PID,``os.kill(pid, 0)`` 检查
-    是否还活着 —— 仍跑就接着展示日志,跑完就显示空闲。
+    Web UI 时，从 ``data/build/state.json`` 取 PID,``os.kill(pid, 0)`` 检查
+    是否还活着 —— 仍跑就接着展示日志，跑完就显示空闲。
   · stdout / stderr 重定向到 ``data/build/build.log``;若系统装了 util-linux
-    ``script`` 命令,用 ``script -qfec '<cmd>' /dev/null`` 包一层伪 tty,
+    ``script`` 命令，用 ``script -qfec '<cmd>' /dev/null`` 包一层伪 tty,
     让 cmake / gcc / clang 输出彩色 ANSI escape 序列(直接重定向 stdout 时
-    多数工具默认关闭颜色)。fallback 到无伪 tty(日志仍可读,只是没颜色)。
+    多数工具默认关闭颜色)。fallback 到无伪 tty(日志仍可读，只是没颜色)。
   · 自身的 ``_ansi_to_html`` 把日志里的 ``\\x1b[...m`` escape 转 ``<span>``,
     支持 30-37 / 90-97 前景色 + 粗体;其他 control char 全剥掉。
-  · 终止编译:``os.killpg(os.getpgid(pid), SIGTERM)`` —— 整个 session 一起死,
+  · 终止编译:``os.killpg(os.getpgid(pid), SIGTERM)`` —— 整个 session 一起死，
     包括 build.sh fork 的 cmake / make / g++。2 秒不响应升级 SIGKILL。
 
 命令注入防护(关键!):
@@ -35,11 +35,11 @@
     2. 后端 ``_validate_target_name`` 再校验同样规则;前端绕过(改 JS)也无法
        让特殊字符进入 argv
   · target 名通过 framework ``/api/config-file/save`` POST 写到
-    ``data/build/build_target_input.json`` 临时文件,后端读 JSON 取出来再过
-    校验。``json.loads`` 本身就杜绝任何 shell 转义可能(里面是字符串字面量,
+    ``data/build/build_target_input.json`` 临时文件，后端读 JSON 取出来再过
+    校验。``json.loads`` 本身就杜绝任何 shell 转义可能(里面是字符串字面量，
     不是 shell 字符串)。
-  · 即便走 ``script -qfec '<cmd>' /dev/null`` 包伪 tty 时,``<cmd>`` 部分是用
-    ``shlex.quote`` 转义后的 argv 拼成的;每个 arg 都被单引号包裹,内含的
+  · 即便走 ``script -qfec '<cmd>' /dev/null`` 包伪 tty 时，``<cmd>`` 部分是用
+    ``shlex.quote`` 转义后的 argv 拼成的;每个 arg 都被单引号包裹，内含的
     单引号被转义成 ``'\\''`` —— shell 完全无法把 target 名解释成多个 token。
 
 状态文件:
@@ -49,8 +49,8 @@
   · ``data/build/build_target_input.json``  自定义 target 参数(JS POST 写入)
 
 故意把 build/ 子目录放在 ``data/`` 根下而非 ``data/engine/`` —— 编译产物属
-于「插件级」资源,与引擎自身数据分离,语义清晰。但 framework 配置入口
-非递归扫 data/(已有 webui 文档说明),子目录天然不可见,不会污染配置列表。
+于「插件级」资源，与引擎自身数据分离，语义清晰。但 framework 配置入口
+非递归扫 data/(已有 webui 文档说明),子目录天然不可见，不会污染配置列表。
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ _TARGET_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_\-]{0,62}$')
 
 
 def _validate_target_name(name: str) -> bool:
-    """目标名严格白名单。后端最后一道闸,前端绕过也卡得住。"""
+    """目标名严格白名单。后端最后一道闸，前端绕过也卡得住。"""
     return bool(name) and bool(_TARGET_RE.match(name))
 
 
@@ -186,8 +186,8 @@ def _compute_elapsed(state: dict) -> int | None:
 def get_build_state() -> dict:
     """对外:返回完整状态 dict。
 
-    若 state 标记 running 但 PID 已死,补全 finished + returncode(读
-    STATUS_PATH 取 wrapper 写入的退出码,可能 None —— 被 SIGKILL 等情况)
+    若 state 标记 running 但 PID 已死，补全 finished + returncode(读
+    STATUS_PATH 取 wrapper 写入的退出码，可能 None —— 被 SIGKILL 等情况)
     + finished_time + elapsed_sec(用于 UI「上次任务  用时 X 分 Y 秒」)。
 
     ``kind`` 字段决定 UI badge 文案:
@@ -232,9 +232,9 @@ def _build_shell_wrapper(argv: list) -> str:
     """构造 shell 脚本字符串:跑 argv,把退出码 printf 到 STATUS_PATH,
     并在日志末尾追加 ``[exit:<code>]`` 标记方便用户对应得上。
 
-    所有动态部分(argv / STATUS_PATH / LOG_PATH)都经 ``shlex.quote`` 转义,
-    shell 看到的是单引号包围的字符串字面量,无法重新 tokenize。target 名
-    已经走 ``_validate_target_name`` 白名单,这里再加 quote 是双保险。
+    所有动态部分(argv / STATUS_PATH / LOG_PATH)都经 ``shlex.quote`` 转义，
+    shell 看到的是单引号包围的字符串字面量，无法重新 tokenize。target 名
+    已经走 ``_validate_target_name`` 白名单，这里再加 quote 是双保险。
     """
     quoted_argv   = ' '.join(shlex.quote(a) for a in argv)
     quoted_status = shlex.quote(STATUS_PATH)
@@ -249,7 +249,7 @@ def _build_shell_wrapper(argv: list) -> str:
 
 
 def _wrap_for_subprocess(argv: list) -> list:
-    """把 argv 包装成最终给 Popen 的命令(list 形式,绝不 shell=True)。
+    """把 argv 包装成最终给 Popen 的命令(list 形式，绝不 shell=True)。
 
     优先用 util-linux ``script -qfec '<wrapper>' /dev/null`` 提供伪 tty,
     让 cmake / gcc 等保留彩色 ANSI;fallback 用 ``bash -c '<wrapper>'``
@@ -269,9 +269,9 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
     Args:
       argv:Popen 用的 argv list(``shell=False`` 直接传),例如
            ``['bash', 'build.sh', '-i']``。本函数内部会再包一层 shell
-           wrapper 来记录退出码,但 wrapper 是我们 control 的常量串,
-           argv 通过 ``shlex.quote`` 嵌入,无注入风险。
-      display:UI 上显示的任务名,例如 ``'增量编译桥接层'``。
+           wrapper 来记录退出码，但 wrapper 是我们 control 的常量串，
+           argv 通过 ``shlex.quote`` 嵌入，无注入风险。
+      display:UI 上显示的任务名，例如 ``'增量编译桥接层'``。
       kind:``'build'`` 编译类(显示成功/失败)或 ``'meta'`` 非编译类
            (列目标 / 删 build/,只显示「已完成」)。
 
@@ -494,7 +494,7 @@ def _read_last_custom_target() -> str:
 
     这是 prompt 预填功能的数据源 —— 用户连续编译同一个 target 时不用重复
     输入。文件由 buildCustom 的 framework /api/config-file/save POST 路径
-    写入,无需额外的持久化通道。
+    写入，无需额外的持久化通道。
     """
     try:
         with open(PARAMS_PATH, 'r', encoding='utf-8') as f:
@@ -579,8 +579,8 @@ def render_build_bridge() -> str:
 def render_build_list() -> str:
     """📋 列出可编译目标 —— bash build.sh --list-targets
 
-    kind='meta':非编译任务,UI 只显示「已完成」灰色 badge,不展示
-    成功/失败(因为「列出」无所谓成功失败,只看日志输出即可)。
+    kind='meta':非编译任务，UI 只显示「已完成」灰色 badge,不展示
+    成功/失败(因为「列出」无所谓成功失败，只看日志输出即可)。
     """
     ok, msg = _require_build_sh()
     if not ok:
@@ -592,8 +592,8 @@ def render_build_list() -> str:
 def render_build_custom() -> str:
     """🎯 编译指定目标 —— 从 PARAMS_PATH 读 target,严格白名单后启动。
 
-    PARAMS_PATH 由 JS 通过 framework ``/api/config-file/save`` POST 写入,
-    内容形如 ``{"target": "numcomb"}``。后端读 JSON 后再次校验,**不信任前端**。
+    PARAMS_PATH 由 JS 通过 framework ``/api/config-file/save`` POST 写入，
+    内容形如 ``{"target": "numcomb"}``。后端读 JSON 后再次校验，**不信任前端**。
     """
     ok, msg = _require_build_sh()
     if not ok:
@@ -700,7 +700,7 @@ def render_build_log() -> str:
 
     前端的 polling 不是真增量(provider 无参拿不到 since-byte),而是「全量
     末尾切片」—— 每次都返回最后 64KB,JS 自己 diff 决定是否替换。日志很长
-    时只看末尾即可,看更老内容请打开 data/build/build.log 文件。
+    时只看末尾即可，看更老内容请打开 data/build/build.log 文件。
     """
     state = get_build_state()
     log_text = _read_log_tail(64 * 1024)

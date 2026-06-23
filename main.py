@@ -51,6 +51,7 @@ from plugins.LGTBot_ElainaBot.mod.webui import page_logs  # noqa: F401
 from plugins.LGTBot_ElainaBot.mod import dispatcher        # noqa: F401  @handler 注册（消息派发 + INTERACTION）
 from plugins.LGTBot_ElainaBot.mod import callbacks         # C++ 回调（被 LGTBot_ElainaBot.start 注入）
 from plugins.LGTBot_ElainaBot.mod import config as _config
+from plugins.LGTBot_ElainaBot.mod import backup as _backup            # noqa: F401  数据库备份(自动 + 手动 + 恢复)
 from plugins.LGTBot_ElainaBot.mod import log_attribution as _log_attribution  # noqa: F401
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -127,6 +128,8 @@ async def _setup():
             log.warning('     再次保存任意文件触发热重载，将自动完成完整重启')
             log.warning('=' * 60)
             _state.started = True   # 让新 dispatcher 正常派发消息
+            # 复用旧引擎也属于热重载成功,触发备份检查(若距上次 > 24h 才真备)
+            _backup.schedule_on_load_check()
             return
 
     # 检查游戏目录是否存在已编译的游戏 .so
@@ -161,6 +164,9 @@ async def _setup():
     boot.mark_engine_running(True)
     _state.started = True
     log.info('✅ LGTBot 引擎已就绪')
+
+    # 启动后台备份检查 —— 距上次备份 > 24h 时,等 60s 让插件就绪后自动备份一次。每次 reload / restart 触发,无 long-running 定时器。
+    _backup.schedule_on_load_check()
 
 
 @on_unload

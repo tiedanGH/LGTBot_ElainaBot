@@ -7,19 +7,19 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
   · ``PAGE_KEY = 'lgtbot'``  唯一对用户可见的侧边栏入口
   · 多个 ``_HIDDEN_KEYS`` —— 内部 action 端点(重启 / 检查更新 / git pull /
     子模块 update / 清理各缓存 / 引擎编译启停),通过 wrap ``web_pages.get_pages``
-    从侧边栏列表过滤;前端用 ``fetch(apiUrl(key))`` 触发,响应是单 HTML 片段
+    从侧边栏列表过滤;前端用 ``fetch(apiUrl(key))`` 触发，响应是单 HTML 片段
     (``<div id="msg">`` / ``<pre id="result">``),JS 用 DOMParser 解析。
-  · 顶部标题栏右侧放「🔁 重启 LGTBot」按钮(整页通用,不属于任一标签)
+  · 顶部标题栏右侧放「🔁 重启 LGTBot」按钮(整页通用，不属于任一标签)
   · 四个标签:仪表盘(``page_dashboard``,最左侧)/ 引擎编译(``page_build``)/
     消息日志(``page_logs``)/ 用户数据(``page_users``);各自的 HTML / JS /
-    数据生成都委托给对应模块,本文件只做组装
+    数据生成都委托给对应模块，本文件只做组装
 
 HTML / CSS / JS 全部抽到 ``templates/`` 子目录的 ``main.html`` /
-``main.css`` / ``main.js`` 中,本文件只保留 Python 逻辑;模板在 import 时
-一次性读入并缓存,插件热重载会随之自动重新读盘。
+``main.css`` / ``main.js`` 中，本文件只保留 Python 逻辑;模板在 import 时
+一次性读入并缓存，插件热重载会随之自动重新读盘。
 
-每次 HTTP 请求 ``_render_html()`` 跑一次,把三个标签的 HTML/JS 片段和数据
-JSON 都拼进同一份 HTML —— 这样无论用户当前在哪个标签上,刷新都能就地更新。
+每次 HTTP 请求 ``_render_html()`` 跑一次，把三个标签的 HTML/JS 片段和数据
+JSON 都拼进同一份 HTML —— 这样无论用户当前在哪个标签上，刷新都能就地更新。
 
 设计注意点:
   · ``_LazyHtmlDict.get('html')`` 返回 truthy 占位而非真调 provider,避免框架
@@ -27,11 +27,11 @@ JSON 都拼进同一份 HTML —— 这样无论用户当前在哪个标签上,�
     把有副作用的 provider 跑两遍 → 例如 ``_render_restart`` 释放 C++ 引擎
     导致 tcache double-free
   · ``_ensure_get_pages_filters_hidden`` 一次性 wrap ``web_pages.get_pages``
-    把所有 ``_HIDDEN_KEYS`` 从侧边栏列表里隐去,链式 wrap 不与其它插件冲突
+    把所有 ``_HIDDEN_KEYS`` 从侧边栏列表里隐去，链式 wrap 不与其它插件冲突
   · ``_render_restart`` 内部延迟 import ``dispatcher``,断开循环依赖(本模块
     被 dispatcher 间接 import)
   · Dashboard 的「保存引擎配置」复用主框架 ``/api/config-file/save`` 端点
-    (接受 plugins/ 下绝对路径,本插件 webui 不再为此自建端点)
+    (接受 plugins/ 下绝对路径，本插件 webui 不再为此自建端点)
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import html
 import os
 
 from core.plugin import web_pages
-from . import page_build, page_config, page_dashboard, page_logs, page_users
+from . import page_backup, page_build, page_config, page_dashboard, page_logs, page_users
 
 
 PAGE_KEY = 'lgtbot'
@@ -71,6 +71,13 @@ _BUILD_CLEAN_KEY   = '__lgtbot_dash_build_clean'
 _BUILD_REMOVE_KEY  = '__lgtbot_dash_build_remove'
 _BUILD_LOG_KEY     = '__lgtbot_dash_build_log'
 
+# 数据备份标签的 action 端点(JS 侧 BACKUP_KEYS 与此一一对应)
+_BACKUP_CREATE_KEY  = '__lgtbot_backup_create'
+_BACKUP_LIST_KEY    = '__lgtbot_backup_list'
+# register_route 的 path,必须以 /api/ext/ 开头(core/plugin/web_pages.py 要求)
+_BACKUP_RESTORE_ROUTE = '/api/ext/lgtbot/backup/restore'
+_BACKUP_DELETE_ROUTE  = '/api/ext/lgtbot/backup/delete'
+
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
     RESTART_KEY,
@@ -95,6 +102,8 @@ _HIDDEN_KEYS = frozenset({
     _BUILD_CLEAN_KEY,
     _BUILD_REMOVE_KEY,
     _BUILD_LOG_KEY,
+    _BACKUP_CREATE_KEY,
+    _BACKUP_LIST_KEY,
 })
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -114,7 +123,7 @@ _MAIN_JS = _load('main/main.js')
 
 
 def _render_html() -> str:
-    """每次访问页面调用,生成最新 HTML(含四个标签的内容和数据)。"""
+    """每次访问页面调用，生成最新 HTML(含四个标签的内容和数据)。"""
     return (_MAIN_HTML
             .replace('__MAIN_CSS__', _MAIN_CSS)
             .replace('__DASHBOARD_CSS__', page_dashboard.TAB_CSS)
@@ -122,22 +131,26 @@ def _render_html() -> str:
             .replace('__BUILD_CSS__', page_build.TAB_CSS)
             .replace('__LOGS_CSS__', page_logs.TAB_CSS)
             .replace('__USERS_CSS__', page_users.TAB_CSS)
+            .replace('__BACKUP_CSS__', page_backup.TAB_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
             .replace('__CONFIG_HTML__', page_config.TAB_HTML)
             .replace('__BUILD_HTML__', page_build.TAB_HTML)
             .replace('__LOGS_HTML__', page_logs.TAB_HTML)
             .replace('__USERS_HTML__', page_users.TAB_HTML)
+            .replace('__BACKUP_HTML__', page_backup.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
             .replace('__CONFIG_DATA__', page_config.get_data())
             .replace('__BUILD_DATA__', page_build.get_data())
             .replace('__LOG_DATA__', page_logs.get_data())
             .replace('__USER_DATA__', page_users.get_data())
+            .replace('__BACKUP_DATA__', page_backup.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
             .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
             .replace('__CONFIG_JS__', page_config.TAB_JS)
             .replace('__BUILD_JS__', page_build.TAB_JS)
             .replace('__LOGS_JS__', page_logs.TAB_JS)
             .replace('__USERS_JS__', page_users.TAB_JS)
+            .replace('__BACKUP_JS__', page_backup.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
             .replace('__RESTART_KEY__', RESTART_KEY))
 
@@ -152,9 +165,9 @@ def _render_restart() -> str:
     """触发重启 + 返回单个 ``<div id="msg">…</div>``。
 
     只用做 JS 的回执片段:主页 main.js 的「🔁 重启 LGTBot」按钮 fetch 后用
-    DOMParser 抠 #msg.textContent 显示成顶部横幅,完整 HTML 外壳(DOCTYPE /
-    卡片 / hint) 都用不到。这个 key 又被 get_pages 过滤掉,用户也不会以独立
-    页面身份打开它,所以连 <html><body> 都省了。
+    DOMParser 抠 #msg.textContent 显示成顶部横幅，完整 HTML 外壳(DOCTYPE /
+    卡片 / hint) 都用不到。这个 key 又被 get_pages 过滤掉，用户也不会以独立
+    页面身份打开它，所以连 <html><body> 都省了。
     """
     # 延迟 import 断开循环依赖(dispatcher 间接 import 本模块)
     from .. import dispatcher
@@ -172,7 +185,7 @@ class _LazyHtmlDict(dict):
     框架 ``get_page_html`` 内部对 'html' 字段先做 truthy 检查再取值。两次访问
     若都直传 provider,有副作用的 provider(此处 ``_render_restart`` 释放 C++ 引擎)
     会跑两遍 → 第二次 deref 已 freed 的 ``g_bot_core`` 触发 tcache double-free。
-    本类 ``.get('html')`` 只返回 truthy 占位,真正生成留给 ``__getitem__``。
+    本类 ``.get('html')`` 只返回 truthy 占位，真正生成留给 ``__getitem__``。
     """
 
     def __init__(self, base: dict, html_provider):
@@ -193,10 +206,10 @@ class _LazyHtmlDict(dict):
 # ──────── 侧边栏过滤 wrap ────────────────────────────────────────────────
 
 def _ensure_get_pages_filters_hidden():
-    """把 ``web_pages.get_pages`` 包一层,从侧边栏列表里过滤掉所有 ``_HIDDEN_KEYS``。
+    """把 ``web_pages.get_pages`` 包一层，从侧边栏列表里过滤掉所有 ``_HIDDEN_KEYS``。
 
     幂等(``_lgtbot_wrapped`` 标记防重复包);链式(``_lgtbot_inner`` 保留对原
-    函数的引用,与其它插件后续的 wrap 兼容)。
+    函数的引用，与其它插件后续的 wrap 兼容)。
     """
     cur = web_pages.get_pages
     if getattr(cur, '_lgtbot_wrapped', False):
@@ -214,7 +227,7 @@ def _ensure_get_pages_filters_hidden():
 # ──────── 注册 / 注销 ────────────────────────────────────────────────────
 
 def _register_hidden_action(key: str, provider):
-    """注册一个隐藏的 action 端点(不出现在侧边栏,只供 JS fetch 触发)。"""
+    """注册一个隐藏的 action 端点(不出现在侧边栏，只供 JS fetch 触发)。"""
     base = {
         'key': key,
         'label': '',
@@ -233,7 +246,7 @@ def register():
     可见:
       · ``lgtbot`` —— 「LGTBot 机器人」侧边栏入口(展示三标签内容)
 
-    隐藏(被 filter wrap 屏蔽,不出现在侧边栏列表):
+    隐藏(被 filter wrap 屏蔽，不出现在侧边栏列表):
       · ``__lgtbot_restart`` —— 整页通用「重启 LGTBot」按钮
       · ``__lgtbot_dash_check_update``      —— Dashboard「检查更新」(同时查桥接层 + 子模块上游)
       · ``__lgtbot_dash_do_update``         —— Dashboard「更新桥接层」(git pull --ff-only origin main)
@@ -289,6 +302,14 @@ def register():
     _register_hidden_action(_BUILD_REMOVE_KEY,  page_build.render_build_remove)
     _register_hidden_action(_BUILD_LOG_KEY,     page_build.render_build_log)
 
+    # 数据备份 action 端点
+    # · create / list:无参,沿用 _register_hidden_action 的 fragment 协议
+    # · restore / delete:要从 ?name= 拿参数,走 web_pages.register_route 真路由
+    _register_hidden_action(_BACKUP_CREATE_KEY, page_backup.render_create)
+    _register_hidden_action(_BACKUP_LIST_KEY,   page_backup.render_list)
+    web_pages.register_route('GET', _BACKUP_RESTORE_ROUTE, page_backup.restore_handler, auth=True)
+    web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
+
     _ensure_get_pages_filters_hidden()
 
 
@@ -296,5 +317,10 @@ def unregister():
     web_pages.unregister_page(PAGE_KEY)
     for k in _HIDDEN_KEYS:
         web_pages.unregister_page(k)
+    # 注销 backup register_route 路由(其余 ``_register_hidden_action`` 注册的
+    # action 端点都是放在 ``web_pages._registry``,前面循环已清掉;register_route
+    # 是另一张表 ``web_pages._routes``,要显式 unregister)
+    web_pages.unregister_route('GET', _BACKUP_RESTORE_ROUTE)
+    web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
     # get_pages 的 wrap 不主动 unwrap:其它插件可能后续也加了包装,贸然恢复会断链。
     # 留着的副作用仅是过滤一组已不存在的 key,无害。

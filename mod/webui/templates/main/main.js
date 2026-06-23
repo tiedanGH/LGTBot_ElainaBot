@@ -107,8 +107,7 @@ const _DASH_OK_TEXT = { confirm: '确定', alert: '我知道了', prompt: '确�
 function _dashOpenModal(opts) {
   const { message, level, kind, defaultValue, okText, cancelText } = opts;
   return new Promise(resolve => {
-    /* 上一个 modal 还未结算就被新的覆盖时,旧 promise resolve 取消值,
-       防止上层 await 永远 stuck */
+    /* 上一个 modal 还未结算就被新的覆盖时,旧 promise resolve 取消值,防止上层 await 永远 stuck */
     if (_dashModalResolve) {
       _dashModalResolve(kind === 'prompt' ? null : false);
       _dashModalResolve = null;

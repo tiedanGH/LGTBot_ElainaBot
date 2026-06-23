@@ -26,8 +26,7 @@ Python 模块(仅做逻辑 + 模板加载):
     templates/logs/        「消息日志」标签 HTML / CSS / JS
     templates/users/       「用户数据」标签 HTML / CSS / JS
 
-action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不出
-现在侧边栏列表,仅供 JS fetch 触发):
+action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不出现在侧边栏列表,仅供 JS fetch 触发):
     __lgtbot_restart                    整页通用「🔁 重启 LGTBot」按钮
     __lgtbot_dash_check_update          Dashboard「检查更新」(同时查桥接层 / 子模块上游)
     __lgtbot_dash_do_update             Dashboard「更新桥接层」(git pull --ff-only)
@@ -50,8 +49,7 @@ JSON</pre>`` 也在 ``page_dashboard._fragment`` inline,无模板文件。
 下绝对路径),不在插件 webui 自建端点。
 
 模板由 Python 在 import 时一次性读入并缓存(模块常量);插件热重载会重
-新执行 import → 重新读盘,所以改完模板存盘后下次热重载就能看到新版本,
-无须重启进程。
+新执行 import → 重新读盘,所以改完模板存盘后下次热重载就能看到新版本,无须重启进程。
 
 如新增标签(房间监控、排行榜等):
   1. 新建 ``page_xxx.py`` + ``templates/xxx/{html,js}``

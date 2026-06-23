@@ -5,14 +5,14 @@
 
 ────────── 数据层(原 message_log.py 合并进来) ──────────
 对外暴露 ``log_incoming`` / ``log_outgoing`` / ``get_logs`` / ``clear_logs``,
-被 ``callbacks`` 与 ``dispatcher`` 在收发消息路径上直接调用,把每条进出消息
+被 ``callbacks`` 与 ``dispatcher`` 在收发消息路径上直接调用，把每条进出消息
 塞进一个环形 deque(默认 500 条上限)。
 
 跨插件热重载:日志 deque 与锁挂在 C++ 扩展常驻的 ``boot._get_persistent()``
 字典里 —— 旧 callback 写入的日志在新 dispatcher 注册的页面里也能被读到。
 
 ────────── 渲染层 ──────────
-HTML / JS 片段在 ``templates/logs/`` 子目录,``TAB_HTML`` / ``TAB_JS`` 在
+HTML / JS 片段在 ``templates/logs/`` 子目录，``TAB_HTML`` / ``TAB_JS`` 在
 import 时一次性读入。``get_data()`` 序列化当前 deque 为 JSON,由
 ``webui/main.py`` 的 ``_render_html()`` 内嵌到 ``<script id="log-data">``。
 功能:筛选(全部/收到/发出/群聊/私聊)+ 自动刷新切换 + 主题切换。
@@ -41,7 +41,7 @@ _lock: Lock = _p['logs_lock']
 
 
 def log_incoming(uid: str, gid: str, content: str):
-    """记录收到的消息(来自 QQ 玩家,即将转发给 LGTBot 引擎)。"""
+    """记录收到的消息(来自 QQ 玩家，即将转发给 LGTBot 引擎)。"""
     _append({
         'time': time.time(),
         'direction': 'in',
