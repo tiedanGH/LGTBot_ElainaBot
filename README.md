@@ -100,6 +100,18 @@ cd ../.. && python3 main.py
 | **在线配置**        | `data/config.yaml` 在 Web 面板「插件 → 配置」可直接编辑保存                                                                         |
 | **优雅退出**        | 进行中对局拒绝释放引擎，避免数据丢失                                                                                                  |
 
+## 开发计划（TODO）
+
+规划中的改进方向，欢迎在 [QQ 群](https://qun.qq.com/universal-share/share?ac=1&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw&svctype=4&tempid=h5_group_info) 或 issue 中讨论：
+
+- [ ] **复用主框架用户数据** —— 去掉插件私有的 `data/user_cache.db`，昵称 / 头像直接从 ElainaBot 主框架的用户数据库读取，消除一份冗余缓存及其同步开销
+- [ ] **运行时指标面板** —— Web 面板新增标签，展示进程内存 / CPU、活跃对局数、消息吞吐、引擎崩溃重启次数等运行时指标
+- [ ] **配置保存前校验** —— Web 面板在线编辑 `config.yaml` / `lgtbot.json` 时先解析 + 字段 schema 校验再落盘，避免一个格式错误让 bot 崩溃或引擎启动失败
+- [ ] **破坏性操作历史日志** —— 恢复 / 删除 / 清缓存 / 编译等危险端点的「何时 / 做了什么」写入持久化文件并在面板可查，形成可追溯的审计流
+- [ ] **活跃对局的重启 / 崩溃保护** —— 跟踪有进行中对局的群 / 用户，强制重启或主核崩溃恢复后主动推送「对局已中断，请重新开始」；并探索经子进程 runner 对局面快照 / 恢复
+- [ ] **CI 预编译产物** —— GitHub Actions 编译引擎核心 + 50+ 游戏插件并发布预编译包，用户无需本地搭 Boost.Python / C++20 工具链即可下载部署
+- [ ] **CI 真桥接冒烟测试** —— 在 CI 里 import 真编译出的 `.so`，用临时 db 启动引擎、发送指令断言响应、再走 restart-release 路径，覆盖 mock 单测照不到的 Boost.Python ABI 与 `g_bot_core` 生命周期回归
+
 ## QQ 协议相关限制（已知）
 
 QQ 官方机器人协议层面的限制，**所有 QQ Bot 都会遇到**，与 LGTBot 无关：
