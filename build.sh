@@ -11,7 +11,7 @@
 #   bash build.sh -j 8                     # 指定并行 jobs
 #   bash build.sh --debug                  # Debug 构建 (默认 Release)
 #   bash build.sh --asan                   # 启用 AddressSanitizer (-DWITH_ASAN=ON)
-#   bash build.sh --no-glog                # 关闭 glog 日志 (默认 ON)
+#   bash build.sh --glog                   # 启用 glog 日志 (默认 OFF)
 #   bash build.sh --no-games               # 不编译内置游戏插件 (默认 ON)
 #
 # 仅构建指定目标 (重复 --target / -t 可指定多个):
@@ -40,7 +40,7 @@ CLEAN=0
 BUILD_TYPE="Release"
 WITH_GCOV="OFF"
 WITH_ASAN="OFF"
-WITH_GLOG="ON"
+WITH_GLOG="OFF"
 WITH_SQLITE="ON"
 WITH_TEST="OFF"      # ← 默认关闭，用 --test 开启
 WITH_GAMES="ON"
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
         --release)    BUILD_TYPE="Release"; shift ;;
         --asan)       WITH_ASAN="ON"; shift ;;
         --gcov)       WITH_GCOV="ON"; shift ;;
-        --no-glog)    WITH_GLOG="OFF"; shift ;;
+        --glog)       WITH_GLOG="ON"; shift ;;
         --no-sqlite)  WITH_SQLITE="OFF"; shift ;;
         --no-games)   WITH_GAMES="OFF"; shift ;;
         -j)           JOBS="$2"; shift 2 ;;

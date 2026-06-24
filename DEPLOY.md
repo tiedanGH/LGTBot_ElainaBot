@@ -77,7 +77,7 @@ bash build.sh --clean --test           # 清理 + 测试模式
 bash build.sh -j 8                     # 8 进程并行
 bash build.sh --debug                  # Debug 构建（含调试符号）
 bash build.sh --asan                   # 启用 AddressSanitizer 排查内存问题
-bash build.sh --no-glog                # 关闭 glog 日志
+bash build.sh --glog                   # 启用 glog 日志（默认关闭）
 bash build.sh --no-games               # 不编译内置游戏（仅引擎）
 bash build.sh -t LGTBot_ElainaBot      # 仅编桥接层 .so（改了 LGTBot_ElainaBot.cc 后最常用）
 bash build.sh -t numcomb -t alchemist  # 仅编两个游戏（增量调试某游戏）
@@ -93,7 +93,7 @@ bash build.sh --help                   # 查看所有参数
 | `--debug` / `--release` | `-DCMAKE_BUILD_TYPE` | `Release` | 构建类型                                                |
 | `--asan`                | `-DWITH_ASAN`        | `OFF`     | AddressSanitizer                                    |
 | `--gcov`                | `-DWITH_GCOV`        | `OFF`     | 覆盖率统计                                               |
-| `--no-glog`             | `-DWITH_GLOG`        | `ON`      | glog 日志                                             |
+| `--glog`                | `-DWITH_GLOG`        | `OFF`     | glog 日志（默认关闭，加此参数启用）                                |
 | `--no-sqlite`           | `-DWITH_SQLITE`      | `ON`      | SQLite 持久化（关闭后无排行榜/历史）                              |
 | `--no-games`            | `-DWITH_GAMES`       | `ON`      | 50+ 内置游戏插件                                          |
 | `-t` / `--target NAME`  | `cmake --target`     | `(全部)`    | 仅构建指定目标，可重复多次（如 `-t numcomb`）                       |
@@ -217,7 +217,7 @@ rm -rf plugins/LGTBot_ElainaBot
 | `git pull` / `git submodule update` 报错 / build.sh 提示「.git/ 不存在」    | 从插件市场安装的目录里没有 `.git/`(市场显式过滤)。打开仪表盘 → 桥接层行点「📥 初始化为 git 仓库」一键修复;再点「⬇ 初始化子模块」拉 lgtbot(已内置 SSH→HTTPS 改写,无需 SSH key)。详见 §2.1                                                                                                                                                                                                                          |
 | `libbot_core.so: cannot open shared object file`                   | `LGTBot_ElainaBot.so` 链接 `libbot_core.so` 但 ld.so 默认不搜 `build/`。本插件已用 `ctypes.CDLL` 在 import 阶段预加载 `build/lib*.so`；若仍报错，确认 `build/libbot_core.so` 存在，或手动 `LD_LIBRARY_PATH=plugins/LGTBot_ElainaBot/build python3 main.py`                                                                                                                          |
 | `ImportError: undefined symbol: ...boost::python...`               | Boost.Python 与编译时的 Python 版本不匹配 — `bash build.sh --clean` 重编译                                                                                                                                                                                                                                                                                      |
-| `Load mod failed: ... undefined symbol: _ZN6google10LogMessage...` | glog 符号不可见。本插件已在 `main.py` 用 `RTLD_GLOBAL` 解决；若仍出现，确认未 `--no-glog` 编译，或试 `LD_PRELOAD=$(ldconfig -p \| grep libglog \| awk '{print $4}' \| head -1) python3 main.py`                                                                                                                                                                                |
+| `Load mod failed: ... undefined symbol: _ZN6google10LogMessage...` | 仅在 `--glog` 编译时可能出现（glog 默认关闭，一般不会遇到）。glog 符号不可见，本插件已在 `main.py` 用 `RTLD_GLOBAL` 解决；若仍出现，试 `LD_PRELOAD=$(ldconfig -p \| grep libglog \| awk '{print $4}' \| head -1) python3 main.py`，或干脆不加 `--glog` 重编                                                                                                                                          |
 | `图片渲染失败 (markdown2image 调用未生成文件)` 或 `markdown2image 二进制缺失`         | 本插件在 `import` 时会切到 `build/` 目录让 LGTBot 找到 `markdown2image`。若仍报错：① 检查 `plugins/LGTBot_ElainaBot/build/markdown2image` 是否存在并可执行（`chmod +x`）；② 手动测试 `cd build && echo '# hi' \| ./markdown2image --output /tmp/x.png --width 400 --nowith_css --noprint_info`；③ 部分游戏依赖字体，需 `apt install fonts-noto-cjk`。不影响游戏核心运行，仅影响图片输出                             |
 | `LGTBot 引擎启动失败`                                                    | 查 `build/plugins/` 下是否有各 `libgame.so`；首次编译需要等待所有 game 子项编译完成                                                                                                                                                                                                                                                                                       |
 | 消息发不出去 / 无响应                                                       | 检查主框架日志中 sender 是否成功初始化；QQ Bot `appid/secret` 是否正确                                                                                                                                                                                                                                                                                                 |
