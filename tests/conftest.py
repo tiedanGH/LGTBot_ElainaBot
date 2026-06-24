@@ -34,7 +34,14 @@ import pytest
 
 # 临时插件目录(在 tmp 下,不污染开发树),供 fake boot 暴露的路径常量用。
 # 不需要跨进程持久;每次 pytest run 拿到一个新 tmp dir。
-_TEST_PLUGIN_DIR = tempfile.mkdtemp(prefix='lgtbot_pytest_')
+#
+# 关键:必须**还原真实布局** ``<root>/plugins/LGTBot_ElainaBot``,因为
+# backup.py 在 import 期算 ``BACKUP_DIR = dirname(dirname(PLUGIN_DIR))/data/backup/lgtbot``。
+# 嵌成 ``<tmp>/plugins/LGTBot_ElainaBot`` 后祖父 = ``<tmp>``,备份落在 ``<tmp>/data/``(tmp 内可写),
+# 与真生产环境的相对结构一致。
+_TEST_ROOT = tempfile.mkdtemp(prefix='lgtbot_pytest_')
+_TEST_PLUGIN_DIR = os.path.join(_TEST_ROOT, 'plugins', 'LGTBot_ElainaBot')
+os.makedirs(_TEST_PLUGIN_DIR, exist_ok=True)
 _TEST_DATA_DIR = os.path.join(_TEST_PLUGIN_DIR, 'data')
 _TEST_BUILD_DIR = os.path.join(_TEST_PLUGIN_DIR, 'build')
 os.makedirs(_TEST_DATA_DIR, exist_ok=True)

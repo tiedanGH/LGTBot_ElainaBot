@@ -83,8 +83,8 @@ def _clean_backup_dir():
 
 def test_resolve_framework_root():
     """BACKUP_DIR 应在 PLUGIN_DIR 的**上两级**之上 —— 不在插件目录内,卸载安全。"""
-    # boot.PLUGIN_DIR = <fake_root>/  (conftest 直接给的临时 dir,没真嵌在 plugins/)
-    # 但 backup._FRAMEWORK_ROOT 仍按"上两级"算 —— 这是真生产环境的逻辑
+    # conftest 把 fake PLUGIN_DIR 嵌成 <tmp>/plugins/LGTBot_ElainaBot,还原真实布局;
+    # backup._FRAMEWORK_ROOT 按"上两级"算 → <tmp>,与生产环境逻辑一致
     assert backup._FRAMEWORK_ROOT == os.path.dirname(os.path.dirname(boot.PLUGIN_DIR))
     # 备份路径形如 <FRAMEWORK_ROOT>/data/backup/lgtbot
     assert backup.BACKUP_DIR.endswith(os.path.join('data', 'backup', 'lgtbot'))
