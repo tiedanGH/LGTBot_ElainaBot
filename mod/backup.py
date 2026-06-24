@@ -12,8 +12,17 @@
     WebUI 手动按钮(`create_backup`)。**不**做 long-running cron,reload
     / restart 每次都触发检查,够用。
   · 轮转:每次成功备份后保留最近 ``RETENTION_COUNT=7`` 份,按 mtime 排序删多余。
-  · 恢复:`restore_backup()` **必须先调用方调 release_bot_if_not_processing_games**,
-    本模块只做 unpack;不停引擎不重启,让 UI 层 + 用户决策。
+  · 恢复:`restore_backup()` 用 ``os.replace`` 把每个文件**原子 rename** 到目标
+    位置,**不停引擎**。lgtbot 引擎对 ``lgtbot.db`` 没有常驻连接 —— 见子模块
+    ``bot_core/db_manager.cc`` 的 ``ExecuteTransaction``:每条指令现 ``sqlite3_open
+    (path)`` 跑事务再 close。所以原子替换 disk 文件后,**下一条 ``/战绩`` 等
+    指令立即按新 path 打开看到恢复的数据**,真正热生效,无需重启。``os.replace``
+    的原子性保证每次 open 看到的要么旧完整 db、要么新完整 db,绝不撞上
+    ``extractall`` 那种 ``open(path,'wb')`` O_TRUNC 写一半的撕裂态。公告 /
+    疑难解答 ``*.txt`` 也是 dispatcher 每条指令现读,同样立即生效。
+  · **唯一需要重启**的是 ``lgtbot.json`` 引擎配置:它在 ``LGTBot_Create`` 时
+    解析进引擎内存,不随指令重读;恢复后由 UI 提示用户手动点「🔁 重启 LGTBot」
+    (走 ``dispatcher.check_and_prepare_restart`` 的活跃游戏预检 + 单次释放)。
 
 安全准则(对齐 page_dashboard.py 的 audit 风格):
   · 所有 create / restore / delete 都 ``log.info`` 一条 audit 行,带文件名
@@ -248,24 +257,47 @@ def list_backups() -> list[dict]:
 
 
 def restore_backup(zip_name: str) -> dict:
-    """把 zip 解压覆盖到 ``plugins/LGTBot_ElainaBot/data/``。
+    """把 zip 内容**原子覆盖**到 ``plugins/LGTBot_ElainaBot/data/``,引擎继续运行不挂。
 
-    **本函数不停引擎、不重启**;调用方(WebUI render_restore)负责在调本函数
-    前先调 ``boot.LGTBot_ElainaBot.release_bot_if_not_processing_games()``
-    做活跃游戏预检,完成后提示用户手动重启。
+    流程:
+      1. 预检 zip 成员(zip-slip + 必须 ``data/`` 开头)
+      2. 整 zip 解到 plugin_dir 下的临时目录 ``.restore_tmp_<ts>/``(与目标同 fs
+         → 后续 rename 必能原子);不直接解到 ``data/``,因为 ``zipfile.extractall``
+         对已有文件是 ``open(path, 'wb')`` 同 inode O_TRUNC 截断:若引擎某条指令
+         的 ``sqlite3_open`` 恰好撞上这个写一半的窗口,会读到撕裂的 db → 报错或
+         拿到残缺页
+      3. 临时目录中每个文件用 ``os.replace`` 原子 rename 到 ``data/`` 对应位置 ——
+         POSIX rename(2) 是原子的:任意时刻 ``open(path)`` 看到的要么旧完整文件、
+         要么新完整文件,绝无中间态
+      4. 对刚替换过的 ``*.db`` 文件,把旁路 ``-journal`` / ``-wal`` / ``-shm``
+         也 rename 为 ``.stale_<ts>`` 备查 —— 否则下次启动 SQLite 见 journal
+         可能误以为是 "未完成事务" 做 rollback,把恢复的数据回滚成残缺态
+
+    热生效(无需重启):引擎对 ``lgtbot.db`` **没有常驻连接** —— 子模块
+    ``bot_core/db_manager.cc:ExecuteTransaction`` 每条指令现 ``sqlite3_open(path)``
+    跑事务再 close。所以原子替换后,**下一条指令立即按新 path 看到恢复的数据**。
+    公告 / 疑难解答 ``*.txt`` 由 dispatcher 每条指令现读,同样立即生效。
+
+    需重启:仅 ``lgtbot.json`` 引擎配置 —— 它在 ``LGTBot_Create`` 时解析进内存,
+    不随指令重读。``data/config.yaml`` 插件配置在 ``@on_load`` 时 apply,下次插件
+    热重载 / 重启时生效。这两类由 UI 提示用户按需点「🔁 重启 LGTBot」。
+
+    **本函数不停引擎、不重启**。重启(及活跃游戏预检 / 拒绝)完全交给
+    ``dispatcher.check_and_prepare_restart`` 这条独立路径,与 restore 解耦 ——
+    早期实现先调 ``release_bot_if_not_processing_games`` 再覆盖,会 null-deref
+    引擎并在后续重启时 double-free,现已移除。
     """
     if not zip_name or '/' in zip_name or '\\' in zip_name or '..' in zip_name:
-        # 防路径穿越 —— 只接受纯文件名,不接受路径
         return {'success': False, 'message': '非法备份文件名'}
     zip_path = os.path.join(BACKUP_DIR, zip_name)
     if not os.path.isfile(zip_path):
         return {'success': False, 'message': f'备份文件不存在: {zip_name}'}
 
     log.info(f'[backup] ⏪ 准备恢复 {zip_name} → {boot.PLUGIN_DIR}/data/')
+
+    ts = f'{int(time.time())}_{os.getpid()}'
+    tmp_root = os.path.join(boot.PLUGIN_DIR, f'.restore_tmp_{ts}')
     try:
-        # zip 内是 data/... 相对路径,unpack 到 plugin_dir 等于把 data/ 整个还原
-        # zipfile.extractall 不会自动覆盖只读文件;先验证 zip 内成员路径全部
-        # 在 data/ 下,防恶意 zip 解压到上级目录(zip slip)
         with zipfile.ZipFile(zip_path, 'r') as zf:
             for member in zf.namelist():
                 norm = os.path.normpath(member)
@@ -274,23 +306,58 @@ def restore_backup(zip_name: str) -> dict:
                         'success': False,
                         'message': f'备份文件包含非法路径 {member!r}(zip slip 防护)',
                     }
-                # 必须 data/ 开头
-                if not norm.startswith('data' + os.sep) and norm != 'data':
+                if not (norm.startswith('data' + os.sep) or norm == 'data'):
                     return {
                         'success': False,
                         'message': f'备份文件含非 data/ 路径 {member!r}',
                     }
-            zf.extractall(boot.PLUGIN_DIR)
+            os.makedirs(tmp_root, exist_ok=True)
+            zf.extractall(tmp_root)
+
+        replaced: list[str] = []
+        swept_sidecars: list[str] = []
+        src_root = os.path.join(tmp_root, 'data')
+        dst_root = boot.DATA_DIR
+        if not os.path.isdir(src_root):
+            return {'success': False, 'message': '备份 zip 内不含 data/ 目录'}
+        for root_dir, _dirs, files in os.walk(src_root):
+            rel = os.path.relpath(root_dir, src_root)
+            dst_dir = dst_root if rel == '.' else os.path.join(dst_root, rel)
+            os.makedirs(dst_dir, exist_ok=True)
+            for fname in files:
+                src_path = os.path.join(root_dir, fname)
+                dst_path = os.path.join(dst_dir, fname)
+                os.replace(src_path, dst_path)
+                replaced.append(
+                    os.path.relpath(dst_path, boot.PLUGIN_DIR).replace(os.sep, '/')
+                )
+                if fname.endswith('.db'):
+                    for suffix in ('-journal', '-wal', '-shm'):
+                        side = dst_path + suffix
+                        if os.path.isfile(side):
+                            try:
+                                bak = f'{side}.stale_{ts}'
+                                os.replace(side, bak)
+                                swept_sidecars.append(
+                                    os.path.relpath(bak, boot.PLUGIN_DIR).replace(os.sep, '/')
+                                )
+                            except OSError as e:
+                                log.warning(f'[backup] 移走过期 sidecar {side} 失败: {e}')
+
+        log.info(f'[backup] ✅ 已恢复 {zip_name},替换 {len(replaced)} 文件,'
+                 f'清理 {len(swept_sidecars)} 个过期 sidecar')
+        return {
+            'success': True,
+            'zip_name': zip_name,
+            'replaced_files': replaced,
+            'swept_sidecars': swept_sidecars,
+            'message': '已恢复成功，战绩 / 成就等数据立即生效。引擎配置需重启才能重新加载',
+        }
     except Exception as e:
         log.error(f'[backup] 恢复 {zip_name} 失败: {e}')
-        return {'success': False, 'message': f'解压失败: {e}'}
-
-    log.info(f'[backup] ✅ 已恢复 {zip_name},请重启 LGTBot 引擎加载新数据')
-    return {
-        'success': True,
-        'zip_name': zip_name,
-        'message': '已恢复成功,请点击「🔁 重启 LGTBot」加载新数据',
-    }
+        return {'success': False, 'message': f'恢复失败: {e}'}
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
 
 
 def delete_backup(zip_name: str) -> dict:

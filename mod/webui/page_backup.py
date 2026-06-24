@@ -7,9 +7,12 @@
     主动触发(restore / delete 还要 confirm);``backup.schedule_on_load_check()``
     是后端 @on_load 钩子里的自动任务，本模块只让用户可见它的产物 + 提供手动
     覆盖入口。
-  · ``restore_handler`` 在解压前先调
-    ``boot.LGTBot_ElainaBot.release_bot_if_not_processing_games()`` —— 有活跃
-    游戏直接拒绝，避免数据库写一半被覆盖。
+  · ``restore_handler`` **不停引擎、不调用 ``release_bot_if_not_processing_games``**
+    现在的实现:``backup.restore_backup`` 用 ``os.replace`` 原子覆盖 disk 上的
+    data/ 文件。引擎对 lgtbot.db 没有常驻连接(每条指令现 open by path),所以
+    战绩 / 成就**下条指令立即热生效**,无需重启;唯独引擎配置 lgtbot.json 在
+    引擎启动时解析进内存,需用户按需点「🔁 重启 LGTBot」(走 dispatcher 的活跃
+    游戏预检 + 单次释放)才会重新加载。
 
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_JS`` 从 ``templates/backup/`` 加载
@@ -32,7 +35,7 @@ import time
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import backup, boot
+from .. import backup
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -116,9 +119,12 @@ def render_list() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 
 async def restore_handler(request: 'web.Request') -> 'web.Response':
-    """``GET /api/ext/lgtbot/backup/restore?name=<zip>`` —— 恢复指定备份。
+    """``GET /api/ext/lgtbot/backup/restore?name=<zip>`` —— 原子恢复指定备份。
 
-    预检:若 LGTBot 引擎正在运行 + 有活跃游戏 → 拒绝(避免数据库写一半被覆盖)。
+    **不释放也不重启** C++ 引擎。仅交给
+    ``backup.restore_backup`` 走 ``os.replace`` 原子替换 disk 上的 data/ 文件;
+    引擎每条指令按 path 现 open db,战绩 / 成就恢复后下条指令立即热生效。
+    仅引擎配置 lgtbot.json 需用户后续点「🔁 重启 LGTBot」才会重新加载。
     """
     name = (request.query.get('name') or '').strip()
     if not name:
@@ -126,22 +132,6 @@ async def restore_handler(request: 'web.Request') -> 'web.Response':
             {'success': False, 'message': '缺少备份文件名参数(?name=...)'},
             status=400,
         )
-
-    # 引擎活跃游戏预检 —— 复用 boot 的原子接口
-    try:
-        if boot.LGTBOT_AVAILABLE and boot.is_engine_running():
-            released = boot.LGTBot_ElainaBot.release_bot_if_not_processing_games()
-            if not released:
-                return web.json_response({
-                    'success': False,
-                    'message': ('检测到有进行中的游戏，拒绝恢复以保护数据。'
-                                '请等所有对局结束后再试，或在「🔁 重启 LGTBot」'
-                                '强制释放引擎后重试。'),
-                })
-            # release 成功 —— 引擎已停,可以安全恢复
-    except Exception as e:
-        log.warning(f'恢复前引擎状态预检异常，仍继续: {e}')
-
     try:
         result = backup.restore_backup(name)
     except Exception as e:

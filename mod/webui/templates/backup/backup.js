@@ -216,15 +216,15 @@ async function backupRefresh() {
 /* ──── 恢复 ──── */
 async function backupRestore(name) {
   const ok1 = await dashConfirm(
-    '确认恢复备份「' + name + '」?\n\n' +
-    '将用此备份覆盖当前数据(战绩 / 配置 / 缓存)。\n' +
-    'LGTBot 引擎会被尝试停止，**进行中的对局会丢失**。',
-    {level: 'warn'}
+    '确认恢复备份「' + name + '」？\n\n' +
+    '将用此备份原子覆盖磁盘上的当前数据，此操作不可逆。\n' +
+    '战绩、成就等数据恢复将立即生效。引擎配置需重启才能重新加载。',
+    {level: 'danger'}
   );
   if (!ok1) return;
   const ok2 = await dashConfirm(
-    '再次确认:这是不可逆操作。\n\n' +
-    '现有的对局战绩、配置、玩家昵称将被备份时的快照覆盖。\n' +
+    '再次确认：这是不可逆操作！\n\n' +
+    '现有的对局战绩、成就、配置将被备份时的快照覆盖。\n' +
     '如有疑虑，请先点「💾 立即备份」抓取当前数据状态后再恢复。',
     {level: 'danger'}
   );
@@ -235,11 +235,11 @@ async function backupRestore(name) {
     const data = await backupCallRoute(BACKUP_ROUTE_BASE + '/restore', {name});
     if (data.success) {
       backupShowMsg('✅ ' + (data.message || '已恢复'), 'ok');
-      /* 提示用户重启 LGTBot 引擎 */
+      /* 仅引擎配置 lgtbot.json 需重启才能重新加载。 */
       dashAlert
-        ? dashAlert('恢复完成 —— 请点击右上角「🔁 重启 LGTBot」加载新数据库内容，'
-                    + '或在「引擎编译」面板手动重启进程。')
-        : alert('恢复完成，请重启 LGTBot 引擎');
+        ? await dashAlert('恢复完成！ —— 战绩、成就、公告等数据已立即生效。\n'
+              + '若本次恢复涉及引擎配置 lgtbot.json，请点击「🔁 重启 LGTBot」让引擎重新加载。')
+        : alert('恢复完成！战绩、成就、公告等数据已立即生效，如涉及引擎配置请重启 LGTBot');
     } else {
       backupShowMsg('❌ ' + (data.message || '恢复失败'), 'err');
     }

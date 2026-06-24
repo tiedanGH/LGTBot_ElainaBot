@@ -239,6 +239,128 @@ def test_create_backup_with_sqlite_failure_skips_and_continues():
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 6.5. restore_backup —— 原子覆盖 + sidecar 清理 + 引擎安全
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_restore_backup_rejects_invalid_name():
+    for bad_name in ('', '../etc/passwd', 'foo/bar.zip', 'foo\\bar.zip', '..foo.zip'):
+        result = backup.restore_backup(bad_name)
+        assert not result['success'], f'非法文件名 {bad_name!r} 应被拒绝'
+
+
+def test_restore_backup_rejects_missing_file():
+    result = backup.restore_backup('LGTBot_nonexistent.zip')
+    assert not result['success']
+    assert '不存在' in result['message']
+
+
+def test_restore_backup_replaces_files_with_backup_content():
+    """restore_backup 应把 data/ 下的文件还原为备份内容。"""
+    _make_dummy_sqlite(boot.DB_PATH, table='t_backup')
+    _make_plain_file(boot.CONF_PATH, '{"v": "backup"}')
+    _make_plain_file(os.path.join(boot.DATA_DIR, 'config.yaml'), 'role: backup')
+    create_result = backup.create_backup()
+    assert create_result['success']
+    zip_name = create_result['zip_name']
+
+    # 修改当前 data 让它和备份不同
+    _make_dummy_sqlite(boot.DB_PATH, table='t_current')
+    _make_plain_file(boot.CONF_PATH, '{"v": "current"}')
+    _make_plain_file(os.path.join(boot.DATA_DIR, 'config.yaml'), 'role: current')
+
+    restore_result = backup.restore_backup(zip_name)
+    assert restore_result['success'], restore_result.get('message')
+    replaced = restore_result['replaced_files']
+    assert any(f.endswith('data/engine/lgtbot.db') for f in replaced)
+    assert any(f.endswith('data/engine/lgtbot.json') for f in replaced)
+    assert any(f.endswith('data/config.yaml') for f in replaced)
+
+    # 文件内容应该匹配备份(不是 "current" 那份)
+    with open(boot.CONF_PATH) as f:
+        assert f.read() == '{"v": "backup"}'
+    with open(os.path.join(boot.DATA_DIR, 'config.yaml')) as f:
+        assert f.read() == 'role: backup'
+    conn = sqlite3.connect(boot.DB_PATH)
+    try:
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert 't_backup' in tables and 't_current' not in tables
+    finally:
+        conn.close()
+
+
+def test_restore_backup_sweeps_stale_sqlite_sidecars():
+    """restored *.db 旁边遗留的 -journal / -wal / -shm 必须改名到 .stale_<ts>,
+    否则下次启动 SQLite 会用 stale journal rollback 把恢复的数据回滚成残缺态。
+    """
+    _make_dummy_sqlite(boot.DB_PATH)
+    _make_plain_file(boot.CONF_PATH, '{}')
+    create_result = backup.create_backup()
+    assert create_result['success']
+
+    # 在 db 旁边造 stale journal 和 wal
+    journal = boot.DB_PATH + '-journal'
+    wal = boot.DB_PATH + '-wal'
+    _make_plain_file(journal, 'stale journal content')
+    _make_plain_file(wal, 'stale wal content')
+
+    restore_result = backup.restore_backup(create_result['zip_name'])
+    assert restore_result['success']
+
+    # 原 path 应不在(已被改名)
+    assert not os.path.isfile(journal)
+    assert not os.path.isfile(wal)
+    # swept_sidecars 列表里应有这俩
+    swept = restore_result['swept_sidecars']
+    assert any('lgtbot.db-journal.stale_' in s for s in swept)
+    assert any('lgtbot.db-wal.stale_' in s for s in swept)
+
+
+@pytest.mark.skipif(os.name != 'posix',
+                    reason='POSIX inode 语义:os.replace 替换 dirent 而非截断 inode')
+def test_restore_preserves_old_inode_for_open_fd():
+    """关键安全保证:引擎打开 db 后,在它运行期间 restore_backup 必须**不**破坏
+    它的 fd —— os.replace 替换 dirent 到新 inode,旧 inode 仍由 fd 持有可读,
+    避免引擎下次 read 拿到截断 / 损坏的 SQLite 页面 → null deref SEGV。
+    """
+    _make_dummy_sqlite(boot.DB_PATH, rows=3)
+    _make_plain_file(boot.CONF_PATH, '{}')
+    create_result = backup.create_backup()
+    assert create_result['success']
+
+    # 模拟引擎: 打开 db fd 时它有 3 行
+    fd = os.open(boot.DB_PATH, os.O_RDONLY)
+    try:
+        ino_before = os.fstat(fd).st_ino
+
+        # 改 disk 上的 db,让它和备份不一样(10 行)
+        _make_dummy_sqlite(boot.DB_PATH, rows=10)
+
+        # restore: dirent → 新 inode(包含备份的 3 行内容)
+        restore_result = backup.restore_backup(create_result['zip_name'])
+        assert restore_result['success']
+
+        # path 现在应当指向新 inode
+        ino_after_path = os.stat(boot.DB_PATH).st_ino
+        assert ino_after_path != ino_before, \
+            'os.replace 应替换 dirent 到新 inode(不要原地 truncate)'
+
+        # fd 仍指向旧 inode(它的 stat 不变,可读)
+        ino_via_fd = os.fstat(fd).st_ino
+        assert ino_via_fd == ino_before, '旧 inode 必须由 fd 保持存活'
+
+        # 旧 inode 的内容应当与新 path 内容不同
+        os.lseek(fd, 0, 0)
+        via_fd_head = os.read(fd, 100)
+        with open(boot.DB_PATH, 'rb') as f:
+            via_path_head = f.read(100)
+        assert via_fd_head != via_path_head, '通过 fd 读到的应是旧数据,通过 path 读到的应是新数据'
+    finally:
+        os.close(fd)
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # 7. schedule_on_load_check 时效判断
 # ─────────────────────────────────────────────────────────────────────────
 
