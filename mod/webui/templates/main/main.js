@@ -36,6 +36,15 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
   applyTheme(cur === 'dark' ? 'light' : 'dark');
 });
 
+/* ──── 全屏按钮──── 在新窗口打开本页面的独立全屏视图。
+   脱离侧边栏 iframe 外壳整页铺满;token 透传保证新窗口里各 action fetch 仍鉴权通过。 */
+const _fullscreenBtn = document.getElementById('fullscreen-btn');
+if (_fullscreenBtn) {
+  _fullscreenBtn.addEventListener('click', () => {
+    window.open(apiUrl(PAGE_KEY), '_blank', 'noopener');
+  });
+}
+
 /* ──── 标签切换 ──── */
 document.querySelectorAll('.tabs .tab').forEach(btn => {
   btn.addEventListener('click', () => {
