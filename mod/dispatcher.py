@@ -93,12 +93,43 @@ _LGT_MSG_EVENTS = frozenset({
 })
 
 
+# ──────── 专属指令排除表 ──────────────────────────────────────────────────
+# 这些指令都有专属 handler(priority > 0 且 block=True),不该再落进 LGTBot 引擎的 catch-all。
+# 防线有两层:
+#   ① 框架层:block=True —— 新版框架把**所有**命中的 handler 按优先级顺序全部
+#     执行,只有 block=True 的 handler 命中后才拦截后续。
+#   ② 插件层:catch-all(lgtbot_dispatch / lgtbot_interaction_dispatch)派发前
+#     调 _is_exclusive_command 主动跳过 —— 即便框架链语义改变,引擎也不会重复收到这些指令。
+# pattern 常量与对应 @handler 装饰器共用,新增专属指令时在此加常量即可,
+# 两处不会漂移。
+_P_QUERY_ID = r'^(?i:查询id)\s+(\S+)$'
+_P_MENU     = r'^/?菜单$'
+_P_MORE     = r'^/?更多功能$'
+_P_NOTICE   = r'^/?更新公告$'
+_P_TROUBLE  = r'^/?疑难解答$'
+_P_ABOUT    = r'^/?关于$'
+_P_RESTART  = r'^重启$'
+
+_EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
+    _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT, _P_RESTART,
+))
+
+
+def _is_exclusive_command(text: str) -> bool:
+    """content 是否命中任一专属指令(含框架「加/去斜杠」重试的变体)。"""
+    if not text:
+        return False
+    alt = text[1:] if text.startswith('/') else '/' + text
+    return any(p.search(text) or p.search(alt) for p in _EXCLUSIVE_RES)
+
+
 # ──────── 用户查询(所有人可用) ────────────────────────────────────────────
 
-@handler(r'^(?i:查询id)\s+(\S+)$',
+@handler(_P_QUERY_ID,
          name='查询用户',
          desc='查缓存中的昵称 / 头像 / 上次活跃',
          priority=50,
+         block=True,
          event_types=_LGT_MSG_EVENTS)
 async def lgtbot_query_user(event, match):
     """以输入的 openid 在用户缓存 DB 中查单条记录,markdown 输出。
@@ -218,10 +249,11 @@ def _read_troubleshooting() -> str:
         _TROUBLESHOOTING_PATH, _DEFAULT_TROUBLESHOOTING, 'troubleshooting.txt')
 
 
-@handler(r'^/?菜单$',
+@handler(_P_MENU,
          name='LGTBot 欢迎菜单',
          desc='触发欢迎菜单 (等同于单独 @bot)',
          priority=50,
+         block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_welcome_menu(event, match):
     """收到「菜单」(文本或按钮)→ 回欢迎菜单。
@@ -244,10 +276,11 @@ async def lgtbot_welcome_menu(event, match):
     await _send_welcome_menu(event)
 
 
-@handler(r'^/?更多功能$',
+@handler(_P_MORE,
          name='LGTBot 更多功能',
          desc='展示「更多功能」子菜单',
          priority=50,
+         block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_more_features(event, match):
     """收到「更多功能」(文本或按钮)→ 回一条带子菜单按钮的 markdown。
@@ -271,10 +304,11 @@ async def lgtbot_more_features(event, match):
     await event.reply(md, buttons=buttons.build_more_features_buttons())
 
 
-@handler(r'^/?更新公告$',
+@handler(_P_NOTICE,
          name='LGTBot 更新公告',
          desc='读取 data/update_notice.txt 实时返回公告内容',
          priority=50,
+         block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_update_notice(event, match):
     """收到「更新公告」(文本或按钮)→ 把 txt 文件内容包在代码块里 reply。
@@ -301,10 +335,11 @@ async def lgtbot_update_notice(event, match):
     await event.reply(md)
 
 
-@handler(r'^/?疑难解答$',
+@handler(_P_TROUBLE,
          name='LGTBot 疑难解答',
          desc='读取 data/troubleshooting.txt 实时返回常见问题与解答',
          priority=50,
+         block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_troubleshooting(event, match):
     """收到「疑难解答」(文本或按钮)→ 把 txt 文件内容包在代码块里 reply。
@@ -333,16 +368,16 @@ async def lgtbot_troubleshooting(event, match):
 # 系统插件 ``plugins/system/app/basic.py::about_info`` 注册了 ``^关于$`` 默认
 # priority=0,展示框架级机器人信息。本插件的引擎自带 about 回执,用户在本 bot 上发 ``/关于`` 应优先看到这个
 #
-# priority=50 高于系统插件,first-match-wins 让本 handler 抢到事件,系统插件的
-# about_info 不再触发。函数体里直接转发给 lgtbot_dispatch
+# priority=50 高于系统插件 + block=True 拦截后续. 函数体里直接转发给 lgtbot_dispatch。
 
-@handler(r'^/?关于$',
+@handler(_P_ABOUT,
          name='LGTBot 关于',
          desc='查看 LGTBot 版本、作者、仓库链接',
          priority=50,
+         block=True,
          event_types=_LGT_MSG_EVENTS)
 async def lgtbot_about(event, match):
-    await lgtbot_dispatch(event, match)
+    await lgtbot_dispatch(event, match, _from_exclusive=True)
 
 
 # ──────── 消息派发 ────────────────────────────────────────────────────────
@@ -352,13 +387,17 @@ async def lgtbot_about(event, match):
          desc='把群 @bot / 私聊 / 全量群 @bot 消息派发给 LGTBot C++ 引擎',
          priority=-100,
          event_types=_LGT_MSG_EVENTS, ignore_at_check=True)
-async def lgtbot_dispatch(event, match):
+async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     """将所有群 @ / 私聊消息派发给 LGTBot 引擎（不消费事件，其他插件仍可处理）。
 
     ``ignore_at_check=True`` 让框架把全量群的 non-AT 消息也派进来,但本 handler
     regex 是 ``.*`` 会吞日常对话 —— 所以本体里强制再过一道 is_at_self 闸:
     群里没 @bot 的消息直接 return,等同于 LGTBot 仍只对 @bot 触发响应。
     (私聊 / 频道私信不受影响,本身没有「@」概念。)
+
+    ``_from_exclusive=True`` 表示由专属 handler 主动转发(目前只有
+    lgtbot_about),跳过下方的专属指令排除闸 —— 那一次转发正是它的职责。
+    框架调用固定传 (event, match) 两个位置参数,不会碰到这个 kwarg。
     """
     if not state.started:
         return
@@ -384,6 +423,12 @@ async def lgtbot_dispatch(event, match):
     content = (event.content or '').strip()
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
+
+    # 专属指令排除闸(见 _EXCLUSIVE_RES 注释):菜单 / 关于 / 重启 等已由各自
+    # 专属 handler 处理,catch-all 直接跳过,引擎不重复收到 —— 复刻旧框架
+    # first-match-wins 的行为,不依赖框架 block 语义。
+    if not _from_exclusive and _is_exclusive_command(content):
+        return
 
     # 用户缓存：昵称 + 头像 URL（事件携带 username + 用 appid 推导头像）
     # 走 userdb 落盘，5 分钟批量 flush；name / avatar 任一为空时不会覆盖 DB 旧值
@@ -501,6 +546,12 @@ async def lgtbot_interaction_dispatch(event, match):
     if not content:
         return
 
+    # 专属指令排除闸:菜单 / 更新公告 等按钮的 data 与文本指令同文案,已由
+    # 专属 handler(同样监听 INTERACTION_CREATE)处理,这里跳过防止引擎重复
+    # 收到 —— 与 lgtbot_dispatch 的闸对称,见 _EXCLUSIVE_RES 注释。
+    if _is_exclusive_command(content):
+        return
+
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
 
@@ -605,12 +656,13 @@ def schedule_exec_after(delay: float = 0.5, on_failure=None) -> None:
 # `owner_only=True` 框架内置:非主人触发时直接回 owner_only 模板,不进函数体。
 # WebUI 重启按钮也走同一对 helper —— 见 webui/main.py::_render_restart。
 
-@handler(r'^重启$',
+@handler(_P_RESTART,
          name='LGTBot 重启',
          desc='整进程 os.execv 重启,重新加载 C++ 引擎与全部游戏插件',
          owner_only=True,
          event_types=_LGT_MSG_EVENTS,
-         priority=100)
+         priority=100,
+         block=True)
 async def lgtbot_restart(event, match):
     """主人发起的本插件「全套」重启 —— exec 整个 Python 进程,把 bridge .so /
     libbot_core.so / 全部 libgame.so 重新 dlopen,等价于让 build.sh 重编后的
