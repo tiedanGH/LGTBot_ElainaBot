@@ -123,6 +123,33 @@ def _is_exclusive_command(text: str) -> bool:
     return any(p.search(text) or p.search(alt) for p in _EXCLUSIVE_RES)
 
 
+# ──────── 用户配置的屏蔽指令列表(config.yaml: blocked_commands) ───────────
+# 与上面的专属指令排除表互补:排除表是**本插件自己**的指令,这里是**其他插件**的指令
+# 框架把所有命中的 handler 全部执行,其他插件处理完后,消息仍会落进本插件的 catch-all 被转发给引擎。
+# 把冲突指令加进 blocked_commands 即可让 catch-all 直接跳过。
+BLOCKED_COMMANDS: tuple[str, ...] = ()
+
+
+def _is_blocked_command(text: str) -> bool:
+    """content 是否命中 blocked_commands 屏蔽表。
+
+    匹配规则(兼容常见写法):
+      · 消息开头的 ``/`` 可选 —— 配 ``帮助`` 同时挡 ``帮助`` 和 ``/帮助``
+      · 完整匹配,或「指令 + 空白 + 参数」前缀匹配 —— ``帮助`` 也挡 ``帮助 xxx``
+    (配置项本身在 config.py 载入时已做 strip / 去 ``/`` 前缀 / 去空规范化。)
+    """
+    cmds = BLOCKED_COMMANDS
+    if not text or not cmds:
+        return False
+    t = text[1:] if text.startswith('/') else text
+    for cmd in cmds:
+        if t == cmd:
+            return True
+        if t.startswith(cmd) and len(t) > len(cmd) and t[len(cmd)] in ' \t　':
+            return True
+    return False
+
+
 # ──────── 用户查询(所有人可用) ────────────────────────────────────────────
 
 @handler(_P_QUERY_ID,
@@ -430,6 +457,11 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     if not _from_exclusive and _is_exclusive_command(content):
         return
 
+    # 用户配置的屏蔽指令闸(config.yaml: blocked_commands):其他插件的指令在此拦下,不再转发给引擎。
+    if _is_blocked_command(content):
+        log.info(f'🚫 [屏蔽指令] 命中 blocked_commands，跳过引擎派发: {content[:30]!r}')
+        return
+
     # 用户缓存：昵称 + 头像 URL（事件携带 username + 用 appid 推导头像）
     # 走 userdb 落盘，5 分钟批量 flush；name / avatar 任一为空时不会覆盖 DB 旧值
     if uid:
@@ -550,6 +582,11 @@ async def lgtbot_interaction_dispatch(event, match):
     # 专属 handler(同样监听 INTERACTION_CREATE)处理,这里跳过防止引擎重复
     # 收到 —— 与 lgtbot_dispatch 的闸对称,见 _EXCLUSIVE_RES 注释。
     if _is_exclusive_command(content):
+        return
+
+    # 用户配置的屏蔽指令闸 —— 其他插件的 callback 按钮 data 也会落进本 catch-all,与 lgtbot_dispatch 的闸对称。
+    if _is_blocked_command(content):
+        log.info(f'🚫 [屏蔽指令] 按钮回调命中 blocked_commands，跳过引擎派发: {content[:30]!r}')
         return
 
     uid = event.user_id or ''

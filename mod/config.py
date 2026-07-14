@@ -8,6 +8,7 @@
   · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
   · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
   · crash_notify_group: str          严重问题通知群 openid（崩溃时向此群主动推报告）
+  · blocked_commands: list[str]      屏蔽指令列表（命中的消息不转发给引擎，化解与其他插件的指令冲突）
   · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（这些用户私信走主动消息直推）
   · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
 """
@@ -32,6 +33,7 @@ DEFAULT_CONFIG = {
     'refresh_wait_timeout': 15.0,
     'image_upload_dedup_ttl': 60.0,
     'crash_notify_group': '',
+    'blocked_commands': [],
     'sandbox_dm_users': [],
     'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
 }
@@ -41,6 +43,7 @@ CONFIG_COMMENTS = {
     'refresh_wait_timeout': '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
     'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
+    'blocked_commands': '屏蔽指令列表：命中的消息不再转发给引擎，用于化解与其他插件的指令冲突',
     'sandbox_dm_users': '沙箱测试用户 openid 列表，列表内用户私信走主动消息直推（仅沙箱私信可发主动消息）',
     'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
 }
@@ -115,9 +118,11 @@ def _apply_runtime_tunables(cfg: dict):
     下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
     ``load_plugin_config`` 处理,不在此函数内):
       image_hosting → refresh_wait_timeout → image_upload_dedup_ttl →
-      crash_notify_group → sandbox_dm_users → menu_game_buttons
+      crash_notify_group → blocked_commands → sandbox_dm_users →
+      menu_game_buttons
     """
     from . import quota, uploader, buttons as _buttons, callbacks as _callbacks
+    from . import dispatcher as _dispatcher
 
     # ── image_hosting ─────────────────────────────────────────────────────
     backend = cfg.get('image_hosting', '')
@@ -179,6 +184,28 @@ def _apply_runtime_tunables(cfg: dict):
         new = notify_group or '(未配置)'
         log.info(f'crash_notify_group: {old} → {new}')
         _callbacks.CRASH_NOTIFY_GROUP = notify_group
+
+    # ── blocked_commands ──────────────────────────────────────────────────
+    # 屏蔽指令列表:命中的消息不再转发给 LGTBot 引擎(dispatcher 两个 catch-all 派发前调 _is_blocked_command 检查)。
+    # 规范化:strip + 去开头 '/'(配 '/帮助' 与 '帮助' 等价)+ 去空 + 去重保序。非法 / 缺失 → 空表(不屏蔽任何指令)。
+    raw_blocked = cfg.get('blocked_commands', None)
+    if isinstance(raw_blocked, list):
+        seen: set = set()
+        blocked: list = []
+        for c in raw_blocked:
+            cmd = str(c).strip().lstrip('/').strip()
+            if cmd and cmd not in seen:
+                seen.add(cmd)
+                blocked.append(cmd)
+        blocked_t = tuple(blocked)
+    else:
+        if raw_blocked is not None:
+            log.warning(f'blocked_commands 应为字符串列表，已忽略 (got {type(raw_blocked).__name__})')
+        blocked_t = ()
+    if _dispatcher.BLOCKED_COMMANDS != blocked_t:
+        log.info(f'blocked_commands: {len(_dispatcher.BLOCKED_COMMANDS)} → {len(blocked_t)} 条'
+                 + (f' {list(blocked_t)}' if blocked_t else ''))
+        _dispatcher.BLOCKED_COMMANDS = blocked_t
 
     # ── sandbox_dm_users ──────────────────────────────────────────────────
     # 列表内用户私信跳过被动配额,直接主动直推。非法 / 缺失 → 空集合(所有

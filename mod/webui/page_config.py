@@ -154,11 +154,13 @@ def _snapshot_runtime_tunables() -> dict:
     前后两次快照的 diff 即得到本次热重载的实际变化。
     """
     from .. import quota as _quota, uploader as _uploader, buttons as _buttons, callbacks as _callbacks
+    from .. import dispatcher as _dispatcher
     return {
         'image_hosting': _uploader.SELECTED_BACKEND or '',
         'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
         'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
         'crash_notify_group': _callbacks.CRASH_NOTIFY_GROUP or '',
+        'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
         'sandbox_dm_users': sorted(_callbacks.SANDBOX_DM_USERS),
         'menu_game_buttons': list(_buttons.MENU_GAMES),
     }
