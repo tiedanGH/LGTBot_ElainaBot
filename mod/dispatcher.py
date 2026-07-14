@@ -133,19 +133,18 @@ BLOCKED_COMMANDS: tuple[str, ...] = ()
 def _is_blocked_command(text: str) -> bool:
     """content 是否命中 blocked_commands 屏蔽表。
 
-    匹配规则(兼容常见写法):
-      · 消息开头的 ``/`` 可选 —— 配 ``帮助`` 同时挡 ``帮助`` 和 ``/帮助``
+    匹配规则:
+      · 斜杠**严格匹配** —— 配置项带 ``/`` 只挡带 ``/`` 的消息,两种写法互不通配
       · 完整匹配,或「指令 + 空白 + 参数」前缀匹配 —— ``帮助`` 也挡 ``帮助 xxx``
-    (配置项本身在 config.py 载入时已做 strip / 去 ``/`` 前缀 / 去空规范化。)
+    (配置项在 config.py 载入时仅做 strip / 去空 / 去重,``/`` 原样保留。)
     """
     cmds = BLOCKED_COMMANDS
     if not text or not cmds:
         return False
-    t = text[1:] if text.startswith('/') else text
     for cmd in cmds:
-        if t == cmd:
+        if text == cmd:
             return True
-        if t.startswith(cmd) and len(t) > len(cmd) and t[len(cmd)] in ' \t　':
+        if text.startswith(cmd) and len(text) > len(cmd) and text[len(cmd)] in ' \t　':
             return True
     return False
 

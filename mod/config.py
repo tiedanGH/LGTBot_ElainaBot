@@ -187,13 +187,13 @@ def _apply_runtime_tunables(cfg: dict):
 
     # ── blocked_commands ──────────────────────────────────────────────────
     # 屏蔽指令列表:命中的消息不再转发给 LGTBot 引擎(dispatcher 两个 catch-all 派发前调 _is_blocked_command 检查)。
-    # 规范化:strip + 去开头 '/'(配 '/帮助' 与 '帮助' 等价)+ 去空 + 去重保序。非法 / 缺失 → 空表(不屏蔽任何指令)。
+    # 规范化:strip + 去空 + 去重保序;严格按配置匹配。非法 / 缺失 → 空表(不屏蔽任何指令)。
     raw_blocked = cfg.get('blocked_commands', None)
     if isinstance(raw_blocked, list):
         seen: set = set()
         blocked: list = []
         for c in raw_blocked:
-            cmd = str(c).strip().lstrip('/').strip()
+            cmd = str(c).strip()
             if cmd and cmd not in seen:
                 seen.add(cmd)
                 blocked.append(cmd)

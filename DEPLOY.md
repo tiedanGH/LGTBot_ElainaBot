@@ -163,7 +163,7 @@ menu_game_buttons:
 | `refresh_wait_timeout`   | `float`     | `15.0` | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                               |
 | `image_upload_dedup_ttl` | `float`     | `60.0` | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用 |
 | `crash_notify_group`     | `str`       | `''`   | 严重问题通知群 openid —— 引擎崩溃时向此群主动推送崩溃报告。留空 = 不推送。该群需给本 bot 开了全量推送权限,主动消息才能落地                                      |
-| `blocked_commands`       | `list[str]` | `[]`   | 屏蔽指令列表：命中的消息（文本 / 按钮回调）不再转发给 LGTBot 引擎。开头 `/` 可省略（配 `帮助` 同时挡 `帮助` 与 `/帮助`），`指令 参数` 形式也匹配。用于化解其他插件的指令冲突，热重载即时生效 |
+| `blocked_commands`       | `list[str]` | `[]`   | 屏蔽指令列表：命中的消息（文本 / 按钮回调）不再转发给 LGTBot 引擎。带 / 不带 `/` **严格按配置匹配**，`指令 参数` 形式也命中。用于化解其他插件的指令冲突                    |
 | `sandbox_dm_users`       | `list[str]` | `[]`   | 沙箱测试用户 openid 列表，列表内用户的私信走主动消息直推（仅沙箱环境的私信能发主动消息）                                                             |
 | `menu_game_buttons`      | `list[str]` | (6 项)  | 欢迎菜单里「游戏快捷开局」按钮列表，每行最多 3 个；游戏名需与 `/游戏列表` 输出一致                                                                |
 
