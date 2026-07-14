@@ -175,7 +175,9 @@ async def lgtbot_query_user(event, match):
         await event.reply('❌ 查询失败：该 ID 不存在')
         return
 
-    name = user.get('name') or '[未知昵称]'
+    # 昵称是用户可控文本,下面要嵌进 **{name}** markdown,先消毒语法字符
+    raw_name = user.get('name') or ''
+    name = helpers.sanitize_md_name(raw_name) if raw_name else '[未知昵称]'
     avatar = user.get('avatar') or ''
     last_seen = user.get('last_seen', 0) or 0
     time_str = (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen))

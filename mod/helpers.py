@@ -19,6 +19,46 @@ QQ_AVATAR_URL = 'https://q.qlogo.cn/qqapp/{appid}/{openid}/100'
 # 图文同条场景下把 mention 退化为 "@昵称"（损失：无 ping 通知）
 _MENTION_RE = re.compile(r'<@([^>\s]+)>')
 
+# ──── markdown 危险字符转义(用户昵称等不可信内容 → 原生 md 消息) ──────────
+# 本插件所有 QQ 消息默认按原生 markdown 发送,昵称里带 # / * / [ 等字符会被
+# 当作语法解析(标题 / 加粗 / 链接),导致排版爆炸。统一加反斜杠转义 ——
+# QQ 官方 markdown 已实测支持 \ 转义,渲染时只显示字符本身,昵称字形不变。
+# ( ) ! . - + 等只在特定组合 / 行首才构成语法,且在昵称中太常见,不转义 ——
+# [ ] 转义后 ``](`` 链接组合已不可能成立。< > 一并转义,防止昵称伪造
+# <@openid> 提及或截断 C++ 侧 <昵称(uid)> 包装。
+# str.translate 单趟替换:输入里的 \ 自身也被转义成 \\,新加的反斜杠不会被二次处理。
+_MD_ESCAPE_TABLE = str.maketrans({c: '\\' + c for c in '#*_`~[]<>|\\'})
+
+
+def sanitize_md_name(text: str) -> str:
+    """给用户昵称等不可信文本中的 markdown 语法字符加反斜杠转义。
+
+    **只在 markdown 语境使用**;注入点:
+      · callbacks.cb_get_user_name   引擎播报里的昵称(引擎文本按 md 发送)
+      · dispatcher.lgtbot_query_user 查询回执里的 **昵称**
+    纯文本语境(媒体兜底 msg_type=7 / WebUI 消息日志)不转义;引擎文本因
+    源头已转义,那些路径改用 ``strip_md_escapes`` 还原。
+    """
+    if not text:
+        return text
+    return text.translate(_MD_ESCAPE_TABLE)
+
+
+# strip_md_escapes 的反向匹配:sanitize_md_name 加的 \X 序列(X 为转义集内字符)
+_MD_UNESCAPE_RE = re.compile(r'\\([#*_`~\[\]<>|\\])')
+
+
+def strip_md_escapes(text: str) -> str:
+    """去掉 ``sanitize_md_name`` 加的反斜杠转义,还原纯文本。
+
+    引擎文本里的昵称在源头(cb_get_user_name)已按 md 语境转义;走**非
+    markdown** 出站路径时(媒体兜底 msg_type=7 的 content、WebUI 消息日志
+    展示),反斜杠会原样露出 —— 调本函数把 ``\\X`` 还原为 ``X``。
+    """
+    if not text or '\\' not in text:
+        return text
+    return _MD_UNESCAPE_RE.sub(r'\1', text)
+
 
 def target_key(target_id: str, is_uid: bool) -> str:
     """统一 target 标识：群消息 'g:<gid>'，私聊 'u:<uid>'"""
@@ -39,6 +79,7 @@ def humanize_mentions(text: str) -> str:
         uid = m.group(1)
         name = userdb.get_name(uid)
         if name:
+            # 输出只用于纯文本语境(媒体 caption / 日志),不做 md 转义
             return f'@{name}'
         # DB 未命中：截短 openid 占位
         return f'@{uid[:6]}…' if len(uid) > 6 else f'@{uid}'

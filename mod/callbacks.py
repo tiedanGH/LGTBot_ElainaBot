@@ -846,8 +846,15 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
 
 
 def cb_get_user_name(uid: str) -> str:
-    """C++ → Python：返回用户昵称（DB 未命中时返回 uid 兜底）"""
-    return userdb.get_name(uid) or uid
+    """C++ → Python：返回用户昵称（DB 未命中时返回 uid 兜底）
+
+    昵称经 ``helpers.sanitize_md_name`` 按 markdown 语境转义
+
+    非 markdown 出站路径(媒体兜底 msg_type=7 / WebUI 消息日志)在各自出口
+    用 ``helpers.strip_md_escapes`` 还原,不会露出反斜杠。已知残留:引擎自渲
+    的对局图片(HTML)里带特殊字符的昵称会显示 ``\\`` 前缀,暂无干净解法。
+    """
+    return helpers.sanitize_md_name(userdb.get_name(uid) or uid)
 
 
 def cb_get_user_avatar_url(uid: str) -> str:
@@ -894,7 +901,9 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """
     key = helpers.target_key(target_id, is_uid)
     extra_buttons = state.pending_buttons.pop(key, None)
-    page_logs.log_outgoing(target_id, is_uid, msg)
+    # 日志是纯文本展示语境:引擎文本里源头转义的昵称(\#foo)还原后再记录,
+    # 实际发送仍用带转义的 msg(markdown 语境)
+    page_logs.log_outgoing(target_id, is_uid, helpers.strip_md_escapes(msg))
 
     loop = state.event_loop
     if loop is None or loop.is_closed():
@@ -1033,10 +1042,10 @@ def cb_send_image_message(target_id: str, is_uid: bool, image_path: str, content
         return
 
     raw_content = content or ''
-    # 日志展示用 humanize 版（更可读），实际发送时再按通道决定是否 humanize
+    # 日志展示用 humanize + 去转义版（纯文本更可读），实际发送时再按通道决定
     page_logs.log_outgoing(
         target_id, is_uid,
-        helpers.humanize_mentions(raw_content), image=True,
+        helpers.strip_md_escapes(helpers.humanize_mentions(raw_content)), image=True,
     )
 
     filename = os.path.basename(image_path) or 'lgtbot.png'
@@ -1194,7 +1203,9 @@ async def _send_media_fallback(sender, target_id, is_uid, ref_type, ref_value,
         log.warning(f'图片上传失败 → {target_id}')
         return
 
-    rendered_content = helpers.humanize_mentions(raw_content)
+    # msg_type=7 的 content 是纯文本(QQ 不按 markdown 解析):humanize 提及后
+    # 再把源头(cb_get_user_name)给昵称加的 md 转义还原,避免露出反斜杠
+    rendered_content = helpers.strip_md_escapes(helpers.humanize_mentions(raw_content))
     media_dict = {'file_info': file_info}
     kwargs = {ref_type: ref_value} if ref_type else {}
     try:
