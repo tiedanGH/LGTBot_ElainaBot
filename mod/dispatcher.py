@@ -484,12 +484,15 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     # 空消息（仅 @bot）→ 回欢迎菜单，不进 LGTBot 引擎
     if not content:
         page_logs.log_incoming(uid, gid, '(空消息：触发欢迎菜单)')
+        # 欢迎菜单走 event.reply,同样真实消耗上面刚 refresh 的 msg_id 一条引用额度(QQ 按 msg_id 计总数,不区分发送入口)。
+        # 这里先把配额计数烧掉 1 条对齐,分支条件与上方 refresh_ref 完全镜像 —— refresh 没发生就不烧。
+        if event.message_id:
+            if event.is_group and gid:
+                quota.try_consume_ref(helpers.target_key(gid, False))
+            elif event.is_direct and uid:
+                quota.try_consume_ref(helpers.target_key(uid, True))
         await _send_welcome_menu(event)
         return
-
-    # 按钮附加完全交给 C++ 桥接层根据消息内容判断（见
-    # LGTBot_ElainaBot.cc::ClassifyMatchEvent）—— 此处不再做命令模式匹配,
-    # 这样 /新游戏 触发的「先解散后新建」两条消息也不会把按钮挂错位置。
 
     page_logs.log_incoming(uid, gid if event.is_group else '', content)
 
