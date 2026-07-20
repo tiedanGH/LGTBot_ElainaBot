@@ -638,6 +638,8 @@ void NotifyCrashToPython(int sig) {
  *   "所有玩家都强制退出..."  全员强制退出,房间解散   -> "all_left"
  *   "游戏已解散"             Terminate(主动/新建前置) -> "terminate" (清状态,不挂按钮)
  *   "游戏开始，您可以使用"  Match::GameStart 成功后  -> "game_started" (触发「刷新按钮使用说明」教学)
+ *   "游戏结束，公布分数"    Match 结算 Boardcast     -> "game_over" (挂「查看战绩 / 重开一局」;此广播无 brief,游戏名由 Python 侧 current_game 回查)
+ *     └ 同串 + "游戏结果不记录"(单机 / 非正式局 / 未连接数据库) -> "game_over_unrecorded" (不挂「查看战绩」;游戏名也未知时整组不挂)
  *   "未预料的游戏设置"        房主输错游戏配置        -> "unknown_config" (配置帮助 + 元指令帮助)
  *   "未预料的游戏指令"        游戏中玩家输错游戏指令  -> "unknown_game"   (游戏帮助 + 元指令帮助)
  *   "未预料的元指令"          / 开头的未知元指令       -> "unknown_meta"   (仅元指令帮助)
@@ -682,6 +684,15 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
     // 用「游戏开始，您可以使用」这段较长的前缀做识别,既避开游戏内文本里偶然
     // 出现「游戏开始」二字的可能,也避开 announce / new_game 类 brief 被误判。
     static const std::string kGameStarted = "游戏开始，您可以使用";
+    // Match 结算广播(match.cc::ApplyChildGameOverFromScores 唯一出处,形如
+    // "游戏结束，公布分数：\n@xxx 3\n…感谢诸位参与！")。带「，公布分数」后缀
+    // 避免游戏内文本偶然出现「游戏结束」二字造成误挂;结算广播不带 brief,
+    // 重开按钮的游戏名由 Python 侧 state.current_game 回查。
+    static const std::string kGameOver = "游戏结束，公布分数";
+    // 结算尾句「游戏结果不记录：因为玩家数小于 2 / 该游戏为非正式游戏 /
+    // 未连接数据库」(同函数三处出处共用前缀) —— 本局没进战绩,「查看战绩」
+    // 按钮只会误导,Python 侧据此不挂。
+    static const std::string kUnrecorded = "游戏结果不记录";
 
     out_game_name.clear();
 
@@ -720,6 +731,14 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
     // 5. 游戏真的开始 —— 早于 brief 检查,因为 GameStart 这条广播没有 brief
     if (content.find(kGameStarted) != std::string::npos) {
         return "game_started";
+    }
+
+    // 5.5 游戏自然结束的结算广播 —— 同样无 brief,须在 brief 检查之前。
+    // 「游戏结果不记录」的结算(单机 / 非正式局 / 未连接数据库)区分返回,
+    // Python 侧据此省掉「查看战绩」按钮。
+    if (content.find(kGameOver) != std::string::npos) {
+        return content.find(kUnrecorded) != std::string::npos
+            ? "game_over_unrecorded" : "game_over";
     }
 
     // 6. 以下事件都需要 brief 存在,顺带把游戏名拿出来

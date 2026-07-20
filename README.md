@@ -88,7 +88,7 @@ cd ../.. && python3 main.py
 | **markdown 图床** | `config.yaml` 指定单个图床上传到 image_hosting，用 markdown 内嵌，保留 `<@>` 原生 mention 和按钮；留空 / 上传失败回退 msg_type=7                  |
 | **并发安全上传**      | 上传时 filename 按内容 sha1 唯一化，避免多群同发同尺寸图片时出现错配；同份图片短时间内复用 URL，并发请求共享 in-flight Future                                   |
 | **玩家头像**        | 利用 `q.qlogo.cn/qqapp/{appid}/{openid}` 直链，LGTBot 渲染头像无需额外接口                                                         |
-| **回调按钮**        | `/新游戏` `/加入` 等命令自动附加交互按钮；非刷新 callback 按钮的 data 被当作用户消息派发回 LGTBot 引擎                                                 |
+| **回调按钮**        | `/新游戏` `/加入` 等命令自动附加交互按钮；游戏结束时附重开快捷按钮；非刷新 callback 按钮的 data 被当作用户消息派发回 LGTBot 引擎                                    |
 | **欢迎菜单**        | 单独 @机器人时回复模板菜单，含「帮助 / 游戏列表 / 排行大图 / 战绩」等按钮；游戏快捷开局列表通过 `config.yaml` 字段可配置                                           |
 | **全量群适配**       | 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查）；主框架的全量群里不再追加刷新按钮，被动配额耗尽直接走主动消息                                       |
 | **菜单 logo**     | 仓库自带图片作为欢迎菜单顶部图（依赖图床上传，URL 进程内缓存 23h）                                                                               |

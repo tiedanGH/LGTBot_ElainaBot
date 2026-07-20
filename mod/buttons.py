@@ -59,6 +59,25 @@ def build_dissolve_buttons() -> list[list[dict]]:
     ]]
 
 
+def build_game_over_buttons(game_name: str | None = None,
+                            include_record: bool = True) -> list[list[dict]]:
+    """游戏自然结束(结算广播)时的引导按钮:查看战绩 / 重开一局。
+
+    挂在「游戏结束，公布分数：」结算消息上(``ClassifyMatchEvent`` 的
+    ``game_over`` / ``game_over_unrecorded`` 分支)。结算广播不带 brief,
+    「重开一局」的游戏名由调用方从 ``state.current_game`` 回查后传入。
+    ``include_record=False``(结算带「游戏结果不记录」:单机 / 非正式局 /
+    未连接数据库)时不给「查看战绩」—— 本局没进战绩,按钮只会误导。
+    两个按钮都凑不齐时返回空列表,调用方跳过 pending_buttons 写入。
+    """
+    row: list[dict] = []
+    if include_record:
+        row.append({'text': '📊 查看战绩', 'data': '/战绩', 'type': 2, 'style': 1})
+    if game_name:
+        row.append({'text': '🔄 重开一局', 'data': f'/新游戏 {game_name}', 'type': 2, 'style': 4})
+    return [row] if row else []
+
+
 # ──────── 未知指令引导(LGTBot_ElainaBot.cc::ClassifyMatchEvent 的 unknown_* 分支)──
 # 「元指令帮助」按钮发 `/帮助`(带斜杠,bot_core 元指令路径处理);
 # 「配置/游戏帮助」按钮发 `帮助`(不带斜杠,在 match 上下文里被分别解释为

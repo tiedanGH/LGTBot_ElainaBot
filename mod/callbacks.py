@@ -779,6 +779,12 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
       ``terminate``      清空当前游戏名,不挂按钮(/新游戏 前置解散 / 管理员
                          主动结束等场景,紧接着会有真正的新建消息覆盖,或就该
                          安静收尾)。
+      ``game_over``      游戏自然结束的结算广播 —— 挂「📊 查看战绩 + 🔄 重开一局」。
+                         结算广播无 brief,重开按钮的游戏名从 ``current_game`` 回查,
+                         取完即清(对局已随结算释放)。
+      ``game_over_unrecorded``  同上,但结算带「游戏结果不记录」(单机 / 非正式局 /
+                         未连接数据库) —— 本局没进战绩,不挂「查看战绩」;
+                         若游戏名也未知则整组不挂。
       ``game_started``   引擎 Match::GameStart 成功后的 BoardcastAtAll —— 不动
                          按钮,只把 key 记入 ``_pending_tip_keys``;真正发出
                          「刷新按钮使用说明」由本帧 cb_send_text/image 同步
@@ -825,6 +831,16 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
             _pending_dm_warn_keys.add(key)
     elif kind == 'all_left':
         state.pending_buttons[key] = buttons.build_dissolve_buttons()
+    elif kind in ('game_over', 'game_over_unrecorded'):
+        # 结算广播不带 brief(bridge 传来的 game_name 为空),重开按钮的游戏名
+        # 从 current_game 回查;pop 取完即清 —— 对局已随结算释放,残留会让之后
+        # 的按钮回查到已结束的游戏。「游戏结果不记录」的结算不挂「查看战绩」。
+        btns = buttons.build_game_over_buttons(
+            state.current_game.pop(key, None),
+            include_record=(kind == 'game_over'),
+        )
+        if btns:
+            state.pending_buttons[key] = btns
     elif kind == 'unknown_meta':
         state.pending_buttons[key] = buttons.build_unknown_meta_buttons()
     elif kind == 'unknown_config':
