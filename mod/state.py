@@ -57,3 +57,17 @@ current_game: dict[str, str] = _p['current_game']  # target_key → 游戏名
 # 持久化:跨热重载存活(挂在 C++ 扩展模块上,见 ``boot._get_persistent()``);
 # 进程重启即丢,首次在某全量群收到 non-AT 消息前会暂时按非全量行为兜底。
 full_volume_groups: set[str] = _p['full_volume_groups']
+
+
+def is_planned_restart() -> bool:
+    """「计划重启」维护模式是否开启。
+
+    开启后仅禁止创建新游戏(dispatcher 拦下「新游戏」类指令回维护提示),
+    进行中的对局与已创建的房间不受影响。跨热重载持久(挂持久字典);真正
+    os.execv 重启后进程重建,自动回到关闭状态,无需手动清理。
+    """
+    return bool(_p.get('planned_restart'))
+
+
+def set_planned_restart(on: bool) -> None:
+    _p['planned_restart'] = bool(on)

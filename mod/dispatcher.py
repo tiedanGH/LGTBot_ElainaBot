@@ -109,10 +109,25 @@ _P_NOTICE   = r'^/?更新公告$'
 _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启$'
+_P_PLANNED  = r'^/?计划重启$'
 
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
-    _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT, _P_RESTART,
+    _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
+    _P_RESTART, _P_PLANNED,
 ))
+
+
+# 「计划重启」维护模式仅拦「新建房间」类指令:新游戏 + 随机游戏。
+# # 与 / 前缀都认(引擎元指令上游为 #,本插件使用 /),不带前缀的裸指令也拦。
+_NEW_GAME_RE = re.compile(r'^[/#]?(新游戏|随机游戏)')
+
+_PLANNED_RESTART_NOTICE = (
+    '## 🚧 维护提醒\n'
+    '\n'
+    '机器人**即将重启更新**，已暂停创建新游戏，进行中的对局与已创建的房间不受影响。\n'
+    '\n'
+    '> 请稍后再试，感谢您的理解 🌹'
+)
 
 
 def _is_exclusive_command(text: str) -> bool:
@@ -479,6 +494,14 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         log.info(f'🚫 [屏蔽指令] 命中 blocked_commands，跳过引擎派发: {content[:30]!r}')
         return
 
+    # 「计划重启」维护闸:仅拦新建房间,回维护提示,不派发给引擎。
+    # 放在 refresh_ref 之前 —— 该消息不进配额表,提示走消息自己的被动额度。
+    if state.is_planned_restart() and _NEW_GAME_RE.match(content):
+        page_logs.log_incoming(uid, gid if event.is_group else '', content)
+        page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
+        await event.reply(_PLANNED_RESTART_NOTICE)
+        return
+
     # 用户缓存：昵称 + 头像 URL（事件携带 username + 用 appid 推导头像）
     # 走 userdb 落盘，5 分钟批量 flush；name / avatar 任一为空时不会覆盖 DB 旧值
     if uid:
@@ -616,6 +639,13 @@ async def lgtbot_interaction_dispatch(event, match):
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
 
+    # 「计划重启」维护闸 —— 欢迎菜单的游戏快捷按钮(data 为 /新游戏 X)也从这里进引擎,与 lgtbot_dispatch 的闸对称。
+    if state.is_planned_restart() and _NEW_GAME_RE.match(content):
+        page_logs.log_incoming(uid, gid if event.is_group else '', content)
+        page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
+        await event.reply(_PLANNED_RESTART_NOTICE)
+        return
+
     # 按钮点击本身就是一次活跃事件 —— mark_dirty 现在不要求 name/avatar 非空,
     # 仅刷 last_seen 也会被记下(INTERACTION 事件没有 username 字段是正常的)
     if uid:
@@ -716,6 +746,36 @@ def schedule_exec_after(delay: float = 0.5, on_failure=None) -> None:
 # 触发文本 "/重启"(框架自动剥前导 /，regex 不带 / 同样匹配 "重启")。
 # `owner_only=True` 框架内置:非主人触发时直接回 owner_only 模板,不进函数体。
 # WebUI 重启按钮也走同一对 helper —— 见 webui/main.py::_render_restart。
+
+def toggle_planned_restart() -> tuple[bool, str]:
+    """翻转「计划重启」维护模式,返回 (新状态, 提示文案)。命令 / WebUI 共用。"""
+    now_on = not state.is_planned_restart()
+    state.set_planned_restart(now_on)
+    if now_on:
+        log.warning('🚧 [计划重启] 维护模式已启用：新游戏创建已禁用')
+        return True, '🚧 计划重启已启用：新游戏创建已禁用。'
+    log.warning('✅ [计划重启] 维护模式已取消：恢复新游戏创建')
+    return False, '✅ 计划重启已取消：已恢复新游戏创建。'
+
+
+@handler(_P_PLANNED,
+         name='LGTBot 计划重启',
+         desc='切换维护模式:暂停创建新游戏',
+         owner_only=True,
+         event_types=_LGT_MSG_EVENTS,
+         priority=100,
+         block=True)
+async def lgtbot_planned_restart(event, match):
+    """主人切换「计划重启」维护模式 —— 重启前逐渐清空对局用。
+
+    与真「重启」互补:先启用本模式挡住新房间,等进行中的对局自然结束,
+    再发「重启」平滑换进程(重启后本模式自动恢复关闭)。
+    """
+    if helpers.is_foreign_event(event):
+        return
+    _on, msg = toggle_planned_restart()
+    await event.reply(msg)
+
 
 @handler(_P_RESTART,
          name='LGTBot 重启',

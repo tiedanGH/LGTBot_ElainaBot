@@ -80,6 +80,9 @@ body {
 
 /* 超链接统一主题蓝(--accent 随明暗主题切换) */
 a, a:visited { color: var(--accent); }
+/* 链接型按钮(如「前往主框架插件模块编辑」)不吃全局链接色 —— 强制按钮白字,
+   :visited 也要写:伪类 (0,1,1) 比 .dash-btn-primary (0,1,0) 优先级更高 */
+a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 
 /* ───── 顶部标题栏 ───── */
 .topbar {
@@ -99,6 +102,8 @@ a, a:visited { color: var(--accent); }
   transition: background .15s, border-color .15s, color .15s;
 }
 .restart-btn:hover { background: var(--hover); border-color: var(--border-2); }
+/* 计划重启按钮激活(维护模式开启)时橙色高亮,提醒管理员当前挡着新游戏 */
+.planned-btn.active { border-color: #e6a23c; color: #e6a23c; }
 
 .topbar-actions {
   display: flex; align-items: center; gap: 8px;

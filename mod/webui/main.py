@@ -40,11 +40,13 @@ import html
 import os
 
 from core.plugin import web_pages
+from .. import state as _plugin_state
 from . import page_backup, page_build, page_config, page_dashboard, page_logs, page_users
 
 
 PAGE_KEY = 'lgtbot'
 RESTART_KEY = '__lgtbot_restart'
+PLANNED_RESTART_KEY = '__lgtbot_planned_restart'
 
 # Dashboard 的各 action 端点(JS 侧 DASH_KEYS 与此一一对应)
 _DASH_CHECK_UPDATE_KEY      = '__lgtbot_dash_check_update'
@@ -83,6 +85,7 @@ _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
     RESTART_KEY,
+    PLANNED_RESTART_KEY,
     _DASH_CHECK_UPDATE_KEY,
     _DASH_DO_UPDATE_KEY,
     _DASH_DO_UPDATE_FORCE_KEY,
@@ -154,7 +157,9 @@ def _render_html() -> str:
             .replace('__USERS_JS__', page_users.TAB_JS)
             .replace('__BACKUP_JS__', page_backup.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
-            .replace('__RESTART_KEY__', RESTART_KEY))
+            .replace('__RESTART_KEY__', RESTART_KEY)
+            .replace('__PLANNED_RESTART_KEY__', PLANNED_RESTART_KEY)
+            .replace('__PLANNED_ON__', '1' if _plugin_state.is_planned_restart() else '0'))
 
 
 # ──────── 重启 action 端点(隐藏,仅按钮 GET) ──────────────────────────────
@@ -177,6 +182,18 @@ def _render_restart() -> str:
     if ok:
         dispatcher.schedule_exec_after(0.5)
     return f'<div id="msg">{html.escape(msg)}</div>'
+
+
+def _render_planned_restart() -> str:
+    """切换「计划重启」维护模式,与命令 /计划重启 共用 dispatcher 的 toggle。
+
+    返回 ``#msg``(提示文案)+ ``#state``(1/0 新状态),main.js 据此更新
+    顶栏按钮的文案与高亮。
+    """
+    from .. import dispatcher
+    on, msg = dispatcher.toggle_planned_restart()
+    return (f'<div id="msg">{html.escape(msg)}</div>'
+            f'<div id="state">{1 if on else 0}</div>')
 
 
 # ──────── LazyHtmlDict ──────────────────────────────────────────────────
@@ -277,6 +294,8 @@ def register():
 
     # 重启 action 端点
     _register_hidden_action(RESTART_KEY, _render_restart)
+    # 计划重启(维护模式)切换端点
+    _register_hidden_action(PLANNED_RESTART_KEY, _render_planned_restart)
 
     # Dashboard action 端点
     _register_hidden_action(_DASH_CHECK_UPDATE_KEY,      page_dashboard.render_check_update)
