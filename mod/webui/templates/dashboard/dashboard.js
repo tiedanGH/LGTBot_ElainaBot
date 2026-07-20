@@ -106,9 +106,87 @@ async function dashBindBot(appid) {
   }
 }
 
+/* ──── 新版本徽章(启动自检 / 手动检查共用) ──── */
+function dashRenderUpdateHint(hint) {
+  const el = document.getElementById('dash-update-hint');
+  if (!el) return;
+  if (hint && hint.has_update) {
+    el.textContent = '✨ 有新版本';
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+/* ──── 极简 markdown 渲染(Release 正文用) ────
+   支持:标题 #~####(降级渲染)、**加粗**、`行内代码`、``` 代码块、
+   [文字](http 链接)、- / * 无序列表、--- 分隔线;其余按行输出。
+   先 escapeHtml 再做替换,正文里的任何 HTML 都不会被执行。 */
+function dashMdToHtml(md) {
+  const lines = escapeHtml(md || '').split(/\r?\n/);
+  const out = [];
+  let inCode = false, inList = false;
+  const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+  for (const raw of lines) {
+    if (/^\s*```/.test(raw)) {
+      closeList();
+      out.push(inCode ? '</code></pre>' : '<pre><code>');
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) { out.push(raw + '\n'); continue; }
+    if (/^\s*(---+|\*\*\*+)\s*$/.test(raw)) { closeList(); out.push('<hr>'); continue; }
+    const line = raw
+      .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+               '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      closeList();
+      const lv = Math.min(h[1].length + 1, 6);
+      out.push('<h' + lv + '>' + h[2] + '</h' + lv + '>');
+      continue;
+    }
+    const li = line.match(/^\s*[-*+]\s+(.*)$/);
+    if (li) {
+      if (!inList) { out.push('<ul>'); inList = true; }
+      out.push('<li>' + li[1] + '</li>');
+      continue;
+    }
+    closeList();
+    if (line.trim() === '') continue;
+    out.push('<div>' + line + '</div>');
+  }
+  if (inCode) out.push('</code></pre>');
+  closeList();
+  return out.join('');
+}
+
+/* ──── 最新 Release 折叠卡(检查更新后出现,默认折叠) ──── */
+function dashRenderRelease(rel) {
+  const box = document.getElementById('dash-release-notes');
+  if (!box) return;
+  if (!rel || rel.error || (!rel.body && !rel.tag_name)) { box.innerHTML = ''; return; }
+  const dateStr = rel.published_at ? rel.published_at.slice(0, 10) : '';
+  const title = (rel.name || rel.tag_name || '') + (dateStr ? '（' + dateStr + '）' : '');
+  const link = rel.html_url
+    ? '<a class="dash-release-link" href="' + escapeHtml(rel.html_url) +
+      '" target="_blank" rel="noopener">↗ 在 GitHub 查看</a>'
+    : '';
+  box.innerHTML =
+    '<details class="dash-release">' +
+      '<summary>📄 最新 Release：' + escapeHtml(title) + '</summary>' +
+      '<div class="dash-release-body">' + dashMdToHtml(rel.body || '（无正文）') + link + '</div>' +
+    '</details>';
+}
+
 function dashApplyData(data) {
   /* 机器人绑定列表 */
   dashRenderBots(data);
+
+  /* 启动自检的新版本 */
+  dashRenderUpdateHint(data.update_hint || null);
 
   /* 版本号 + 引擎状态 */
   document.getElementById('dash-current-version').textContent = data.version || '—';
@@ -226,6 +304,12 @@ async function dashCheckUpdate() {
     }
     dashRenderBridgeStatus(data.bridge || {});
     dashRenderSubmoduleStatus(data.submodule || {});
+    dashRenderRelease(data.release || null);
+    const b = data.bridge || {};
+    dashRenderUpdateHint({
+      has_update: !!(b.success && b.has_update),
+      remote_version: b.remote_version || '',
+    });
   } catch (e) {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {

@@ -48,6 +48,7 @@ from plugins.LGTBot_ElainaBot.mod.webui import main as webui  # noqa: F401  Web 
 # 也是「消息日志」tab 的页面模块,合并后单一文件入口。webui.main 已 import 它,
 # 这里早 import 是为了确保 callbacks/dispatcher 调用时数据层已就位。
 from plugins.LGTBot_ElainaBot.mod.webui import page_logs  # noqa: F401
+from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard as _page_dashboard  # 启动更新自检入口
 from plugins.LGTBot_ElainaBot.mod import dispatcher        # noqa: F401  @handler 注册（消息派发 + INTERACTION）
 from plugins.LGTBot_ElainaBot.mod import callbacks         # C++ 回调（被 LGTBot_ElainaBot.start 注入）
 from plugins.LGTBot_ElainaBot.mod import config as _config
@@ -77,6 +78,12 @@ async def _setup():
 
     # 注册 Web 面板拓展页（无论 LGTBot 是否可用，让用户先能看到日志页）
     webui.register()
+
+    # 后台自检一次桥接层是否有新版本。放在 LGTBOT_AVAILABLE 早退之前,引擎没编译好也照常提示更新。
+    try:
+        _page_dashboard.schedule_startup_update_check()
+    except Exception as e:
+        log.warning(f'调度启动更新自检失败: {e}')
 
     # 加载 / 创建配置（让 Web UI「插件 → 配置」入口立刻可见 config.yaml）
     admins = _config.load_plugin_config()

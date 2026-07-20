@@ -8,6 +8,7 @@
         <span class="dash-version-label">当前版本</span>
         <span id="dash-current-version" class="dash-version-num">—</span>
         <span id="dash-engine-status" class="dash-badge">—</span>
+        <span id="dash-update-hint" class="dash-badge dash-badge-warn" style="display:none"></span>
       </div>
       <div class="dash-version-actions">
         <button id="dash-check-update" class="dash-btn dash-btn-primary">🔍 检查更新</button>
@@ -24,6 +25,9 @@
         <button id="dash-do-update" class="dash-btn dash-btn-warn" style="display:none">⬇ 更新桥接层</button>
       </div>
     </div>
+
+    <!-- 最新 Release 折叠卡(点「检查更新」后出现,默认折叠) -->
+    <div id="dash-release-notes"></div>
 
     <!-- 子模块 lgtbot 更新 / 初始化行 -->
     <div class="dash-update-row" id="dash-submodule-row">

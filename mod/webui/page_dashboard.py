@@ -31,6 +31,7 @@ Python 侧职责:
 
 from __future__ import annotations
 
+import asyncio
 import html as _html
 import json
 import os
@@ -458,6 +459,7 @@ def get_data() -> str:
         'bots': helpers.list_framework_bots(),
         'bound_appid': helpers.get_bound_appid(),
         'bind_configured': state.bind_bot_appid or '',
+        'update_hint': _get_update_hint(),
         'submodule': _get_submodule_info(query_remote=False),
         'stats': {
             'user_cache_total': userdb.count_users(),
@@ -538,22 +540,108 @@ def _bridge_check_payload() -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 启动自检(仅桥接层)+ 最新 Release 信息
+# ─────────────────────────────────────────────────────────────────────────
+
+_STARTUP_CHECK_KEY = 'startup_update_check'
+# 热重载风暴保护:近期(含手动检查)已查过就沿用缓存,避免匿名 GitHub API
+# 60 次/小时限流被频繁 reload 烧光
+_STARTUP_CHECK_MIN_INTERVAL = 600.0
+
+
+def _get_update_hint() -> dict:
+    """从持久缓存取启动自检结果,供 get_data 渲染新版本标记。"""
+    cached = boot._get_persistent().get(_STARTUP_CHECK_KEY) or {}
+    bridge = cached.get('bridge') or {}
+    if bridge.get('success') and bridge.get('has_update'):
+        return {'has_update': True, 'remote_version': bridge.get('remote_version', '')}
+    return {'has_update': False, 'remote_version': ''}
+
+
+def schedule_startup_update_check() -> None:
+    """@on_load 调用:后台异步检查一次桥接层是否有新版本。
+
+    只提示不动手 —— 不查上游子模块、不自动更新、不触发完整「检查更新」流程;
+    结果落持久缓存,仪表盘「版本与更新」区据此渲染标记。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_startup_update_check())
+
+
+async def _startup_update_check() -> None:
+    await asyncio.sleep(3.0)          # 避开启动 / 热重载抖动
+    p = boot._get_persistent()
+    cached = p.get(_STARTUP_CHECK_KEY) or {}
+    now = time.time()
+    if now - float(cached.get('ts', 0) or 0) < _STARTUP_CHECK_MIN_INTERVAL:
+        return
+    loop = asyncio.get_running_loop()
+    try:
+        bridge = await loop.run_in_executor(None, _bridge_check_payload)
+    except Exception as e:
+        log.debug(f'启动自检桥接层更新失败: {e}')
+        return
+    p[_STARTUP_CHECK_KEY] = {'ts': now, 'bridge': bridge}
+    if bridge.get('success') and bridge.get('has_update'):
+        log.info(f'✨ 检测到桥接层新版本: v{bridge.get("local_version")} → '
+                 f'{bridge.get("remote_version")} (插件仪表盘可一键更新)')
+
+
+def _fetch_latest_release() -> dict:
+    """GET ``/releases/latest`` → ``{tag_name, name, body, published_at, html_url}``。
+
+    仓库没有任何 release(HTTP 404)或网络失败时返回 ``{'error': ...}``,
+    前端对 error 静默不渲染折叠卡。
+    """
+    owner, repo = _parse_github_owner_repo(_get_plugin_meta().get('github', ''))
+    if not owner:
+        return {'error': 'no-repo'}
+    api_url = f'https://api.github.com/repos/{owner}/{repo}/releases/latest'
+    try:
+        req = urllib.request.Request(api_url, headers={
+            'User-Agent': 'LGTBot-Dashboard',
+            'Accept': 'application/vnd.github+json',
+        })
+        with urllib.request.urlopen(req, timeout=8.0) as r:
+            rel = json.loads(r.read().decode('utf-8') or '{}')
+    except Exception as e:
+        return {'error': str(e)}
+    if not isinstance(rel, dict):
+        return {'error': 'bad-payload'}
+    return {
+        'tag_name': rel.get('tag_name', ''),
+        'name': rel.get('name', ''),
+        'body': rel.get('body', '') or '',
+        'published_at': rel.get('published_at', ''),
+        'html_url': rel.get('html_url', ''),
+    }
+
+
 def render_check_update() -> str:
     """同时检查桥接层(本插件)与 lgtbot 子模块(上游 commit)两边的更新。
 
-    返回 ``{success, bridge, submodule}``:
+    返回 ``{success, bridge, submodule, release}``:
       · ``bridge``    —— 本插件 __plugin_meta__.version vs GitHub tags
       · ``submodule`` —— 子模块本地 HEAD vs 上游 main/master HEAD,含 status
                         (ok / missing / empty),供 UI 决定按钮文案
+      · ``release``   —— 仓库最新 release(markdown 正文由前端渲染成折叠卡)
     任一侧失败不影响另一侧，success 反映「两侧都没致命错误」(子模块网络失败
     会被 UI 单独展示);整体 success 仅当桥接层成功时为 True。
     """
     bridge = _bridge_check_payload()
     submodule = _get_submodule_info(query_remote=True)
+    release = _fetch_latest_release()
+    # 手动检查的结果同步进启动自检缓存 (更新完成后再点一次检查)
+    boot._get_persistent()[_STARTUP_CHECK_KEY] = {'ts': time.time(), 'bridge': bridge}
     return _fragment({
         'success': bool(bridge.get('success')),
         'bridge': bridge,
         'submodule': submodule,
+        'release': release,
     })
 
 

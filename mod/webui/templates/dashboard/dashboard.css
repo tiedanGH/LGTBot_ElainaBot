@@ -125,3 +125,23 @@
 .dash-bot-qq { color: var(--text-muted); }
 .dash-bot-row .dash-btn,
 .dash-bot-row .dash-badge { margin-left: auto; }
+
+/* ──── 最新 Release 折叠卡(检查更新后出现) ──── */
+#dash-release-notes:empty { display: none; }
+.dash-release {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; font-size: 13px;
+}
+.dash-release summary { cursor: pointer; color: var(--accent); user-select: none; }
+.dash-release-body {
+  margin-top: 8px; max-height: 320px; overflow-y: auto; line-height: 1.65;
+}
+.dash-release-body h3, .dash-release-body h4,
+.dash-release-body h5, .dash-release-body h6 { margin: 10px 0 4px; }
+.dash-release-body ul { padding-left: 20px; margin: 4px 0; }
+.dash-release-body pre {
+  background: var(--tag-bg); padding: 8px 10px; border-radius: 6px; overflow-x: auto;
+}
+.dash-release-body code { background: var(--tag-bg); padding: 1px 5px; border-radius: 4px; }
+.dash-release-body pre code { background: transparent; padding: 0; }
+.dash-release-link { display: inline-block; margin-top: 8px; }

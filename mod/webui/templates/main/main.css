@@ -78,6 +78,9 @@ body {
 .page-content::-webkit-scrollbar-thumb:hover { background: var(--border-2); }
 .page-content { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
 
+/* 超链接统一主题蓝(--accent 随明暗主题切换) */
+a, a:visited { color: var(--accent); }
+
 /* ───── 顶部标题栏 ───── */
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
