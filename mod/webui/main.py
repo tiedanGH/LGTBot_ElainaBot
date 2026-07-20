@@ -77,6 +77,8 @@ _BACKUP_LIST_KEY    = '__lgtbot_backup_list'
 # register_route 的 path,必须以 /api/ext/ 开头(core/plugin/web_pages.py 要求)
 _BACKUP_RESTORE_ROUTE = '/api/ext/lgtbot/backup/restore'
 _BACKUP_DELETE_ROUTE  = '/api/ext/lgtbot/backup/delete'
+# 仪表盘「机器人绑定」换绑端点(要接 ?appid= 参数,同样走 register_route)
+_BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
@@ -309,6 +311,7 @@ def register():
     _register_hidden_action(_BACKUP_LIST_KEY,   page_backup.render_list)
     web_pages.register_route('GET', _BACKUP_RESTORE_ROUTE, page_backup.restore_handler, auth=True)
     web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
+    web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)
 
     _ensure_get_pages_filters_hidden()
 
@@ -322,5 +325,6 @@ def unregister():
     # 是另一张表 ``web_pages._routes``,要显式 unregister)
     web_pages.unregister_route('GET', _BACKUP_RESTORE_ROUTE)
     web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
+    web_pages.unregister_route('GET', _BIND_BOT_ROUTE)
     # get_pages 的 wrap 不主动 unwrap:其它插件可能后续也加了包装,贸然恢复会断链。
     # 留着的副作用仅是过滤一组已不存在的 key,无害。

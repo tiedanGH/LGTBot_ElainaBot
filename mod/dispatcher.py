@@ -164,6 +164,10 @@ async def lgtbot_query_user(event, match):
     - 查不到 → 「查询失败:该 ID 不存在」
     - 命中 → ``## 查询成功`` + 一行内嵌头像 + 昵称 + 一行上次活跃时间戳
     """
+    # 非绑定 bot 的事件静默忽略
+    # (多 bot 部署下本插件只服务绑定 bot,不回复不打日志;下同,所有 handler 的第一道闸)
+    if helpers.is_foreign_event(event):
+        return
     target = match.group(1).strip()
     if len(target) != 32:
         await event.reply(f'❌ ID 长度不正确（需 32 位，当前 {len(target)} 位）')
@@ -290,6 +294,8 @@ async def lgtbot_welcome_menu(event, match):
     打,标签区分文本 / 按钮路径,方便排查。state.started=False(引擎崩溃 30s
     窗口)时静默不回 —— 菜单按钮指向的命令都依赖引擎,提前发出去也没用。
     """
+    if helpers.is_foreign_event(event):
+        return
     if event.is_interaction:
         try:
             await event.ack_interaction(code=0)
@@ -315,6 +321,8 @@ async def lgtbot_more_features(event, match):
 
     INTERACTION 路径要先 ack 抑制客户端 3s「请求超时」toast。
     """
+    if helpers.is_foreign_event(event):
+        return
     if event.is_interaction:
         try:
             await event.ack_interaction(code=0)
@@ -344,6 +352,8 @@ async def lgtbot_update_notice(event, match):
     若 ``important_update.txt`` 非空,在常规「公告详情」代码块上方再渲染一个
     ``重要更新`` 代码块作为置顶提示;为空时该区块不出现,UI 与旧版完全一致。
     """
+    if helpers.is_foreign_event(event):
+        return
     if event.is_interaction:
         try:
             await event.ack_interaction(code=0)
@@ -376,6 +386,8 @@ async def lgtbot_troubleshooting(event, match):
     管理员通过编辑 ``data/troubleshooting.txt`` 热更新内容。首次访问时
     文件不存在,会自动用 ``_DEFAULT_TROUBLESHOOTING`` 中预置的 Q&A 创建。
     """
+    if helpers.is_foreign_event(event):
+        return
     if event.is_interaction:
         try:
             await event.ack_interaction(code=0)
@@ -405,6 +417,8 @@ async def lgtbot_troubleshooting(event, match):
          block=True,
          event_types=_LGT_MSG_EVENTS)
 async def lgtbot_about(event, match):
+    if helpers.is_foreign_event(event):
+        return
     await lgtbot_dispatch(event, match, _from_exclusive=True)
 
 
@@ -427,6 +441,8 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     lgtbot_about),跳过下方的专属指令排除闸 —— 那一次转发正是它的职责。
     框架调用固定传 (event, match) 两个位置参数,不会碰到这个 kwarg。
     """
+    if helpers.is_foreign_event(event):
+        return
     if not state.started:
         return
 
@@ -537,6 +553,8 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
          priority=-200,
          event_types={INTERACTION_CREATE})
 async def lgtbot_interaction_relay(event, match):
+    if helpers.is_foreign_event(event):
+        return
     try:
         await event.ack_interaction(code=0)
     except Exception:
@@ -569,6 +587,8 @@ async def lgtbot_interaction_dispatch(event, match):
       · 配额刷新键用 event.event_id('event_id' 类型),而不是 msg_id
         (INTERACTION 没 msg_id,但 event_id 同样能撑起 5 条被动回复额度)
     """
+    if helpers.is_foreign_event(event):
+        return
     # ack 优先于一切,确保在 3s 时限内回执
     try:
         await event.ack_interaction(code=0)
@@ -709,6 +729,8 @@ async def lgtbot_restart(event, match):
     libbot_core.so / 全部 libgame.so 重新 dlopen,等价于让 build.sh 重编后的
     C++ 二进制即刻生效。
     """
+    if helpers.is_foreign_event(event):
+        return
     ok, msg = check_and_prepare_restart()
     await event.reply(msg)
     if not ok:

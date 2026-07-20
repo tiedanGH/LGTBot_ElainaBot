@@ -42,8 +42,11 @@ import time
 import urllib.error
 import urllib.request
 
+from aiohttp import web
+
 from core.base.logger import get_logger, PLUGIN
-from .. import boot, userdb
+from .. import boot, helpers, state, userdb
+from .. import config as _config
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -452,6 +455,9 @@ def get_data() -> str:
         'version': meta.get('version', ''),
         'github_url': meta.get('github', ''),
         'engine_running': bool(boot.is_engine_running()),
+        'bots': helpers.list_framework_bots(),
+        'bound_appid': helpers.get_bound_appid(),
+        'bind_configured': state.bind_bot_appid or '',
         'submodule': _get_submodule_info(query_remote=False),
         'stats': {
             'user_cache_total': userdb.count_users(),
@@ -994,3 +1000,30 @@ def render_clear_match_all() -> str:
 def render_clear_match_7d() -> str:
     ok, msg, n = _clear_dir_keep_recent(_cache_dir('match'), days=7)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 机器人绑定 —— register_route 真路由(要接 ?appid= 参数,不走 fragment 协议)
+# ─────────────────────────────────────────────────────────────────────────
+
+async def bind_bot_handler(request: 'web.Request') -> 'web.Response':
+    """``GET /api/ext/lgtbot/bind-bot?appid=<appid>`` —— 面板换绑机器人。
+
+    校验 appid 必须在框架 bot.yaml 配置列表内,然后由
+    ``config.persist_bind_bot_appid`` 写回 config.yaml(行级替换保注释)并
+    即时应用:更新 ``state.bind_bot_appid`` + 从新绑定 bot 的 data.db 重载
+    全量群集合。绑定切换后,其他 bot 的事件立刻被 dispatcher 静默忽略。
+    """
+    appid = (request.query.get('appid') or '').strip()
+    valid = {b['appid'] for b in helpers.list_framework_bots()}
+    if not appid or appid not in valid:
+        return web.json_response(
+            {'success': False, 'message': f'appid 无效或不在框架 bot 列表中: {appid!r}'},
+            status=400,
+        )
+    ok, msg = _config.persist_bind_bot_appid(appid)
+    return web.json_response({
+        'success': ok,
+        'message': msg,
+        'bound_appid': helpers.get_bound_appid(),
+    })

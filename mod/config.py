@@ -3,6 +3,7 @@
 """插件配置（data/config.yaml）—— 通过 ElainaBot 标准配置体系存取。
 
 字段（按 yaml 中出现顺序）：
+  · bind_bot_appid: str              绑定机器人 appid（留空 = 框架第一个 bot），其他 bot 的事件静默忽略
   · admin_uids: list[str]            LGTBot 内部管理员 openid 列表
   · image_hosting: str               markdown 图片内嵌使用的单个图床名（留空 = 禁用）
   · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
@@ -28,6 +29,7 @@ _DEFAULT_MENU_GAMES = [
 ]
 
 DEFAULT_CONFIG = {
+    'bind_bot_appid': '',
     'admin_uids': [],
     'image_hosting': '',
     'refresh_wait_timeout': 15.0,
@@ -38,6 +40,7 @@ DEFAULT_CONFIG = {
     'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
 }
 CONFIG_COMMENTS = {
+    'bind_bot_appid': '绑定机器人 appid（可在仪表盘配置）。留空 = 自动使用框架第一个 bot；绑定后仅处理该 bot 的消息，其他 bot 的事件静默忽略',
     'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
     'image_hosting': '游戏图片走 markdown 内嵌时使用的图床（可选值：cos / nature / bilibili / chatglm / ukaka / xingye）。上传失败回退 msg_type=7',
     'refresh_wait_timeout': '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
@@ -117,12 +120,30 @@ def _apply_runtime_tunables(cfg: dict):
 
     下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
     ``load_plugin_config`` 处理,不在此函数内):
-      image_hosting → refresh_wait_timeout → image_upload_dedup_ttl →
-      crash_notify_group → blocked_commands → sandbox_dm_users →
-      menu_game_buttons
+      bind_bot_appid → image_hosting → refresh_wait_timeout →
+      image_upload_dedup_ttl → crash_notify_group → blocked_commands →
+      sandbox_dm_users → menu_game_buttons
     """
-    from . import quota, uploader, buttons as _buttons, callbacks as _callbacks
+    from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
     from . import dispatcher as _dispatcher
+
+    # ── bind_bot_appid ────────────────────────────────────────────────────
+    # 绑定机器人:所有出站消息 / 数据读取固定走该 bot,其他 bot 的事件被 dispatcher 静默忽略。
+    # 这里只落配置原值到 state,真正解析(在线校验 / 回退第一个)由 helpers.get_bound_appid() 每次调用惰性完成。
+    raw_bind = cfg.get('bind_bot_appid', '')
+    if not isinstance(raw_bind, str):
+        log.warning(f'bind_bot_appid 应为字符串，已忽略 (got {type(raw_bind).__name__})')
+        raw_bind = ''
+    bind_appid = raw_bind.strip()
+    if state.bind_bot_appid != bind_appid:
+        old = state.bind_bot_appid or '(自动第一个)'
+        new = bind_appid or '(自动第一个)'
+        log.info(f'bind_bot_appid: {old} → {new}')
+        state.bind_bot_appid = bind_appid
+    # 每次加载都从绑定 bot 的 data.db 重载全量群集合。bot 未就绪时返回 -1,保留现状。
+    seeded = helpers.seed_full_volume_groups_from_db()
+    if seeded >= 0:
+        log.info(f'全量群集合已从绑定 bot({helpers.get_bound_appid() or "?"}) 数据库载入: {seeded} 个')
 
     # ── image_hosting ─────────────────────────────────────────────────────
     backend = cfg.get('image_hosting', '')
@@ -206,6 +227,49 @@ def _apply_runtime_tunables(cfg: dict):
         log.info(f'blocked_commands: {len(_dispatcher.BLOCKED_COMMANDS)} → {len(blocked_t)} 条'
                  + (f' {list(blocked_t)}' if blocked_t else ''))
         _dispatcher.BLOCKED_COMMANDS = blocked_t
+
+
+def persist_bind_bot_appid(appid: str) -> tuple[bool, str]:
+    """把面板选择的绑定 bot 写回 ``data/config.yaml`` 并即时应用到运行时。
+
+    用**行级文本替换**而非 yaml 全量重写 —— 保住 ensure_config 生成的注释和
+    用户手写内容。key 不存在(老配置文件)时带注释追加到文件末尾。写盘成功后
+    同步 ``state.bind_bot_appid`` + 从新绑定 bot 的 data.db 重载全量群集合。
+    """
+    import os
+    import re as _re
+
+    from . import helpers, boot as _boot
+
+    appid = (appid or '').strip()
+    path = os.path.join(_boot.DATA_DIR, 'config.yaml')
+    try:
+        if os.path.isfile(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                text = f.read()
+        else:
+            text = ''
+        new_line = f"bind_bot_appid: '{appid}'"
+        if _re.search(r'(?m)^bind_bot_appid:', text):
+            text = _re.sub(r'(?m)^bind_bot_appid:.*$', new_line, text, count=1)
+        else:
+            if text and not text.endswith('\n'):
+                text += '\n'
+            text += (f"# {CONFIG_COMMENTS['bind_bot_appid']}\n{new_line}\n")
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text)
+    except Exception as e:
+        log.error(f'写回 bind_bot_appid 失败: {e}')
+        return False, f'写入 config.yaml 失败: {e}'
+
+    old = state.bind_bot_appid or '(自动第一个)'
+    state.bind_bot_appid = appid
+    log.info(f'🤖 [面板换绑] bind_bot_appid: {old} → {appid or "(自动第一个)"}')
+    seeded = helpers.seed_full_volume_groups_from_db()
+    if seeded >= 0:
+        log.info(f'   全量群集合已从新绑定 bot 重载: {seeded} 个')
+    resolved = helpers.get_bound_appid()
+    return True, f'已绑定 {resolved or "(无可用 bot)"};全量群 {max(seeded, 0)} 个'
 
     # ── sandbox_dm_users ──────────────────────────────────────────────────
     # 列表内用户私信跳过被动配额,直接主动直推。非法 / 缺失 → 空集合(所有

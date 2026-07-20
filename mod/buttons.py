@@ -156,23 +156,15 @@ def _build_robot_invite_link(uin: str, appid: str) -> str:
 
 
 def _auto_robot_invite_link() -> str:
-    """自动从 BotManager 拿任一已加载 bot 的 (uin, appid) 拼邀请链接。
+    """用**绑定 bot** 的 (uin, appid) 拼邀请链接。
 
     用在没有 event 上下文的发送路径(如 callbacks._send_dm_warning,跑在
-    C++ 工作线程上拿不到具体 event.appid)。多 bot 部署时取扫到的第一个
-    非空 robot_qq;单 bot 部署等价于唯一那个。
+    C++ 工作线程上拿不到具体 event.appid)。绑定解析见
+    ``helpers.get_bound_appid``(配置的 bind_bot_appid,回退第一个 bot)。
     """
-    uin, appid = '', ''
-    try:
-        from core.bot.manager import _bot_manager_ref
-        if _bot_manager_ref and _bot_manager_ref._bots:
-            for aid, bot in _bot_manager_ref._bots.items():
-                uin = getattr(bot, 'robot_qq', '') or ''
-                if uin:
-                    appid = aid
-                    break
-    except Exception:
-        pass
+    from . import helpers as _helpers
+    appid = _helpers.get_bound_appid()
+    uin = _helpers.get_bot_uin(appid)
     return _build_robot_invite_link(uin, appid)
 
 

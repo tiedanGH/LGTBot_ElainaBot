@@ -87,14 +87,103 @@ def humanize_mentions(text: str) -> str:
     return _MENTION_RE.sub(_repl, text)
 
 
+# ──── bot 绑定(config.yaml: bind_bot_appid) ──────────────────────────────
+# 本插件所有出站消息 / 数据库读取都固定走**绑定 bot**:配置了且在线用配置的,否则回退框架第一个 bot。
+# 解析每次调用惰性完成(bot 列表在框架侧可能晚于插件加载就绪,启动时缓存会拿到空)。
+# 来自其他 bot 的入站事件由 ``is_foreign_event`` 在 dispatcher 各 handler 顶部静默挡掉。
+
+def list_framework_bots() -> list[dict]:
+    """枚举主框架 bot.yaml 里配置的机器人,``[{'appid', 'qq'}]``,供面板选择。"""
+    try:
+        from core.base.config import cfg as core_cfg
+        out = []
+        for b in core_cfg.get_bot_configs() or []:
+            appid = str(b.get('appid') or '').strip()
+            if appid:
+                out.append({'appid': appid, 'qq': str(b.get('robot_qq') or '').strip()})
+        return out
+    except Exception as e:
+        log.warning(f'枚举框架 bot 配置失败: {e}')
+        return []
+
+
+def get_bound_appid() -> str:
+    """解析当前绑定 bot 的 appid。
+
+    优先级:``state.bind_bot_appid`` 配置了且该 bot 已加载 → 用配置;
+    否则框架第一个已加载 bot;无 bot 返回 ``''``。
+    """
+    try:
+        from core.bot.manager import _bot_manager_ref
+        if _bot_manager_ref is None or not _bot_manager_ref._bots:
+            return ''
+        bots = _bot_manager_ref._bots
+        cfgd = (state.bind_bot_appid or '').strip()
+        if cfgd and cfgd in bots:
+            return cfgd
+        return next(iter(bots.keys()))
+    except Exception:
+        return ''
+
+
+def get_bound_bot():
+    """返回绑定 bot 的 BotInstance;无可用 bot 返回 None。"""
+    try:
+        from core.bot.manager import _bot_manager_ref
+        appid = get_bound_appid()
+        if not appid or _bot_manager_ref is None:
+            return None
+        return _bot_manager_ref._bots.get(appid)
+    except Exception:
+        return None
+
+
+def is_foreign_event(event) -> bool:
+    """事件是否来自**非绑定** bot —— True 时调用方应静默 return(不打日志)。
+
+    多 bot 部署下,其他 bot 收到的消息也会进到本插件的 handler;绑定后本插件
+    只服务一个 bot,其余事件完全忽略(不回复、不计日志、不刷配额)。
+    """
+    bound = get_bound_appid()
+    if not bound:
+        return False   # 无 bot 可解析时不拦(单以防误伤;此时本来也无事件)
+    return (event.appid or '') != bound
+
+
+def seed_full_volume_groups_from_db() -> int:
+    """从绑定 bot 的 data.db 读 ``full_access_groups`` 表,整体替换运行时全量群集合。
+
+    框架 ``core/bot/event.py::_record_full_access_group`` 按实际收到
+    GROUP_MESSAGE_CREATE 落库(per-bot data.db),是跨进程重启的持久事实来源;
+    这里在绑定生效时(启动 / 热重载 / 面板换绑)一次性载入,弥补
+    ``state.full_volume_groups`` 进程重启即丢的缺口。
+
+    注意 ``state.full_volume_groups`` 是跨热重载持久 set(挂在 C++ 扩展上),
+    必须**原地** clear+update,不能重新赋值。查询失败保留现状不清空。
+    返回载入的群数量;bot 未就绪 / 查询失败返回 -1。
+    """
+    bot = get_bound_bot()
+    if bot is None:
+        return -1
+    try:
+        rows = bot.log_service.query_data('SELECT group_id FROM full_access_groups')
+        gids = {str(r['group_id']) for r in rows if r.get('group_id')}
+    except Exception as e:
+        log.warning(f'读取绑定 bot 全量群失败: {e}')
+        return -1
+    state.full_volume_groups.clear()
+    state.full_volume_groups.update(gids)
+    return len(gids)
+
+
 def get_bot_uin(appid: str = '') -> str:
-    """从主框架 BotManager 拿本 bot 的 QQ uin (``BotInstance.robot_qq``)。
+    """从主框架 BotManager 拿 bot 的 QQ uin (``BotInstance.robot_qq``)。
 
     由 ``bot.yaml`` 每个 bot 节下的 ``robot_qq`` 字段配置(框架在
     ``core/bot/instance.py::__init__`` 里读出来挂到 BotInstance)。
 
     Args:
-        appid: bot 的 appid;空字符串时返回任一已加载 bot 的 uin。
+        appid: bot 的 appid;空 / 未加载时回退**绑定 bot**。
 
     Returns:
         uin 字符串。bot 未加载 / 字段未配置时返回 ``''``,调用方应能优雅降级
@@ -108,10 +197,9 @@ def get_bot_uin(appid: str = '') -> str:
         bots = _bot_manager_ref._bots
         if appid and appid in bots:
             return getattr(bots[appid], 'robot_qq', '') or ''
-        for bot in bots.values():
-            uin = getattr(bot, 'robot_qq', '') or ''
-            if uin:
-                return uin
+        bot = get_bound_bot()
+        if bot is not None:
+            return getattr(bot, 'robot_qq', '') or ''
     except Exception as e:
         log.warning(f'获取 bot uin 失败: {e}')
     return ''
@@ -120,7 +208,8 @@ def get_bot_uin(appid: str = '') -> str:
 def get_sender(appid: str = ''):
     """从 BotManager 全局引用获取 MessageSender。
 
-    appid 为空时返回任一可用 sender（单 Bot 场景足够）。
+    appid 为空 / 未加载时返回**绑定 bot** 的 sender ——
+    崩溃通知、补发道歉等无事件上下文的出站路径都固定从绑定 bot 发出。
     """
     try:
         from core.bot.manager import _bot_manager_ref
@@ -128,7 +217,8 @@ def get_sender(appid: str = ''):
             return None
         if appid and appid in _bot_manager_ref._bots:
             return _bot_manager_ref._bots[appid].sender
-        return next(iter(_bot_manager_ref._bots.values())).sender
+        bot = get_bound_bot()
+        return bot.sender if bot is not None else None
     except Exception as e:
         log.warning(f'获取 sender 失败: {e}')
         return None

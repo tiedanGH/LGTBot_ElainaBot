@@ -868,9 +868,9 @@ def cb_get_user_avatar_url(uid: str) -> str:
     if cached:
         return cached
     try:
-        from core.bot.manager import _bot_manager_ref
-        if _bot_manager_ref and _bot_manager_ref._bots:
-            appid = next(iter(_bot_manager_ref._bots.keys()))
+        # DB 未命中时用**绑定 bot** 的 appid 临时推导
+        appid = helpers.get_bound_appid()
+        if appid:
             return helpers.QQ_AVATAR_URL.format(appid=appid, openid=uid)
     except Exception:
         pass

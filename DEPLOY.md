@@ -130,6 +130,8 @@ python3 main.py         # 启动主框架，自动加载插件
 首次启动时插件会自动生成下面这份模板（字段顺序与 yaml 输出一致）：
 
 ```yaml
+# 绑定机器人 appid（可在仪表盘配置）。留空 = 自动使用框架第一个 bot
+bind_bot_appid: ''
 # LGTBot 内部管理员 openid 列表（不同于 ElainaBot 的 owner_ids）
 admin_uids: []
 # 游戏图片走 markdown 内嵌时使用的图床。留空 = 不启用图床，所有图片直接以 msg_type=7 发送
@@ -158,6 +160,7 @@ menu_game_buttons:
 
 | 字段                       | 类型          | 默认     | 说明                                                                                                           |
 |--------------------------|-------------|--------|--------------------------------------------------------------------------------------------------------------|
+| `bind_bot_appid`         | `str`       | `''`   | 绑定机器人 appid（仪表盘可视化选择）。留空自动使用第一个 bot。绑定后所有功能均走该 bot，**其他 bot 的事件被静默忽略**                                       |
 | `admin_uids`             | `list[str]` | `[]`   | LGTBot 内部管理员的 QQ openid 列表                                                                                   |
 | `image_hosting`          | `str`       | `''`   | markdown 图片内嵌使用的图床（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`），留空 = 直接走 msg_type=7       |
 | `refresh_wait_timeout`   | `float`     | `15.0` | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                               |

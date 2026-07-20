@@ -28,6 +28,12 @@ event_loop: Optional[asyncio.AbstractEventLoop] = None
 # LGTBot 引擎是否已成功 start（per-load，与 boot.is_engine_running() 配合使用）
 started: bool = False
 
+# config.yaml 的 bind_bot_appid 原值（'' = 自动取框架第一个 bot）。由
+# config._apply_runtime_tunables 每次加载 / 热重载写入;真正的解析(配置值
+# 是否在线、回退第一个)由 helpers.get_bound_appid() **每次调用时**惰性完成,
+# 避免"插件加载早于 bot 就绪"的时序问题。
+bind_bot_appid: str = ''
+
 # ── 跨重载共享的可变容器(取自 boot 持久化字典) ──
 # 所有默认 key 由 ``boot._get_persistent()`` 集中保证,这里直接取下标即可。
 _p = boot._get_persistent()

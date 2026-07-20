@@ -173,7 +173,7 @@ body {
 
 .dashboard,
 .config-tab,
-.backup { display: flex; flex-direction: column; gap: 24px; padding-top: 4px; }
+.backup { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
 
 .dash-section {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -344,7 +344,7 @@ body {
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
-   窄屏(手机)适配 —— 集中放在文件末尾
+   窄屏(手机)适配
    ─────────────────────────────────────────────────────────────────────────
    理由:CSS cascade 同 specificity 走 source order,后写者赢。因此移动端
    ``@media`` 必须出现在被覆写的 desktop 规则**之后**,否则像

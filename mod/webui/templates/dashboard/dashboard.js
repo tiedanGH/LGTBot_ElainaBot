@@ -16,6 +16,9 @@ const DASH_KEYS = {
   clear_match_7d:     '__lgtbot_dash_clear_match_7d',
   init_repo:          '__lgtbot_dash_init_repo',
 };
+
+/* 机器人绑定换绑端点(register_route 真路由,带 ?appid= 参数) */
+const BIND_BOT_ROUTE = '/api/ext/lgtbot/bind-bot';
 /* 注:reload_config / dash-config-* / dash-reload-config 全部搬迁到「配置管理」
    tab,见 templates/config/config.js (CFG_KEYS.reload_config) */
 
@@ -55,7 +58,58 @@ function dashFmtVersion(v) {
   return /^v/i.test(v) ? v : 'v' + v;
 }
 
+/* ──── 机器人绑定 ──── */
+function dashRenderBots(data) {
+  const wrap = document.getElementById('dash-bot-list');
+  if (!wrap) return;
+  const bots = data.bots || [];
+  const bound = data.bound_appid || '';
+  if (!bots.length) {
+    wrap.innerHTML = '<span class="dash-msg-warn">未在主框架配置中发现任何机器人</span>';
+    return;
+  }
+  wrap.innerHTML = bots.map(b => {
+    const isBound = b.appid === bound;
+    const qq = b.qq ? ('QQ：' + b.qq) : 'QQ 未配置';
+    return '<div class="dash-bot-row' + (isBound ? ' bound' : '') + '">' +
+      '<span class="dash-mono">' + escapeHtml(b.appid) + '</span>' +
+      '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
+      (isBound
+        ? '<span class="dash-badge dash-badge-ok">当前绑定</span>'
+        : '<button class="dash-btn dash-btn-small" data-bind-appid="' +
+          escapeHtml(b.appid) + '">绑定</button>') +
+      '</div>';
+  }).join('');
+  wrap.querySelectorAll('[data-bind-appid]').forEach(btn => {
+    btn.addEventListener('click', () => dashBindBot(btn.dataset.bindAppid));
+  });
+}
+
+async function dashBindBot(appid) {
+  const ok = await dashConfirm(
+    '确认绑定机器人 ' + appid + '？\n\n' +
+    '绑定后仅该 bot 的消息会被处理，全量群等数据切换为该 bot 的数据库，' +
+    '其他 bot 的事件将被静默忽略。',
+    {level: 'warn'}
+  );
+  if (!ok) return;
+  const msgEl = document.getElementById('dash-bot-msg');
+  try {
+    const url = BIND_BOT_ROUTE + TOKEN_QS + (TOKEN_QS ? '&' : '?') +
+                'appid=' + encodeURIComponent(appid);
+    const r = await fetch(url, { cache: 'no-store' });
+    const data = await r.json();
+    if (msgEl) msgEl.textContent = (data.success ? '✅ ' : '❌ ') + (data.message || '');
+    if (data.success) dashRefreshAll();
+  } catch (e) {
+    if (msgEl) msgEl.textContent = '❌ 请求失败：' + e.message;
+  }
+}
+
 function dashApplyData(data) {
+  /* 机器人绑定列表 */
+  dashRenderBots(data);
+
   /* 版本号 + 引擎状态 */
   document.getElementById('dash-current-version').textContent = data.version || '—';
   const statusEl = document.getElementById('dash-engine-status');
