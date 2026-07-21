@@ -95,3 +95,43 @@ def test_apply_reaches_function_tail_regression_guard():
     ))
     assert callbacks.SANDBOX_DM_USERS == frozenset({'GUARD_U'})
     assert buttons.MENU_GAMES == ['游戏A', '游戏B']
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 纯数字 ID 字段的 int → str 容错
+# ─────────────────────────────────────────────────────────────────────────
+# 历史回归:appid 是纯数字,手工 / 框架通用编辑器写成不带引号的
+# ``bind_bot_appid: 102003762`` 时 yaml 解析成 int,旧读取端直接「忽略」——
+# 绑定在重启后静默回退第一个 bot,看起来像绑定丢失。
+
+
+def test_bind_bot_appid_unquoted_number_coerced_to_str():
+    config._apply_runtime_tunables(_base_cfg(bind_bot_appid=102003762))
+    assert state.bind_bot_appid == '102003762'
+
+
+def test_bind_bot_appid_bool_and_garbage_still_ignored():
+    """bool 是 int 子类但显然不是 appid;list 等其他类型同样保持忽略语义。"""
+    config._apply_runtime_tunables(_base_cfg(bind_bot_appid=True))
+    assert state.bind_bot_appid == ''
+    config._apply_runtime_tunables(_base_cfg(bind_bot_appid=['x']))
+    assert state.bind_bot_appid == ''
+
+
+def test_crash_notify_group_unquoted_number_coerced_to_str():
+    config._apply_runtime_tunables(_base_cfg(crash_notify_group=987654321))
+    assert callbacks.CRASH_NOTIFY_GROUP == '987654321'
+
+
+def test_validator_warns_not_errors_on_numeric_id_fields():
+    """webui 校验器与运行时同语义:ID 字段的裸数字放行(警告),
+    其余 str 字段(image_hosting)填数字仍是错误。"""
+    pytest.importorskip('aiohttp')   # page_config 顶层 import;CI 装框架依赖必有
+    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+
+    errors, warnings = page_config._validate_config_yaml('bind_bot_appid: 102003762')
+    assert errors == []
+    assert any('bind_bot_appid' in w and '引号' in w for w in warnings)
+
+    errors2, _w2 = page_config._validate_config_yaml('image_hosting: 123')
+    assert any('image_hosting' in e for e in errors2)

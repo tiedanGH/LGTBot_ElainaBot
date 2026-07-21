@@ -131,6 +131,10 @@ def _apply_runtime_tunables(cfg: dict):
     # 绑定机器人:所有出站消息 / 数据读取固定走该 bot,其他 bot 的事件被 dispatcher 静默忽略。
     # 这里只落配置原值到 state,真正解析(在线校验 / 回退第一个)由 helpers.get_bound_appid() 每次调用惰性完成。
     raw_bind = cfg.get('bind_bot_appid', '')
+    # appid 是纯数字,不带引号时 yaml 解析成 int(手工 / 框架通用编辑器写入的
+    # 常见形态)—— 按字符串接受;若直接忽略,绑定会在重启后静默回退第一个 bot
+    if isinstance(raw_bind, int) and not isinstance(raw_bind, bool):
+        raw_bind = str(raw_bind)
     if not isinstance(raw_bind, str):
         log.warning(f'bind_bot_appid 应为字符串，已忽略 (got {type(raw_bind).__name__})')
         raw_bind = ''
@@ -196,6 +200,9 @@ def _apply_runtime_tunables(cfg: dict):
     # 引擎崩溃时往这里推送主动消息。非 str 或空白 → 视为未配置(空字符串);
     # callbacks.CRASH_NOTIFY_GROUP 在崩溃善后路径里读这个值,empty 跳过推送。
     raw_notify = cfg.get('crash_notify_group', '')
+    # 同 bind_bot_appid:纯数字群 id 不带引号会解析成 int,按字符串接受
+    if isinstance(raw_notify, int) and not isinstance(raw_notify, bool):
+        raw_notify = str(raw_notify)
     if not isinstance(raw_notify, str):
         log.warning(f'crash_notify_group 应为字符串，已忽略 (got {type(raw_notify).__name__})')
         raw_notify = ''

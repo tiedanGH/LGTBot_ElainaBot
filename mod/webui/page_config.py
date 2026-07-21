@@ -265,6 +265,12 @@ def _valid_backends() -> set:
     return {name for name, _ in _uploader._UPLOADERS}
 
 
+# 纯数字 ID 类字段:不带引号时 yaml 解析成 int,运行时
+# (config._apply_runtime_tunables)按字符串接受 —— 校验器同语义放行(警告级)。
+# 其余 str 字段(如 image_hosting)填数字仍是错误。
+_INT_OK_STR_FIELDS = {'bind_bot_appid', 'crash_notify_group'}
+
+
 def _validate_config_yaml(text: str) -> tuple[list, list]:
     """校验 config.yaml 文本,返回 ``(errors, warnings)``;errors 非空则拒绝保存。
 
@@ -303,7 +309,11 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
                 if bad:
                     errors.append(f'{key} 第 {bad[0] + 1} 项应为字符串')
         elif isinstance(default, str):
-            if not isinstance(val, str):
+            if (key in _INT_OK_STR_FIELDS and isinstance(val, int)
+                    and not isinstance(val, bool)):
+                warnings.append(f'{key} 是不带引号的数字，运行时按字符串处理；'
+                                f'建议加引号写成 {str(val)!r}')
+            elif not isinstance(val, str):
                 errors.append(f'{key} 应为字符串，当前是 {type(val).__name__}')
         elif isinstance(default, float):
             if isinstance(val, bool) or not isinstance(val, (int, float)):
