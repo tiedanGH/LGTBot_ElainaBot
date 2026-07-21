@@ -22,7 +22,7 @@ from core.message.event import (
     INTERACTION_CREATE,
 )
 
-from . import state, quota, helpers, boot, buttons, uploader, userdb
+from . import state, quota, helpers, boot, buttons, uploader, userdb, audit
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -788,6 +788,8 @@ async def lgtbot_planned_restart(event, match):
     if helpers.is_foreign_event(event):
         return
     _on, msg = toggle_planned_restart()
+    audit.record('restart', '计划重启模式',
+                 '已开启维护模式' if _on else '已取消维护模式', src=audit.SRC_CMD)
     await event.reply(msg)
 
 
@@ -806,6 +808,9 @@ async def lgtbot_restart(event, match):
     if helpers.is_foreign_event(event):
         return
     ok, msg = check_and_prepare_restart()
+    # record 同步写盘,任何 await 前已持久化 —— 重启换进程也不丢这条记录
+    audit.record('restart', '重启 LGTBot', '' if ok else msg,
+                 ok=ok, src=audit.SRC_CMD)
     await event.reply(msg)
     if not ok:
         return

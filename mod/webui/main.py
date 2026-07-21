@@ -10,9 +10,10 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
     从侧边栏列表过滤;前端用 ``fetch(apiUrl(key))`` 触发，响应是单 HTML 片段
     (``<div id="msg">`` / ``<pre id="result">``),JS 用 DOMParser 解析。
   · 顶部标题栏右侧放「🔁 重启 LGTBot」按钮(整页通用，不属于任一标签)
-  · 四个标签:仪表盘(``page_dashboard``,最左侧)/ 引擎编译(``page_build``)/
-    消息日志(``page_logs``)/ 用户数据(``page_users``);各自的 HTML / JS /
-    数据生成都委托给对应模块，本文件只做组装
+  · 面板标签:仪表盘(``page_dashboard``)/ 配置管理(``page_config``)/
+    引擎编译(``page_build``)/ 数据备份(``page_backup``)/ 消息日志
+    (``page_logs``)/ 操作审计(``page_audit``)/ 用户数据(``page_users``);
+    各自的 HTML / JS / 数据生成都委托给对应模块，本文件只做组装
 
 HTML / CSS / JS 全部抽到 ``templates/`` 子目录的 ``main.html`` /
 ``main.css`` / ``main.js`` 中，本文件只保留 Python 逻辑;模板在 import 时
@@ -40,8 +41,9 @@ import html
 import os
 
 from core.plugin import web_pages
+from .. import audit
 from .. import state as _plugin_state
-from . import page_backup, page_build, page_config, page_dashboard, page_logs, page_users
+from . import page_audit, page_backup, page_build, page_config, page_dashboard, page_logs, page_users
 
 
 PAGE_KEY = 'lgtbot'
@@ -76,6 +78,8 @@ _BUILD_LOG_KEY     = '__lgtbot_dash_build_log'
 # 数据备份标签的 action 端点(JS 侧 BACKUP_KEYS 与此一一对应)
 _BACKUP_CREATE_KEY  = '__lgtbot_backup_create'
 _BACKUP_LIST_KEY    = '__lgtbot_backup_list'
+# 操作审计标签的唯一 action 端点(只读刷新)
+_AUDIT_LIST_KEY     = '__lgtbot_audit_list'
 # register_route 的 path,必须以 /api/ext/ 开头(core/plugin/web_pages.py 要求)
 _BACKUP_RESTORE_ROUTE = '/api/ext/lgtbot/backup/restore'
 _BACKUP_DELETE_ROUTE  = '/api/ext/lgtbot/backup/delete'
@@ -111,6 +115,7 @@ _HIDDEN_KEYS = frozenset({
     _BUILD_LOG_KEY,
     _BACKUP_CREATE_KEY,
     _BACKUP_LIST_KEY,
+    _AUDIT_LIST_KEY,
 })
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -139,18 +144,21 @@ def _render_html() -> str:
             .replace('__LOGS_CSS__', page_logs.TAB_CSS)
             .replace('__USERS_CSS__', page_users.TAB_CSS)
             .replace('__BACKUP_CSS__', page_backup.TAB_CSS)
+            .replace('__AUDIT_CSS__', page_audit.TAB_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
             .replace('__CONFIG_HTML__', page_config.TAB_HTML)
             .replace('__BUILD_HTML__', page_build.TAB_HTML)
             .replace('__LOGS_HTML__', page_logs.TAB_HTML)
             .replace('__USERS_HTML__', page_users.TAB_HTML)
             .replace('__BACKUP_HTML__', page_backup.TAB_HTML)
+            .replace('__AUDIT_HTML__', page_audit.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
             .replace('__CONFIG_DATA__', page_config.get_data())
             .replace('__BUILD_DATA__', page_build.get_data())
             .replace('__LOG_DATA__', page_logs.get_data())
             .replace('__USER_DATA__', page_users.get_data())
             .replace('__BACKUP_DATA__', page_backup.get_data())
+            .replace('__AUDIT_DATA__', page_audit.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
             .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
             .replace('__CONFIG_JS__', page_config.TAB_JS)
@@ -158,6 +166,7 @@ def _render_html() -> str:
             .replace('__LOGS_JS__', page_logs.TAB_JS)
             .replace('__USERS_JS__', page_users.TAB_JS)
             .replace('__BACKUP_JS__', page_backup.TAB_JS)
+            .replace('__AUDIT_JS__', page_audit.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
             .replace('__RESTART_KEY__', RESTART_KEY)
             .replace('__PLANNED_RESTART_KEY__', PLANNED_RESTART_KEY)
@@ -181,6 +190,9 @@ def _render_restart() -> str:
     # 延迟 import 断开循环依赖(dispatcher 间接 import 本模块)
     from .. import dispatcher
     ok, msg = dispatcher.check_and_prepare_restart()
+    # record 同步写盘,返回即已持久化 —— 先落审计再调度 execv,重启不丢记录
+    audit.record('restart', '重启 LGTBot', '' if ok else msg,
+                 ok=ok, src=audit.SRC_PANEL)
     if ok:
         dispatcher.schedule_exec_after(0.5)
     return f'<div id="msg">{html.escape(msg)}</div>'
@@ -194,6 +206,8 @@ def _render_planned_restart() -> str:
     """
     from .. import dispatcher
     on, msg = dispatcher.toggle_planned_restart()
+    audit.record('restart', '计划重启模式',
+                 '已开启维护模式' if on else '已取消维护模式', src=audit.SRC_PANEL)
     return (f'<div id="msg">{html.escape(msg)}</div>'
             f'<div id="state">{1 if on else 0}</div>')
 
@@ -281,6 +295,8 @@ def register():
       · ``__lgtbot_dash_reload_config`` —— Dashboard「插件配置」热重载 yaml 到运行时
       · ``__lgtbot_dash_build_full / incr / bridge / list / custom / kill /
          clean / remove / log`` —— 引擎编译标签的 9 个动作 + 轮询端点
+      · ``__lgtbot_backup_create / list`` —— 数据备份标签的创建 / 列表端点
+      · ``__lgtbot_audit_list`` —— 操作审计标签的列表刷新(只读)
     """
     # 主页(可见)
     log_base = {
@@ -330,6 +346,9 @@ def register():
     # · restore / delete:要从 ?name= 拿参数,走 web_pages.register_route 真路由
     _register_hidden_action(_BACKUP_CREATE_KEY, page_backup.render_create)
     _register_hidden_action(_BACKUP_LIST_KEY,   page_backup.render_list)
+
+    # 操作审计 action 端点(只读刷新;审计流不设清空 / 删除端点)
+    _register_hidden_action(_AUDIT_LIST_KEY, page_audit.render_list)
     web_pages.register_route('GET', _BACKUP_RESTORE_ROUTE, page_backup.restore_handler, auth=True)
     web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
     web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)

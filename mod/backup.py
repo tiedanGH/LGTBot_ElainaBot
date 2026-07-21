@@ -41,7 +41,7 @@ import zipfile
 from datetime import datetime
 
 from core.base.logger import get_logger, PLUGIN
-from . import boot
+from . import audit, boot
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -449,7 +449,12 @@ async def _on_load_check_coro() -> None:
         result = create_backup()
         if result.get('success'):
             log.info(f'[backup] 自动备份完成: {result.get("zip_name")}')
+            audit.record('backup', '自动备份', str(result.get('zip_name') or ''),
+                         src=audit.SRC_AUTO)
         else:
             log.warning(f'[backup] 自动备份失败: {result.get("message")}')
+            audit.record('backup', '自动备份', str(result.get('message') or ''),
+                         ok=False, src=audit.SRC_AUTO)
     except Exception as e:
         log.error(f'[backup] 自动备份异常: {e}')
+        audit.record('backup', '自动备份', str(e), ok=False, src=audit.SRC_AUTO)

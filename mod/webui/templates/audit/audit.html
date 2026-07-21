@@ -1,0 +1,65 @@
+<div class="audit">
+
+  <!-- ──── 状态卡 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🛡️ 操作审计</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">存储文件</span>
+        <span id="audit-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+
+    <div class="audit-status-grid">
+      <div class="audit-status-card">
+        <div class="audit-status-label">记录条数</div>
+        <div id="audit-count" class="audit-status-value">—</div>
+        <div id="audit-count-sub" class="audit-status-sub">—</div>
+      </div>
+      <div class="audit-status-card">
+        <div class="audit-status-label">最早记录</div>
+        <div id="audit-oldest" class="audit-status-value">—</div>
+        <div id="audit-oldest-sub" class="audit-status-sub">—</div>
+      </div>
+      <div class="audit-status-card">
+        <div class="audit-status-label">文件大小</div>
+        <div id="audit-size" class="audit-status-value">—</div>
+        <div class="audit-status-sub">本地持久化保存</div>
+      </div>
+    </div>
+
+    <div class="audit-actions-bar">
+      <button id="audit-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新</button>
+      <div id="audit-filter-chips" class="audit-filter-chips"></div>
+      <span id="audit-action-msg" class="audit-action-msg"></span>
+    </div>
+  </section>
+
+  <!-- ──── 记录表 ──── -->
+  <section class="dash-section">
+    <h2 class="dash-section-title">📋 审计记录</h2>
+    <div class="audit-table-wrap">
+      <table class="audit-table">
+        <thead>
+          <tr>
+            <th class="audit-col-time">时间</th>
+            <th class="audit-col-cat">类别</th>
+            <th class="audit-col-action">动作</th>
+            <th class="audit-col-detail">详情</th>
+            <th class="audit-col-src">来源</th>
+            <th class="audit-col-result">结果</th>
+          </tr>
+        </thead>
+        <tbody id="audit-table-body">
+          <tr class="audit-empty"><td colspan="6">暂无审计记录 —— 面板或指令触发的状态变更操作会自动记录在这里</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="audit-note">
+      记录范围：引擎编译 / 数据备份 / 缓存清理 / 更新维护 / 配置变更 / 重启 / 机器人绑定等全部状态变更操作。
+      「来源」区分操作从 <b>面板</b> 按钮、QQ <b>指令</b>（如 /重启）、<b>自动</b>任务触发。
+      超过上限后自动淘汰最旧记录，审计流为只读视图。
+    </p>
+  </section>
+
+</div>

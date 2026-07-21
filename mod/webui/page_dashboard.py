@@ -46,7 +46,7 @@ import urllib.request
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import boot, helpers, state, userdb
+from .. import audit, boot, helpers, state, userdb
 from .. import config as _config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -645,6 +645,13 @@ def render_check_update() -> str:
     })
 
 
+def _git_output_summary(proc, success: bool) -> str:
+    """取 git 输出首行作审计详情:成功优先 stdout,失败优先 stderr。"""
+    text = ((proc.stdout if success else proc.stderr) or
+            (proc.stderr if success else proc.stdout) or '').strip()
+    return text.splitlines()[0][:120] if text else f'returncode={proc.returncode}'
+
+
 def render_do_update() -> str:
     """更新桥接层 —— 在 ``boot.PLUGIN_DIR`` 执行 ``git pull --ff-only``。
 
@@ -670,6 +677,7 @@ def render_do_update() -> str:
             timeout=60.0,
         )
     except subprocess.TimeoutExpired:
+        audit.record('update', '更新桥接层 (git pull)', 'git pull 超时 (60s)', ok=False)
         return _fragment({'success': False, 'message': 'git pull 超时 (超过 60 秒)'})
     except FileNotFoundError:
         return _fragment({
@@ -677,9 +685,12 @@ def render_do_update() -> str:
             'message': '未找到 git 命令，请确认系统已安装 git',
         })
     except Exception as e:
+        audit.record('update', '更新桥接层 (git pull)', f'异常: {e}', ok=False)
         return _fragment({'success': False, 'message': f'git pull 异常：{e}'})
 
     success = proc.returncode == 0
+    audit.record('update', '更新桥接层 (git pull)',
+                 _git_output_summary(proc, success), ok=success)
     msg = ('✅ 桥接层已更新，请重启 LGTBot 引擎或重启整个进程以加载新版本'
            if success else '❌ git pull 失败，请尝试手动更新。详见 stderr')
     return _fragment({
@@ -739,6 +750,8 @@ def render_do_update_force() -> str:
     if not run_stage('git reset --hard origin/main',
                      ['git', '-C', plugin_dir, 'reset', '--hard', 'origin/main'],
                      timeout=30.0):
+        audit.record('update', '强制更新桥接层 (reset --hard)',
+                     'git reset --hard 失败', ok=False)
         return _fragment({
             'success': False,
             'stages': stages,
@@ -747,6 +760,8 @@ def render_do_update_force() -> str:
 
     log.warning(f'[do-update-force] 强制更新完成 plugin_dir={plugin_dir} '
                 f'(本地未提交修改已丢弃)')
+    audit.record('update', '强制更新桥接层 (reset --hard)',
+                 '已对齐 origin/main,本地未提交修改已丢弃')
     return _fragment({
         'success': True,
         'stages': stages,
@@ -792,6 +807,9 @@ def render_update_submodule() -> str:
             cmd, capture_output=True, text=True, timeout=300.0,
         )
     except subprocess.TimeoutExpired:
+        # 超时时克隆可能已进行到一半 —— 真变更,记 ok=False
+        audit.record('update', '更新 lgtbot 子模块',
+                     '超时 (300s),可能留下半克隆', ok=False)
         return _fragment({
             'success': False,
             'command': ' '.join(cmd),
@@ -811,6 +829,8 @@ def render_update_submodule() -> str:
         })
 
     success = proc.returncode == 0
+    audit.record('update', '更新 lgtbot 子模块',
+                 _git_output_summary(proc, success), ok=success)
     msg = ('✅ 子模块已更新，如桥接层 C++ 部分有变化需要重新 bash build.sh'
            if success else '❌ git submodule update 失败，详见 stderr')
     return _fragment({
@@ -917,6 +937,7 @@ def render_init_repo() -> str:
 
     if not run_stage('git init',
                      ['git', '-C', plugin_dir, 'init', '-b', 'main'], timeout=10.0):
+        audit.record('update', '初始化 git 仓库', '失败于 git init', ok=False)
         return _fragment({
             'success': False,
             'stages': stages,
@@ -925,6 +946,7 @@ def render_init_repo() -> str:
     if not run_stage('git remote add',
                      ['git', '-C', plugin_dir, 'remote', 'add', 'origin', remote_url],
                      timeout=10.0):
+        audit.record('update', '初始化 git 仓库', '失败于 git remote add', ok=False)
         return _fragment({
             'success': False,
             'stages': stages,
@@ -933,6 +955,7 @@ def render_init_repo() -> str:
     if not run_stage('git fetch --tags --depth 50',
                      ['git', '-C', plugin_dir, 'fetch', 'origin',
                       '--tags', '--depth', '50'], timeout=120.0):
+        audit.record('update', '初始化 git 仓库', '失败于 git fetch', ok=False)
         return _fragment({
             'success': False,
             'stages': stages,
@@ -954,6 +977,7 @@ def render_init_repo() -> str:
         if not run_stage('git reset --mixed origin/main',
                          ['git', '-C', plugin_dir, 'reset', '--mixed',
                           'origin/main'], timeout=30.0):
+            audit.record('update', '初始化 git 仓库', '失败于 git reset', ok=False)
             return _fragment({
                 'success': False,
                 'stages': stages,
@@ -970,6 +994,8 @@ def render_init_repo() -> str:
 
     log.info(f'[init-repo] 完成 plugin_dir={plugin_dir} '
              f'tag={version_tag_used or "(fallback origin/main)"}')
+    audit.record('update', '初始化 git 仓库',
+                 f'HEAD={version_tag_used or "origin/main"}')
     return _fragment({
         'success': True,
         'stages': stages,
@@ -1060,33 +1086,44 @@ def _cache_dir(name: str) -> str:
     return os.path.join(boot.IMG_PATH, _CACHE_DIRNAMES.get(name, name))
 
 
+def _audit_clear(action: str, ok: bool, msg: str, n: int) -> None:
+    """清缓存审计:目录不存在(n=0)也照记 —— 用户确实按下了清理按钮。"""
+    audit.record('cache', action, f'删除 {n} 项' + ('' if ok else f'; {msg}'), ok=ok)
+
+
 def render_clear_avatar() -> str:
     ok, msg, n = _clear_dir(_cache_dir('avatar'))
+    _audit_clear('清理头像缓存 (全部)', ok, msg, n)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_avatar_7d() -> str:
     ok, msg, n = _clear_dir_keep_recent(_cache_dir('avatar'), days=7)
+    _audit_clear('清理头像缓存 (保留7天)', ok, msg, n)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_gen() -> str:
     ok, msg, n = _clear_dir(_cache_dir('gen'))
+    _audit_clear('清理图片缓存 (全部)', ok, msg, n)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_gen_7d() -> str:
     ok, msg, n = _clear_dir_keep_recent(_cache_dir('gen'), days=7)
+    _audit_clear('清理图片缓存 (保留7天)', ok, msg, n)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_match_all() -> str:
     ok, msg, n = _clear_dir(_cache_dir('match'))
+    _audit_clear('清理赛况缓存 (全部)', ok, msg, n)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_match_7d() -> str:
     ok, msg, n = _clear_dir_keep_recent(_cache_dir('match'), days=7)
+    _audit_clear('清理赛况缓存 (保留7天)', ok, msg, n)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
@@ -1110,6 +1147,8 @@ async def bind_bot_handler(request: 'web.Request') -> 'web.Response':
             status=400,
         )
     ok, msg = _config.persist_bind_bot_appid(appid)
+    audit.record('bind', '换绑机器人',
+                 f'→ {appid}' + ('' if ok else f'; {msg}'), ok=ok)
     return web.json_response({
         'success': ok,
         'message': msg,

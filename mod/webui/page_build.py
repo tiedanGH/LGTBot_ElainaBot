@@ -69,7 +69,7 @@ import time
 from datetime import datetime
 
 from core.base.logger import get_logger, PLUGIN
-from .. import boot
+from .. import audit, boot
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -349,6 +349,8 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
     })
 
     log.info(f'[build] 已启动：{display} (PID {proc.pid}， kind={kind})')
+    # 只记「已启动」—— 编译结果由 build 状态页(state.json + 日志)负责展示
+    audit.record('build', display, f'已启动 (PID {proc.pid})')
     return {'success': True, 'message': f'已启动：{display}', 'pid': proc.pid}
 
 
@@ -361,11 +363,13 @@ def _kill_build() -> dict:
     try:
         pgid = os.getpgid(int(pid))
     except (ProcessLookupError, PermissionError, OSError) as e:
+        audit.record('build', '终止编译', f'获取进程组失败: {e}', ok=False)
         return {'success': False, 'message': f'获取进程组失败：{e}'}
 
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError) as e:
+        audit.record('build', '终止编译', f'SIGTERM 失败: {e}', ok=False)
         return {'success': False, 'message': f'SIGTERM 失败：{e}'}
 
     # 最多等 2s 让进程优雅退出;否则 SIGKILL
@@ -397,6 +401,7 @@ def _kill_build() -> dict:
     except Exception:
         pass
 
+    audit.record('build', '终止编译', f'PID {pid}')
     return {'success': True, 'message': f'已终止编译进程 (PID {pid})'}
 
 
@@ -687,8 +692,10 @@ def render_build_remove() -> str:
     except Exception as e:
         log.warning(f'[build-remove] 失败:{build_dir}:{e}')
         _write_meta_done('删除 build/ 目录', display_argv, 1)
+        audit.record('build', '删除 build/ 目录', str(e), ok=False)
         return _fragment({'success': False, 'message': f'删除失败：{e}'})
     log.info(f'[build-remove] 完成:{build_dir}')
+    audit.record('build', '删除 build/ 目录')
     # 顺便在日志末尾留一条 audit 记录(若 build.log 不存在,append 模式会创建)
     try:
         with open(LOG_PATH, 'a', encoding='utf-8') as f:

@@ -35,7 +35,7 @@ import time
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import backup
+from .. import audit, backup
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -97,7 +97,13 @@ def render_create() -> str:
         result = backup.create_backup()
     except Exception as e:
         log.error(f'手动备份异常: {e}')
+        audit.record('backup', '创建备份', str(e), ok=False)
         return _fragment({'success': False, 'message': f'备份异常: {e}'})
+    ok = bool(result.get('success'))
+    audit.record('backup', '创建备份',
+                 (f'{result.get("zip_name")} ({len(result.get("included") or [])} 个文件)'
+                  if ok else str(result.get('message') or '')),
+                 ok=ok)
     return _fragment(result)
 
 
@@ -136,7 +142,13 @@ async def restore_handler(request: 'web.Request') -> 'web.Response':
         result = backup.restore_backup(name)
     except Exception as e:
         log.error(f'恢复备份 {name} 异常: {e}')
+        audit.record('backup', '恢复备份', f'{name}; {e}', ok=False)
         return web.json_response({'success': False, 'message': f'恢复异常: {e}'})
+    ok = bool(result.get('success'))
+    audit.record('backup', '恢复备份',
+                 (f'{name},替换 {len(result.get("replaced_files") or [])} 文件'
+                  if ok else f'{name}; {result.get("message") or ""}'),
+                 ok=ok)
     return web.json_response(result)
 
 
@@ -152,5 +164,9 @@ async def delete_handler(request: 'web.Request') -> 'web.Response':
         result = backup.delete_backup(name)
     except Exception as e:
         log.error(f'删除备份 {name} 异常: {e}')
+        audit.record('backup', '删除备份', f'{name}; {e}', ok=False)
         return web.json_response({'success': False, 'message': f'删除异常: {e}'})
+    ok = bool(result.get('success'))
+    audit.record('backup', '删除备份',
+                 name if ok else f'{name}; {result.get("message") or ""}', ok=ok)
     return web.json_response(result)

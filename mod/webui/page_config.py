@@ -26,7 +26,7 @@ import yaml
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import boot
+from .. import audit, boot
 from .. import config as _plugin_config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -194,6 +194,7 @@ def render_reload_config() -> str:
     except Exception as e:
         log.error(f'🔁 [reload-config] 失败: {e}')
         log.info('=' * 60)
+        audit.record('config', '热重载插件配置', str(e), ok=False)
         return _fragment({
             'success': False,
             'message': f'热重载失败: {e}',
@@ -232,6 +233,10 @@ def render_reload_config() -> str:
         log.info(f'   · admin_uids: 当前 yaml 中 {admin_count} 人 (未变化)')
     log.info('🔁 [reload-config] 完成')
     log.info('=' * 60)
+
+    audit.record('config', '热重载插件配置',
+                 f'{len(changes)} 项运行时变化'
+                 + ('; admin 变更需重启生效' if admin_changed else ''))
 
     payload = {
         'success': True,
@@ -369,17 +374,25 @@ async def save_config_handler(request: 'web.Request') -> 'web.Response':
     path, validator = _SAVE_TARGETS[target]
     if path is None:
         path = boot.CONF_PATH
+    fname = 'config.yaml' if target == 'config_yaml' else 'lgtbot.json'
     result = validator(content)
     errors, warnings = result if isinstance(result, tuple) else (result, [])
     if errors:
         log.info(f'🛡️ [配置校验] {target} 保存被拒: {errors}')
+        # 校验拒绝虽未落盘,记 ok=False
+        audit.record('config', f'保存 {fname}',
+                     '校验拒绝: ' + '; '.join(str(e) for e in errors)[:150], ok=False)
         return web.json_response({'success': False, 'errors': errors, 'warnings': warnings})
 
     try:
         _atomic_write(path, content)
     except Exception as e:
         log.error(f'写入 {target} 失败: {e}')
+        audit.record('config', f'保存 {fname}', f'写盘失败: {e}', ok=False)
         return web.json_response({'success': False, 'errors': [f'写盘失败: {e}']})
     log.info(f'💾 [配置校验] {target} 校验通过并已保存'
              + (f'(警告 {len(warnings)} 条)' if warnings else ''))
+    audit.record('config', f'保存 {fname}',
+                 f'{len(content)} 字符'
+                 + (f',{len(warnings)} 条警告' if warnings else ''))
     return web.json_response({'success': True, 'errors': [], 'warnings': warnings})

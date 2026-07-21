@@ -181,7 +181,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 
 .dashboard,
 .config-tab,
-.backup { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
+.backup,
+.audit { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
 
 .dash-section {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -376,5 +377,6 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
      套用同款 selector list,会自动跟着收紧。 */
   .dashboard,
   .config-tab,
-  .backup { gap: 10px; }
+  .backup,
+  .audit { gap: 10px; }
 }

@@ -1,0 +1,120 @@
+/* ───── 操作审计 tab 专属样式 ─────
+   布局与数据备份 tab 同构:状态卡 grid + 记录表格 + 操作 toolbar;
+   额外的类别筛选 chips(多选切换)与来源 / 结果徽标。 */
+
+/* ── 顶部 3 卡状态网格(条数 / 最早记录 / 文件大小) ── */
+.audit-status-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 12px;
+}
+.audit-status-card {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.audit-status-label {
+  font-size: 12px; color: var(--text-muted); font-weight: 500;
+}
+.audit-status-value {
+  font-size: 18px; font-weight: 600; color: var(--accent);
+  font-family: 'Consolas', 'Menlo', monospace;
+  word-break: break-all;
+}
+.audit-status-sub {
+  font-size: 11px; color: var(--text-faint);
+}
+
+/* ── 「刷新 + 类别筛选」操作条 ── */
+.audit-actions-bar {
+  margin-top: 14px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.audit-action-msg {
+  font-size: 12px; flex: 1; min-width: 120px;
+}
+.audit-action-msg:empty { display: none; }
+
+/* 类别筛选 chips —— 每个可独立点击切换选中(多选);无选中 = 全部显示 */
+.audit-filter-chips {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.audit-chip {
+  padding: 4px 10px; border-radius: 14px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--text-muted); line-height: 1.4; user-select: none;
+}
+.audit-chip:hover { background: var(--hover); }
+.audit-chip.active {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--accent-text); font-weight: 600;
+}
+
+/* ── 记录表格 ── */
+.audit-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel);
+}
+.audit-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  min-width: 640px;     /* 列再窄就触发水平滚动而不是挤压(来源列不隐藏) */
+}
+.audit-table thead {
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.audit-table th {
+  text-align: left; padding: 10px 12px;
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+  white-space: nowrap;
+}
+.audit-table td {
+  padding: 9px 12px; border-bottom: 1px solid var(--border);
+  color: var(--text); vertical-align: top;
+}
+.audit-table tbody tr:last-child td { border-bottom: none; }
+.audit-table tbody tr:hover { background: var(--hover); }
+
+.audit-col-time   { width: 12%; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.audit-col-cat    { width: 12%; white-space: nowrap; }
+.audit-col-action { width: 22%; }
+.audit-col-detail { width: 38%; }
+.audit-col-src    { width: 8%;  white-space: nowrap; }
+.audit-col-result { width: 8%;  white-space: nowrap; }
+
+/* 详情单元:单行省略 + title 全文;点击切换展开(pre-wrap 显示完整多行) */
+.audit-detail-text {
+  display: block; max-width: 360px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
+}
+.audit-detail-text.expanded {
+  max-width: none; white-space: pre-wrap; word-break: break-all;
+}
+
+/* 来源 / 结果徽标 —— 复用 main.css 的 dash-badge / dash-msg-* 主题色,仅缩小尺寸适配表格行高 */
+.audit-table .dash-badge {
+  font-size: 11px; padding: 2px 8px;
+}
+
+.audit-empty td {
+  text-align: center; padding: 32px 16px;
+  color: var(--text-faint); font-size: 13px;
+}
+
+/* ── 表格下方说明 ── */
+.audit-note {
+  margin-top: 10px; padding: 10px 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; color: var(--text-muted); line-height: 1.7;
+}
+
+/* ── 移动端微调(来源列保留不隐藏,靠表格横向滚动) ── */
+@media (max-width: 600px) {
+  .audit-status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .audit-status-card { padding: 10px 12px; }
+  .audit-status-value { font-size: 15px; }
+  .audit-table { min-width: 560px; }
+  .audit-table th, .audit-table td { padding: 7px 8px; font-size: 12px; }
+  .audit-detail-text { max-width: 180px; }
+}
