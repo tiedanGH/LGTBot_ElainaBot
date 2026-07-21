@@ -23,8 +23,9 @@
     ``script`` 命令，用 ``script -qfec '<cmd>' /dev/null`` 包一层伪 tty,
     让 cmake / gcc / clang 输出彩色 ANSI escape 序列(直接重定向 stdout 时
     多数工具默认关闭颜色)。fallback 到无伪 tty(日志仍可读，只是没颜色)。
-  · 自身的 ``_ansi_to_html`` 把日志里的 ``\\x1b[...m`` escape 转 ``<span>``,
-    支持 30-37 / 90-97 前景色 + 粗体;其他 control char 全剥掉。
+  · 自身的 ``_ansi_to_segments`` 把日志里的 ``\\x1b[...m`` escape 解析成结构化段
+   ``[{t,b,c}]``(文本 / 粗体 / 前景色,支持 30-37 / 90-97),
+    JSON 交给前端直接建 DOM 节点 —— 日志内容全程不以 HTML 字符串形态传输;其他 control char 全剥掉。
   · 终止编译:``os.killpg(os.getpgid(pid), SIGTERM)`` —— 整个 session 一起死，
     包括 build.sh fork 的 cmake / make / g++。2 秒不响应升级 SIGKILL。
 
@@ -400,7 +401,7 @@ def _kill_build() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 日志读取 + ANSI 转 HTML
+# 日志读取 + ANSI 解析成结构化段
 # ─────────────────────────────────────────────────────────────────────────
 
 # CSI 序列 \x1b[<params>m;我们只关心 m 结尾的 SGR(颜色 / 粗体)
@@ -420,55 +421,57 @@ _SGR_FG = {
 }
 
 
-def _ansi_to_html(text: str) -> str:
-    """ANSI escape → HTML(只支持 SGR 前景色 + 粗体;其他 escape 剥掉)。
+def _ansi_to_segments(text: str) -> list:
+    """ANSI escape → 结构化段列表(只支持 SGR 前景色 + 粗体;其他 escape 剥掉)。
 
-    输出已 html-escape,可以直接塞进 DOM 的 innerHTML。
+    返回 ``[{'t': 文本, 'b': 1(粗体,可选), 'c': '#rgb'(前景色,可选)}, ...]``,
+    经 JSON 原样交给前端,由 JS 用 createTextNode / CSSOM 直接建 DOM 节点。
+    日志内容从头到尾不出现 HTML 字符串,前端也就没有任何 HTML 解析环节。
     """
     if not text:
-        return ''
+        return []
     # 先把 \r 转 \n(script 命令可能产生 CR/LF 混乱)
     text = text.replace('\r\n', '\n').replace('\r', '\n')
 
-    out = []
-    open_spans = 0
-    pos = 0
-    for m in _SGR_RE.finditer(text):
-        # 中间普通文本先 escape
-        chunk = text[pos:m.start()]
-        # 清掉其它 CSI / 控制字符
+    segments: list = []
+    bold = False
+    color = ''
+
+    def emit(chunk: str) -> None:
+        # 清掉其它 CSI / 控制字符;空块不产生段
         chunk = _OTHER_CSI_RE.sub('', chunk)
         chunk = _OTHER_ESC_RE.sub('', chunk)
         chunk = _CTRL_RE.sub('', chunk)
-        out.append(_html.escape(chunk))
+        if not chunk:
+            return
+        seg: dict = {'t': chunk}
+        if bold:
+            seg['b'] = 1
+        if color:
+            seg['c'] = color
+        segments.append(seg)
 
-        codes = m.group(1)
-        if not codes:
-            codes = '0'
-        for code_str in codes.split(';'):
+    pos = 0
+    for m in _SGR_RE.finditer(text):
+        emit(text[pos:m.start()])
+        # SGR 状态机:0 复位 / 1 粗体 / 30-37+90-97 前景色。新前景色替换旧值
+        # (而非嵌套),与 ANSI 语义一致。
+        for code_str in (m.group(1) or '0').split(';'):
             try:
                 code = int(code_str)
             except ValueError:
                 continue
             if code == 0:
-                out.append('</span>' * open_spans)
-                open_spans = 0
+                bold = False
+                color = ''
             elif code == 1:
-                out.append('<span style="font-weight:bold">')
-                open_spans += 1
+                bold = True
             elif code in _SGR_FG:
-                out.append(f'<span style="color:{_SGR_FG[code]}">')
-                open_spans += 1
+                color = _SGR_FG[code]
         pos = m.end()
 
-    # 尾部剩余文本
-    tail = text[pos:]
-    tail = _OTHER_CSI_RE.sub('', tail)
-    tail = _OTHER_ESC_RE.sub('', tail)
-    tail = _CTRL_RE.sub('', tail)
-    out.append(_html.escape(tail))
-    out.append('</span>' * open_spans)
-    return ''.join(out)
+    emit(text[pos:])
+    return segments
 
 
 def _read_log_tail(max_bytes: int = 64 * 1024) -> str:
@@ -515,7 +518,7 @@ def get_data() -> str:
     log_text = _read_log_tail(64 * 1024)
     payload = {
         'state': state,
-        'log_html': _ansi_to_html(log_text),
+        'log_segments': _ansi_to_segments(log_text),
         'log_size': _log_size(),
         'params_path': os.path.abspath(PARAMS_PATH),
         'last_custom_target': _read_last_custom_target(),
@@ -708,6 +711,6 @@ def render_build_log() -> str:
     log_text = _read_log_tail(64 * 1024)
     return _fragment({
         'state': state,
-        'log_html': _ansi_to_html(log_text),
+        'log_segments': _ansi_to_segments(log_text),
         'log_size': _log_size(),
     })

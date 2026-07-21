@@ -36,6 +36,8 @@ let buildParamsPath = '';
 /* 上次「编译指定目标」用的 target 名,作为下一次 prompt 的预填值 */
 let buildLastCustomTarget = '';
 let buildPollTimer = null;
+/* 上次挂载的日志段的 JSON 串,内容没变就跳过 DOM 重建 */
+let buildLastLogKey = '';
 
 function buildFmtBytes(n) {
   if (n == null) return '—';
@@ -66,34 +68,35 @@ function buildFmtDuration(sec) {
   return h + ' 时 ' + m + ' 分';
 }
 
-/* 服务端 _ansi_to_html 只产出纯文本 + 两种内联 span(粗体 / 前景色)。
-   这里在客户端按同一白名单**重建 DOM** 再挂载:文本节点原样,span 仅放行安全的
-   style 值,其余标签剥壳保内容 —— 不再对响应内容用 innerHTML */
-const BUILD_SAFE_SPAN_STYLE_RE = /^(font-weight:\s*bold|color:\s*(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}))$/;
+/* 服务端 _ansi_to_segments 把 ANSI 日志解析成 [{t,b,c}] 结构化段(文本 /
+   粗体 / 前景色)。这里从数据直接建 DOM:文本一律 createTextNode / textContent,
+   颜色经十六进制白名单校验后由 CSSOM 属性赋值 —— 日志内容全程不以 HTML
+   字符串出现,也就不存在任何 HTML 解析 / innerHTML 环节 */
+const BUILD_SAFE_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
 
-function buildSanitizedLogFragment(html) {
-  const doc = new DOMParser().parseFromString(html || '', 'text/html');
+function buildLogFragment(segments) {
   const out = document.createDocumentFragment();
-  (function walk(src, dst) {
-    src.childNodes.forEach(node => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        dst.appendChild(document.createTextNode(node.textContent));
-      } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SPAN') {
-        const span = document.createElement('span');
-        const style = (node.getAttribute('style') || '').trim();
-        if (BUILD_SAFE_SPAN_STYLE_RE.test(style)) span.setAttribute('style', style);
-        walk(node, span);
-        dst.appendChild(span);
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        walk(node, dst);   // 其他元素:剥标签,保留内部文本
-      }
-    });
-  })(doc.body, out);
+  (Array.isArray(segments) ? segments : []).forEach(seg => {
+    const text = seg && typeof seg.t === 'string' ? seg.t : '';
+    if (!text) return;
+    const bold = !!(seg && seg.b);
+    const color = seg && typeof seg.c === 'string' && BUILD_SAFE_COLOR_RE.test(seg.c)
+      ? seg.c : '';
+    if (!bold && !color) {
+      out.appendChild(document.createTextNode(text));
+      return;
+    }
+    const span = document.createElement('span');
+    if (bold) span.style.fontWeight = 'bold';
+    if (color) span.style.color = color;
+    span.textContent = text;
+    out.appendChild(span);
+  });
   return out;
 }
 
-/* 把后端发来的状态对象 + 日志 HTML 渲染到 UI */
-function buildApplyState(state, logHtml, logSize) {
+/* 把后端发来的状态对象 + 结构化日志段渲染到 UI */
+function buildApplyState(state, logSegments, logSize) {
   const badge = document.getElementById('build-status-badge');
   const cmdEl = document.getElementById('build-status-cmd');
   const sinceEl = document.getElementById('build-status-since');
@@ -143,12 +146,13 @@ function buildApplyState(state, logHtml, logSize) {
     killBtn.style.display = 'none';
   }
 
-  /* 日志(ANSI→HTML span,经白名单重建后挂载)*/
+  /* 日志(结构化段 → 文本节点 / 白名单 span)*/
   const logEl = document.getElementById('build-log');
-  /* 同样内容就跳过 set,避免 DOM 抖动 + 用户选区被破坏 */
-  if (logEl.dataset.lastHtml !== logHtml) {
-    logEl.replaceChildren(buildSanitizedLogFragment(logHtml));
-    logEl.dataset.lastHtml = logHtml;
+  /* 同样内容就跳过重建,避免 DOM 抖动 + 用户选区被破坏 */
+  const logKey = JSON.stringify(logSegments || []);
+  if (buildLastLogKey !== logKey) {
+    logEl.replaceChildren(buildLogFragment(logSegments));
+    buildLastLogKey = logKey;
     const autoscroll = document.getElementById('build-log-autoscroll');
     if (autoscroll && autoscroll.checked) {
       logEl.scrollTop = logEl.scrollHeight;
@@ -162,7 +166,7 @@ function buildLoadInline() {
     const data = JSON.parse(document.getElementById('build-data').textContent);
     buildParamsPath = data.params_path || '';
     buildLastCustomTarget = data.last_custom_target || '';
-    buildApplyState(data.state || {}, data.log_html || '', data.log_size || 0);
+    buildApplyState(data.state || {}, data.log_segments || [], data.log_size || 0);
     /* 进入页面时若有正在跑的编译,启动轮询 */
     if (data.state && data.state.running) buildStartPolling();
   } catch (e) {
@@ -186,7 +190,7 @@ async function buildPullOnce() {
   try {
     const data = await buildCallAction(BUILD_KEYS.log);
     const state = data.state || {};
-    buildApplyState(state, data.log_html || '', data.log_size || 0);
+    buildApplyState(state, data.log_segments || [], data.log_size || 0);
     /* 跑完了就停轮询 */
     if (!state.running) buildStopPolling();
   } catch (e) {
