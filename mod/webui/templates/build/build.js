@@ -66,6 +66,32 @@ function buildFmtDuration(sec) {
   return h + ' 时 ' + m + ' 分';
 }
 
+/* 服务端 _ansi_to_html 只产出纯文本 + 两种内联 span(粗体 / 前景色)。
+   这里在客户端按同一白名单**重建 DOM** 再挂载:文本节点原样,span 仅放行安全的
+   style 值,其余标签剥壳保内容 —— 不再对响应内容用 innerHTML */
+const BUILD_SAFE_SPAN_STYLE_RE = /^(font-weight:\s*bold|color:\s*(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}))$/;
+
+function buildSanitizedLogFragment(html) {
+  const doc = new DOMParser().parseFromString(html || '', 'text/html');
+  const out = document.createDocumentFragment();
+  (function walk(src, dst) {
+    src.childNodes.forEach(node => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        dst.appendChild(document.createTextNode(node.textContent));
+      } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SPAN') {
+        const span = document.createElement('span');
+        const style = (node.getAttribute('style') || '').trim();
+        if (BUILD_SAFE_SPAN_STYLE_RE.test(style)) span.setAttribute('style', style);
+        walk(node, span);
+        dst.appendChild(span);
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        walk(node, dst);   // 其他元素:剥标签,保留内部文本
+      }
+    });
+  })(doc.body, out);
+  return out;
+}
+
 /* 把后端发来的状态对象 + 日志 HTML 渲染到 UI */
 function buildApplyState(state, logHtml, logSize) {
   const badge = document.getElementById('build-status-badge');
@@ -117,11 +143,11 @@ function buildApplyState(state, logHtml, logSize) {
     killBtn.style.display = 'none';
   }
 
-  /* 日志(已是 ANSI→HTML span,直接 innerHTML)*/
+  /* 日志(ANSI→HTML span,经白名单重建后挂载)*/
   const logEl = document.getElementById('build-log');
   /* 同样内容就跳过 set,避免 DOM 抖动 + 用户选区被破坏 */
   if (logEl.dataset.lastHtml !== logHtml) {
-    logEl.innerHTML = logHtml;
+    logEl.replaceChildren(buildSanitizedLogFragment(logHtml));
     logEl.dataset.lastHtml = logHtml;
     const autoscroll = document.getElementById('build-log-autoscroll');
     if (autoscroll && autoscroll.checked) {

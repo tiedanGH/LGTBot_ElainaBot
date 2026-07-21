@@ -89,7 +89,7 @@ function backupApplyData(data) {
     return `<tr>
       <td class="backup-col-name"><code class="dash-mono">${safeName}</code></td>
       <td class="backup-col-time">${escapeHtml(backupFmtRelative(b.mtime_ts))}</td>
-      <td class="backup-col-size">${backupFmtBytes(b.size_bytes)}</td>
+      <td class="backup-col-size">${escapeHtml(backupFmtBytes(b.size_bytes))}</td>
       <td class="backup-col-ops">
         <button class="dash-btn dash-btn-small backup-btn-restore" data-name="${safeName}">↩ 恢复</button>
         <button class="dash-btn dash-btn-small dash-btn-warn backup-btn-delete" data-name="${safeName}">🗑 删除</button>

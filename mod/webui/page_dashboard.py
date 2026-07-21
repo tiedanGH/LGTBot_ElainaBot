@@ -117,18 +117,18 @@ def _get_plugin_meta() -> dict:
 def _parse_github_owner_repo(url: str) -> tuple[str, str]:
     """从 ``https://github.com/owner/repo`` 抽 ``(owner, repo)``;失败返回 ``('', '')``。"""
     if not url:
-        return ('', '')
+        return '', ''
     try:
         s = url.rstrip('/')
         if s.endswith('.git'):
             s = s[:-4]
         parts = s.split('/')
-        # 形如 ['https:', '', 'github.com', 'owner', 'repo']
-        if len(parts) >= 5 and 'github.com' in parts[2]:
-            return (parts[3], parts[4])
+        # 主机名必须 **精确等于** github.com(或 www 变体)
+        if len(parts) >= 5 and parts[2].lower() in ('github.com', 'www.github.com'):
+            return parts[3], parts[4]
     except Exception:
         pass
-    return ('', '')
+    return '', ''
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -199,12 +199,12 @@ def _local_submodule_commit(sub_path: str) -> tuple[str, str]:
             capture_output=True, text=True, timeout=5.0,
         )
         if proc.returncode != 0:
-            return ('', '')
+            return '', ''
         full = (proc.stdout or '').strip()
         return (full[:7], full) if full else ('', '')
     except Exception as e:
         log.debug(f'rev-parse {sub_path} HEAD 失败：{e}')
-        return ('', '')
+        return '', ''
 
 
 def _query_upstream_commit(owner: str, repo: str, branch: str) -> tuple[str, str, str]:
@@ -213,7 +213,7 @@ def _query_upstream_commit(owner: str, repo: str, branch: str) -> tuple[str, str
     返回 ``(short_sha, full_sha, error_message)``;失败时前两项空，error 含原因。
     """
     if not owner or not repo:
-        return ('', '', '上游仓库地址未配置')
+        return '', '', '上游仓库地址未配置'
     api_url = f'https://api.github.com/repos/{owner}/{repo}/commits/{branch or "HEAD"}'
     try:
         req = urllib.request.Request(
@@ -226,13 +226,13 @@ def _query_upstream_commit(owner: str, repo: str, branch: str) -> tuple[str, str
         with urllib.request.urlopen(req, timeout=8.0) as r:
             data = json.loads(r.read().decode('utf-8') or '{}')
     except urllib.error.HTTPError as e:
-        return ('', '', f'GitHub HTTP {e.code} (可能触发匿名 60 次每小时限流)')
+        return '', '', f'GitHub HTTP {e.code} (可能触发匿名 60 次每小时限流)'
     except Exception as e:
-        return ('', '', f'网络错误：{e}')
+        return '', '', f'网络错误：{e}'
     full = data.get('sha') or ''
     if not full:
-        return ('', '', '响应缺少 sha 字段')
-    return (full[:7], full, '')
+        return '', '', '响应缺少 sha 字段'
+    return full[:7], full, ''
 
 
 def _get_submodule_info(query_remote: bool = False) -> dict:
@@ -321,7 +321,7 @@ def _semver_tuple(v: str) -> tuple:
       · 解析失败的段 → 0,无法成为 winner
     """
     if not v:
-        return (0, 0, 0, ('zzz',))
+        return 0, 0, 0, ('zzz',)
     s = v.lstrip('vV').strip()
     main, _, pre = s.partition('-')
     parts = main.split('.')
@@ -342,7 +342,7 @@ def _semver_tuple(v: str) -> tuple:
                 pre_tuple += (p,)
     else:
         pre_tuple = ('~',)
-    return (nums[0], nums[1], nums[2], pre_tuple)
+    return nums[0], nums[1], nums[2], pre_tuple
 
 
 def _pick_latest_semver(names: list) -> str:

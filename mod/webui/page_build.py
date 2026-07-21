@@ -38,9 +38,10 @@
     ``data/build/build_target_input.json`` 临时文件，后端读 JSON 取出来再过
     校验。``json.loads`` 本身就杜绝任何 shell 转义可能(里面是字符串字面量，
     不是 shell 字符串)。
-  · 即便走 ``script -qfec '<cmd>' /dev/null`` 包伪 tty 时，``<cmd>`` 部分是用
-    ``shlex.quote`` 转义后的 argv 拼成的;每个 arg 都被单引号包裹，内含的
-    单引号被转义成 ``'\\''`` —— shell 完全无法把 target 名解释成多个 token。
+  · 交给 shell(``script`` / ``bash -c``)的命令串是**常量 wrapper**(见
+    ``_BUILD_WRAPPER``);真正要跑的 argv 经环境变量 ``LGTBOT_ARGV_NL`` 作为
+    数据传入，wrapper 用 ``mapfile`` 读回 bash 数组按元素执行 —— shell 从不对
+    argv 元素分词，target 名无论如何都到不了命令行 tokenize 阶段。
 
 状态文件:
   · ``data/build/state.json``  {pid, start_time, cmd_display, cmd_argv,
@@ -228,49 +229,43 @@ def get_build_state() -> dict:
 # 启动 / 终止 编译
 # ─────────────────────────────────────────────────────────────────────────
 
-def _build_shell_wrapper(argv: list) -> str:
-    """构造 shell 脚本字符串:跑 argv,把退出码 printf 到 STATUS_PATH,
-    并在日志末尾追加 ``[exit:<code>]`` 标记方便用户对应得上。
+# 固定 wrapper 脚本(模块常量,不含任何用户/动态数据)——
+# 真正要跑的构建命令通过环境变量 LGTBOT_ARGV_NL(换行分隔)传入,``mapfile`` 读回 bash 数组后 ``"${_cmd[@]}"`` 逐元素执行:
+# shell **不对数组元素再做分词 / 通配 / 展开**,任何字符都安全。退出码写 LGTBOT_STATUS_FILE,并向 LGTBOT_LOG_FILE 追加 ``[exit:N]``。
+#
+# 关键安全设计:交给 shell 解释的命令串是**常量**,用户可控的 target 只作为"数据"经 env 传入,永远不进入命令行 tokenize 阶段
+# 从根上杜绝命令注入(target 另有 _validate_target_name 白名单,双保险)。argv 元素均无换行(全是硬编码常量 + 白名单 target),换行分隔安全。
+_BUILD_WRAPPER = (
+    'mapfile -t _cmd <<< "$LGTBOT_ARGV_NL"; '
+    '"${_cmd[@]}"; status=$?; '
+    'printf "%s" "$status" > "$LGTBOT_STATUS_FILE"; '
+    'printf "\\n[exit:%s]\\n" "$status" >> "$LGTBOT_LOG_FILE"; '
+    'exit "$status"'
+)
 
-    所有动态部分(argv / STATUS_PATH / LOG_PATH)都经 ``shlex.quote`` 转义，
-    shell 看到的是单引号包围的字符串字面量，无法重新 tokenize。target 名
-    已经走 ``_validate_target_name`` 白名单，这里再加 quote 是双保险。
+
+def _wrap_for_subprocess() -> list:
+    """最终给 Popen 的 argv(list 形式，绝不 shell=True)。
+
+    返回值只含**字面量**:要跑的构建命令由 ``_start_build`` 经 env 传入,不拼
+    进这里的命令行。优先 util-linux ``script`` 提供伪 tty 让 cmake / gcc 保留
+    彩色 ANSI;缺失回退纯 bash(无色但仍工作)。两条路径都在 bash 下执行
+    ``_BUILD_WRAPPER``,末尾把退出码写 STATUS_PATH 供 get_build_state() 读取。
     """
-    quoted_argv   = ' '.join(shlex.quote(a) for a in argv)
-    quoted_status = shlex.quote(STATUS_PATH)
-    quoted_log    = shlex.quote(LOG_PATH)
-    return (
-        quoted_argv
-        + '; status=$?; '
-        + 'printf "%s" "$status" > ' + quoted_status + '; '
-        + 'printf "\\n[exit:%s]\\n" "$status" >> ' + quoted_log + '; '
-        + 'exit "$status"'
-    )
-
-
-def _wrap_for_subprocess(argv: list) -> list:
-    """把 argv 包装成最终给 Popen 的命令(list 形式，绝不 shell=True)。
-
-    优先用 util-linux ``script -qfec '<wrapper>' /dev/null`` 提供伪 tty,
-    让 cmake / gcc 等保留彩色 ANSI;fallback 用 ``bash -c '<wrapper>'``
-    (没颜色但仍工作)。两条路径都跑同一段 wrapper,末尾把退出码写
-    STATUS_PATH —— 这样进程跑完后 get_build_state() 能拿到 returncode。
-    """
-    wrapper = _build_shell_wrapper(argv)
     script_bin = shutil.which('script')
     if script_bin:
-        return [script_bin, '-qfec', wrapper, '/dev/null']
-    return ['bash', '-c', wrapper]
+        # script -c 的命令串同样是常量:让它在 bash 下跑 env 里的 wrapper。
+        return [script_bin, '-qfec', 'bash -c "$LGTBOT_WRAP"', '/dev/null']
+    return ['bash', '-c', _BUILD_WRAPPER]
 
 
 def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
     """启动一个编译子进程。
 
     Args:
-      argv:Popen 用的 argv list(``shell=False`` 直接传),例如
-           ``['bash', 'build.sh', '-i']``。本函数内部会再包一层 shell
-           wrapper 来记录退出码，但 wrapper 是我们 control 的常量串，
-           argv 通过 ``shlex.quote`` 嵌入，无注入风险。
+      argv:要执行的构建命令 list,例如 ``['bash', 'build.sh', '-i']``。经
+           env(``LGTBOT_ARGV_NL``)作为数据传给常量 wrapper 执行(见
+           ``_BUILD_WRAPPER``),不拼进命令行 —— 无注入风险。
       display:UI 上显示的任务名，例如 ``'增量编译桥接层'``。
       kind:``'build'`` 编译类(显示成功/失败)或 ``'meta'`` 非编译类
            (列目标 / 删 build/,只显示「已完成」)。
@@ -301,7 +296,7 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
     except Exception as e:
         return {'success': False, 'message': f'无法创建日志文件：{e}'}
 
-    actual_cmd = _wrap_for_subprocess(argv)
+    actual_cmd = _wrap_for_subprocess()
     log_f = open(LOG_PATH, 'ab', buffering=0)  # binary append, unbuffered
 
     # 强制彩色输出环境变量(对支持的工具生效)
@@ -311,6 +306,13 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
         'CLICOLOR_FORCE': '1',
         'FORCE_COLOR': '1',
         'TERM': 'xterm-256color',
+    })
+    # 要执行的构建命令 + 退出码/日志文件路径,全部经 env 作为**数据**传给常量 wrapper(见 _BUILD_WRAPPER),不进入任何命令行 tokenize。
+    env.update({
+        'LGTBOT_ARGV_NL': '\n'.join(argv),
+        'LGTBOT_STATUS_FILE': STATUS_PATH,
+        'LGTBOT_LOG_FILE': LOG_PATH,
+        'LGTBOT_WRAP': _BUILD_WRAPPER,
     })
 
     try:
