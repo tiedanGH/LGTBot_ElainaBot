@@ -118,6 +118,12 @@ def main() -> None:
     if not os.path.isdir(BUILD_DIR):
         die(2, f'未找到 {BUILD_DIR}/')
 
+    # ── 无头环境的 Qt 渲染:markdown2image(引擎 popen 的子进程,继承本进程环境)
+    # 基于 Qt WebEngine 把 HTML 渲染成 PNG。CI runner 无显示器 / 无 GPU,显式声明离屏平台 → Qt 一开始就不找 GPU 后端,不产生警告。
+    # setdefault:尊重外部已设的平台(如部署配了 xvfb 的 xcb),不覆盖。
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    os.environ.setdefault('QT_LOGGING_RULES', 'qt.webenginecontext=false')
+
     # ── 复刻 boot.py 的加载副作用:chdir + RTLD_GLOBAL 预加载 ─────────────
     # chdir 让引擎按相对路径找到 markdown2image;RTLD_GLOBAL 预加载 build/
     # 下全部共享库,让 .so 的未决符号(libbot_core 等)在 import 时可见。
