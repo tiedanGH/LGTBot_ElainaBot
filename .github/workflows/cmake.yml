@@ -52,3 +52,8 @@ jobs:
           GAMES=$(find build/plugins -mindepth 2 -name 'libgame.so' | wc -l)
           echo "✅ libgame.so 数量: $GAMES"
           test "$GAMES" -gt 0
+
+      # 真桥接冒烟:import 编译出的 .so,临时 db 起真引擎,发指令断言响应,再走 restart-release 生命周期
+      # 覆盖 mock 单测照不到的 Boost.Python ABI 与 g_bot_core 换代回归。脚本完全独立于主框架。
+      - name: Bridge test
+        run: python3 tests/smoke_bridge.py
