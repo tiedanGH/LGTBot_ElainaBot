@@ -31,6 +31,18 @@ let dashRepoStatus = 'ok';
    弹窗决定文案(初始化 vs 更新),也用来拼完整 git 命令展示。 */
 let dashLastSubmoduleInfo = {};
 
+/* 桥接层(本插件)自身仓库跳转链接信息 {repo_url, repo_owner, repo_name} ——
+   首屏 get_data 与「检查更新」结果都会填,渲染时拼成「· 仓库 <a>owner/repo</a>」。 */
+let dashBridgeRepo = {};
+
+function dashBridgeRepoLink() {
+  const r = dashBridgeRepo || {};
+  if (!r.repo_url || !r.repo_owner || !r.repo_name) return '';
+  return ' · 仓库 <a href="' + escapeHtml(r.repo_url) +
+         '" target="_blank" rel="noopener">' +
+         escapeHtml(r.repo_owner + '/' + r.repo_name) + '</a>';
+}
+
 function dashFmtBytes(n) {
   if (n == null) return '—';
   if (n < 1024) return n + ' B';
@@ -204,16 +216,21 @@ function dashApplyData(data) {
     dashRepoStatus = data.submodule.repo_status || 'ok';
     dashRenderSubmoduleStatus(data.submodule);
   }
-  /* 桥接层 placeholder: no_git 时主动把按钮切到「初始化」状态;ok 时保持
-     HTML 初始文案「点击「检查更新」查看版本」+ 按钮隐藏。 */
+  /* 桥接层仓库链接(首屏 / 刷新都渲染,同子模块的本地态渲染)*/
+  if (data.bridge) dashBridgeRepo = data.bridge;
+  const bDetail = document.getElementById('dash-bridge-detail');
+  const bBtn = document.getElementById('dash-do-update');
   if (dashRepoStatus === 'no_git') {
-    const bDetail = document.getElementById('dash-bridge-detail');
-    const bBtn = document.getElementById('dash-do-update');
+    /* no_git 时主动把按钮切到「初始化」状态 */
     bDetail.innerHTML = '<span class="dash-msg-warn">⚠️ 未检测到 .git/ '
                       + '(可能从插件市场安装)。点击右侧按钮把当前目录'
-                      + '初始化为 git 仓库，方可使用更新功能。</span>';
+                      + '初始化为 git 仓库，方可使用更新功能。</span>'
+                      + dashBridgeRepoLink();
     bBtn.textContent = '📥 初始化为 git 仓库';
     bBtn.style.display = '';
+  } else {
+    /* ok 时初始文案「点击检查更新查看版本」+ 仓库链接;检查更新后由 dashRenderBridgeStatus 覆盖成版本对比 */
+    bDetail.innerHTML = '点击「检查更新」查看版本' + dashBridgeRepoLink();
   }
 
   /* 统计 */
@@ -323,12 +340,16 @@ function dashRenderBridgeStatus(bridge) {
   const detail = document.getElementById('dash-bridge-detail');
   const btn = document.getElementById('dash-do-update');
 
+  /* 检查更新结果里带仓库链接字段,存起来供本行各分支拼接(同 get_data) */
+  if (bridge && (bridge.repo_url || bridge.repo_owner)) dashBridgeRepo = bridge;
+  const repoLink = dashBridgeRepoLink();
+
   /* 最高优先级: 插件目录不是 git 仓库 → 把这一行整个切到「初始化」分支,
      不展示版本对比信息(也对比不了,本地没 git history) */
   if (dashRepoStatus === 'no_git') {
     detail.innerHTML = '<span class="dash-msg-warn">⚠️ 未检测到 .git/ '
                      + '(可能从插件市场安装)。点击右侧按钮把当前目录'
-                     + '初始化为 git 仓库，方可使用更新功能。</span>';
+                     + '初始化为 git 仓库，方可使用更新功能。</span>' + repoLink;
     btn.textContent = '📥 初始化为 git 仓库';
     btn.style.display = '';
     return;
@@ -339,7 +360,7 @@ function dashRenderBridgeStatus(bridge) {
 
   if (!bridge || !bridge.success) {
     detail.innerHTML = '<span class="dash-msg-err">❌ ' +
-      escapeHtml(bridge && bridge.error ? bridge.error : '检查失败') + '</span>';
+      escapeHtml(bridge && bridge.error ? bridge.error : '检查失败') + '</span>' + repoLink;
     btn.style.display = 'none';
     return;
   }
@@ -347,10 +368,10 @@ function dashRenderBridgeStatus(bridge) {
   const remote = dashFmtVersion(bridge.remote_version);
   if (bridge.has_update) {
     detail.innerHTML = '<span class="dash-msg-warn">✨ 本地 <b>' +
-      escapeHtml(local) + '</b> → 远端 <b>' + escapeHtml(remote) + '</b></span>';
+      escapeHtml(local) + '</b> → 远端 <b>' + escapeHtml(remote) + '</b></span>' + repoLink;
     btn.style.display = '';
   } else {
-    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本 (' + escapeHtml(remote) + ')</span>';
+    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本 (' + escapeHtml(remote) + ')</span>' + repoLink;
     btn.style.display = 'none';
   }
 }

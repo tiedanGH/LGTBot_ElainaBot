@@ -460,6 +460,7 @@ def get_data() -> str:
         'bound_appid': helpers.get_bound_appid(),
         'bind_configured': state.bind_bot_appid or '',
         'update_hint': _get_update_hint(),
+        'bridge': _bridge_repo_link(),
         'submodule': _get_submodule_info(query_remote=False),
         'stats': {
             'user_cache_total': userdb.count_users(),
@@ -487,11 +488,24 @@ def _fragment(payload: dict) -> str:
     return f'<pre id="result">{_html.escape(body)}</pre>'
 
 
+def _bridge_repo_link() -> dict:
+    """桥接层(本插件)自身的 GitHub 仓库跳转链接字段。
+
+    与 lgtbot 子模块的 ``upstream_*`` 同款,只是语义是"本仓库"而非"上游",
+    故用 ``repo_*`` 命名。owner/repo 解析失败时字段为空,前端不渲染链接。
+    """
+    url = _get_plugin_meta().get('github', '') or ''
+    owner, repo = _parse_github_owner_repo(url)
+    return {'repo_url': url, 'repo_owner': owner, 'repo_name': repo}
+
+
 def _bridge_check_payload() -> dict:
     """对 GitHub tags 做一次查询，返回桥接层(本插件)的版本对比 dict。"""
     meta = _get_plugin_meta()
     local_ver = meta.get('version', '') or ''
     owner, repo = _parse_github_owner_repo(meta.get('github', '') or '')
+    # 仓库跳转链接字段并入每个返回分支,前端「版本与更新」区域各状态都能显示
+    link = _bridge_repo_link()
     if not owner or not repo:
         return {
             'success': False,
@@ -499,6 +513,7 @@ def _bridge_check_payload() -> dict:
             'remote_version': '',
             'has_update': False,
             'error': '无法从 __plugin_meta__ 解析 GitHub 仓库地址',
+            **link,
         }
     api_url = f'https://api.github.com/repos/{owner}/{repo}/tags?per_page=30'
     try:
@@ -518,6 +533,7 @@ def _bridge_check_payload() -> dict:
             'remote_version': '',
             'has_update': False,
             'error': f'GitHub HTTP {e.code}(可能触发匿名 60 次每小时限流)',
+            **link,
         }
     except Exception as e:
         return {
@@ -526,6 +542,7 @@ def _bridge_check_payload() -> dict:
             'remote_version': '',
             'has_update': False,
             'error': f'网络错误：{e}',
+            **link,
         }
     names = [t.get('name', '') for t in tags if isinstance(t, dict)]
     latest = _pick_latest_semver(names)
@@ -537,6 +554,7 @@ def _bridge_check_payload() -> dict:
         'has_update': has_update,
         'tag_count': len(names),
         'error': '',
+        **link,
     }
 
 
