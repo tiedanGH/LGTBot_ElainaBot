@@ -1,13 +1,17 @@
 /* ──── 配置管理 tab ────
- * 四块编辑器(yaml / notice / trouble / engine)共享同一套读 / dirty 跟踪 /
- * 保存 / revert 逻辑,通过 cfgEditors 表驱动避免重复代码。保存全部走主框架
- * /api/config-file/save(yaml/json/text format)。
+ * 编辑器共享同一套读 / dirty 跟踪 / 保存 / revert 逻辑,通过 cfgEditors 表驱动。
+ * 保存分两路:
+ *   · config.yaml / lgtbot.json(带 target 字段)→ 本插件校验端点
+ *     /api/ext/lgtbot/config/save —— 服务端语法 + schema 校验通过才落盘,
+ *     校验失败返回 errors 列表,文件保持原样
+ *   · 纯文本编辑器(公告 / 疑难解答等)→ 主框架 /api/config-file/save
  * 热重载按钮调 __lgtbot_dash_reload_config(从原 dashboard 搬迁,key 不变)。
  */
 
 const CFG_KEYS = {
   reload_config: '__lgtbot_dash_reload_config',
 };
+const CFG_VALIDATED_SAVE_ROUTE = '/api/ext/lgtbot/config/save';
 
 /* 每个编辑器一份状态:
  *   absPath  —— 保存请求要原样回传给 /api/config-file/save 的绝对路径
@@ -16,7 +20,7 @@ const CFG_KEYS = {
  *   editorId / pathId / msgId / saveBtnId —— 对应 DOM 元素 id */
 const cfgEditors = {
   yaml: {
-    absPath: '', original: '', format: 'yaml',
+    absPath: '', original: '', format: 'yaml', target: 'config_yaml',
     editorId: 'cfg-yaml-editor', pathId: 'cfg-yaml-path',
     msgId: 'cfg-yaml-msg', saveBtnId: 'cfg-yaml-save', revertBtnId: 'cfg-yaml-revert',
     saveHint: '，请点「🔁 热重载配置」即时下发到运行时',
@@ -40,7 +44,7 @@ const cfgEditors = {
     saveHint: '，下次发送「疑难解答」指令时即生效',
   },
   engine: {
-    absPath: '', original: '', format: 'json',
+    absPath: '', original: '', format: 'json', target: 'engine_json',
     editorId: 'cfg-engine-editor', pathId: 'cfg-engine-path',
     msgId: 'cfg-engine-msg', saveBtnId: 'cfg-engine-save', revertBtnId: 'cfg-engine-revert',
     saveHint: '，需重启 LGTBot 引擎或整进程才能生效',
@@ -93,19 +97,40 @@ async function cfgSave(key) {
   const editor = document.getElementById(state.editorId);
   if (!editor) return;
   const text = editor.value;
-  /* json / yaml 前端浅校验:json 用 JSON.parse,yaml 没有内置 parser 让主框架兜底。
-     text(更新公告 / 疑难解答)无格式约束,直接保存。 */
-  if (state.format === 'json') {
-    try { JSON.parse(text); }
-    catch (e) { cfgShowMsg(key, 'JSON 格式错误：' + e.message, 'err'); return; }
-  }
-  if (!state.absPath) {
-    cfgShowMsg(key, '文件路径未知，无法保存', 'err');
-    return;
-  }
   const btn = document.getElementById(state.saveBtnId);
   if (btn) btn.disabled = true;
   try {
+    /* config.yaml / lgtbot.json → 插件校验端点:服务端语法 + schema 校验通过才落盘;失败返回 errors,文件不动。 */
+    if (state.target) {
+      if (state.format === 'json') {
+        try { JSON.parse(text); }
+        catch (e) { cfgShowMsg(key, '❌ JSON 格式错误：' + e.message, 'err'); return; }
+      }
+      const r = await fetch(CFG_VALIDATED_SAVE_ROUTE + TOKEN_QS, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: state.target, content: text }),
+      });
+      const data = await r.json();
+      if (data.success) {
+        const warn = (data.warnings && data.warnings.length)
+          ? '（提醒：' + data.warnings.join('；') + '）' : '';
+        cfgShowMsg(key, '✅ 校验通过并已保存' + state.saveHint + warn, warn ? 'info' : 'ok');
+        state.original = text;
+        delete editor.dataset.dirty;
+      } else {
+        const errs = (data.errors && data.errors.length)
+          ? data.errors.join('；') : '校验失败';
+        cfgShowMsg(key, '❌ 未保存 —— ' + errs, 'err');
+      }
+      return;
+    }
+
+    /* 纯文本编辑器(公告 / 疑难解答等)→ 主框架通用保存端点 */
+    if (!state.absPath) {
+      cfgShowMsg(key, '文件路径未知，无法保存', 'err');
+      return;
+    }
     const r = await fetch('/api/config-file/save' + TOKEN_QS, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

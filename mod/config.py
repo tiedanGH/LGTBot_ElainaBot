@@ -269,34 +269,4 @@ def persist_bind_bot_appid(appid: str) -> tuple[bool, str]:
     if seeded >= 0:
         log.info(f'   全量群集合已从新绑定 bot 重载: {seeded} 个')
     resolved = helpers.get_bound_appid()
-    return True, f'已绑定 {resolved or "(无可用 bot)"};全量群 {max(seeded, 0)} 个'
-
-    # ── sandbox_dm_users ──────────────────────────────────────────────────
-    # 列表内用户私信跳过被动配额,直接主动直推。非法 / 缺失 → 空集合(所有
-    # 私信按正式环境规则:无有效 msg_id 直接丢弃)。
-    raw_sandbox = cfg.get('sandbox_dm_users', None)
-    if isinstance(raw_sandbox, list):
-        sandbox_set = frozenset(
-            str(u).strip() for u in raw_sandbox if str(u).strip())
-    else:
-        if raw_sandbox is not None:
-            log.warning(f'sandbox_dm_users 应为字符串列表，已忽略 (got {type(raw_sandbox).__name__})')
-        sandbox_set = frozenset()
-    if _callbacks.SANDBOX_DM_USERS != sandbox_set:
-        log.info(f'sandbox_dm_users: {len(_callbacks.SANDBOX_DM_USERS)} → {len(sandbox_set)} 人')
-        _callbacks.SANDBOX_DM_USERS = sandbox_set
-
-    # ── menu_game_buttons ─────────────────────────────────────────────────
-    # 非法 / 缺失时回退到默认 6 个;buttons.build_menu_buttons() 每次调用都
-    # 读这个列表,所以下发后下一次回欢迎菜单即生效。
-    raw_games = cfg.get('menu_game_buttons', None)
-    if raw_games is None:
-        games = list(_buttons.DEFAULT_MENU_GAMES)
-    elif isinstance(raw_games, list):
-        games = [str(g).strip() for g in raw_games if str(g).strip()]
-    else:
-        log.warning(f'menu_game_buttons 应为字符串列表，已忽略 (got {type(raw_games).__name__})')
-        games = list(_buttons.DEFAULT_MENU_GAMES)
-    if _buttons.MENU_GAMES != games:
-        log.info(f'menu_game_buttons: {len(_buttons.MENU_GAMES)} → {len(games)} 个游戏')
-        _buttons.MENU_GAMES = games
+    return True, f'已绑定 {resolved or "(无可用 bot)"}；全量群 {max(seeded, 0)} 个'

@@ -22,8 +22,12 @@ import html as _html
 import json
 import os
 
+import yaml
+from aiohttp import web
+
 from core.base.logger import get_logger, PLUGIN
 from .. import boot
+from .. import config as _plugin_config
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -241,3 +245,141 @@ def render_reload_config() -> str:
     if admin_changed:
         payload['note'] = 'admin_uids 改动需重启 LGTBot 引擎才能生效 (C++ 侧仅在 start() 时读一次)'
     return _fragment(payload)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 带校验的配置保存 —— POST /api/ext/lgtbot/config/save
+# ─────────────────────────────────────────────────────────────────────────
+# config.yaml / lgtbot.json 两个编辑器不再走主框架 /api/config-file/save (只写盘不校验)
+# 先语法解析 + 字段 schema 校验,全部通过才原子落盘,一个格式错误不再让插件加载回退默认配置或引擎启动失败。
+# 路径由服务端按 target 解析,不信任客户端传路径。
+
+# 图床合法值延迟取自 uploader._UPLOADERS —— 与运行时校验同源,避免两处漂移
+def _valid_backends() -> set:
+    from .. import uploader as _uploader
+    return {name for name, _ in _uploader._UPLOADERS}
+
+
+def _validate_config_yaml(text: str) -> tuple[list, list]:
+    """校验 config.yaml 文本,返回 ``(errors, warnings)``;errors 非空则拒绝保存。
+
+    schema 从 ``config.DEFAULT_CONFIG`` 的字段类型动态推导(list / str / 数值),
+    新增配置字段无需改这里。错误级(阻断):语法错误、根不是映射、字段类型不符、
+    image_hosting 填了未知图床、refresh_wait_timeout 非正数。警告级(放行):
+    字段值为空(yaml 裸 key 解析为 None,运行时按缺省处理)、未知字段。
+    """
+    errors: list = []
+    warnings: list = []
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        mark = getattr(e, 'problem_mark', None)
+        pos = f'(第 {mark.line + 1} 行)' if mark else ''
+        return [f'YAML 语法错误{pos}: {getattr(e, "problem", e)}'], []
+    if data is None:
+        return [], ['文件为空 —— 下次插件加载会自动补全默认字段']
+    if not isinstance(data, dict):
+        return [f'根节点必须是键值映射，当前是 {type(data).__name__}'], []
+
+    missing: list = []
+    for key, default in _plugin_config.DEFAULT_CONFIG.items():
+        if key not in data:
+            missing.append(key)
+            continue
+        val = data[key]
+        if val is None:
+            warnings.append(f'{key} 为空，运行时将按未配置处理')
+            continue
+        if isinstance(default, list):
+            if not isinstance(val, list):
+                errors.append(f'{key} 应为列表，当前是 {type(val).__name__}')
+            else:
+                bad = [i for i, e in enumerate(val) if not isinstance(e, (str, int))]
+                if bad:
+                    errors.append(f'{key} 第 {bad[0] + 1} 项应为字符串')
+        elif isinstance(default, str):
+            if not isinstance(val, str):
+                errors.append(f'{key} 应为字符串，当前是 {type(val).__name__}')
+        elif isinstance(default, float):
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                errors.append(f'{key} 应为数值，当前是 {type(val).__name__}')
+
+    # 值级规则(类型已过关的字段才检查)
+    backend = data.get('image_hosting')
+    if isinstance(backend, str) and backend.strip():
+        valid = _valid_backends()
+        if backend.strip().lower() not in valid:
+            errors.append(f'image_hosting 未知图床 {backend!r}，可选: {sorted(valid)} 或留空')
+    timeout = data.get('refresh_wait_timeout')
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout <= 0:
+        errors.append(f'refresh_wait_timeout 应为正数，当前 {timeout}')
+
+    if missing:
+        warnings.append(f'缺少字段 {"、".join(missing)}(下次加载自动补默认值)')
+    for key in data:
+        if key not in _plugin_config.DEFAULT_CONFIG:
+            warnings.append(f'未知字段 {key}(本插件不会读取)')
+    return errors, warnings
+
+
+def _validate_engine_json(text: str) -> list:
+    """校验 lgtbot.json:必须是合法 JSON 且根为对象(引擎 nlohmann 解析要求)。
+
+    更深的结构属于上游引擎的领域,这里不越界校验 —— 语法错误 / 根类型错误才是「引擎启动失败」的实际来源。
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        return [f'JSON 语法错误(第 {e.lineno} 行第 {e.colno} 列): {e.msg}']
+    if not isinstance(data, dict):
+        return [f'根节点必须是 JSON 对象 {{}}，当前是 {type(data).__name__}']
+    return []
+
+
+# target → (绝对路径, 校验器)。校验器返回 (errors, warnings) 或仅 errors。
+_SAVE_TARGETS = {
+    'config_yaml': (_CONFIG_YAML_PATH, _validate_config_yaml),
+    'engine_json': (None, _validate_engine_json),   # 路径运行时取 boot.CONF_PATH
+}
+
+
+def _atomic_write(path: str, content: str) -> None:
+    """临时文件 + os.replace 原子落盘,避免写一半被读到。"""
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(content)
+    os.replace(tmp, path)
+
+
+async def save_config_handler(request: 'web.Request') -> 'web.Response':
+    """``POST /api/ext/lgtbot/config/save`` —— body ``{"target", "content"}``。
+
+    校验失败返回 ``{'success': False, 'errors': [...]}``,**不落盘**;
+    通过则原子写入并把警告一并带回给前端展示。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({'success': False, 'errors': ['请求体不是合法 JSON']}, status=400)
+    target = str(body.get('target') or '')
+    content = body.get('content')
+    if target not in _SAVE_TARGETS or not isinstance(content, str):
+        return web.json_response({'success': False, 'errors': ['target 无效或缺少 content']}, status=400)
+
+    path, validator = _SAVE_TARGETS[target]
+    if path is None:
+        path = boot.CONF_PATH
+    result = validator(content)
+    errors, warnings = result if isinstance(result, tuple) else (result, [])
+    if errors:
+        log.info(f'🛡️ [配置校验] {target} 保存被拒: {errors}')
+        return web.json_response({'success': False, 'errors': errors, 'warnings': warnings})
+
+    try:
+        _atomic_write(path, content)
+    except Exception as e:
+        log.error(f'写入 {target} 失败: {e}')
+        return web.json_response({'success': False, 'errors': [f'写盘失败: {e}']})
+    log.info(f'💾 [配置校验] {target} 校验通过并已保存'
+             + (f'(警告 {len(warnings)} 条)' if warnings else ''))
+    return web.json_response({'success': True, 'errors': [], 'warnings': warnings})
