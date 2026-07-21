@@ -7,13 +7,13 @@
 
 ## 1. 修改边界
 
-| 范围                                              | 是否可改                       |
-|-------------------------------------------------|----------------------------|
+| 范围                                                     | 是否可改                       |
+|--------------------------------------------------------|----------------------------|
 | `plugins/LGTBot_ElainaBot/` 下所有 Python 文件              | ✅ 可改                       |
-| `plugins/LGTBot_ElainaBot/LGTBot_ElainaBot.cc`                | ✅ 可改（这是本插件自己的桥接层）          |
+| `plugins/LGTBot_ElainaBot/LGTBot_ElainaBot.cc`         | ✅ 可改（这是本插件自己的桥接层）          |
 | `plugins/LGTBot_ElainaBot/CMakeLists.txt` / `build.sh` | ✅ 可改                       |
 | `plugins/LGTBot_ElainaBot/lgtbot/` （子模块）               | ❌ **不可改** —— 上游 C++ 引擎源码   |
-| `core/` / `web/` / `main.py`（项目根）               | ❌ **不可改** —— ElainaBot 主框架 |
+| `core/` / `web/` / `main.py`（项目根）                      | ❌ **不可改** —— ElainaBot 主框架 |
 
 如果用户的需求需要改主框架或 lgtbot 子模块，先**显式向用户说明**并征得同意。
 
@@ -52,34 +52,45 @@ survive hot-reload with active games and improve quota logic
 - Replace shared asyncio.Event with per-waiter Events ...
 ```
 
-### 模块前缀规则
+### 功能域前缀规则
 
-| 改动范围                                                          | 前缀                     | 示例                                               |
-|---------------------------------------------------------------|------------------------|--------------------------------------------------|
-| 入口 `main.py`                                                  | **无前缀**                | `add @on_unload guard for active games`          |
-| 顶层文档（`README` / `DEPLOY` / `CLAUDE`）单独改动                      | **无前缀**                | `update README to reflect data/engine subfolder` |
-| 顶层构建文件（`LGTBot_ElainaBot.cc` / `build.sh` / `CMakeLists.txt`） | **无前缀**                | `disable AddressSanitizer in build script`       |
-| `mod/` 下任一子模块                                                 | **模块文件名（不带路径、不带 .py）** | `quota: fix race in shared Event`                |
-| 子模块 + 同步更新 README / DEPLOY                                    | **跟主代码变化的 prefix**     | `uploader: extend dispatch to all backends`      |
-| 多个 mod/ 子模块都有 *功能性* 变化                                        | **无前缀**，按最高层职责描述       | `survive hot-reload with active games`           |
+**前缀 = 本次改动的主要功能域,与动了哪些文件无关。** 一个功能横跨多少文件都用
+同一个前缀(如配置校验特性同时改了 page_config.py / webui/main.py / config.js /
+README,前缀仍是 `config`)。功能域名字常与 `mod/` 模块名重合(quota / backup /
+uploader…),但判定依据始终是"这次改的是什么功能",不是"动了哪个文件"。
 
-**关键约束 ①：前缀只用文件名，不带路径。** 路径会随重构变化（今天 `mod/quota.py` 明天可能变 `mod/runtime/quota.py`），但模块名相对稳定。
+| 改动主要功能                                     | 前缀                            | 示例                                                            |
+|--------------------------------------------|-------------------------------|---------------------------------------------------------------|
+| CI / 测试基建（workflows、`tests/`）              | `ci`                          | `ci: add real-bridge smoke test to cmake ci`                  |
+| 配置体系（字段 / 校验 / 热重载）                        | `config`                      | `config: validate config.yaml and lgtbot.json before saving`  |
+| 消息派发 / 指令处理行为                              | `dispatcher`                  | `dispatcher: stop exclusive commands leaking into catch-alls` |
+| 引擎回调 / 发送链路                                | `callbacks`                   | `callbacks: simplify refresh tip for full access group`       |
+| Web 面板界面与交互                                | `webui`                       | `webui: lock tabs nav to horizontal-only scrolling on mobile` |
+| 其他清晰功能域（配额 / 备份 / 图床 / 启动加载 …）             | `quota` / `backup` / `boot` … | `quota: fix race in shared Event causing dead wait`           |
+| 构建脚本 / 编译选项（`build.sh` / `CMakeLists.txt`） | `build`                       | `build: default glog off, flip flag to --glog`                |
+| 顶层文档单独改动（README / DEPLOY / CLAUDE）         | `doc`                         | `doc: trim key features table to the essentials`              |
+| 跨功能域的大型新特性（以特性本身命名最清楚）/ 版本 bump            | **无前缀**                       | `add owner planned-restart mode blocking only new games`      |
 
-**关键约束 ②：README / DEPLOY 同步不算"混合改动"。** 它们是 §4 同步规则强制要求的副作用，prefix 跟主代码变化的位置走。只有多个 `mod/` 子模块都有**功能性**变化时才用"无前缀"。
+**关键约束 ①：前缀是功能域短词,不带路径、不带 .py。** 功能域比文件路径稳定
+（文件会重构搬家,功能不会）;同一功能的后续演进沿用同一前缀,便于
+`git log --grep '^config:'` 按功能追溯。
+
+**关键约束 ②：README / DEPLOY 同步不改变前缀。** 它们是 §4 同步规则强制要求的
+副作用,前缀跟功能走。仅当特性大到没有单一主导功能域时才用"无前缀 + 特性描述"。
 
 ✅ 好：
 ```
-quota: fix race in shared Event causing dead wait
-boot: preload local shared libs
-message_log: hide log buffer from log_outgoing on reload
-move lgtbot.json into data/engine/ subfolder
+ci: add real-bridge smoke test to cmake ci
+config: match blocked_commands slash strictly
+doc: trim key features table to the essentials
+add owner planned-restart mode blocking only new games
 ```
 
 ❌ 差：
 ```
 fix: Preload shared libs                       # 动作前缀 + 大写
+page_config: validate config.yaml              # 文件名当前缀(应按功能用 config)
 mod/quota: fix race                            # 不要带路径
-plugins/LGTBot_ElainaBot/mod/quota.py: ...            # 更不要带完整路径
 修复 lgtbot.json 位置                            # 中文
 ```
 
