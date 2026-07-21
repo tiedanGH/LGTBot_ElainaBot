@@ -9,7 +9,7 @@
   · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
   · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
   · crash_notify_group: str          严重问题通知群 openid（崩溃时向此群主动推报告）
-  · blocked_commands: list[str]      屏蔽指令列表（命中的消息不转发给引擎，化解与其他插件的指令冲突）
+  · blocked_commands: list[str]      追加屏蔽指令（与 dispatcher 内置屏蔽表共同生效，命中的消息不转发给引擎）
   · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（这些用户私信走主动消息直推）
   · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
 """
@@ -207,8 +207,8 @@ def _apply_runtime_tunables(cfg: dict):
         _callbacks.CRASH_NOTIFY_GROUP = notify_group
 
     # ── blocked_commands ──────────────────────────────────────────────────
-    # 屏蔽指令列表:命中的消息不再转发给 LGTBot 引擎(dispatcher 两个 catch-all 派发前调 _is_blocked_command 检查)。
-    # 规范化:strip + 去空 + 去重保序;严格按配置匹配。非法 / 缺失 → 空表(不屏蔽任何指令)。
+    # 追加屏蔽指令:与 dispatcher.BUILTIN_BLOCKED_COMMANDS 共同组成屏蔽表(两个 catch-all 派发前调 _is_blocked_command 检查)。
+    # 规范化:strip + 去空 + 去重保序;严格按配置匹配。非法 / 缺失 → 空表(仅内置屏蔽项生效)。
     raw_blocked = cfg.get('blocked_commands', None)
     if isinstance(raw_blocked, list):
         seen: set = set()

@@ -14,6 +14,7 @@
   · INTERACTION relay 同上互斥
   · INTERACTION dispatch 同上互斥
   · is_at_self 守卫挡住全量群日常对话
+  · _is_blocked_command:内置屏蔽项(斜杠不敏感 + 数字连写参数)与配置追加项(斜杠严格)的匹配语义
 """
 
 from __future__ import annotations
@@ -229,3 +230,43 @@ async def test_dispatch_at_self_guard_blocks_group_chitchat(patched_downstream):
     # is_at_self 守卫应让 handler 在 refresh_ref 之前就 return
     assert quota._active_ref == {}
     patched_downstream['thread_start'].assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 8. _is_blocked_command:内置屏蔽项 + 配置追加项
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_builtin_blocked_commands_cover_all_plugin_forms():
+    """内置指令的全部真实触发形态都要命中:裸 / 带斜杠 / 空白参数 /
+    无空格数字连写参数(全量申请、dau 的参数正则是 ``\\s*`` 空格可选,
+    主框架派发又做斜杠互换匹配 —— 这些形态都会被对应插件应答)。"""
+    hits = (
+        'dau', '/dau', 'dau 0503', 'dau0503',
+        '全量申请', '/全量申请', '全量申请 123456789', '全量申请123456789',
+        '全量列表', '/全量列表',
+        '关闭欢迎', '/关闭欢迎', '开启欢迎', '/开启欢迎',
+    )
+    for text in hits:
+        assert dispatcher._is_blocked_command(text), f'应命中却漏过: {text!r}'
+
+    misses = ('', 'daux', 'dau测试', '全量', '全量列表们', '开启', '关闭欢迎吧', '新游戏 五子棋')
+    for text in misses:
+        assert not dispatcher._is_blocked_command(text), f'不应命中却挡了: {text!r}'
+
+
+def test_config_blocked_commands_keep_strict_slash(monkeypatch):
+    """配置追加项维持原严格语义:斜杠按配置原样匹配,不做互换;
+    「指令 + 空白 + 参数」命中,数字连写**不**命中(与内置项的宽松规则区分)。"""
+    monkeypatch.setattr(dispatcher, 'BLOCKED_COMMANDS', ('帮助', '/规则'))
+
+    assert dispatcher._is_blocked_command('帮助')
+    assert dispatcher._is_blocked_command('帮助 xxx')
+    assert not dispatcher._is_blocked_command('/帮助')     # 配置无斜杠,不通配
+    assert not dispatcher._is_blocked_command('帮助123')   # 数字连写仅内置项放行
+
+    assert dispatcher._is_blocked_command('/规则')
+    assert not dispatcher._is_blocked_command('规则')      # 配置带斜杠,只挡带斜杠
+
+    # 内置项不受配置影响,依旧生效
+    assert dispatcher._is_blocked_command('dau')

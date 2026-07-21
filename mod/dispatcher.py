@@ -138,25 +138,39 @@ def _is_exclusive_command(text: str) -> bool:
     return any(p.search(text) or p.search(alt) for p in _EXCLUSIVE_RES)
 
 
-# ──────── 用户配置的屏蔽指令列表(config.yaml: blocked_commands) ───────────
+# ──────── 屏蔽指令表(内置 + config.yaml: blocked_commands) ────────────────
 # 与上面的专属指令排除表互补:排除表是**本插件自己**的指令,这里是**其他插件**的指令
 # 框架把所有命中的 handler 全部执行,其他插件处理完后,消息仍会落进本插件的 catch-all 被转发给引擎。
-# 把冲突指令加进 blocked_commands 即可让 catch-all 直接跳过。
+# 命中屏蔽表的消息 catch-all 直接跳过,引擎不再二次回复。
+
+# 部署自带插件的指令,固定屏蔽、无需配置。匹配斜杠不敏感,且允许参数不带空格
+# 直接跟数字(``dau0503`` / ``全量申请123456789``)—— 主框架派发对 handler
+# 正则本身就做斜杠互换匹配,且 全量申请 / dau 的参数正则是 ``\s*`` 空格可选。
+BUILTIN_BLOCKED_COMMANDS: tuple[str, ...] = ('全量申请', '全量列表', '关闭欢迎', '开启欢迎', 'dau')
+
+# 用户配置的追加项(config.yaml: blocked_commands,config.py 热重载时覆写),
+# 与内置表共同组成屏蔽表;匹配语义比内置表严格(斜杠按配置原样)。
 BLOCKED_COMMANDS: tuple[str, ...] = ()
 
 
 def _is_blocked_command(text: str) -> bool:
-    """content 是否命中 blocked_commands 屏蔽表。
+    """content 是否命中屏蔽表(BUILTIN_BLOCKED_COMMANDS + BLOCKED_COMMANDS)。
 
-    匹配规则:
-      · 斜杠**严格匹配** —— 配置项带 ``/`` 只挡带 ``/`` 的消息,两种写法互不通配
-      · 完整匹配,或「指令 + 空白 + 参数」前缀匹配 —— ``帮助`` 也挡 ``帮助 xxx``
+    内置项:斜杠不敏感;完整匹配,或后跟空白 / 数字的前缀匹配 ——
+    ``/dau``、``dau 0503``、``dau0503``、``全量申请123456789`` 全部命中。
+    配置项:斜杠**严格匹配** —— 配置带 ``/`` 只挡带 ``/`` 的消息,两种写法互不通配;
+    完整匹配,或「指令 + 空白 + 参数」前缀匹配 —— ``帮助`` 也挡 ``帮助 xxx``
     (配置项在 config.py 载入时仅做 strip / 去空 / 去重,``/`` 原样保留。)
     """
-    cmds = BLOCKED_COMMANDS
-    if not text or not cmds:
+    if not text:
         return False
-    for cmd in cmds:
+    bare = text[1:] if text.startswith('/') else text
+    for cmd in BUILTIN_BLOCKED_COMMANDS:
+        if bare == cmd:
+            return True
+        if bare.startswith(cmd) and (bare[len(cmd)] in ' \t　' or bare[len(cmd)].isdigit()):
+            return True
+    for cmd in BLOCKED_COMMANDS:
         if text == cmd:
             return True
         if text.startswith(cmd) and len(text) > len(cmd) and text[len(cmd)] in ' \t　':
@@ -489,9 +503,9 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     if not _from_exclusive and _is_exclusive_command(content):
         return
 
-    # 用户配置的屏蔽指令闸(config.yaml: blocked_commands):其他插件的指令在此拦下,不再转发给引擎。
+    # 屏蔽指令闸(内置 BUILTIN_BLOCKED_COMMANDS + config.yaml blocked_commands):其他插件的指令在此拦下,不再转发给引擎。
     if _is_blocked_command(content):
-        log.info(f'🚫 [屏蔽指令] 命中 blocked_commands，跳过引擎派发: {content[:30]!r}')
+        log.info(f'🚫 [屏蔽指令] 命中屏蔽指令表，跳过引擎派发: {content[:30]!r}')
         return
 
     # 「计划重启」维护闸:仅拦新建房间,回维护提示,不派发给引擎。
@@ -631,9 +645,9 @@ async def lgtbot_interaction_dispatch(event, match):
     if _is_exclusive_command(content):
         return
 
-    # 用户配置的屏蔽指令闸 —— 其他插件的 callback 按钮 data 也会落进本 catch-all,与 lgtbot_dispatch 的闸对称。
+    # 屏蔽指令闸(内置 + 配置)—— 其他插件的 callback 按钮 data 也会落进本 catch-all,与 lgtbot_dispatch 的闸对称。
     if _is_blocked_command(content):
-        log.info(f'🚫 [屏蔽指令] 按钮回调命中 blocked_commands，跳过引擎派发: {content[:30]!r}')
+        log.info(f'🚫 [屏蔽指令] 按钮回调命中屏蔽指令表，跳过引擎派发: {content[:30]!r}')
         return
 
     uid = event.user_id or ''
