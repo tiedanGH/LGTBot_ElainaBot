@@ -126,12 +126,14 @@
 .dash-bot-row .dash-btn,
 .dash-bot-row .dash-badge { margin-left: auto; }
 
-/* ──── 最新 Release 折叠卡(检查更新后出现) ──── */
+/* ──── Release 折叠卡(检查更新后出现;跨多版本升级会堆叠多张) ──── */
 #dash-release-notes:empty { display: none; }
 .dash-release {
   border: 1px solid var(--border); border-radius: 8px;
   padding: 8px 12px; font-size: 13px;
 }
+/* 仅相邻两卡之间留距 —— 单卡(已最新)外观与旧版一致 */
+.dash-release + .dash-release { margin-top: 8px; }
 .dash-release summary { cursor: pointer; color: var(--accent); user-select: none; }
 .dash-release-body {
   margin-top: 8px; max-height: 320px; overflow-y: auto; line-height: 1.65;

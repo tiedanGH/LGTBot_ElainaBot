@@ -175,22 +175,31 @@ function dashMdToHtml(md) {
   return out.join('');
 }
 
-/* ──── 最新 Release 折叠卡(检查更新后出现,默认折叠) ──── */
+/* ──── Release 折叠卡(检查更新后出现,默认折叠) ────
+ * data.release = {releases: [...]}:后端已筛成「比本地新的全部版本」(新→旧);
+ * 已是最新时退化为只含最新一个。跨多个大版本升级(如 2.2.x → 2.4.0)会渲染多张卡片,各自独立展开查看。 */
+function dashReleaseCard(r, latestLabel) {
+  const dateStr = r.published_at ? r.published_at.slice(0, 10) : '';
+  const title = (r.name || r.tag_name || '') + (dateStr ? '（' + dateStr + '）' : '');
+  const link = r.html_url
+    ? '<a class="dash-release-link" href="' + escapeHtml(r.html_url) +
+      '" target="_blank" rel="noopener">↗ 在 GitHub 查看</a>'
+    : '';
+  /* 单个(已最新)沿用「最新 Release：」前缀,与旧版一致;多个时每卡按版本自述 */
+  const prefix = latestLabel ? '最新 Release：' : '';
+  return '<details class="dash-release">' +
+      '<summary>📄 ' + prefix + escapeHtml(title) + '</summary>' +
+      '<div class="dash-release-body">' + dashMdToHtml(r.body || '（无正文）') + link + '</div>' +
+    '</details>';
+}
+
 function dashRenderRelease(rel) {
   const box = document.getElementById('dash-release-notes');
   if (!box) return;
-  if (!rel || rel.error || (!rel.body && !rel.tag_name)) { box.innerHTML = ''; return; }
-  const dateStr = rel.published_at ? rel.published_at.slice(0, 10) : '';
-  const title = (rel.name || rel.tag_name || '') + (dateStr ? '（' + dateStr + '）' : '');
-  const link = rel.html_url
-    ? '<a class="dash-release-link" href="' + escapeHtml(rel.html_url) +
-      '" target="_blank" rel="noopener">↗ 在 GitHub 查看</a>'
-    : '';
-  box.innerHTML =
-    '<details class="dash-release">' +
-      '<summary>📄 最新 Release：' + escapeHtml(title) + '</summary>' +
-      '<div class="dash-release-body">' + dashMdToHtml(rel.body || '（无正文）') + link + '</div>' +
-    '</details>';
+  const list = (rel && Array.isArray(rel.releases)) ? rel.releases : [];
+  if (!list.length) { box.innerHTML = ''; return; }
+  const single = list.length === 1;
+  box.innerHTML = list.map(r => dashReleaseCard(r, single)).join('');
 }
 
 function dashApplyData(data) {

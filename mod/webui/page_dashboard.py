@@ -609,34 +609,50 @@ async def _startup_update_check() -> None:
                  f'{bridge.get("remote_version")} (插件仪表盘可一键更新)')
 
 
-def _fetch_latest_release() -> dict:
-    """GET ``/releases/latest`` → ``{tag_name, name, body, published_at, html_url}``。
+def _fetch_releases() -> dict:
+    """GET ``/releases`` → ``{releases: [...], error: ''}``。
 
-    仓库没有任何 release(HTTP 404)或网络失败时返回 ``{'error': ...}``,
-    前端对 error 静默不渲染折叠卡。
+    ``releases`` 是**比本地版本新**的已发布版本(新→旧,各含 markdown 正文),
+    让用户跨多个版本升级时能分别查看每个版本的说明(如 2.2.x → 2.4.0 会同时列出 2.3.0 与 2.4.0)。
+    本项目约定只在大版本(2.3 / 2.4 …)发 release,补丁版(2.4.1)不发 —— 故按「版本号 > 本地」过滤 GitHub 上真实发布的 release,
+    补丁版天然不产生新卡片。若没有比本地更新的(已最新 / 仅落后无 release 的补丁),退化为只含最新一个 release(与旧行为一致)。
+
+    仓库无 release / 网络失败时 ``releases`` 为空,前端静默不渲染折叠卡。
     """
     owner, repo = _parse_github_owner_repo(_get_plugin_meta().get('github', ''))
     if not owner:
-        return {'error': 'no-repo'}
-    api_url = f'https://api.github.com/repos/{owner}/{repo}/releases/latest'
+        return {'error': 'no-repo', 'releases': []}
+    local_ver = _get_plugin_meta().get('version', '') or ''
+    api_url = f'https://api.github.com/repos/{owner}/{repo}/releases?per_page=30'
     try:
         req = urllib.request.Request(api_url, headers={
             'User-Agent': 'LGTBot-Dashboard',
             'Accept': 'application/vnd.github+json',
         })
         with urllib.request.urlopen(req, timeout=8.0) as r:
-            rel = json.loads(r.read().decode('utf-8') or '{}')
+            data = json.loads(r.read().decode('utf-8') or '[]')
     except Exception as e:
-        return {'error': str(e)}
-    if not isinstance(rel, dict):
-        return {'error': 'bad-payload'}
-    return {
-        'tag_name': rel.get('tag_name', ''),
-        'name': rel.get('name', ''),
-        'body': rel.get('body', '') or '',
-        'published_at': rel.get('published_at', ''),
-        'html_url': rel.get('html_url', ''),
-    }
+        return {'error': str(e), 'releases': []}
+    if not isinstance(data, list):
+        return {'error': 'bad-payload', 'releases': []}
+    rels = []
+    for rel in data:
+        if not isinstance(rel, dict) or rel.get('draft'):
+            continue
+        rels.append({
+            'tag_name': rel.get('tag_name', ''),
+            'name': rel.get('name', ''),
+            'body': rel.get('body', '') or '',
+            'published_at': rel.get('published_at', ''),
+            'html_url': rel.get('html_url', ''),
+        })
+    if not rels:
+        return {'error': 'no-release', 'releases': []}
+    # 不完全信任 API 顺序,按语义化版本降序(新→旧)自排
+    rels.sort(key=lambda r: _semver_tuple(r.get('tag_name', '')), reverse=True)
+    newer = [r for r in rels if _semver_gt(r.get('tag_name', ''), local_ver)]
+    # 有比本地新的 → 全列(可能多个);否则(已最新)→ 只给最新一个
+    return {'releases': newer if newer else rels[:1], 'error': ''}
 
 
 def render_check_update() -> str:
@@ -646,13 +662,15 @@ def render_check_update() -> str:
       · ``bridge``    —— 本插件 __plugin_meta__.version vs GitHub tags
       · ``submodule`` —— 子模块本地 HEAD vs 上游 main/master HEAD,含 status
                         (ok / missing / empty),供 UI 决定按钮文案
-      · ``release``   —— 仓库最新 release(markdown 正文由前端渲染成折叠卡)
+      · ``release``   —— ``{releases: [...]}``:比本地新的 release 列表
+                        (跨多个大版本升级时逐个可展开);已最新则退化为最新一个。
+                        markdown 正文由前端渲染成折叠卡
     任一侧失败不影响另一侧，success 反映「两侧都没致命错误」(子模块网络失败
     会被 UI 单独展示);整体 success 仅当桥接层成功时为 True。
     """
     bridge = _bridge_check_payload()
     submodule = _get_submodule_info(query_remote=True)
-    release = _fetch_latest_release()
+    release = _fetch_releases()
     # 手动检查的结果同步进启动自检缓存 (更新完成后再点一次检查)
     boot._get_persistent()[_STARTUP_CHECK_KEY] = {'ts': time.time(), 'bridge': bridge}
     return _fragment({
