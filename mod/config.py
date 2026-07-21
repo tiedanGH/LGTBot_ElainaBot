@@ -10,7 +10,7 @@
   · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
   · crash_notify_group: str          严重问题通知群 openid（崩溃时向此群主动推报告）
   · blocked_commands: list[str]      追加屏蔽指令（与 dispatcher 内置屏蔽表共同生效，命中的消息不转发给引擎）
-  · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（这些用户私信走主动消息直推）
+  · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（私信主动直推；["all"] = 全员直推模式）
   · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
 """
 
@@ -47,7 +47,7 @@ CONFIG_COMMENTS = {
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
     'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
     'blocked_commands': '屏蔽指令列表：命中的消息不再转发给引擎，用于化解与其他插件的指令冲突',
-    'sandbox_dm_users': '沙箱测试用户 openid 列表，列表内用户私信走主动消息直推（仅沙箱私信可发主动消息）',
+    'sandbox_dm_users': '沙箱用户 openid 列表，列表内用户私信走主动消息直推；填 ["all"]（仅此一项）= 全员直推模式',
     'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
 }
 
@@ -229,23 +229,29 @@ def _apply_runtime_tunables(cfg: dict):
         _dispatcher.BLOCKED_COMMANDS = blocked_t
 
     # ── sandbox_dm_users ──────────────────────────────────────────────────
-    # 列表内用户私信跳过被动配额,直接主动直推。非法 / 缺失 → 空集合(所有
-    # 私信按正式环境规则:无有效 msg_id 直接丢弃)。
+    # 列表内用户私信跳过被动配额,直接主动直推。非法 / 缺失 → 空集合(所有私信按正式环境规则:无有效 msg_id 直接丢弃)。
+    # 特例:恰好只有一项 'all' → 全员直推模式(callbacks.DM_PUSH_ALL),对全部用户主动私信、不再丢弃。
+    # 白名单老语义原样保留,官方收回权限时把配置改回白名单即可整体还原。
+    # 混入其他项(如 ['all', openid])按普通白名单处理:字面 'all' 不匹配任何真实 openid,等于无效项。
     raw_sandbox = cfg.get('sandbox_dm_users', None)
     if isinstance(raw_sandbox, list):
-        sandbox_set = frozenset(
-            str(u).strip() for u in raw_sandbox if str(u).strip())
+        cleaned = [str(u).strip() for u in raw_sandbox if str(u).strip()]
     else:
         if raw_sandbox is not None:
             log.warning(f'sandbox_dm_users 应为字符串列表，已忽略 (got {type(raw_sandbox).__name__})')
-        sandbox_set = frozenset()
+        cleaned = []
+    push_all = (cleaned == ['all'])
+    sandbox_set = frozenset() if push_all else frozenset(cleaned)
+    if _callbacks.DM_PUSH_ALL != push_all:
+        log.info(f'sandbox_dm_users: 全员主动私信直推 {"开启 (all 模式)" if push_all else "关闭 (白名单模式)"}')
+        _callbacks.DM_PUSH_ALL = push_all
     if _callbacks.SANDBOX_DM_USERS != sandbox_set:
         log.info(f'sandbox_dm_users: {len(_callbacks.SANDBOX_DM_USERS)} → {len(sandbox_set)} 人')
         _callbacks.SANDBOX_DM_USERS = sandbox_set
 
     # ── menu_game_buttons ─────────────────────────────────────────────────
-    # 非法 / 缺失时回退到默认 6 个;buttons.build_menu_buttons() 每次调用都
-    # 读这个列表,所以下发后下一次回欢迎菜单即生效。
+    # 非法 / 缺失时回退到默认 6 个;
+    # buttons.build_menu_buttons() 每次调用都读这个列表,所以下发后下一次回欢迎菜单即生效。
     raw_games = cfg.get('menu_game_buttons', None)
     if raw_games is None:
         games = list(_buttons.DEFAULT_MENU_GAMES)

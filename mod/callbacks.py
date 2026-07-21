@@ -68,11 +68,21 @@ _CRASH_APOLOGY_MD_BELATED = (
 # bot 才能向它走主动消息(没 msg_id 引用)。
 CRASH_NOTIFY_GROUP: str = ''
 
-# 沙箱私信用户 openid 集合 —— 由 config.py::_apply_runtime_tunables 按 yaml 的
-# sandbox_dm_users 列表覆盖。当前 QQ 官方机器人**只有沙箱环境**的私信能发
-# 主动消息(无 msg_id 引用),正式环境私信主动消息一律被拒。所以把沙箱测试
-# 账号的 openid 填进来:这些用户的私信跳过被动配额,直接走主动消息直推
+# 私信主动直推资格 —— 两个变量均由 config.py::_apply_runtime_tunables 按 yaml 的
+# sandbox_dm_users 覆盖:
+#   · 列表恰好为 ['all'] → DM_PUSH_ALL=True,对**全部用户**私信直推。
+#     官方现已默认允许 bot 向好友推送主动私信(默认开启,用户可在权限设置中自行关闭)。
+#   · 其他 → 白名单老语义:仅列表内用户(沙箱测试号)直推,其余私信在无有效
+#     msg_id 时丢弃。老逻辑保留 —— 官方将来收回全员推送权限时改回配置即可。
+# 两种模式下「直推资格」都不跳过被动配额:前 5 条照常 msg_id 被动回复,
+# 配额耗尽后才走主动消息(见 _send_text/image_quota_managed)。
 SANDBOX_DM_USERS: frozenset = frozenset()
+DM_PUSH_ALL: bool = False
+
+
+def _is_sandbox_dm(target_id: str, is_uid: bool) -> bool:
+    """私信目标是否具备「配额耗尽后主动直推」资格(all 模式 = 所有人)。"""
+    return is_uid and (DM_PUSH_ALL or target_id in SANDBOX_DM_USERS)
 # 信号编号 → 名称,日志里更可读。
 # 数字 key 对应 SigSegvHandler 路径(C++ bridge 直接传 int);字符串 key
 # 对应 OnCxxTerminate 写入 marker 文件里的 sig=<kind> 字段(目前只有
@@ -599,10 +609,18 @@ _DM_LIMITED_GAMES: frozenset = frozenset({
 # 通过 cb_send_text/image 发完后,在同一把 per-target Lock 内调度提示发送。
 _pending_dm_warn_keys: set[str] = set()
 
-_DM_WARNING_TEXT = (
+# 老文案 —— 白名单模式(正式环境主动私信被拒,发出去会失败)下的受限警告
+_DM_WARNING_TEXT_LEGACY = (
     '## ⚠️ 主动私信受限\n'
     '此游戏存在**主动私信**，会受到协议限制发送失败。\n'
     '请在游戏中**私信机器人**发送“赛况”来短暂激活私信和查看私信信息'
+)
+
+# 新文案 —— 全员直推(sandbox_dm_users: ['all'])模式:
+# 私信发得出去,只需玩家加好友,且未关闭机器人的主动消息权限
+_DM_WARNING_TEXT_ALL = (
+    '## 💬 主动私信提醒\n'
+    '此游戏存在**主动私信**。若无法接收，请点击机器人头像 → 右上角设置中进入「权限设置」中开启**主动消息**权限'
 )
 
 # ──────── per-target 串行化:发到同一 target 的消息按 cb 调用顺序送达 QQ ────────
@@ -707,8 +725,8 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
     if (not is_uid) and helpers.is_full_volume_group(target_id):
         log.debug(f'全量群 {target_id} 跳过刷新按钮使用说明')
         return
-    if is_uid and target_id in SANDBOX_DM_USERS:
-        log.debug(f'沙箱私信用户 {target_id} 跳过刷新按钮使用说明')
+    if _is_sandbox_dm(target_id, is_uid):
+        log.debug(f'直推私信用户 {target_id} 跳过刷新按钮使用说明')
         return
     _schedule_refresh_tip(target_id, is_uid)
 
@@ -720,21 +738,23 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
 # image_send 在开局公告同步落地后调 _consume_pending_dm_warn 触发。
 
 async def _send_dm_warning(target_id: str, is_uid: bool) -> None:
-    """走标准 ``_send_text_quota_managed`` 通道发出「私信限制」提示。
+    """走标准 ``_send_text_quota_managed`` 通道发出「主动私信」提示。
 
-    与 ``_send_refresh_tip`` 同一把 per-target Lock,保证排在「房间已创建」
-    公告之后到达 QQ。底部挂一个「💫 添加好友」link 按钮,链接是
-    ``_build_robot_invite_link`` 的同款邀请页 —— 用户点开后 QQ 客户端会让
-    他选「添加为好友」或「邀请到群」。
+    文案随模式切换:全员直推(``DM_PUSH_ALL``)用提醒版(加好友 + 开权限即可收到),
+    白名单老模式用受限警告版。两版底部都挂「💫 添加好友」link 按钮,
+    链接是 ``_build_robot_invite_link`` 的同款邀请页。
+
+    与 ``_send_refresh_tip`` 同一把 per-target Lock,保证排在「房间已创建」公告之后到达 QQ。
     """
     key = helpers.target_key(target_id, is_uid)
+    text = _DM_WARNING_TEXT_ALL if DM_PUSH_ALL else _DM_WARNING_TEXT_LEGACY
     extra = buttons.build_dm_warning_buttons()
     try:
         async with _get_send_lock(key):
-            page_logs.log_outgoing(target_id, is_uid, _DM_WARNING_TEXT)
-            await _send_text_quota_managed(target_id, is_uid, _DM_WARNING_TEXT, extra)
+            page_logs.log_outgoing(target_id, is_uid, text)
+            await _send_text_quota_managed(target_id, is_uid, text, extra)
     except Exception as e:
-        log.debug(f'私信限制提示发送失败 ({target_id}): {e}')
+        log.debug(f'主动私信提示发送失败 ({target_id}): {e}')
 
 
 def _schedule_dm_warning(target_id: str, is_uid: bool) -> None:
@@ -956,9 +976,9 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     key = helpers.target_key(target_id, is_uid)
     msg_preview = (msg or '')[:30].replace('\n', ' ')
 
-    # 沙箱私信用户:QQ 仅沙箱环境私信可发主动消息。逻辑与全量群完全一致 ——
+    # 直推私信(all 模式全员 / 白名单沙箱用户):逻辑与全量群完全一致 ——
     # 前 5 次仍用 msg_id 被动回复(消耗配额),仅配额耗尽后才直接主动消息。
-    is_sandbox_dm = is_uid and (target_id in SANDBOX_DM_USERS)
+    is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
     # 全量群判定:只看运行时观测到的事实(state.full_volume_groups),不再退回
     # 框架 non_at_message.* 配置 —— 配置可能与 QQ 后台权限不同步,误判会让
     # 非全量群也走主动消息(QQ 必拒,把 bot 的配额烧掉)。
@@ -1106,9 +1126,9 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
     透传到下游)。私信无有效 msg_id 时直接丢弃(同 _send_text_quota_managed)。
     """
     key = helpers.target_key(target_id, is_uid)
-    # 沙箱私信 / 全量群:前 5 次仍走 msg_id 被动回复,仅配额耗尽后主动直推
+    # 直推私信 / 全量群:前 5 次仍走 msg_id 被动回复,仅配额耗尽后主动直推
     # (逻辑同 _send_text_quota_managed,详见那里的注释)
-    is_sandbox_dm = is_uid and (target_id in SANDBOX_DM_USERS)
+    is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
     is_full = (not is_uid) and helpers.is_full_volume_group(target_id)
     is_active_push = is_full or is_sandbox_dm
 

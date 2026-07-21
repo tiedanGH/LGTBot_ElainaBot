@@ -166,7 +166,7 @@ def _snapshot_runtime_tunables() -> dict:
         'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
         'crash_notify_group': _callbacks.CRASH_NOTIFY_GROUP or '',
         'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
-        'sandbox_dm_users': sorted(_callbacks.SANDBOX_DM_USERS),
+        'sandbox_dm_users': ['all'] if _callbacks.DM_PUSH_ALL else sorted(_callbacks.SANDBOX_DM_USERS),
         'menu_game_buttons': list(_buttons.MENU_GAMES),
     }
 
@@ -318,6 +318,12 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
     timeout = data.get('refresh_wait_timeout')
     if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout <= 0:
         errors.append(f'refresh_wait_timeout 应为正数，当前 {timeout}')
+    sandbox = data.get('sandbox_dm_users')
+    if isinstance(sandbox, list):
+        entries = [str(u).strip() for u in sandbox if str(u).strip()]
+        if 'all' in entries and entries != ['all']:
+            warnings.append('sandbox_dm_users 含 "all" 但还有其他项 —— '
+                            '全员直推模式仅在数组只有一项 "all" 时生效，当前按普通白名单处理')
 
     if missing:
         warnings.append(f'缺少字段 {"、".join(missing)}(下次加载自动补默认值)')
