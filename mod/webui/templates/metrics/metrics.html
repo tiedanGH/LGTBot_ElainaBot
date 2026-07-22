@@ -1,0 +1,140 @@
+<div class="metrics">
+
+  <!-- ──── 顶部标题栏:统一刷新 + 查询时间 ──── -->
+  <section class="dash-section metrics-topbar">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📈 指标面板</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">查询时间</span>
+        <span id="metrics-query-time" class="dash-meta-value dash-mono">—</span>
+        <button id="metrics-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新</button>
+      </div>
+    </div>
+    <span id="metrics-action-msg" class="metrics-action-msg"></span>
+  </section>
+
+  <!-- ──── ① 数据统计 ──── -->
+  <section class="dash-section">
+    <h2 class="dash-section-title">📊 数据统计</h2>
+    <div class="metrics-status-grid">
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">用户总数</div>
+        <div id="metrics-stat-user-cache" class="metrics-status-value metrics-value-big">—</div>
+        <div class="metrics-status-sub">user_cache.db</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">注册用户数</div>
+        <div id="metrics-stat-lgt-users" class="metrics-status-value metrics-value-big">—</div>
+        <div class="metrics-status-sub">lgtbot.db / user</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">对局总数</div>
+        <div id="metrics-stat-matches" class="metrics-status-value metrics-value-big">—</div>
+        <div class="metrics-status-sub">lgtbot.db / match</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">对局人次</div>
+        <div id="metrics-stat-attendances" class="metrics-status-value metrics-value-big">—</div>
+        <div class="metrics-status-sub">user_with_match</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">成就总数</div>
+        <div id="metrics-stat-achievements" class="metrics-status-value metrics-value-big">—</div>
+        <div class="metrics-status-sub">user_with_achievement</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──── ② 运行指标 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📈 运行指标</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">存储文件</span>
+        <span id="metrics-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <div class="metrics-status-grid">
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">图床上传成功率</div>
+        <div id="metrics-upload-rate" class="metrics-status-value metrics-value-big">—</div>
+        <div id="metrics-upload-sub" class="metrics-status-sub">暂无上传记录</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">配额压力（超时次数）</div>
+        <div id="metrics-quota-timeout" class="metrics-status-value metrics-value-big">—</div>
+        <div id="metrics-quota-sub" class="metrics-status-sub">配额耗尽 — 次</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">重启次数</div>
+        <div id="metrics-restart-total" class="metrics-status-value metrics-value-big">—</div>
+        <div id="metrics-restart-sub" class="metrics-status-sub">—</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">引擎崩溃重启</div>
+        <div id="metrics-crash-total" class="metrics-status-value metrics-value-big">—</div>
+        <div id="metrics-crash-sub" class="metrics-status-sub">—</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──── ③ 游戏数据 ──── -->
+  <section class="dash-section">
+    <h2 class="dash-section-title">🎮 游戏数据</h2>
+    <div class="metrics-status-grid">
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">今日对局</div>
+        <div id="metrics-today-matches" class="metrics-status-value">—</div>
+        <div class="metrics-status-sub">当日 00:00 起已结束的对局</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">今日活跃玩家</div>
+        <div id="metrics-today-players" class="metrics-status-value">—</div>
+        <div class="metrics-status-sub">今日参与游戏的玩家</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">今日活跃群聊</div>
+        <div id="metrics-today-groups" class="metrics-status-value">—</div>
+        <div class="metrics-status-sub">今日进行游戏的群聊</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">今日群聊主动</div>
+        <div id="metrics-active-group" class="metrics-status-value">—</div>
+        <div id="metrics-active-group-sub" class="metrics-status-sub">平均每群 — 条</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">今日私信主动</div>
+        <div id="metrics-active-dm" class="metrics-status-value">—</div>
+        <div id="metrics-active-dm-sub" class="metrics-status-sub">平均每人 — 条</div>
+      </div>
+    </div>
+    <div id="metrics-game-errors" class="metrics-errors" style="display:none"></div>
+    <div class="metrics-tables">
+      <div class="metrics-table-wrap">
+        <table class="metrics-table">
+          <thead><tr><th class="metrics-col-rank">#</th><th>游戏局数总榜</th><th class="metrics-col-count">局数</th></tr></thead>
+          <tbody id="metrics-top-all-body"><tr class="metrics-empty"><td colspan="3">暂无数据</td></tr></tbody>
+        </table>
+      </div>
+      <div class="metrics-table-wrap">
+        <table class="metrics-table">
+          <thead><tr><th class="metrics-col-rank">#</th><th>本周游戏榜</th><th class="metrics-col-count">局数</th></tr></thead>
+          <tbody id="metrics-top-week-body"><tr class="metrics-empty"><td colspan="3">暂无数据</td></tr></tbody>
+        </table>
+      </div>
+      <div class="metrics-table-wrap">
+        <table class="metrics-table">
+          <thead><tr><th class="metrics-col-rank">#</th><th>本周玩家参与榜</th><th class="metrics-col-count">局数</th></tr></thead>
+          <tbody id="metrics-top-players-body"><tr class="metrics-empty"><td colspan="3">暂无数据</td></tr></tbody>
+        </table>
+      </div>
+      <div class="metrics-table-wrap">
+        <table class="metrics-table">
+          <thead><tr><th>近 10 日对局趋势</th><th class="metrics-col-count">局数</th><th class="metrics-col-count">玩家</th></tr></thead>
+          <tbody id="metrics-trend-body"><tr class="metrics-empty"><td colspan="3">暂无数据</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</div>

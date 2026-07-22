@@ -51,17 +51,6 @@ function dashFmtBytes(n) {
   return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
-function dashFmtTime(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts * 1000);
-  return d.getFullYear() + '-' +
-         String(d.getMonth() + 1).padStart(2, '0') + '-' +
-         String(d.getDate()).padStart(2, '0') + ' ' +
-         String(d.getHours()).padStart(2, '0') + ':' +
-         String(d.getMinutes()).padStart(2, '0') + ':' +
-         String(d.getSeconds()).padStart(2, '0');
-}
-
 /* 版本号统一加 v 前缀:'1.5.0' → 'v1.5.0'(若已带 v/V 则不重复加)。
    __plugin_meta__ 里 version='1.5.0' 不带 v;GitHub tag 是 'v1.5.0' 带 v,
    规范化到同一形式后视觉对齐,避免「本地 1.5.0 / 远端 v1.5.0」混杂。 */
@@ -242,25 +231,6 @@ function dashApplyData(data) {
     bDetail.innerHTML = '点击「检查更新」查看版本' + dashBridgeRepoLink();
   }
 
-  /* 统计 */
-  document.getElementById('dash-stats-time').textContent = dashFmtTime(data.query_time);
-  const stats = data.stats || {};
-  const fmt = (v) => (v == null ? '—' : String(v));
-  document.getElementById('dash-stat-user-cache').textContent = fmt(stats.user_cache_total);
-  document.getElementById('dash-stat-lgt-users').textContent = fmt(stats.lgtbot_users);
-  document.getElementById('dash-stat-matches').textContent = fmt(stats.lgtbot_matches);
-  document.getElementById('dash-stat-attendances').textContent = fmt(stats.lgtbot_match_attendances);
-  document.getElementById('dash-stat-achievements').textContent = fmt(stats.lgtbot_achievements);
-
-  const errsBox = document.getElementById('dash-stats-errors');
-  const errs = stats.errors || [];
-  if (errs.length) {
-    errsBox.innerHTML = errs.map(e => escapeHtml(e)).join('<br>');
-    errsBox.style.display = 'block';
-  } else {
-    errsBox.style.display = 'none';
-  }
-
   /* 缓存尺寸 */
   const cache = data.cache || {};
   ['avatar', 'gen', 'match'].forEach(k => {
@@ -280,11 +250,9 @@ function dashLoadInline() {
   }
 }
 
-/* 整页刷新 → 抠出新的 dashboard-data JSON,只刷新本标签的状态(用户的标签
- * 切换 / 编辑器脏标记都不会被破坏) */
+/* 整页刷新 → 抠出新的 dashboard-data JSON,只刷新本标签的状态(用户的标签切换 / 编辑器脏标记都不会被破坏)。
+ * 无专属刷新按钮 —— 由换绑 / 清缓存 / 初始化仓库等操作成功后程序化调用。 */
 async function dashRefreshAll() {
-  const btn = document.getElementById('dash-stats-refresh');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 刷新中……'; }
   try {
     const r = await fetch(apiUrl(PAGE_KEY), { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -293,8 +261,6 @@ async function dashRefreshAll() {
     if (m) dashApplyData(JSON.parse(m[1]));
   } catch (e) {
     console.warn('[dashboard] refresh failed:', e);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 刷新'; }
   }
 }
 
@@ -783,7 +749,6 @@ window.addEventListener('DOMContentLoaded', () => {
   /* 桥接层行按钮: dashRepoStatus 决定调 dashInitRepo 还是 dashDoUpdate */
   document.getElementById('dash-do-update').addEventListener('click', dashBridgeButtonClick);
   document.getElementById('dash-update-submodule').addEventListener('click', dashDoUpdateSubmodule);
-  document.getElementById('dash-stats-refresh').addEventListener('click', dashRefreshAll);
 
   /* 缓存清理按钮(委托) */
   document.querySelectorAll('[data-clear]').forEach(btn => {

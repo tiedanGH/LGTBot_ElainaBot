@@ -22,7 +22,7 @@ from core.message.event import (
     INTERACTION_CREATE,
 )
 
-from . import state, quota, helpers, boot, buttons, uploader, userdb, audit
+from . import state, quota, helpers, boot, buttons, uploader, userdb, audit, metrics
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -110,10 +110,11 @@ _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启$'
 _P_PLANNED  = r'^/?计划重启$'
+_P_STATS    = r'^/?数据统计$'
 
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
-    _P_RESTART, _P_PLANNED,
+    _P_RESTART, _P_PLANNED, _P_STATS,
 ))
 
 
@@ -311,7 +312,7 @@ def _read_troubleshooting() -> str:
 
 
 @handler(_P_MENU,
-         name='LGTBot 欢迎菜单',
+         name='欢迎菜单',
          desc='触发欢迎菜单 (等同于单独 @bot)',
          priority=50,
          block=True,
@@ -340,7 +341,7 @@ async def lgtbot_welcome_menu(event, match):
 
 
 @handler(_P_MORE,
-         name='LGTBot 更多功能',
+         name='更多功能',
          desc='展示「更多功能」子菜单',
          priority=50,
          block=True,
@@ -370,7 +371,7 @@ async def lgtbot_more_features(event, match):
 
 
 @handler(_P_NOTICE,
-         name='LGTBot 更新公告',
+         name='更新公告',
          desc='读取 data/update_notice.txt 实时返回公告内容',
          priority=50,
          block=True,
@@ -402,8 +403,60 @@ async def lgtbot_update_notice(event, match):
     await event.reply(md)
 
 
+@handler(_P_STATS,
+         name='数据统计',
+         desc='全员可用:今日对局 / 今日游戏榜 / 玩家参与榜 / 近10日趋势',
+         priority=50,
+         block=True,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_data_stats(event, match):
+    """收到「数据统计」(文本或按钮)→ 输出 lgtbot.db 游戏数据摘要(dau 风格)。
+
+    仅游戏数据 —— 两个榜单均为今日口径(00:00 起)且 TOP3 截断控制消息长度(面板另有总榜与本周榜);
+    玩家无缓存昵称时以脱敏 ID(前3****后3)展示。序号用「1、」而非「1.」—— QQ 客户端
+    会把「1.」解析成 markdown 有序列表并自行重排编号,导致显示错乱。
+    """
+    if helpers.is_foreign_event(event):
+        return
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    g = metrics.query_game_stats()
+    if not g.get('available'):
+        await event.reply('❌ 数据统计暂不可用，请稍后再试')
+        return
+
+    def _n(v):
+        return '—' if v is None else v
+
+    lines = [
+        f'<@{event.user_id}>',
+        f'📈 LGT-Bot 数据统计 (截至{time.strftime("%H:%M")})',
+        f'🎮 今日对局: {_n(g.get("today_matches"))} 局',
+        f'👤 活跃玩家: {_n(g.get("today_players"))} 人',
+        f'👥 活跃群聊: {_n(g.get("today_groups"))} 个',
+    ]
+    top_today = (g.get('top_games_today') or [])[:3]
+    if top_today:
+        lines.append('🔥 今日游戏榜:')
+        lines += [f'  {i}、{t["game_name"]} ({t["count"]}局)'
+                  for i, t in enumerate(top_today, 1)]
+    top_players = (g.get('top_players_today') or [])[:3]
+    if top_players:
+        lines.append('👑 玩家参与榜:')
+        lines += [f'  {i}、{p["display"]} ({p["count"]}局)'
+                  for i, p in enumerate(top_players, 1)]
+    trend = g.get('trend_10d') or []
+    if trend:
+        total10 = sum(t['count'] for t in trend)
+        lines.append(f'📅 近10日对局: {total10} 局')
+    await event.reply('\n'.join(lines))
+
+
 @handler(_P_TROUBLE,
-         name='LGTBot 疑难解答',
+         name='疑难解答',
          desc='读取 data/troubleshooting.txt 实时返回常见问题与解答',
          priority=50,
          block=True,
@@ -773,7 +826,7 @@ def toggle_planned_restart() -> tuple[bool, str]:
 
 
 @handler(_P_PLANNED,
-         name='LGTBot 计划重启',
+         name='计划重启',
          desc='切换维护模式:暂停创建新游戏',
          owner_only=True,
          event_types=_LGT_MSG_EVENTS,
@@ -794,7 +847,7 @@ async def lgtbot_planned_restart(event, match):
 
 
 @handler(_P_RESTART,
-         name='LGTBot 重启',
+         name='框架重启',
          desc='整进程 os.execv 重启,重新加载 C++ 引擎与全部游戏插件',
          owner_only=True,
          event_types=_LGT_MSG_EVENTS,
@@ -808,9 +861,11 @@ async def lgtbot_restart(event, match):
     if helpers.is_foreign_event(event):
         return
     ok, msg = check_and_prepare_restart()
-    # record 同步写盘,任何 await 前已持久化 —— 重启换进程也不丢这条记录
+    # record 同步写盘,任何 await 前已持久化 —— 重启换进程也不丢这些记录
     audit.record('restart', '重启 LGTBot', '' if ok else msg,
                  ok=ok, src=audit.SRC_CMD)
+    if ok:
+        metrics.record_restart()
     await event.reply(msg)
     if not ok:
         return

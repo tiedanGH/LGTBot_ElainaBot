@@ -182,7 +182,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .dashboard,
 .config-tab,
 .backup,
-.audit { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
+.audit,
+.metrics { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
 
 .dash-section {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -378,5 +379,6 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   .dashboard,
   .config-tab,
   .backup,
-  .audit { gap: 10px; }
+  .audit,
+  .metrics { gap: 10px; }
 }

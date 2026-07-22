@@ -286,10 +286,13 @@ def build_more_features_buttons() -> list[list[dict]]:
     return [
         [
             {'text': '📢 更新公告', 'data': '更新公告', 'type': 1, 'style': 4},
-            {'text': '❓ 疑难解答', 'data': '疑难解答', 'type': 1, 'style': 1},
+            {'text': '📈 数据统计', 'data': '数据统计', 'type': 1, 'style': 4},
         ],
         [
+            {'text': '❓ 疑难解答', 'data': '疑难解答', 'type': 1, 'style': 0},
             {'text': '🛠️ 问题反馈', 'link': _QUESTIONNAIRE_LINK},
+        ],
+        [
             {'text': 'ℹ️ 关于框架',  'data': '/关于', 'type': 2, 'style': 1},
         ],
         [

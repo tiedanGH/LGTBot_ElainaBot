@@ -28,7 +28,7 @@ import sys
 import time
 
 from core.base.logger import get_logger, PLUGIN
-from . import state, quota, helpers, boot, uploader, userdb, buttons, log_attribution
+from . import state, quota, helpers, boot, uploader, userdb, buttons, log_attribution, metrics
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -133,6 +133,10 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
         boot.mark_engine_running(False)
     except Exception:
         pass
+
+    # 指标:崩溃累计(live 信号路径)。record 同步写盘且永不抛
+    # 在腐败 heap上属 best-effort,但发生在 execv 之前,通常能成功落盘。
+    metrics.record_crash(sig_name)
 
     # 异步善后:发道歉 + 倒计时 + execv。C++ wrapper 即将 return,不能在这里阻塞。
     loop = state.event_loop
@@ -426,6 +430,12 @@ async def _belated_apology(marker_path: str, info: dict) -> None:
         msg: str = info.get('msg', '') or ''
         sig_kind: str = info.get('sig', 'cxx_terminate') or 'cxx_terminate'
         sig_name = _SIG_NAMES.get(sig_kind, sig_kind)
+        # 指标:崩溃累计(marker 路径,恰一次 —— 与 finally 的 marker 删除同生命周期);ts 用 marker 里记录的真实崩溃时刻
+        try:
+            _marker_ts = int(info.get('ts') or 0)
+        except (TypeError, ValueError):
+            _marker_ts = 0
+        metrics.record_crash(sig_name, ts=_marker_ts or None)
         target = (f'用户 {uid}' if is_uid else f'群聊 {gid} 用户 {uid}')
         preview = msg[:80].replace('\n', ' ')
         msg_len = len(preview)
@@ -989,13 +999,18 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
 
     consumed = quota.try_consume_ref(key)
     if consumed is None:
+        # 指标:「真耗尽」= TTL 内引用的 5 条真用完(has_valid_ref True);
+        # 无引用 / 已过期的场景(无事件上下文的推送、私信丢弃)不算配额压力。
+        had_valid_ref = quota.has_valid_ref(key)
+        if had_valid_ref:
+            metrics.record_quota_exhausted()
         if is_active_push:
             # 全量群 / 沙箱私信:配额满 → 直接主动消息,不等刷新按钮
             tag = '私信直推' if is_sandbox_dm else '全量直推'
             log.info(f'⚡ [{tag}] {key} 配额已满，走主动消息: {msg_preview!r}')
-        elif is_uid and not quota.has_valid_ref(key):
-            # 普通私信 + 无有效 msg_id(从未私信过 / 已超 5 分钟过期):正式环境
-            # 主动私信必拒 → 直接丢弃,只留一行 audit 日志。
+        elif is_uid and not had_valid_ref:
+            # 普通私信 + 无有效 msg_id(从未私信过 / 已超 5 分钟过期):
+            # 正式环境主动私信必拒 → 直接丢弃,只留一行 audit 日志。
             log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃: {msg_preview!r}')
             return
         else:
@@ -1009,6 +1024,7 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
             if consumed is None:
                 # 等待超时 → 改走主动消息(无 msg_id/event_id)。
                 # bot 若在该群/用户上有主动 quota 还能落地,语义更干净。
+                metrics.record_quota_wait_timeout()
                 log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送主动消息')
             else:
                 log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发文本')
@@ -1026,6 +1042,10 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     if sender is None:
         log.warning(f'无可用 sender，丢弃文本消息 → {target_id}')
         return
+
+    # 指标:无 ref 即主动消息(全量直推 / 沙箱直推 / 超时强发),按日分桶计数
+    if consumed is None:
+        metrics.record_active_push(target_id, is_uid)
 
     # 第 4 条起追加刷新按钮;第 5 条（达到上限）用「⚠️ 最终刷新」加强提示。
     # 主动直推(全量群 / 沙箱私信)从不追加(bot 不被 5 条/msg_id 限制)。
@@ -1134,10 +1154,14 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
 
     consumed = quota.try_consume_ref(key)
     if consumed is None:
+        # 指标口径同 _send_text_quota_managed:仅 TTL 内引用真用完算耗尽
+        had_valid_ref = quota.has_valid_ref(key)
+        if had_valid_ref:
+            metrics.record_quota_exhausted()
         if is_active_push:
             tag = '私信直推' if is_sandbox_dm else '全量直推'
             log.info(f'⚡ [{tag}] {key} 配额已满，图片走主动消息')
-        elif is_uid and not quota.has_valid_ref(key):
+        elif is_uid and not had_valid_ref:
             # 普通私信无有效 msg_id(从未私信过 / 已超 5 分钟):直接丢弃
             log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃图片')
             return
@@ -1150,6 +1174,7 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
             if consumed is None:
                 # 等待超时 → 改走主动消息(理由同 _send_text_quota_managed:
                 # 过期 msg_id 强发必拒,主动消息至少留一条出路)。
+                metrics.record_quota_wait_timeout()
                 log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送图片主动消息')
             else:
                 log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发图片')
@@ -1166,6 +1191,10 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
     if sender is None:
         log.warning(f'无可用 sender，丢弃图片 → {target_id}')
         return
+
+    # 指标:ref_type 为空即主动消息(同文本路径口径),按日分桶计数
+    if not ref_type:
+        metrics.record_active_push(target_id, is_uid)
 
     # ── 通道 A：尝试图床 → markdown 内嵌 ─────────────────────────────────
     user_id_for_cos = target_id if is_uid else ''

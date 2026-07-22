@@ -9,6 +9,8 @@ __MAIN_CSS__
 /* ───── 各 tab 专属样式(每个 page_*.py 的 TAB_CSS) ───── */
 __DASHBOARD_CSS__
 
+__METRICS_CSS__
+
 __CONFIG_CSS__
 
 __BUILD_CSS__
@@ -36,6 +38,7 @@ __AUDIT_CSS__
 
     <div class="tabs">
       <button class="tab active" data-tab="dashboard">📊 仪表盘</button>
+      <button class="tab" data-tab="metrics">📈 指标面板</button>
       <button class="tab" data-tab="config">⚙️ 配置管理</button>
       <button class="tab" data-tab="build">🛠️ 引擎编译</button>
       <button class="tab" data-tab="backup">💾 数据备份</button>
@@ -48,6 +51,10 @@ __AUDIT_CSS__
   <div class="page-content">
     <div id="tab-dashboard" class="tab-pane active">
 __DASHBOARD_HTML__
+    </div>
+
+    <div id="tab-metrics" class="tab-pane">
+__METRICS_HTML__
     </div>
 
     <div id="tab-config" class="tab-pane">
@@ -93,6 +100,7 @@ __USERS_HTML__
   </div>
 
   <script id="dashboard-data" type="application/json">__DASHBOARD_DATA__</script>
+  <script id="metrics-data" type="application/json">__METRICS_DATA__</script>
   <script id="config-data" type="application/json">__CONFIG_DATA__</script>
   <script id="build-data" type="application/json">__BUILD_DATA__</script>
   <script id="log-data" type="application/json">__LOG_DATA__</script>
@@ -103,6 +111,8 @@ __USERS_HTML__
 __MAIN_JS__
 
 __DASHBOARD_JS__
+
+__METRICS_JS__
 
 __CONFIG_JS__
 

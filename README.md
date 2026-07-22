@@ -80,28 +80,29 @@ cd ../.. && python3 main.py
 
 ## 关键特性
 
-| 能力              | 实现                                                                                                                  |
-|-----------------|---------------------------------------------------------------------------------------------------------------------|
-| **零配置自动加载**     | 作为 ElainaBot 插件，路径全部自包含在 `plugins/LGTBot_ElainaBot/`                                                                |
-| **机器人绑定**       | 多 bot 部署时在仪表盘可视化选择本插件服务的机器人（默认第一个）；消息收发、全量群数据、邀请链接、错误推送均固定走绑定 bot，其他 bot 的事件静默忽略                                    |
-| **消息合并**        | C++ 端聚合 "@玩家 文本 + 图片" 到单条媒体消息（避免 QQ 端拆成两条）                                                                          |
-| **markdown 图床** | `config.yaml` 指定单个图床上传到 image_hosting，用 markdown 内嵌，保留 `<@>` 原生 mention 和按钮；留空 / 上传失败回退 msg_type=7                  |
-| **回调按钮**        | `/新游戏` `/加入` 等命令自动附加交互按钮；游戏结束时附「查看战绩 / 重开一局」快捷按钮；非刷新 callback 按钮的 data 被当作用户消息派发回 LGTBot 引擎                         |
-| **欢迎菜单**        | 单独 @机器人时回复模板菜单，含「帮助 / 游戏列表 / 排行大图 / 战绩」等按钮；游戏快捷开局列表通过 `config.yaml` 字段可配置                                           |
-| **全量群适配**       | 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查）；主框架的全量群里不再追加刷新按钮，被动配额耗尽直接走主动消息                                       |
-| **Web 面板拓展页**   | 侧边栏「LGTBot 机器人」单页多标签：仪表盘 / 配置管理 / 引擎编译 / 数据备份 / 消息日志 / 操作审计 / 用户数据；含一键更新（tag + 子模块 commit 双重对比）、缓存清理、在线编辑配置与整进程重启   |
-| **计划重启**        | 主人指令「计划重启」或面板顶栏按钮切换维护模式：暂停创建新游戏，进行中对局与已建房间不受影响（可加入 / 开始）；跨热重载保持，真重启后自动恢复                                            |
-| **数据库备份**       | 每日自动备份 + 手动按钮 + 一键恢复 + 自动轮转保留 7 份。备份 zip 存主框架 `data/backup/lgtbot/`;SQLite 在线备份用 `Connection.backup()` API,引擎运行中也安全 |
-| **操作审计**        | 编译 / 备份恢复删除 / 清缓存 / git 更新 / 配置变更 / 重启 / 换绑等全部状态变更持久化记录最近 500 条，按类别多选筛选，并区分来源                                       |
-| **市场安装兼容**      | 插件市场 zip 不含 `.git/`；仪表盘可初始化git仓库来修复;子模块 init 内置 SSH→HTTPS 改写,不需要 SSH key 也能拉 lgtbot 嵌套子模块                           |
-| **优雅退出**        | 进行中对局拒绝释放引擎，避免数据丢失                                                                                                  |
+| 能力              | 实现                                                                                                                       |
+|-----------------|--------------------------------------------------------------------------------------------------------------------------|
+| **零配置自动加载**     | 作为 ElainaBot 插件，路径全部自包含在 `plugins/LGTBot_ElainaBot/`                                                                     |
+| **机器人绑定**       | 多 bot 部署时在仪表盘可视化选择本插件服务的机器人（默认第一个）；消息收发、全量群数据、邀请链接、错误推送均固定走绑定 bot，其他 bot 的事件静默忽略                                         |
+| **消息合并**        | C++ 端聚合 "@玩家 文本 + 图片" 到单条媒体消息（避免 QQ 端拆成两条）                                                                               |
+| **markdown 图床** | `config.yaml` 指定单个图床上传到 image_hosting，用 markdown 内嵌，保留 `<@>` 原生 mention 和按钮；留空 / 上传失败回退 msg_type=7                       |
+| **回调按钮**        | `/新游戏` `/加入` 等命令自动附加交互按钮；游戏结束时附「查看战绩 / 重开一局」快捷按钮；非刷新 callback 按钮的 data 被当作用户消息派发回 LGTBot 引擎                              |
+| **欢迎菜单**        | 单独 @机器人时回复模板菜单，含「帮助 / 游戏列表 / 排行大图 / 战绩」等按钮；游戏快捷开局列表通过 `config.yaml` 字段可配置                                                |
+| **全量群适配**       | 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查）；主框架的全量群里不再追加刷新按钮，被动配额耗尽直接走主动消息                                            |
+| **Web 面板拓展页**   | 侧边栏「LGTBot 机器人」单页多标签：仪表盘 / 指标面板 / 配置管理 / 引擎编译 / 数据备份 / 消息日志 / 操作审计 / 用户数据；含一键更新（tag + 子模块 commit 双重对比）、缓存清理、在线编辑配置与整进程重启 |
+| **计划重启**        | 主人指令「计划重启」或面板顶栏按钮切换维护模式：暂停创建新游戏，进行中对局与已建房间不受影响（可加入 / 开始）；跨热重载保持，真重启后自动恢复                                                 |
+| **数据库备份**       | 每日自动备份 + 手动按钮 + 一键恢复 + 自动轮转保留 7 份。备份 zip 存主框架 `data/backup/lgtbot/`;SQLite 在线备份用 `Connection.backup()` API,引擎运行中也安全      |
+| **操作审计**        | 编译 / 备份恢复删除 / 清缓存 / git 更新 / 配置变更 / 重启 / 换绑等全部状态变更持久化记录最近 500 条，按类别多选筛选，并区分来源                                            |
+| **指标面板**        | 面板集中展示数据统计、运行指标（图床上传成功率 / 引擎崩溃与重启累计 / 被动配额压力 / 今日主动消息量）与引擎游戏数据（今日对局 / 活跃玩家群聊 / 排行榜 / 10 日趋势）                             |
+| **市场安装兼容**      | 插件市场 zip 不含 `.git/`；仪表盘可初始化git仓库来修复;子模块 init 内置 SSH→HTTPS 改写,不需要 SSH key 也能拉 lgtbot 嵌套子模块                                |
+| **优雅退出**        | 进行中对局拒绝释放引擎，避免数据丢失                                                                                                       |
 
 ## 开发计划（TODO）
 
 规划中的改进方向，欢迎在 [QQ 群](https://qun.qq.com/universal-share/share?ac=1&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw&svctype=4&tempid=h5_group_info) 或 issue 中讨论：
 
 - [ ] **复用主框架用户数据** —— 去掉插件私有的 `data/user_cache.db`，昵称 / 头像直接从 ElainaBot 主框架的用户数据库读取，消除一份冗余缓存及其同步开销
-- [ ] **运行时指标面板** —— Web 面板新增标签，展示进程内存 / CPU、活跃对局数、消息吞吐、引擎崩溃重启次数等运行时指标
+- [x] **运行时指标面板** —— Web 面板新增标签，展示进程内存 / CPU、活跃对局数、消息吞吐、引擎崩溃重启次数等运行时指标
 - [x] **配置保存前校验** —— Web 面板在线编辑 `config.yaml` / `lgtbot.json` 时先解析 + 字段 schema 校验再落盘，避免一个格式错误让 bot 崩溃或引擎启动失败
 - [x] **破坏性操作历史日志** —— 恢复 / 删除 / 清缓存 / 编译等危险端点的「何时 / 做了什么」写入持久化文件并在面板可查，形成可追溯的审计流
 - [ ] **活跃对局的重启 / 崩溃保护** —— 跟踪有进行中对局的群 / 用户，强制重启或主核崩溃恢复后主动推送「对局已中断，请重新开始」；并探索经子进程 runner 对局面快照 / 恢复
@@ -146,11 +147,13 @@ plugins/LGTBot_ElainaBot/
 │   ├── uploader.py          图床上传调度（COS / B站）+ 图片尺寸解析
 │   ├── backup.py            数据备份（创建 / 恢复 / 删除 / 轮转 + 启动自动检查）
 │   ├── audit.py             状态变更操作审计（持久化最近 500 条,record 永不抛异常）
+│   ├── metrics.py           运行指标计数（上传 / 崩溃 / 配额,重启不丢）+ lgtbot.db 统计查询
 │   ├── log_attribution.py   类级 monkey-patch ，把本插件 push 的消息在 Web 面板正确归类
 │   └── webui/               Web 面板拓展页（侧边栏「LGTBot 机器人」/ 多标签）
 │       ├── __init__.py
 │       ├── main.py          入口：页面注册 + 主页面拼装（读 templates/ 并填充占位）+ 隐藏 action 端点路由
-│       ├── page_dashboard.py「仪表盘」标签：版本 / 统计 / 缓存清理 + 检查更新 / git pull / 子模块 update / 缓存清理
+│       ├── page_dashboard.py「仪表盘」标签：版本 / 机器人绑定 / 缓存清理 + 检查更新 / git pull / 子模块 update
+│       ├── page_metrics.py  「指标面板」标签：数据统计 + 运行指标 + 游戏数据（统一刷新）
 │       ├── page_config.py   「配置管理」标签：插件和引擎全部配置的内置编辑器 + 热重载
 │       ├── page_build.py    「引擎编译」标签：子进程 + state.json + build.log + ANSI 解析成结构化段 + 编译动作
 │       ├── page_backup.py   「数据备份」标签：列出 / 创建 / 恢复 / 删除备份 zip
@@ -160,6 +163,7 @@ plugins/LGTBot_ElainaBot/
 │       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
 │           ├── main/        主骨架 / 全局 + 通用 CSS / 公共 JS
 │           ├── dashboard/   「仪表盘」标签 HTML / CSS / JS
+│           ├── metrics/     「指标面板」标签 HTML / CSS / JS
 │           ├── config/      「配置管理」标签 HTML / CSS / JS
 │           ├── build/       「引擎编译」标签 HTML / CSS / JS
 │           ├── backup/      「数据备份」标签 HTML / CSS / JS
@@ -188,6 +192,8 @@ plugins/LGTBot_ElainaBot/
     │   └── build_target_input.json  自定义目标名临时参数（前端 POST 写入）
     ├── audit/               操作审计（WebUI「操作审计」标签使用）
     │   └── audit.json       最近 500 条状态变更记录（重启不丢,滚动淘汰最旧）
+    ├── metrics/             运行指标（WebUI「指标面板」标签使用）
+    │   └── metrics.json     上传 / 崩溃 / 配额计数器（重启不丢）
     └── engine/              引擎内部数据
         ├── lgtbot.json      LGTBot 引擎全局选项（首次启动写入空 JSON）
         ├── lgtbot.db        SQLite（用户 / 对局 / 排行榜）

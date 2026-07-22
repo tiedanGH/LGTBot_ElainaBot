@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-「仪表盘」标签 —— 集中展示版本/统计/引擎配置/缓存，提供一键更新与缓存清理。
+「仪表盘」标签 —— 集中展示版本/机器人绑定/缓存，提供一键更新与缓存清理。
 
 ★ 安全准则 ★
   · **没有任何自动清理 / 自动更新 / 后台定时任务**。所有破坏性动作
@@ -18,15 +18,11 @@
 
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_JS`` 从 ``templates/dashboard/`` 加载
-  · ``get_data()`` 返回所有面板数据(版本、统计、缓存尺寸、引擎配置内容、
+  · ``get_data()`` 返回面板数据(版本、机器人列表、缓存尺寸、引擎配置内容、
     config 文件绝对路径 —— 保存走主框架 ``/api/config-file/save`` 端点)
   · ``render_check_update`` / ``render_do_update`` / ``render_clear_*``
     供 ``webui/main.py`` 注册为隐藏 action 端点(参考 RESTART_KEY 套路),
     每个端点返回 ``<pre id="result">JSON</pre>`` 单片段供 JS 解析
-
-读取 ``lgtbot.db`` 时严格只读(``sqlite3 URI mode=ro``):不开启 WAL,不允
-许任何写路径;插件级 ``user_cache.db`` 走已有的 ``userdb.count_users()``
-接口避免重复打开连接。
 """
 
 from __future__ import annotations
@@ -36,7 +32,6 @@ import html as _html
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 import time
@@ -46,7 +41,7 @@ import urllib.request
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import audit, boot, helpers, state, userdb
+from .. import audit, boot, helpers, state
 from .. import config as _config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -355,51 +350,6 @@ def _semver_gt(a: str, b: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 引擎数据库统计 —— 严格只读
-# ─────────────────────────────────────────────────────────────────────────
-
-# 4 个 COUNT 查询。SELECT COUNT 不写库,只读 URI 连接也不允许写;
-# SQLite 在 read-only 模式下不会创建 -shm/-wal 旁路文件
-_LGTBOT_STAT_SQL = {
-    'lgtbot_users':              'SELECT COUNT(*) FROM user',
-    'lgtbot_matches':            'SELECT COUNT(*) FROM match',
-    'lgtbot_match_attendances':  'SELECT COUNT(*) FROM user_with_match',
-    'lgtbot_achievements':       'SELECT COUNT(*) FROM user_with_achievement',
-}
-
-
-def _query_lgtbot_stats() -> tuple[dict, list]:
-    """返回 ``(stats_dict, errors_list)``;表缺失或查询异常时，对应 stat 为 ``None``。"""
-    stats: dict = {k: None for k in _LGTBOT_STAT_SQL}
-    errors: list = []
-    if not os.path.isfile(boot.DB_PATH):
-        errors.append(f'lgtbot.db 不存在：{boot.DB_PATH}')
-        errors.append('数据库将在引擎启动时自动创建。**请注意：卸载本插件时数据库将被删除，请手动做好数据备份！**')
-        return stats, errors
-    uri = f'file:{boot.DB_PATH}?mode=ro'
-    conn = None
-    try:
-        conn = sqlite3.connect(uri, uri=True, timeout=2.0)
-        for key, sql in _LGTBOT_STAT_SQL.items():
-            try:
-                cur = conn.execute(sql)
-                row = cur.fetchone()
-                stats[key] = int(row[0]) if row else 0
-            except sqlite3.OperationalError as e:
-                errors.append(f'{key}:{e}')
-                stats[key] = None
-    except Exception as e:
-        errors.append(f'打开 lgtbot.db 失败：{e}')
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-    return stats, errors
-
-
-# ─────────────────────────────────────────────────────────────────────────
 # 缓存目录尺寸 —— os.walk 递归累加,避免 du 子进程开销
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -450,9 +400,7 @@ def get_data() -> str:
     commit 留给「检查更新」按钮去查，避免每次页面渲染都打 GitHub API。
     """
     meta = _get_plugin_meta()
-    stats, stat_errs = _query_lgtbot_stats()
     payload = {
-        'query_time': int(time.time()),
         'version': meta.get('version', ''),
         'github_url': meta.get('github', ''),
         'engine_running': bool(boot.is_engine_running()),
@@ -462,11 +410,6 @@ def get_data() -> str:
         'update_hint': _get_update_hint(),
         'bridge': _bridge_repo_link(),
         'submodule': _get_submodule_info(query_remote=False),
-        'stats': {
-            'user_cache_total': userdb.count_users(),
-            **stats,
-            'errors': stat_errs,
-        },
         'cache': _cache_sizes(),
     }
     data_json = json.dumps(payload, ensure_ascii=False, default=str)

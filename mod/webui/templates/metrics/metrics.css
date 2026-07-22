@@ -1,0 +1,93 @@
+/* ───── 指标面板 tab 专属样式 ─────
+   顶部独立标题栏(统一刷新按钮 + 查询时间)+ 三个区共用状态卡 grid;游戏数据区另有 4 张小表的两列自适应网格。 */
+
+/* ── 顶部标题栏 ──
+   header 是本区块唯一内容(action-msg 通常为空且 :empty 隐藏),归零它的margin-bottom,
+   否则下方 = padding-bottom + header margin,比上方 padding 大;
+   同时把标题 / 查询时间 / 刷新按钮整体放大一档。action-msg 出现时靠自身 margin-top 分隔,不受影响。 */
+.metrics-topbar .dash-section-header { margin-bottom: 0; }
+.metrics-topbar .dash-section-title { font-size: 18px; }
+.metrics-topbar .dash-section-meta { font-size: 14px; gap: 10px; }
+.metrics-topbar .dash-btn-small { padding: 6px 14px; font-size: 13px; }
+
+/* ── 状态卡网格(三个区共用) ── */
+.metrics-status-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 12px;
+}
+.metrics-status-card {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.metrics-status-label {
+  font-size: 12px; color: var(--text-muted); font-weight: 500;
+}
+.metrics-status-value {
+  font-size: 18px; font-weight: 600; color: var(--accent);
+  font-family: 'Consolas', 'Menlo', monospace;
+  word-break: break-all;
+}
+/* 数据统计 / 运行指标的数字放大档(与主框架仪表盘统计卡同款字号) */
+.metrics-value-big { font-size: 24px; }
+.metrics-status-sub {
+  font-size: 11px; color: var(--text-faint);
+}
+
+.metrics-action-msg { font-size: 12px; display: block; margin-top: 8px; }
+.metrics-action-msg:empty { display: none; }
+
+/* ── 游戏数据错误提示(lgtbot.db 缺失 / 表缺失) ── */
+.metrics-errors {
+  margin-top: 10px; padding: 8px 12px; font-size: 12px; line-height: 1.7;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-muted);
+}
+
+/* ── 4 张小表的两列自适应网格 ── */
+.metrics-tables {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  margin-top: 12px;
+}
+.metrics-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel);
+}
+.metrics-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  table-layout: fixed;
+}
+.metrics-table thead {
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.metrics-table th {
+  text-align: left; padding: 9px 12px;
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.metrics-table td {
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  color: var(--text); line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.metrics-table tbody tr:last-child td { border-bottom: none; }
+.metrics-table tbody tr:hover { background: var(--hover); }
+.metrics-col-rank  { width: 12%; color: var(--text-muted); }
+.metrics-col-count { width: 22%; font-family: 'Consolas', 'Menlo', monospace; }
+
+.metrics-empty td {
+  text-align: center; padding: 24px 16px;
+  color: var(--text-faint); font-size: 13px;
+}
+
+/* ── 移动端微调 ── */
+@media (max-width: 600px) {
+  .metrics-status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .metrics-status-card { padding: 10px 12px; }
+  .metrics-status-value { font-size: 15px; }
+  .metrics-value-big { font-size: 20px; }
+  .metrics-table th, .metrics-table td { padding: 7px 8px; font-size: 12px; }
+}

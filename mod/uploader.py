@@ -24,6 +24,8 @@ import hashlib
 import time as _time
 from core.base.logger import get_logger, PLUGIN
 
+from . import metrics
+
 log = get_logger(PLUGIN, 'LGTBot')
 
 
@@ -225,6 +227,8 @@ async def _do_upload(data: bytes, filename: str, user_id: str = '') -> str | Non
         return None
 
     url = await fn(hosting, data, filename, user_id)
+    # 指标:一次真实图床往返(dedup 缓存命中与上面的未配置早退都不经过这里)
+    metrics.record_upload(bool(url))
     if url:
         log.info(f'图床 {backend} 上传成功: {url}')
         return url

@@ -270,3 +270,10 @@ def test_config_blocked_commands_keep_strict_slash(monkeypatch):
 
     # 内置项不受配置影响,依旧生效
     assert dispatcher._is_blocked_command('dau')
+
+
+def test_data_stats_command_is_exclusive():
+    """/数据统计 必须在独占表内 —— 否则 catch-all 会把它二次派发进引擎。"""
+    assert dispatcher._is_exclusive_command('数据统计')
+    assert dispatcher._is_exclusive_command('/数据统计')
+    assert not dispatcher._is_exclusive_command('数据统计2')   # 不误伤带参形态
