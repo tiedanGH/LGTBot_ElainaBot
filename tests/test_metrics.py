@@ -279,13 +279,14 @@ def test_trend_10d_always_ten_zero_filled_with_players():
     trend = g['trend_10d']
     assert len(trend) == 10
     today = datetime.now().date()
-    assert trend[-1]['date'] == today.strftime('%Y-%m-%d')
-    assert trend[0]['date'] == (today - timedelta(days=9)).strftime('%Y-%m-%d')
-    assert trend[-1]['count'] == 1 and trend[-1]['players'] == 1
-    assert trend[-3]['count'] == 2               # 2 天前:2 局
-    assert trend[-3]['players'] == 2             # 2 天前:U1/U2 去重
+    # 新→旧:今天在最前(index 0),9 天前在最后
+    assert trend[0]['date'] == today.strftime('%Y-%m-%d')
+    assert trend[-1]['date'] == (today - timedelta(days=9)).strftime('%Y-%m-%d')
+    assert trend[0]['count'] == 1 and trend[0]['players'] == 1     # 今天
+    assert trend[2]['count'] == 2                # 2 天前:2 局
+    assert trend[2]['players'] == 2              # 2 天前:U1/U2 去重
     assert sum(t['count'] for t in trend) == 3   # 12 天前不入窗
-    assert trend[-2]['count'] == 0 and trend[-2]['players'] == 0   # 补零日
+    assert trend[1]['count'] == 0 and trend[1]['players'] == 0     # 1 天前补零日
 
 
 def test_game_stats_missing_db_not_raise():

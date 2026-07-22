@@ -302,7 +302,7 @@ def query_game_stats() -> dict:
 
     参与榜在此完成昵称解析(userdb.get_name)与脱敏兜底(mask_id),
     原始 openid 不出本模块。榜单双口径:本周(近 7 天,面板展示)与今日
-    (/数据统计 指令用)。trend_10d 恒 10 项(缺失日补 0,含今天),
+    (/数据统计 指令用)。trend_10d 恒 10 项(缺失日补 0,含今天,新→旧),
     每项含当日对局数与当日活跃玩家数。
     """
     out: dict = {
@@ -348,14 +348,15 @@ def query_game_stats() -> dict:
         out['top_players_week'] = _players(_TOP_PLAYERS_WEEK_SQL, 'top_players_week')
         out['top_players_today'] = _players(_TOP_PLAYERS_TODAY_SQL, 'top_players_today')
 
-        # 10 日趋势:查询按存在的日期聚合,Python 端补零成恒 10 项(旧→新,含今天)
+        # 10 日趋势:查询按存在的日期聚合,Python 端补零成恒 10 项。
+        # 新→旧排列(今天在最前,越靠近的日期越靠前)。
         matches_by_date = {str(d): int(c)
                            for d, c in _rows(_TREND_MATCHES_SQL, 'trend_10d')}
         players_by_date = {str(d): int(c)
                            for d, c in _rows(_TREND_PLAYERS_SQL, 'trend_players')}
         today = datetime.now().date()
         trend = []
-        for i in range(_TREND_WINDOW_DAYS - 1, -1, -1):
+        for i in range(_TREND_WINDOW_DAYS):
             ds = (today - timedelta(days=i)).strftime('%Y-%m-%d')
             trend.append({'date': ds,
                           'count': matches_by_date.get(ds, 0),
