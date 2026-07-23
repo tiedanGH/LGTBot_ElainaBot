@@ -19,8 +19,11 @@ sudo apt install -y \
     libcurl4-openssl-dev \
     python3-dev \
     libboost-python-dev libboost-system-dev \
-    libgflags-dev libgoogle-glog-dev libsqlite3-dev
+    libgflags-dev libgoogle-glog-dev libsqlite3-dev \
+    qtbase5-dev libqt5webkit5-dev
 ```
+
+> `qtbase5-dev` + `libqt5webkit5-dev` 供 markdown2image 渲染游戏图片（默认 Qt5 WebKit 后端）；缺失时构建会跳过图片支持，引擎将无图片渲染。
 
 ### CentOS / RHEL
 ```bash
@@ -28,7 +31,8 @@ sudo yum install -y \
     gcc-c++ cmake git \
     libcurl-devel python3-devel \
     boost-python3-devel boost-devel \
-    gflags-devel glog-devel sqlite-devel
+    gflags-devel glog-devel sqlite-devel \
+    qt5-qtbase-devel qt5-qtwebkit-devel
 ```
 
 > **C++20 要求**：GCC ≥ 10 / Clang ≥ 12。Ubuntu 20.04 默认 GCC 9，需 `sudo apt install g++-10` 并 `export CXX=g++-10`。

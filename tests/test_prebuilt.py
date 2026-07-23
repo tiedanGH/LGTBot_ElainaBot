@@ -286,14 +286,14 @@ def test_self_check_qt_either_or(monkeypatch):
         return lambda t: t in names
     # 只有 Qt6 → 两行都 ok,Qt5 行 detail 注明已存在 Qt6
     monkeypatch.setattr(pd, '_lib_present', _qt({'libQt6WebEngineCore'}))
-    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if 'WebEngine' in c['name']}
+    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if c['name'].startswith('Qt')}
     assert comp['Qt6']['ok'] and comp['Qt5']['ok'] and 'Qt6' in comp['Qt5']['detail']
     # 只有 Qt5 → 对称
     monkeypatch.setattr(pd, '_lib_present', _qt({'libQt5WebKit'}))
-    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if 'WebEngine' in c['name']}
+    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if c['name'].startswith('Qt')}
     assert comp['Qt5']['ok'] and comp['Qt6']['ok'] and 'Qt5' in comp['Qt6']['detail']
     # 两者皆无 → 都不满足(前端据此标「预编译无需」),仍是可选项
     monkeypatch.setattr(pd, '_lib_present', lambda t: False)
-    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if 'WebEngine' in c['name']}
+    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if c['name'].startswith('Qt')}
     assert not comp['Qt6']['ok'] and not comp['Qt5']['ok']
     assert all(c['optional_prebuilt'] for c in comp.values())
