@@ -90,11 +90,14 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   margin-bottom: 14px; gap: 16px; flex-wrap: wrap;
 }
 .topbar h1 { font-size: 18px; color: var(--accent); }
-.topbar .badge {
-  display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 10px;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent); margin-left: 6px;
+/* 「实时」标签 —— 仅该标签聚焦(.active)时显示,其余标签聚焦时隐藏。透明度由消息日志页「⏸ 自动」开关经 #live-badge 控制。 */
+.tabs .tab .tab-live-badge {
+  display: none;
+  margin-left: 6px; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 500;
+  background: color-mix(in srgb, var(--in) 20%, transparent);
+  color: var(--in); vertical-align: middle;
 }
+.tabs .tab.active .tab-live-badge { display: inline-block; }
 .restart-btn {
   background: var(--panel); color: var(--text);
   border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px;
