@@ -333,3 +333,29 @@ def test_self_check_qt_either_or(monkeypatch):
     comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if c['name'].startswith('Qt')}
     assert not comp['Qt6']['ok'] and not comp['Qt5']['ok']
     assert all(c['optional_prebuilt'] for c in comp.values())
+
+
+def test_self_check_runtime_syslibs():
+    """桥接层 / bot_core 运行时动态链接的系统库应归到 runtime(缺失报红、计入严重异常),
+    而不是 compile 的「预编译无需」;编译期工具(protoc / 各 -dev 头 / CMake)仍留 compile。"""
+    sc = _dash().self_check()
+    rt_names = ' '.join(c['name'] for c in sc['runtime'])
+    for kw in ('Boost.Python', 'Boost.System', 'glog', 'gflags', 'Protobuf 运行时', 'libcurl 运行时', 'SQLite3 运行时'):
+        assert kw in rt_names, f'{kw} 应在 runtime'
+    # runtime 项一律不带 optional_prebuilt(前端据此渲染红点 + 计入严重异常红字)
+    assert all('optional_prebuilt' not in c for c in sc['runtime'])
+    # 编译期工具仍在 compile(灰显、预编译无需)
+    comp_names = ' '.join(c['name'] for c in sc['compile'])
+    assert 'protoc' in comp_names and 'CMake' in comp_names and '开发头' in comp_names
+    # runtime 不应再出现编译期 protoc(Protobuf 运行时只判 .so)
+    assert 'protoc' not in rt_names
+
+
+def test_self_check_runtime_syslib_missing_reports_red(monkeypatch):
+    """系统库缺失时:runtime 项 ok=False(前端红点),detail 给可操作文案,不再是「预编译无需」。"""
+    pd = _dash()
+    monkeypatch.setattr(pd, '_lib_present', lambda t: False)   # 所有 .so 都缺
+    sc = pd.self_check()
+    boost = next(c for c in sc['runtime'] if c['name'].startswith('Boost.Python'))
+    assert boost['ok'] is False
+    assert 'DEPLOY' in boost['detail'] and '预编译无需' not in boost['detail']

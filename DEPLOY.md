@@ -126,6 +126,26 @@ CI 已为 **Ubuntu 22.04 / 24.04、Debian 12** 各预编译一份引擎核心 + 
 
 > 需要改桥接层源码或用未覆盖的发行版 / Python 时，仍走 §3 本地编译。
 
+### 3.2 在 Docker / 纯运行时环境用预编译包所需的运行时库
+
+预编译包只含**引擎自己编译出的产物**，不含它运行时动态链接的系统库。像主框架官方镜像 `python:3.11-slim`（基于 Debian 12，Dockerfile 只 `pip`、无 `apt`）这类纯运行时环境，缺这些库会让 `import LGTBot_ElainaBot` 直接失败——仪表盘「🧪 运行环境自检」的**运行时依赖**会把它们标红。
+
+用哪档包：`python:3.11-slim` = **Debian 12 + Python 3.11**，选 `lgtbot-debian-12-py3.11` 那档（桥接层 `.so` 锁定 Boost.Python ABI，发行版 + Python 小版本必须匹配）。
+
+需补装的**运行时（非 `-dev`）库**——Debian 12 对应包名：
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libboost-python1.74.0 libboost-system1.74.0 \
+        libgoogle-glog0v5 libgflags2.2 libprotobuf32 \
+        libcurl4 libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+- **以自检面板红项为准**：装完「运行时依赖」应全绿;`libsqlite3-0` 在 slim 镜像里通常已自带。
+- 「编译依赖」标灰「预编译无需」可忽略;Qt（仅 markdown2image 出图用）缺失只影响图片渲染，引擎照常启动。
+- 其他发行版包名不同（如 RHEL/CentOS 用 `boost-python3` / `glog` / `gflags` / `protobuf` / `libcurl` / `sqlite-libs`），按自检红项逐一对应安装即可。
+
 ---
 
 ## 4. 启动主框架（零配置）

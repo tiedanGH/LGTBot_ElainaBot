@@ -110,10 +110,29 @@ def _python_dev_present() -> bool:
 
 
 def self_check() -> dict:
-    """收集运行时 + 编译依赖自检数据。编译依赖标 ``optional_prebuilt=True``
-    (预编译模式下不需要)。返回 ``{runtime:[...], compile:[...], mode:{...}}``。"""
+    """收集运行时 + 编译依赖自检数据。
+
+    runtime = 引擎「跑起来」的硬依赖:桥接层 .so / 引擎共享库 / Python 版本,以及桥接层与
+    bot_core **运行时动态链接的系统库**(Boost.Python/System、glog、gflags、Protobuf、
+    libcurl、SQLite3)。缺任一都会让 ``import LGTBot_ElainaBot`` 直接失败,故缺失报红并计入
+    严重异常。预编译包(tools/pack_prebuilt.sh)只含引擎自编译产物、**不含**这些系统库,
+    所以它们绝不是「预编译无需」——纯运行时环境(如主框架的 python:3.11-slim,只 pip 无 apt)
+    缺库正是最容易踩的坑。
+
+    compile = 仅本地从源码编译时才需要(标 ``optional_prebuilt=True``,预编译模式下灰显、
+    不计入异常):CMake、编译器、各 -dev 头、protoc、Qt(仅出图,缺了只是图片渲染坏)。
+    返回 ``{runtime:[...], compile:[...], mode:{...}}``。"""
     active = boot.BUILD_DIR
     engine_libs = glob.glob(os.path.join(active, 'lib*.so')) if os.path.isdir(active) else []
+
+    def _rt_lib(name: str, token: str, note: str = '') -> dict:
+        """运行时系统库项 —— 普通 dict(无 optional_prebuilt),前端渲染红点 dot-bad、
+        计入 dashRenderSelfCheck 的严重异常红字计数。用 .so 判定(``_lib_present``)。"""
+        present = _lib_present(token)
+        base = '已检测到' if present else '未检测到,需安装运行时库(见 DEPLOY)'
+        return {'name': name, 'ok': present,
+                'detail': base + (f'({note})' if note else '')}
+
     runtime = [
         {'name': '桥接层扩展 LGTBot_ElainaBot.so',
          'ok': bool(boot.LGTBOT_AVAILABLE),
@@ -124,6 +143,14 @@ def self_check() -> dict:
         {'name': 'Python 版本',
          'ok': sys.version_info[:2] >= (3, 11),
          'detail': f'{prebuilt.local_python_tag()}(框架要求 3.11+)'},
+        # 桥接层 / bot_core 运行时动态链接的系统库(预编译包不含,缺了 import 直接失败)
+        _rt_lib('Boost.Python 运行时', 'libboost_python'),
+        _rt_lib('Boost.System 运行时', 'libboost_system'),
+        _rt_lib('glog 运行时', 'libglog'),
+        _rt_lib('gflags 运行时', 'libgflags'),
+        _rt_lib('Protobuf 运行时', 'libprotobuf'),   # 只判 .so,protoc 是编译期工具,留在 compile
+        _rt_lib('libcurl 运行时', 'libcurl'),          # 只判 .so,curl.h 头留在 compile
+        _rt_lib('SQLite3 运行时', 'libsqlite3', note='slim 镜像通常自带'),
     ]
 
     which = shutil.which
@@ -137,20 +164,16 @@ def self_check() -> dict:
     compile_deps = [
         _dep('CMake', which('cmake'), which('cmake') or '未安装'),
         _dep('C++ 编译器 (g++/clang++)', cxx, cxx or '未安装'),
-        _dep('libcurl 开发头', _header_present('/usr/include/curl/curl.h') or _lib_present('libcurl')),
+        _dep('libcurl 开发头', _header_present('/usr/include/curl/curl.h')),
         _dep('Python 开发头 (python3-dev)', _python_dev_present(),
              'Python.h ' + ('存在' if _python_dev_present() else '缺失')),
-        _dep('Boost.Python', _lib_present('libboost_python')),
-        _dep('Boost.System', _lib_present('libboost_system')),
-        _dep('gflags', _lib_present('libgflags')),
-        _dep('glog', _lib_present('libglog')),
-        _dep('SQLite3 开发', _header_present('/usr/include/sqlite3.h') or _lib_present('libsqlite3')),
-        _dep('Protobuf', _lib_present('libprotobuf') or which('protoc'), which('protoc') or ''),
+        _dep('SQLite3 开发头', _header_present('/usr/include/sqlite3.h')),
+        _dep('Protobuf 编译器 (protoc)', which('protoc'), which('protoc') or '未安装'),
     ]
 
     # markdown2image 的 HTML 渲染依赖 —— Qt5 用 **WebKit**、Qt6 用 **WebEngine**
     # (上游 markdown2image 在 Qt5 下走 WebKit),**二选一**即可,本地编译才需要。
-    # 有其一则另一项标注「已存在 XXX(二选一即可)」并视为满足;两者皆无 → 都标「预编译无需」。
+    # 缺失仅影响图片渲染(引擎仍能启动),故维持可选、灰显、不报红。
     qt6 = _lib_present('libQt6WebEngineCore')
     qt5 = _lib_present('libQt5WebKit')     # 匹配 libQt5WebKit{,Widgets}*.so
 
@@ -159,7 +182,7 @@ def self_check() -> dict:
             return '已检测到'
         if other:
             return f'已存在 {other_name}'
-        return '未检测到'
+        return '未检测到(缺失仅影响图片渲染)'
 
     compile_deps += [
         _dep('Qt6 WebEngine (markdown2image)', qt6 or qt5, _qt_detail(qt6, qt5, 'Qt5 WebKit')),
