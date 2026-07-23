@@ -27,32 +27,46 @@ log = get_logger(PLUGIN, 'LGTBot')
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR   = os.path.join(PLUGIN_DIR, 'data')
 
-# 本地编译产物(build/)与下载的预编译包(build_prebuilt/)两个候选目录,
-# 用哪个由 data/prebuilt/active marker 决定 —— 见 _resolve_active_build_dir()。
-LOCAL_BUILD_DIR = os.path.join(PLUGIN_DIR, 'build')
-PREBUILT_DIR    = os.path.join(PLUGIN_DIR, 'build_prebuilt')
+# 本地编译产物(build/)与下载的预编译包(build_prebuilt/)两个候选,
+# 用哪个由 data/prebuilt/active marker 决定 —— 见 _resolve_active_build()。
+#
+# 布局差异(关键):本地编译时 .so 在插件根、编译产物在 build/;而预编译包解压后
+# **保留了 zip 内的 build/ 前缀**(见 tools/pack_prebuilt.sh:打包时 .so 放包根、
+# 其余进 build/),即:
+#     build_prebuilt/LGTBot_ElainaBot.so          ← 桥接 .so
+#     build_prebuilt/build/{libbot_core.so, runner, markdown2image, plugins/…}
+# 所以预编译模式下,「桥接 .so 所在目录」(ENGINE_ROOT)与「编译产物目录」(BUILD_DIR)
+# 相差一层,不能混为一谈。
+LOCAL_BUILD_DIR      = os.path.join(PLUGIN_DIR, 'build')
+PREBUILT_DIR         = os.path.join(PLUGIN_DIR, 'build_prebuilt')
+_PREBUILT_BUILD_DIR  = os.path.join(PREBUILT_DIR, 'build')   # 预编译包内真正的编译产物目录
 _ACTIVE_BUILD_MARKER = os.path.join(DATA_DIR, 'prebuilt', 'active')
 
 
-def _resolve_active_build_dir() -> str:
-    """决定引擎从 build/(本地编译)还是 build_prebuilt/(下载的预编译包)加载。
+def _resolve_active_build() -> tuple[str, str]:
+    """决定引擎加载来源,返回 ``(engine_root, build_dir)``。
 
-    读 marker ``data/prebuilt/active``:内容 == ``build_prebuilt`` 且该目录存在 → 用预编译;
-    其余一切情况(marker 缺失 / == ``build`` / 目录不存在)一律回落本地 ``build/``。
-    逻辑放在 boot 内(而非 prebuilt.py)因为 boot 最先 import,
-    不能依赖后加载的模块;切换 marker 后需重启进程才生效(引擎只在 start 时按此路径加载一次)。
+    - ``engine_root``:``import LGTBot_ElainaBot`` 找桥接 .so 的目录。
+    - ``build_dir``:``libbot_core.so`` / runner / markdown2image / ``plugins/`` 所在目录。
+
+    读 marker ``data/prebuilt/active``:内容 == ``build_prebuilt`` 且预编译包已解压
+    (``build_prebuilt/build/`` 存在)→ 用预编译(engine_root=``build_prebuilt/``,
+    build_dir=``build_prebuilt/build/``);其余一切情况(marker 缺失 / == ``build`` /
+    未下载)一律回落本地(engine_root=插件根,build_dir=``build/``)。
+    逻辑放在 boot 内(而非 prebuilt.py)因为 boot 最先 import,不能依赖后加载的模块;
+    切换 marker 后需重启进程才生效(引擎只在 start 时按此路径加载一次)。
     """
     try:
         with open(_ACTIVE_BUILD_MARKER, 'r', encoding='utf-8') as f:
             choice = f.read().strip()
     except OSError:
         choice = ''
-    if choice == 'build_prebuilt' and os.path.isdir(PREBUILT_DIR):
-        return PREBUILT_DIR
-    return LOCAL_BUILD_DIR
+    if choice == 'build_prebuilt' and os.path.isdir(_PREBUILT_BUILD_DIR):
+        return PREBUILT_DIR, _PREBUILT_BUILD_DIR
+    return PLUGIN_DIR, LOCAL_BUILD_DIR
 
 
-BUILD_DIR  = _resolve_active_build_dir()             # 当前生效的编译产物目录
+ENGINE_ROOT, BUILD_DIR = _resolve_active_build()     # (桥接 .so 目录, 编译产物目录)
 ENGINE_DIR = os.path.join(DATA_DIR, 'engine')        # LGTBot 引擎内部文件目录
 GAME_PATH  = os.path.join(BUILD_DIR, 'plugins')      # 各 libgame.so 所在目录
 # 引擎自身的数据 —— 全部归入 data/engine/，让 data/ 根只放插件级用户数据
@@ -85,9 +99,12 @@ def _ensure_lgtbot_conf():
 
 _ensure_lgtbot_conf()
 
-# 让 `import LGTBot_ElainaBot` 能找到同目录下的 .so / .pyd
-if PLUGIN_DIR not in sys.path:
-    sys.path.insert(0, PLUGIN_DIR)
+# 让 `import LGTBot_ElainaBot` 能找到桥接 .so / .pyd。
+# 预编译模式下 .so 在 build_prebuilt/,ENGINE_ROOT 必须排在插件根之前,盖过插件根里
+# 可能残留的本地旧 .so(ABI 可能与预编译包不同);本地模式 ENGINE_ROOT == 插件根,等价原逻辑。
+if ENGINE_ROOT in sys.path:
+    sys.path.remove(ENGINE_ROOT)
+sys.path.insert(0, ENGINE_ROOT)
 
 
 # ──────── C++ 扩展加载 ────────────────────────────────────────────────────

@@ -31,6 +31,10 @@ log = get_logger(PLUGIN, 'LGTBot')
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 
+# 持有后台下载 task 的强引用 —— asyncio 只对运行中的 task 持弱引用,不保存的话
+# task 可能在下载途中被 GC 掉,下载静默中断、state 停在 running。done 回调里移除。
+_bg_tasks: set = set()
+
 
 def _load(name: str) -> str:
     with open(os.path.join(_TEMPLATE_DIR, name), 'r', encoding='utf-8') as f:
@@ -116,7 +120,9 @@ async def download_handler(request: 'web.Request') -> 'web.Response':
         except Exception as e:
             log.error(f'[prebuilt] 后台下载 {name} 异常: {e}')
 
-    asyncio.create_task(_run())
+    task = asyncio.create_task(_run())
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
     return web.json_response({'success': True, 'started': True, 'message': '已开始下载'})
 
 

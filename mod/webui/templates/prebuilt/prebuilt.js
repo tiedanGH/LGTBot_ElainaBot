@@ -227,6 +227,9 @@ function pbStopPoll() { if (_pbPollTimer) { clearInterval(_pbPollTimer); _pbPoll
 async function pbPollOnce() {
   let st;
   try { st = (await pbCallAction(PB_KEYS.state)).state || {}; } catch (e) { return; }
+  // 读到空 state(文件缺失 / 极短暂的写入窗口)时不据此收尾
+  // 后端保证下载期间一定有 running=true 的 state,空只是瞬时,继续轮询等真实进度,别误判「已结束」。
+  if (!st.stage && !st.running) return;
   pbRenderProgress(st);
   if (!st.running) {
     pbStopPoll();

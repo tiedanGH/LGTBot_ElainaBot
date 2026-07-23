@@ -41,8 +41,11 @@ log = get_logger(PLUGIN, 'LGTBot')
 
 
 # ──────── 路径常量 ────────────────────────────────────────────────────────
-PREBUILT_DIR   = boot.PREBUILT_DIR                              # build_prebuilt/
+PREBUILT_DIR   = boot.PREBUILT_DIR                              # build_prebuilt/(桥接 .so 所在)
 LOCAL_BUILD_DIR = boot.LOCAL_BUILD_DIR                          # build/
+# 预编译包解压后保留 build/ 前缀 → 真正的编译产物在 build_prebuilt/build/(见 boot.py)。
+# 「是否已安装可用」以该子目录为准(仅有空的 build_prebuilt/ 不算,boot 会回落本地)。
+_PREBUILT_BUILD_DIR = os.path.join(PREBUILT_DIR, 'build')
 _STAGING_DIR   = os.path.join(boot.PLUGIN_DIR, 'build_prebuilt.staging')
 _PREBUILT_DATA = os.path.join(boot.DATA_DIR, 'prebuilt')
 ACTIVE_MARKER  = os.path.join(_PREBUILT_DATA, 'active')         # 'build' | 'build_prebuilt'
@@ -126,9 +129,22 @@ def current_mode() -> str:
     return 'local'
 
 
+def prebuilt_ready() -> bool:
+    """预编译包是否已下载并可用 —— 以 ``build_prebuilt/build/`` 存在为准。
+
+    与 boot._resolve_active_build() 的判据一致:仅有空的 ``build_prebuilt/`` 不算可用
+    (boot 会因缺 build/ 子目录回落本地),避免 UI 报「已安装」但切过去仍是本地的错觉。
+    """
+    return os.path.isdir(_PREBUILT_BUILD_DIR)
+
+
 def active_mode_running() -> str:
-    """本进程**实际加载**的模式(以 boot 启动时定格的 BUILD_DIR 为准)。"""
-    return 'prebuilt' if boot.BUILD_DIR == PREBUILT_DIR else 'local'
+    """本进程**实际加载**的模式(以 boot 启动时定格的 ENGINE_ROOT 为准)。
+
+    注意用 ENGINE_ROOT 而非 BUILD_DIR:预编译模式下 BUILD_DIR = build_prebuilt/build/
+    (深一层),ENGINE_ROOT = build_prebuilt/ 才等于 PREBUILT_DIR。
+    """
+    return 'prebuilt' if boot.ENGINE_ROOT == PREBUILT_DIR else 'local'
 
 
 def mode_info() -> dict:
@@ -136,16 +152,16 @@ def mode_info() -> dict:
     return {
         'running': active_mode_running(),     # 本进程实际加载的
         'selected': current_mode(),           # marker 最新选择(可能待重启)
-        'prebuilt_installed': os.path.isdir(PREBUILT_DIR),
+        'prebuilt_installed': prebuilt_ready(),
     }
 
 
 def set_mode(use_prebuilt: bool) -> dict:
-    """写 marker 切换模式。切预编译前要求 ``build_prebuilt/`` 已存在(已下载过)。
+    """写 marker 切换模式。切预编译前要求预编译包已下载可用(``build_prebuilt/build/`` 在)。
 
     只写盘、不重启 —— 引擎只在启动时按 BUILD_DIR 加载一次,调用方(UI)提示用户手动重启后生效。
     """
-    if use_prebuilt and not os.path.isdir(PREBUILT_DIR):
+    if use_prebuilt and not prebuilt_ready():
         return {'success': False, 'message': '尚未下载预编译包,无法切换'}
     os.makedirs(_PREBUILT_DATA, exist_ok=True)
     value = 'build_prebuilt' if use_prebuilt else 'build'
@@ -181,10 +197,14 @@ def read_state() -> dict:
 
 
 def _write_state(**kw) -> None:
+    # 原子写:先写 .tmp 再 os.replace,避免前端轮询恰好读到半写文件 → json 解析失败
+    # 退化成空 state,进而误判「已结束」而收尾。
     os.makedirs(_PREBUILT_DATA, exist_ok=True)
+    tmp = STATE_PATH + '.tmp'
     try:
-        with open(STATE_PATH, 'w', encoding='utf-8') as f:
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(kw, f, ensure_ascii=False)
+        os.replace(tmp, STATE_PATH)
     except OSError:
         pass
 
@@ -439,15 +459,25 @@ async def download(asset_name: str, preferred_mirror: str | None = None) -> dict
 
     ``preferred_mirror`` 优先(其次读 marker),失败再按排序兜底其余镜像。
     """
+    # 立刻落盘「下载中」—— 必须在慢速 list_remote() 之前:下载在后台 task 里跑,
+    # 前端收到 HTTP 响应后按 1s 轮询读 state.json。若首个 running=True 迟到(卡在 list_remote 的网络调用后),
+    # 轮询会先读到空 / 上一次遗留的旧 state → 进度条闪一下即隐藏、并误判「已结束」而停止轮询,真实进度再不刷新(刷新页面才恢复)。
+    os.makedirs(_PREBUILT_DATA, exist_ok=True)
+    _write_state(running=True, stage='download', asset=asset_name,
+                 progress=0, downloaded=0, total=0, error='')
+
     loop = asyncio.get_running_loop()
     remote = await loop.run_in_executor(None, list_remote)
     if not remote.get('success'):
-        return {'success': False, 'message': remote.get('error') or '无法获取远程列表'}
+        msg = remote.get('error') or '无法获取远程列表'
+        _write_state(running=False, stage='error', asset=asset_name, error=msg)
+        return {'success': False, 'message': msg}
     asset = next((a for a in remote['assets'] if a['name'] == asset_name), None)
     if asset is None:
-        return {'success': False, 'message': f'未找到预编译包: {asset_name}'}
+        msg = f'未找到预编译包: {asset_name}'
+        _write_state(running=False, stage='error', asset=asset_name, error=msg)
+        return {'success': False, 'message': msg}
 
-    os.makedirs(_PREBUILT_DATA, exist_ok=True)
     _write_state(running=True, stage='download', asset=asset_name,
                  progress=0, downloaded=0, total=asset.get('size', 0), error='')
     try:

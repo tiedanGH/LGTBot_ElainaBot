@@ -106,7 +106,9 @@ def test_set_mode_prebuilt_requires_dir():
 
 
 def test_set_mode_prebuilt_then_local():
-    os.makedirs(prebuilt.PREBUILT_DIR, exist_ok=True)
+    # 预编译「可用」以 build_prebuilt/build/ 存在为准(与 boot 判据一致),仅有空
+    # build_prebuilt/ 不算 —— 故这里要建到 build/ 子目录才允许切换。
+    os.makedirs(os.path.join(prebuilt.PREBUILT_DIR, 'build'), exist_ok=True)
     r = prebuilt.set_mode(True)
     assert r['success'] and prebuilt.current_mode() == 'prebuilt'
     r2 = prebuilt.set_mode(False)
@@ -157,6 +159,31 @@ def test_mode_info_shape():
     mi = prebuilt.mode_info()
     assert set(mi.keys()) == {'running', 'selected', 'prebuilt_installed'}
     assert mi['running'] in ('local', 'prebuilt')
+
+
+def test_prebuilt_ready_requires_build_subdir():
+    # 预编译包解压后保留 build/ 前缀 → 真正可用要 build_prebuilt/build/ 存在;
+    # 仅有空的 build_prebuilt/ 不算(boot 会因缺 build/ 回落本地)。
+    assert not prebuilt.prebuilt_ready()
+    os.makedirs(prebuilt.PREBUILT_DIR, exist_ok=True)
+    assert not prebuilt.prebuilt_ready()               # 只有壳目录,不算就绪
+    os.makedirs(os.path.join(prebuilt.PREBUILT_DIR, 'build'), exist_ok=True)
+    assert prebuilt.prebuilt_ready()                   # build/ 到位才就绪
+    assert prebuilt.mode_info()['prebuilt_installed'] is True
+
+
+def test_extract_then_ready_and_switchable(tmp_path):
+    """端到端:装包 → build_prebuilt/build/ 就绪 → 允许切到预编译(路径布局对齐)。"""
+    pkg = str(tmp_path / 'ok.zip')
+    _build_pkg(pkg, {
+        'LGTBot_ElainaBot.so': b'bridge',
+        'build/libbot_core.so': b'core',
+        'build/plugins/wordle/libgame.so': b'game',
+    })
+    prebuilt._extract_and_swap(pkg)
+    assert prebuilt.prebuilt_ready()
+    r = prebuilt.set_mode(True)
+    assert r['success'] and prebuilt.current_mode() == 'prebuilt'
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -189,7 +189,9 @@ plugins/LGTBot_ElainaBot/
 │   └── plugins/<game>/libgame.so   各游戏插件
 │
 ├── build_prebuilt/          📦 下载的预编译包解压目录（与 build/ 并存）
-│   └── (同 build/ 布局) + manifest.json   包元数据（平台 / Python / sha,用于对比更新）
+│   ├── LGTBot_ElainaBot.so   预编译的桥接层（预编译模式下 boot 从此 import）
+│   ├── build/               编译产物（同顶层 build/ 布局：libbot_core.so / runner / plugins/…）
+│   └── manifest.json        包元数据（平台 / Python / sha,用于对比更新）
 │
 └── data/                    🗂 运行时数据（自动创建）
     ├── config.yaml          插件配置（Web UI 可在线编辑）

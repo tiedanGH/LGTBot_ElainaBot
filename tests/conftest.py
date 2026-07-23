@@ -70,7 +70,9 @@ def _make_fake_boot() -> types.ModuleType:
     m.BUILD_DIR = _TEST_BUILD_DIR
     # 预编译特性:build/(本地编译)与 build_prebuilt/(下载包)两个候选目录 +
     # 当前生效目录 BUILD_DIR(测试里默认指向本地 build)。prebuilt.py 顶层引用。
+    # ENGINE_ROOT = 桥接 .so 所在目录(本地模式 == 插件根);active_mode_running() 用它判定。
     m.LOCAL_BUILD_DIR = _TEST_BUILD_DIR
+    m.ENGINE_ROOT = _TEST_PLUGIN_DIR
     m.PREBUILT_DIR = os.path.join(_TEST_PLUGIN_DIR, 'build_prebuilt')
     m.ENGINE_DIR = os.path.join(_TEST_DATA_DIR, 'engine')
     m.GAME_PATH = os.path.join(_TEST_BUILD_DIR, 'plugins')
