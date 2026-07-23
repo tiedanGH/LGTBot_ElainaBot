@@ -44,7 +44,9 @@ jobs:
     steps:
       - name: Install git (container only)
         if: matrix.container != ''
-        run: apt-get update && apt-get install -y git ca-certificates
+        run: |
+          apt-get update && apt-get install -y git ca-certificates
+          git config --global --add safe.directory '*'
 
       - name: Checkout repository and submodules
         uses: actions/checkout@v4

@@ -56,11 +56,20 @@ def test_parse_asset_valid():
     assert a['url'] == 'https://x/y.zip'
 
 
+def test_parse_asset_accepts_unknown_sha():
+    # 打包机 git 不可用时 sha 段退化成字面量 unknown —— 仍要能解析出来,否则该档
+    # 在列表里被静默丢弃(debian-12 容器里就踩过这个坑)。
+    a = prebuilt._parse_asset({'name': 'lgtbot-debian-12-py3.11-unknown.zip'})
+    assert a is not None
+    assert a['os'] == 'debian-12' and a['python_tag'] == '3.11' and a['sha'] == 'unknown'
+
+
 @pytest.mark.parametrize('name', [
     'lgtbot-ubuntu-24.04.zip',            # 缺 py / sha
     'lgtbot-debian-12-py3.11.zip',        # 缺 sha
     'something-else.zip',
     'lgtbot-ubuntu-24.04-py3.12-abc1234.tar.gz',
+    'lgtbot-debian-12-py3.11-nope.zip',   # sha 段既非 hex 也非 unknown
 ])
 def test_parse_asset_rejects_bad(name):
     assert prebuilt._parse_asset({'name': name}) is None

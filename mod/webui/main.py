@@ -88,6 +88,7 @@ _METRICS_REFRESH_KEY = '__lgtbot_metrics_refresh'
 # 预编译部署标签的无参 action 端点(JS 侧 PREBUILT_KEYS 与此一一对应)
 _PREBUILT_LIST_KEY            = '__lgtbot_prebuilt_list'        # 远程包列表(网络)
 _PREBUILT_STATE_KEY           = '__lgtbot_prebuilt_state'       # 下载进度(轮询)
+_PREBUILT_CANCEL_KEY          = '__lgtbot_prebuilt_cancel'      # 取消下载 + 清理临时文件
 _PREBUILT_SWITCH_LOCAL_KEY    = '__lgtbot_prebuilt_switch_local'    # 切回本地编译
 _PREBUILT_SWITCH_PREBUILT_KEY = '__lgtbot_prebuilt_switch_prebuilt'  # 切到预编译
 # register_route 的 path,必须以 /api/ext/ 开头(core/plugin/web_pages.py 要求)
@@ -389,6 +390,7 @@ def register():
     # 预编译部署 action 端点(远程列表 / 进度轮询 / 本地·预编译切换)
     _register_hidden_action(_PREBUILT_LIST_KEY,            page_prebuilt.render_list)
     _register_hidden_action(_PREBUILT_STATE_KEY,           page_prebuilt.render_state)
+    _register_hidden_action(_PREBUILT_CANCEL_KEY,          page_prebuilt.render_cancel)
     _register_hidden_action(_PREBUILT_SWITCH_LOCAL_KEY,    page_prebuilt.render_switch_local)
     _register_hidden_action(_PREBUILT_SWITCH_PREBUILT_KEY, page_prebuilt.render_switch_prebuilt)
 

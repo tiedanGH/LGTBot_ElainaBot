@@ -6,6 +6,7 @@
 const PB_KEYS = {
   list:           '__lgtbot_prebuilt_list',
   state:          '__lgtbot_prebuilt_state',
+  cancel:         '__lgtbot_prebuilt_cancel',
   switchLocal:    '__lgtbot_prebuilt_switch_local',
   switchPrebuilt: '__lgtbot_prebuilt_switch_prebuilt',
 };
@@ -210,7 +211,12 @@ async function pbRefreshList() {
 function pbRenderProgress(st) {
   const wrap = document.getElementById('pb-progress-wrap');
   if (!wrap) return;
-  if (!st || (!st.running && st.stage !== 'done' && st.stage !== 'error')) { wrap.style.display = 'none'; return; }
+  const cancelBtn = document.getElementById('pb-progress-cancel');
+  if (!st || (!st.running && st.stage !== 'done' && st.stage !== 'error')) {
+    wrap.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    return;
+  }
   wrap.style.display = 'block';
   const pct = st.progress || 0;
   document.getElementById('pb-progress-fill').style.width = pct + '%';
@@ -221,6 +227,26 @@ function pbRenderProgress(st) {
   if (st.stage === 'download' && st.total) sub = pbFmtSize(st.downloaded) + ' / ' + pbFmtSize(st.total);
   else if (st.stage === 'error') sub = st.error || '';
   document.getElementById('pb-progress-sub').textContent = sub;
+  // 取消按钮:仅下载阶段可取消(校验/安装很快且不可干净中断)
+  if (cancelBtn) cancelBtn.style.display = (st.running && st.stage === 'download') ? '' : 'none';
+}
+
+async function pbCancelDownload() {
+  const ok = await dashConfirm('取消当前下载？\n\n将停止下载并删除已下载的未完成文件。', { level: 'warn' });
+  if (!ok) return;
+  const btn = document.getElementById('pb-progress-cancel');
+  if (btn) { btn.disabled = true; btn.textContent = '取消中……'; }
+  try {
+    const data = await pbCallAction(PB_KEYS.cancel);
+    // 立即解除「下载中」UI(不等轮询):停轮询 + 隐藏进度条 + 提示
+    pbStopPoll();
+    pbRenderProgress({ stage: 'cancelled', running: false });
+    pbShowMsg(data.message || '已取消下载', 'info');
+  } catch (e) {
+    pbShowMsg('❌ 取消失败：' + e.message, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✕ 取消'; }
+  }
 }
 function pbStartPoll() { if (!_pbPollTimer) _pbPollTimer = setInterval(pbPollOnce, PB_POLL_MS); }
 function pbStopPoll() { if (_pbPollTimer) { clearInterval(_pbPollTimer); _pbPollTimer = null; } }
@@ -240,6 +266,8 @@ async function pbPollOnce() {
         dashAlert('预编译包已下载安装完成。\n到本页「🔀 构建来源」点「📦 用预编译包」切换，再点右上角「🔁 重启 LGTBot」生效。');
     } else if (st.stage === 'error') {
       pbShowMsg('❌ 下载失败：' + (st.error || ''), 'err');
+    } else if (st.stage === 'cancelled') {
+      pbShowMsg('已取消下载，已删除未完成的下载文件。', 'info');
     }
   }
 }
@@ -337,6 +365,7 @@ window.addEventListener('DOMContentLoaded', () => {
   bind('pb-add-mirror', pbAddCustomMirror);
   bind('pb-list-refresh', pbRefreshList);
   bind('pb-mirror-expand', () => { _pbMirrorExpanded = true; pbRenderMirrorUI(); });
+  bind('pb-progress-cancel', pbCancelDownload);
 
   // 手动上传:按钮触发隐藏 file input;选文件后上传并清空 input(便于重复上传同名文件)
   const upBtn = document.getElementById('pb-upload-btn');

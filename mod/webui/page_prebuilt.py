@@ -34,6 +34,8 @@ _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 # 持有后台下载 task 的强引用 —— asyncio 只对运行中的 task 持弱引用,不保存的话
 # task 可能在下载途中被 GC 掉,下载静默中断、state 停在 running。done 回调里移除。
 _bg_tasks: set = set()
+# 当前正在跑的下载 task(供「取消下载」定位并 task.cancel());done 时清空。
+_download_task = None
 
 
 def _load(name: str) -> str:
@@ -75,6 +77,25 @@ def render_list() -> str:
 
 def render_state() -> str:
     return _fragment({'success': True, 'state': prebuilt.read_state()})
+
+
+def render_cancel() -> str:
+    """取消当前下载 —— 停止后台 task 并删除已下载的未完成文件,解除「下载中」死锁。
+
+    有活动 task:对其 ``task.cancel()``,终态 + 临时文件由 download() 的 CancelledError /
+    finally 收尾(不在这里抢写 state,避免与仍在退出的 task 竞态)。
+    无活动 task(卡死残留 / 进程重启后 state 仍 running):直接强制清理。
+    """
+    task = _download_task
+    if task is not None and not task.done():
+        task.cancel()
+        cancelled, msg = True, '正在取消下载,已删除未完成的文件'
+    else:
+        prebuilt.cancel_cleanup()
+        cancelled, msg = False, '已清理残留下载状态'
+    audit.record('build', '取消预编译下载', '' if cancelled else '(无活动下载,强制清理)',
+                 ok=True, src=audit.SRC_PANEL)
+    return _fragment({'success': True, 'cancelled': cancelled, 'message': msg})
 
 
 def render_switch_local() -> str:
@@ -120,9 +141,18 @@ async def download_handler(request: 'web.Request') -> 'web.Response':
         except Exception as e:
             log.error(f'[prebuilt] 后台下载 {name} 异常: {e}')
 
+    global _download_task
     task = asyncio.create_task(_run())
+    _download_task = task
     _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
+
+    def _on_done(t):
+        global _download_task
+        _bg_tasks.discard(t)
+        if _download_task is t:
+            _download_task = None
+
+    task.add_done_callback(_on_done)
     return web.json_response({'success': True, 'started': True, 'message': '已开始下载'})
 
 

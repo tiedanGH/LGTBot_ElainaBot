@@ -55,7 +55,9 @@ INSTALLED_MANIFEST = os.path.join(PREBUILT_DIR, 'manifest.json')
 
 PREBUILT_TAG = 'prebuilt'
 _DOWNLOAD_TIMEOUT_S = 1800.0     # 预编译包大,给足超时
-_ASSET_RE = re.compile(r'^lgtbot-(?P<os>.+)-py(?P<py>\d+\.\d+)-(?P<sha>[0-9a-f]{7,40})\.zip$')
+# sha 段一般是 7~40 位十六进制;但打包机若 git 不可用(如容器里 dubious ownership),
+# pack_prebuilt.sh 会退化成字面量 ``unknown`` —— 也接受,否则该档会被静默丢弃、列表里看不到。
+_ASSET_RE = re.compile(r'^lgtbot-(?P<os>.+)-py(?P<py>\d+\.\d+)-(?P<sha>[0-9a-f]{7,40}|unknown)\.zip$')
 
 # import 失败时的兜底镜像前缀(空串 = GitHub 直连)。框架可用时以框架排序为准。
 _FALLBACK_MIRRORS = ['', 'https://ghproxy.cc/', 'https://gh-proxy.com/',
@@ -207,6 +209,20 @@ def _write_state(**kw) -> None:
         os.replace(tmp, STATE_PATH)
     except OSError:
         pass
+
+
+def cancel_cleanup() -> None:
+    """兜底清理:删掉下载临时文件 + 把 state 置为「已取消」(running=False)。
+
+    两种场景都用它:① 用户取消时若已无活动下载 task(卡死残留 / 进程重启后 state 仍
+    running);② 活动 task 被 task.cancel() 后,其自身的 CancelledError 分支已写终态,
+    此处不重复调用。核心目的:让前端一定能从「下载中」死锁里解除。
+    """
+    try:
+        os.remove(_DOWNLOAD_TMP)
+    except OSError:
+        pass
+    _write_state(running=False, stage='cancelled', asset='', error='')
 
 
 # ──────── 镜像(复用框架 web.tools._updater,失败兜底)──────────────────────
@@ -505,6 +521,12 @@ async def download(asset_name: str, preferred_mirror: str | None = None) -> dict
         _write_state(running=True, stage='verify', asset=asset_name, progress=100)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, _extract_and_swap, _DOWNLOAD_TMP)
+    except asyncio.CancelledError:
+        # 用户取消(page_prebuilt 对本 task 调 task.cancel()):置「已取消」终态,
+        # finally 会删掉未完成的临时文件。re-raise 让 task 正常标记为已取消。
+        _write_state(running=False, stage='cancelled', asset=asset_name, error='')
+        log.info(f'[prebuilt] 下载已取消: {asset_name}')
+        raise
     except Exception as e:
         log.error(f'[prebuilt] 安装 {asset_name} 失败: {e}')
         _write_state(running=False, stage='error', asset=asset_name, error=str(e))

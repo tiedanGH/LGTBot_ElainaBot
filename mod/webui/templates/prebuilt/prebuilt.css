@@ -52,7 +52,9 @@
 /* ── 下载进度 ── */
 .pb-progress-wrap { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
 .pb-progress-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
-.pb-progress-bar { height: 10px; border-radius: 5px; background: var(--tag-bg); overflow: hidden; }
+.pb-progress-barrow { display: flex; align-items: center; gap: 10px; }
+.pb-progress-bar { flex: 1; height: 10px; border-radius: 5px; background: var(--tag-bg); overflow: hidden; }
+.pb-progress-cancel { flex: none; white-space: nowrap; }
 .pb-progress-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s ease; }
 .pb-progress-sub { font-size: 11px; color: var(--text-faint); margin-top: 6px; font-family: 'Consolas','Menlo',monospace; }
 
