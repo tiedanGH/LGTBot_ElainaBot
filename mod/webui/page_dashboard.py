@@ -148,10 +148,11 @@ def self_check() -> dict:
         _dep('Protobuf', _lib_present('libprotobuf') or which('protoc'), which('protoc') or ''),
     ]
 
-    # Qt WebEngine(markdown2image 渲染用)—— Qt5 / Qt6 **二选一**即可,本地编译才需要。
+    # markdown2image 的 HTML 渲染依赖 —— Qt5 用 **WebKit**、Qt6 用 **WebEngine**
+    # (上游 markdown2image 在 Qt5 下走 WebKit),**二选一**即可,本地编译才需要。
     # 有其一则另一项标注「已存在 XXX(二选一即可)」并视为满足;两者皆无 → 都标「预编译无需」。
     qt6 = _lib_present('libQt6WebEngineCore')
-    qt5 = _lib_present('libQt5WebKit')     # 匹配 libQt5WebKit{,Core,Widgets}*.so
+    qt5 = _lib_present('libQt5WebKit')     # 匹配 libQt5WebKit{,Widgets}*.so
 
     def _qt_detail(mine: bool, other: bool, other_name: str) -> str:
         if mine:
@@ -161,8 +162,8 @@ def self_check() -> dict:
         return '未检测到'
 
     compile_deps += [
-        _dep('Qt6 WebEngine (markdown2image)', qt6 or qt5, _qt_detail(qt6, qt5, 'Qt5 WebEngine')),
-        _dep('Qt5 WebEngine (markdown2image)', qt5 or qt6, _qt_detail(qt5, qt6, 'Qt6 WebEngine')),
+        _dep('Qt6 WebEngine (markdown2image)', qt6 or qt5, _qt_detail(qt6, qt5, 'Qt5 WebKit')),
+        _dep('Qt5 WebKit (markdown2image)', qt5 or qt6, _qt_detail(qt5, qt6, 'Qt6 WebEngine')),
     ]
     return {'runtime': runtime, 'compile': compile_deps, 'mode': prebuilt.mode_info()}
 
