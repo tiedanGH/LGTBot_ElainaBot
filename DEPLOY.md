@@ -9,6 +9,8 @@
 
 目前只支持 **Linux**（lgtbot 引擎依赖 POSIX/Boost.Python，Windows 上编译复杂度极高）。
 
+> 💡 **不想装工具链？** 若你的发行版 / Python 版本在预编译覆盖范围内（Ubuntu 22.04 / 24.04、Debian 12），可直接下载预编译包运行，**跳过本节所有编译依赖**，见 [§3.1 预编译包部署](#31-预编译包部署免本地工具链)。
+
 ### Ubuntu / Debian
 ```bash
 sudo apt update
@@ -103,6 +105,22 @@ bash build.sh --help                   # 查看所有参数
 > 生产部署使用 `bash build.sh` 即可；只有需要跑 LGTBot 自带测试用例时才加 `--test`。
 >
 > ⚠️ 编译完成后 **请勿删除 `build/`** —— LGTBot 引擎运行时会从该目录动态加载游戏 `.so`。
+
+### 3.1 预编译包部署（免本地工具链）
+
+CI 已为 **Ubuntu 22.04 / 24.04、Debian 12** 各预编译一份引擎核心 + 全部游戏，发布到本仓库滚动的 `prebuilt` 预发布 release。若本机在此范围，无需 §1 的编译依赖，直接在 Web 面板下载：
+
+1. 启动主框架后打开 Web 面板 → 侧边栏「LGTBot 机器人」→「📦 预编译部署」tab
+2. 在**仪表盘「🧪 运行环境自检」**看依赖：运行时依赖齐全即可；编译依赖标灰「预编译无需」可忽略
+3. 点「📶 测速」选择延迟低的下载镜像，刷新**预编译包**列表
+4. 在**预编译包**列表选**与本机匹配**（发行版 + Python 版本一致）的包，点「⬇ 下载」，等进度条完成
+5. 到**构建来源**分区点「📦 用预编译包」，再点右上角「🔁 重启 LGTBot」生效
+
+- 预编译包解压到 `plugins/LGTBot_ElainaBot/build_prebuilt/`，与本地 `build/` **并存**，可随时切换（每次切换都需要重启）。
+- 匹配以**发行版 + Python 小版本**为准：桥接层 `.so` 锁定 Boost.Python ABI，不匹配的包无法加载。列表会自动标注并推荐匹配项。
+- 远程有更新时列表按 asset 时间戳 / sha 标「最新」，与已安装 `build_prebuilt/manifest.json` 对比提示。
+
+> 需要改桥接层源码或用未覆盖的发行版 / Python 时，仍走 §3 本地编译。
 
 ---
 
@@ -223,6 +241,7 @@ rm -rf plugins/LGTBot_ElainaBot
 | `git pull` / `git submodule update` 报错 / build.sh 提示「.git/ 不存在」    | 从插件市场安装的目录里没有 `.git/`(市场显式过滤)。打开仪表盘 → 桥接层行点「📥 初始化为 git 仓库」一键修复;再点「⬇ 初始化子模块」拉 lgtbot(已内置 SSH→HTTPS 改写,无需 SSH key)。详见 §2.1                                                                                                                                                                                                                          |
 | `libbot_core.so: cannot open shared object file`                   | `LGTBot_ElainaBot.so` 链接 `libbot_core.so` 但 ld.so 默认不搜 `build/`。本插件已用 `ctypes.CDLL` 在 import 阶段预加载 `build/lib*.so`；若仍报错，确认 `build/libbot_core.so` 存在，或手动 `LD_LIBRARY_PATH=plugins/LGTBot_ElainaBot/build python3 main.py`                                                                                                                          |
 | `ImportError: undefined symbol: ...boost::python...`               | Boost.Python 与编译时的 Python 版本不匹配 — `bash build.sh --clean` 重编译                                                                                                                                                                                                                                                                                      |
+| 切到预编译后引擎起不来 / 桥接 `undefined symbol` / 游戏 spawn 失败                 | 多半是下载的预编译包**与本机发行版 / Python 小版本不匹配**(桥接 `.so` 锁 Boost.Python ABI)。在「📦 预编译部署」列表按标注选**本机匹配**的包重下;`config_runner` / `match_game_runner` 的路径由 `boot.py` 自动重定位(设 `LGTBOT_MATCH_RUNNER` + `LD_LIBRARY_PATH` + 桥接传 `config_runner_path_`),若仍失败切回「🧱 用本地编译」并重启,或用 §3 本地编译                                                                          |
 | `Load mod failed: ... undefined symbol: _ZN6google10LogMessage...` | 仅在 `--glog` 编译时可能出现（glog 默认关闭，一般不会遇到）。glog 符号不可见，本插件已在 `main.py` 用 `RTLD_GLOBAL` 解决；若仍出现，试 `LD_PRELOAD=$(ldconfig -p \| grep libglog \| awk '{print $4}' \| head -1) python3 main.py`，或干脆不加 `--glog` 重编                                                                                                                                          |
 | `图片渲染失败 (markdown2image 调用未生成文件)` 或 `markdown2image 二进制缺失`         | 本插件在 `import` 时会切到 `build/` 目录让 LGTBot 找到 `markdown2image`。若仍报错：① 检查 `plugins/LGTBot_ElainaBot/build/markdown2image` 是否存在并可执行（`chmod +x`）；② 手动测试 `cd build && echo '# hi' \| ./markdown2image --output /tmp/x.png --width 400 --nowith_css --noprint_info`；③ 部分游戏依赖字体，需 `apt install fonts-noto-cjk`。不影响游戏核心运行，仅影响图片输出                             |
 | `LGTBot 引擎启动失败`                                                    | 查 `build/plugins/` 下是否有各 `libgame.so`；首次编译需要等待所有 game 子项编译完成                                                                                                                                                                                                                                                                                       |

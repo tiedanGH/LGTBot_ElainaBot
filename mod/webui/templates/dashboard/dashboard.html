@@ -11,6 +11,7 @@
         <span id="dash-update-hint" class="dash-badge dash-badge-warn" style="display:none"></span>
       </div>
       <div class="dash-version-actions">
+        <button id="dash-prebuilt-jump" class="dash-btn dash-btn-warn" style="display:none" title="引擎未运行，可下载预编译包免编译部署">📦 预编译部署</button>
         <button id="dash-check-update" class="dash-btn dash-btn-primary">🔍 检查更新</button>
       </div>
     </div>
@@ -51,6 +52,22 @@
     </p>
     <div id="dash-bot-list" class="dash-bot-list"></div>
     <div id="dash-bot-msg" class="dash-cache-msg"></div>
+  </section>
+
+  <!-- ──── 运行环境自检 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🧪 运行环境自检</h2>
+      <button id="dash-selfcheck-refresh" class="dash-btn dash-btn-small">🔄 重新检测</button>
+    </div>
+    <div class="dash-check-group">
+      <div class="dash-check-title">运行时依赖 <span class="dash-check-note">（引擎运行必须）</span></div>
+      <div id="dash-runtime-list" class="dash-check-grid"><div class="dash-check-empty">检测中……</div></div>
+    </div>
+    <div class="dash-check-group">
+      <div class="dash-check-title">引擎编译依赖 <span class="dash-check-note">（用预编译包则无需，见「📦 预编译部署」）</span></div>
+      <div id="dash-compile-list" class="dash-check-grid"><div class="dash-check-empty">检测中……</div></div>
+    </div>
   </section>
 
   <!-- ──── 进行中的对局 ──── -->

@@ -1,0 +1,64 @@
+/* ───── 预编译部署 tab 专属样式 ─────
+   容器 .prebuilt 的 flex/gap 与仪表盘统一在 main.css(共享 selector);
+   这里只定义本 tab 特有的构建来源切换、镜像折叠列表、包表格、下载进度。 */
+
+.pb-hint { font-size: 12px; color: var(--text-muted); line-height: 1.7; margin: 4px 0 10px; }
+
+/* ── 构建来源切换 ── */
+.pb-source-row {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.pb-source-row .pb-hint { flex: 1 1 320px; margin: 0; }
+.pb-switch-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pb-switch-note { font-size: 12px; color: var(--img); margin-top: 8px; }
+.pb-switch-note:empty { display: none; }
+
+/* ── 下载镜像 ── */
+.pb-mirror-summary {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+}
+.pb-mirror-summary-label { font-size: 12px; color: var(--text-muted); }
+.pb-mirror-list { display: flex; flex-direction: column; gap: 6px; }
+.pb-mirror-empty { font-size: 12px; color: var(--text-faint); padding: 10px 0; }
+.pb-mirror-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2);
+}
+.pb-mirror-row.pb-mirror-chosen { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.pb-mirror-name { font-family: 'Consolas','Menlo',monospace; word-break: break-all; font-size: 12px; }
+.pb-mirror-lat { margin-left: auto; font-family: 'Consolas','Menlo',monospace; font-size: 12px; white-space: nowrap; }
+.pb-mirror-ok { color: var(--in); }
+.pb-mirror-bad { color: var(--text-faint); }
+.pb-mirror-chosen-tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+
+/* ── 包表格 ── */
+.pb-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); margin-top: 10px; }
+.pb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pb-table thead { background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.pb-table th { text-align: left; padding: 9px 12px; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.pb-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.pb-table tbody tr:last-child td { border-bottom: none; }
+.pb-table tbody tr:hover { background: var(--hover); }
+.pb-row-match { background: color-mix(in srgb, var(--in) 7%, transparent); }
+.pb-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
+.pb-tag-latest    { background: color-mix(in srgb, var(--out) 18%, transparent); color: var(--out); }
+.pb-tag-match     { background: color-mix(in srgb, var(--in) 18%, transparent);  color: var(--in); }
+.pb-tag-mismatch  { background: color-mix(in srgb, var(--img) 18%, transparent); color: var(--img); }
+.pb-tag-installed { background: color-mix(in srgb, var(--text-faint) 18%, transparent); color: var(--text-faint); }
+.pb-empty td { text-align: center; padding: 24px 16px; color: var(--text-faint); font-size: 13px; }
+
+/* ── 下载进度 ── */
+.pb-progress-wrap { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.pb-progress-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+.pb-progress-bar { height: 10px; border-radius: 5px; background: var(--tag-bg); overflow: hidden; }
+.pb-progress-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s ease; }
+.pb-progress-sub { font-size: 11px; color: var(--text-faint); margin-top: 6px; font-family: 'Consolas','Menlo',monospace; }
+
+.pb-msg { font-size: 12px; margin-top: 10px; }
+.pb-msg:empty { display: none; }
+
+@media (max-width: 600px) {
+  .pb-mirror-lat { margin-left: 0; }
+}

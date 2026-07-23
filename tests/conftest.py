@@ -68,6 +68,10 @@ def _make_fake_boot() -> types.ModuleType:
     m.PLUGIN_DIR = _TEST_PLUGIN_DIR
     m.DATA_DIR = _TEST_DATA_DIR
     m.BUILD_DIR = _TEST_BUILD_DIR
+    # 预编译特性:build/(本地编译)与 build_prebuilt/(下载包)两个候选目录 +
+    # 当前生效目录 BUILD_DIR(测试里默认指向本地 build)。prebuilt.py 顶层引用。
+    m.LOCAL_BUILD_DIR = _TEST_BUILD_DIR
+    m.PREBUILT_DIR = os.path.join(_TEST_PLUGIN_DIR, 'build_prebuilt')
     m.ENGINE_DIR = os.path.join(_TEST_DATA_DIR, 'engine')
     m.GAME_PATH = os.path.join(_TEST_BUILD_DIR, 'plugins')
     m.DB_PATH = os.path.join(m.ENGINE_DIR, 'lgtbot.db')

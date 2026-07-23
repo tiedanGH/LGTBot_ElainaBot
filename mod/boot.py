@@ -25,8 +25,34 @@ log = get_logger(PLUGIN, 'LGTBot')
 # ──────── 路径常量 ────────────────────────────────────────────────────────
 # __file__ → plugins/LGTBot_ElainaBot/mod/boot.py  → 插件根目录是其上一级的上一级
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BUILD_DIR  = os.path.join(PLUGIN_DIR, 'build')
 DATA_DIR   = os.path.join(PLUGIN_DIR, 'data')
+
+# 本地编译产物(build/)与下载的预编译包(build_prebuilt/)两个候选目录,
+# 用哪个由 data/prebuilt/active marker 决定 —— 见 _resolve_active_build_dir()。
+LOCAL_BUILD_DIR = os.path.join(PLUGIN_DIR, 'build')
+PREBUILT_DIR    = os.path.join(PLUGIN_DIR, 'build_prebuilt')
+_ACTIVE_BUILD_MARKER = os.path.join(DATA_DIR, 'prebuilt', 'active')
+
+
+def _resolve_active_build_dir() -> str:
+    """决定引擎从 build/(本地编译)还是 build_prebuilt/(下载的预编译包)加载。
+
+    读 marker ``data/prebuilt/active``:内容 == ``build_prebuilt`` 且该目录存在 → 用预编译;
+    其余一切情况(marker 缺失 / == ``build`` / 目录不存在)一律回落本地 ``build/``。
+    逻辑放在 boot 内(而非 prebuilt.py)因为 boot 最先 import,
+    不能依赖后加载的模块;切换 marker 后需重启进程才生效(引擎只在 start 时按此路径加载一次)。
+    """
+    try:
+        with open(_ACTIVE_BUILD_MARKER, 'r', encoding='utf-8') as f:
+            choice = f.read().strip()
+    except OSError:
+        choice = ''
+    if choice == 'build_prebuilt' and os.path.isdir(PREBUILT_DIR):
+        return PREBUILT_DIR
+    return LOCAL_BUILD_DIR
+
+
+BUILD_DIR  = _resolve_active_build_dir()             # 当前生效的编译产物目录
 ENGINE_DIR = os.path.join(DATA_DIR, 'engine')        # LGTBot 引擎内部文件目录
 GAME_PATH  = os.path.join(BUILD_DIR, 'plugins')      # 各 libgame.so 所在目录
 # 引擎自身的数据 —— 全部归入 data/engine/，让 data/ 根只放插件级用户数据
@@ -73,6 +99,23 @@ _old_cwd = os.getcwd()
 _chdir_ok = os.path.isdir(BUILD_DIR)
 if _chdir_ok:
     os.chdir(BUILD_DIR)
+
+
+# ──────── 预编译包可重定位 env ────────────────────────────────────────────
+# CI 编译机的绝对路径会被烤进 match_game_runner / config_runner。预编译包解压到
+# 用户任意路径后这些路径失效,需运行时覆盖:
+#   · match_game_runner —— 认 LGTBOT_MATCH_RUNNER 环境变量(见 match.cc:ResolveRunnerExe)
+#   · 子进程 runner 找 build/ 里的 libbot_core.so 等 —— 靠 LD_LIBRARY_PATH(preload
+#     只对本 Python 进程生效,不传播给 spawn 出的 runner 子进程)
+# (config_runner 无环境变量入口,由桥接层 Start() 传 config_runner_path_ 覆盖。)
+# 本地编译路径正确时设这些是幂等的(值本就指向 build/),无副作用。
+if _chdir_ok:
+    _match_runner = os.path.join(BUILD_DIR, 'match_game_runner')
+    if os.path.isfile(_match_runner):
+        os.environ['LGTBOT_MATCH_RUNNER'] = _match_runner
+    _ld = os.environ.get('LD_LIBRARY_PATH', '')
+    if BUILD_DIR not in _ld.split(os.pathsep):
+        os.environ['LD_LIBRARY_PATH'] = BUILD_DIR + (os.pathsep + _ld if _ld else '')
 
 
 # ──────── 预加载本地共享库 ────────────────────────────────────────────────

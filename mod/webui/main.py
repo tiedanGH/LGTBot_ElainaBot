@@ -44,7 +44,8 @@ import os
 from core.plugin import web_pages
 from .. import audit, metrics
 from .. import state as _plugin_state
-from . import page_audit, page_backup, page_build, page_config, page_dashboard, page_logs, page_metrics, page_users
+from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
+               page_logs, page_metrics, page_prebuilt, page_users)
 
 
 PAGE_KEY = 'lgtbot'
@@ -84,6 +85,11 @@ _BACKUP_LIST_KEY    = '__lgtbot_backup_list'
 _AUDIT_LIST_KEY     = '__lgtbot_audit_list'
 # 指标面板标签的唯一 action 端点(统一刷新:数据统计 + 运行指标 + 游戏数据)
 _METRICS_REFRESH_KEY = '__lgtbot_metrics_refresh'
+# 预编译部署标签的无参 action 端点(JS 侧 PREBUILT_KEYS 与此一一对应)
+_PREBUILT_LIST_KEY            = '__lgtbot_prebuilt_list'        # 远程包列表(网络)
+_PREBUILT_STATE_KEY           = '__lgtbot_prebuilt_state'       # 下载进度(轮询)
+_PREBUILT_SWITCH_LOCAL_KEY    = '__lgtbot_prebuilt_switch_local'    # 切回本地编译
+_PREBUILT_SWITCH_PREBUILT_KEY = '__lgtbot_prebuilt_switch_prebuilt'  # 切到预编译
 # register_route 的 path,必须以 /api/ext/ 开头(core/plugin/web_pages.py 要求)
 _BACKUP_RESTORE_ROUTE = '/api/ext/lgtbot/backup/restore'
 _BACKUP_DELETE_ROUTE  = '/api/ext/lgtbot/backup/delete'
@@ -91,6 +97,11 @@ _BACKUP_DELETE_ROUTE  = '/api/ext/lgtbot/backup/delete'
 _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
 # 带 schema 校验的配置保存(config.yaml / lgtbot.json),POST body 传内容
 _CONFIG_SAVE_ROUTE    = '/api/ext/lgtbot/config/save'
+# 预编译下载(POST {name,mirror?},后台起 task)/ 镜像测速(POST {customs?})/ 记住下载镜像(POST {mirror})
+_PREBUILT_DOWNLOAD_ROUTE    = '/api/ext/lgtbot/prebuilt/download'
+_PREBUILT_TESTMIRRORS_ROUTE = '/api/ext/lgtbot/prebuilt/test-mirrors'
+_PREBUILT_MIRROR_ROUTE      = '/api/ext/lgtbot/prebuilt/mirror'
+_PREBUILT_UPLOAD_ROUTE      = '/api/ext/lgtbot/prebuilt/upload'   # 手动上传包(multipart)
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
@@ -122,6 +133,10 @@ _HIDDEN_KEYS = frozenset({
     _BACKUP_LIST_KEY,
     _AUDIT_LIST_KEY,
     _METRICS_REFRESH_KEY,
+    _PREBUILT_LIST_KEY,
+    _PREBUILT_STATE_KEY,
+    _PREBUILT_SWITCH_LOCAL_KEY,
+    _PREBUILT_SWITCH_PREBUILT_KEY,
 })
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
@@ -152,6 +167,7 @@ def _render_html() -> str:
             .replace('__USERS_CSS__', page_users.TAB_CSS)
             .replace('__BACKUP_CSS__', page_backup.TAB_CSS)
             .replace('__AUDIT_CSS__', page_audit.TAB_CSS)
+            .replace('__PREBUILT_CSS__', page_prebuilt.TAB_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
             .replace('__METRICS_HTML__', page_metrics.TAB_HTML)
             .replace('__CONFIG_HTML__', page_config.TAB_HTML)
@@ -160,6 +176,7 @@ def _render_html() -> str:
             .replace('__USERS_HTML__', page_users.TAB_HTML)
             .replace('__BACKUP_HTML__', page_backup.TAB_HTML)
             .replace('__AUDIT_HTML__', page_audit.TAB_HTML)
+            .replace('__PREBUILT_HTML__', page_prebuilt.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
             .replace('__METRICS_DATA__', page_metrics.get_data())
             .replace('__CONFIG_DATA__', page_config.get_data())
@@ -168,6 +185,7 @@ def _render_html() -> str:
             .replace('__USER_DATA__', page_users.get_data())
             .replace('__BACKUP_DATA__', page_backup.get_data())
             .replace('__AUDIT_DATA__', page_audit.get_data())
+            .replace('__PREBUILT_DATA__', page_prebuilt.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
             .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
             .replace('__METRICS_JS__', page_metrics.TAB_JS)
@@ -177,6 +195,7 @@ def _render_html() -> str:
             .replace('__USERS_JS__', page_users.TAB_JS)
             .replace('__BACKUP_JS__', page_backup.TAB_JS)
             .replace('__AUDIT_JS__', page_audit.TAB_JS)
+            .replace('__PREBUILT_JS__', page_prebuilt.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
             .replace('__RESTART_KEY__', RESTART_KEY)
             .replace('__PLANNED_RESTART_KEY__', PLANNED_RESTART_KEY)
@@ -366,10 +385,22 @@ def register():
 
     # 指标面板 action 端点(统一刷新:数据统计 + 运行指标 + 游戏数据)
     _register_hidden_action(_METRICS_REFRESH_KEY, page_metrics.render_refresh)
+
+    # 预编译部署 action 端点(远程列表 / 进度轮询 / 本地·预编译切换)
+    _register_hidden_action(_PREBUILT_LIST_KEY,            page_prebuilt.render_list)
+    _register_hidden_action(_PREBUILT_STATE_KEY,           page_prebuilt.render_state)
+    _register_hidden_action(_PREBUILT_SWITCH_LOCAL_KEY,    page_prebuilt.render_switch_local)
+    _register_hidden_action(_PREBUILT_SWITCH_PREBUILT_KEY, page_prebuilt.render_switch_prebuilt)
+
     web_pages.register_route('GET', _BACKUP_RESTORE_ROUTE, page_backup.restore_handler, auth=True)
     web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
     web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)
     web_pages.register_route('POST', _CONFIG_SAVE_ROUTE, page_config.save_config_handler, auth=True)
+    # 预编译:下载 / 镜像测速 / 记住下载镜像(均 POST)
+    web_pages.register_route('POST', _PREBUILT_DOWNLOAD_ROUTE, page_prebuilt.download_handler, auth=True)
+    web_pages.register_route('POST', _PREBUILT_TESTMIRRORS_ROUTE, page_prebuilt.test_mirrors_handler, auth=True)
+    web_pages.register_route('POST', _PREBUILT_MIRROR_ROUTE, page_prebuilt.mirror_select_handler, auth=True)
+    web_pages.register_route('POST', _PREBUILT_UPLOAD_ROUTE, page_prebuilt.upload_handler, auth=True)
 
     _ensure_get_pages_filters_hidden()
 
@@ -385,5 +416,9 @@ def unregister():
     web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
     web_pages.unregister_route('GET', _BIND_BOT_ROUTE)
     web_pages.unregister_route('POST', _CONFIG_SAVE_ROUTE)
+    web_pages.unregister_route('POST', _PREBUILT_DOWNLOAD_ROUTE)
+    web_pages.unregister_route('POST', _PREBUILT_TESTMIRRORS_ROUTE)
+    web_pages.unregister_route('POST', _PREBUILT_MIRROR_ROUTE)
+    web_pages.unregister_route('POST', _PREBUILT_UPLOAD_ROUTE)
     # get_pages 的 wrap 不主动 unwrap:其它插件可能后续也加了包装,贸然恢复会断链。
     # 留着的副作用仅是过滤一组已不存在的 key,无害。

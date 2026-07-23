@@ -1,0 +1,82 @@
+<div class="prebuilt">
+
+  <!-- ──── 构建来源 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🔀 构建来源</h2>
+      <span id="pb-mode-badge" class="dash-badge">当前运行：—</span>
+    </div>
+    <div class="pb-source-row">
+      <p class="pb-hint">
+        选择引擎从<b>本地编译</b>（<code class="dash-mono">build/</code>）还是<b>下载的预编译包</b>
+        （<code class="dash-mono">build_prebuilt/</code>）加载。两份产物并存、可随时来回切，
+        切换后需<b>重启 LGTBot</b> 才生效。
+      </p>
+      <div class="pb-switch-actions">
+        <button id="pb-use-local" class="dash-btn">🧱 用本地编译</button>
+        <button id="pb-use-prebuilt" class="dash-btn dash-btn-primary">📦 用预编译包</button>
+      </div>
+    </div>
+    <div id="pb-switch-note" class="pb-switch-note"></div>
+  </section>
+
+  <!-- ──── 下载镜像 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🌐 下载镜像</h2>
+      <div class="dash-section-meta">
+        <button id="pb-add-mirror" class="dash-btn">➕ 自定义镜像</button>
+        <button id="pb-test-mirrors" class="dash-btn">📶 测速</button>
+      </div>
+    </div>
+    <p class="pb-hint">预编译包较大，选延迟低的镜像可显著加快下载。</p>
+    <!-- 折叠态:只展示已选镜像 + 展开重选 -->
+    <div id="pb-mirror-summary" class="pb-mirror-summary" style="display:none">
+      <span class="pb-mirror-summary-label">当前下载镜像</span>
+      <span id="pb-mirror-summary-name" class="pb-mirror-name">—</span>
+      <button id="pb-mirror-expand" class="dash-btn dash-btn-small">展开重选</button>
+    </div>
+    <!-- 展开态:测速结果列表(默认未选择时展开) -->
+    <div id="pb-mirror-list" class="pb-mirror-list">
+      <div class="pb-mirror-empty">点「📶 测速」按延迟排序后逐个选择，或「➕ 自定义镜像」添加自己的代理。</div>
+    </div>
+  </section>
+
+  <!-- ──── 预编译包列表 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📦 预编译包</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">本机</span>
+        <span id="pb-local-plat" class="dash-meta-value dash-mono">—</span>
+        <button id="pb-upload-btn" class="dash-btn" title="手动上传本地已下载的预编译包 zip">⬆ 上传预编译包</button>
+        <input id="pb-upload-input" type="file" accept=".zip,application/zip" style="display:none">
+        <button id="pb-list-refresh" class="dash-btn">🔄 刷新列表</button>
+      </div>
+    </div>
+    <div class="pb-table-wrap">
+      <table class="pb-table">
+        <thead>
+          <tr>
+            <th>发行版</th><th>Python</th><th>大小</th><th>构建时间</th><th>状态</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="pb-table-body">
+          <tr class="pb-empty"><td colspan="6">点击「🔄 刷新列表」从远程获取</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 下载进度 -->
+    <div id="pb-progress-wrap" class="pb-progress-wrap" style="display:none">
+      <div class="pb-progress-head">
+        <span id="pb-progress-label">下载中……</span>
+        <span id="pb-progress-pct" class="dash-mono">0%</span>
+      </div>
+      <div class="pb-progress-bar"><div id="pb-progress-fill" class="pb-progress-fill"></div></div>
+      <div id="pb-progress-sub" class="pb-progress-sub"></div>
+    </div>
+    <div id="pb-list-msg" class="pb-msg"></div>
+  </section>
+
+</div>

@@ -183,7 +183,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .config-tab,
 .backup,
 .audit,
-.metrics { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
+.metrics,
+.prebuilt { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
 
 .dash-section {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -346,12 +347,6 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   background: color-mix(in srgb, var(--in) 22%, var(--panel));
   border-color: color-mix(in srgb, var(--in) 60%, var(--border));
 }
-/* .dash-badge-err:badge 的红色变体,与 .dash-msg-err 的字色一致但用作
-   实心 chip 背景 —— 编译失败 / 危险状态显示 */
-.dash-badge-err {
-  background: color-mix(in srgb, #dc3545 18%, transparent);
-  color: #dc3545;
-}
 
 /* ═════════════════════════════════════════════════════════════════════════
    窄屏(手机)适配
@@ -380,5 +375,6 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   .config-tab,
   .backup,
   .audit,
-  .metrics { gap: 10px; }
+  .metrics,
+  .prebuilt { gap: 10px; }
 }

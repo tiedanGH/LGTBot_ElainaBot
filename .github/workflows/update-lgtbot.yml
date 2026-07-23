@@ -12,6 +12,8 @@ jobs:
   update-lgtbot:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.detect.outputs.changed }}
 
     steps:
       - name: Checkout repository
@@ -36,18 +38,26 @@ jobs:
           git pull origin $branch;
 
       - name: Detect changes
+        id: detect
         run: |
           git add lgtbot
           if git diff --staged --quiet; then
-            echo "changes=false" >> $GITHUB_ENV
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            echo "changes=true" >> $GITHUB_ENV
+            echo "changed=true" >> "$GITHUB_OUTPUT"
             git diff --staged --stat
           fi
 
       - name: Commit & push
-        if: env.changes == 'true'
+        if: steps.detect.outputs.changed == 'true'
         run: |
           new_hash=$(git -C lgtbot rev-parse --short HEAD)
           git commit -m "update lgtbot submodule to ${new_hash}"
           git push origin HEAD:main
+
+  # 子模块有更新 → 重打预编译包
+  trigger-prebuilt:
+    needs: update-lgtbot
+    if: needs.update-lgtbot.outputs.changed == 'true'
+    uses: ./.github/workflows/prebuilt.yml
+    secrets: inherit

@@ -848,8 +848,8 @@ def toggle_planned_restart() -> tuple[bool, str]:
     now_on = not state.is_planned_restart()
     state.set_planned_restart(now_on)
     if now_on:
-        log.warning('🚧 [计划重启] 维护模式已启用：新游戏创建已禁用')
-        return True, '🚧 计划重启已启用：新游戏创建已禁用。'
+        log.warning('🚧 [计划重启] 维护模式已启用：禁用新游戏创建')
+        return True, '🚧 计划重启已启用：已禁用新游戏创建。'
     log.warning('✅ [计划重启] 维护模式已取消：恢复新游戏创建')
     return False, '✅ 计划重启已取消：已恢复新游戏创建。'
 

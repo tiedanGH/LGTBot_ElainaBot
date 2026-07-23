@@ -971,12 +971,28 @@ bool Start(
     InstallSigSegvHandler(game_path);
 
     ReleaseGIL r;
+
+    // 预编译包可解压到用户任意路径,而 config_runner 的绝对路径在编译期被 -DCONFIG_RUNNER_PATH 烤进 libbot_core(bot_ctx.cc 的 #ifndef 使其成为 fallback)。
+    // config_runner 没有环境变量入口,唯一运行时覆盖是 LGTBot_Option.config_runner_path_(bot_core.h)。
+    // 这里从 game_path (= <build>/plugins)反推出 <build>,拼出随包移动的绝对路径。(match_game_runner 走 LGTBOT_MATCH_RUNNER 环境变量,由 boot.py 设置。)
+    // runner_path 只需在 LGTBot_Create 返回前有效 —— 引擎在 LoadGameModules 内立即把它拷进 std::string,故此处栈上 string 安全。Linux only,径分隔符恒为 '/'。
+    std::string config_runner_path;
+    if (game_path && game_path[0] != '\0') {
+        std::string gp(game_path);
+        while (gp.size() > 1 && gp.back() == '/') gp.pop_back();
+        const size_t slash = gp.find_last_of('/');
+        if (slash != std::string::npos) {
+            config_runner_path = gp.substr(0, slash) + "/config_runner";
+        }
+    }
+
     const LGTBot_Option option {
         .game_path_  = game_path,
         .db_path_    = db_path,
         .conf_path_  = std::strlen(conf_path) == 0 ? nullptr : conf_path,
         .image_path_ = image_path,
         .admins_     = admins,
+        .config_runner_path_ = config_runner_path.empty() ? nullptr : config_runner_path.c_str(),
         .callbacks_  = LGTBot_Callback{
             .get_user_name         = GetUserName,
             .get_user_name_in_group = GetUserNameInGroup,

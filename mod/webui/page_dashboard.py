@@ -28,6 +28,7 @@ Python 侧职责:
 from __future__ import annotations
 
 import asyncio
+import glob
 import html as _html
 import json
 import os
@@ -41,7 +42,7 @@ import urllib.request
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import audit, boot, helpers, state, userdb
+from .. import audit, boot, helpers, prebuilt, state, userdb
 from .. import config as _config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -57,6 +58,113 @@ def _load(name: str) -> str:
 TAB_HTML = _load('dashboard/dashboard.html')
 TAB_CSS = _load('dashboard/dashboard.css')
 TAB_JS = _load('dashboard/dashboard.js')
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 运行环境自检 —— 运行时依赖(引擎运行必须)+ 编译依赖(本地编译才需,预编译模式可免)。
+# 构建来源 mode 仍取 ``prebuilt.mode_info()``。
+# ``get_data()`` 把结果塞进 dashboard-data,前端 dashboard.js 的 dashRenderSelfCheck 渲染成检查项网格。
+# 编译依赖列表覆盖 build.sh 依赖检查 + apt 清单 + CI(cmake.yml)所装。
+# ─────────────────────────────────────────────────────────────────────────
+
+_LIB_DIRS = (
+    '/usr/lib', '/usr/lib64', '/usr/local/lib', '/usr/local/lib64',
+    '/usr/lib/x86_64-linux-gnu',
+)
+_ldconfig_cache: str | None = None
+
+
+def _ldconfig_text() -> str:
+    """``ldconfig -p`` 输出,进程内缓存一次(自检可能多次调用)。"""
+    global _ldconfig_cache
+    if _ldconfig_cache is None:
+        try:
+            out = subprocess.run(['ldconfig', '-p'], capture_output=True, text=True, timeout=5)
+            _ldconfig_cache = out.stdout or ''
+        except Exception:
+            _ldconfig_cache = ''
+    return _ldconfig_cache
+
+
+def _lib_present(token: str) -> bool:
+    """共享库是否存在:先查 ldconfig 缓存,再扫常见 lib 目录(缓存可能过期)。"""
+    if token in _ldconfig_text():
+        return True
+    for d in _LIB_DIRS:
+        if glob.glob(os.path.join(d, token + '*.so*')):
+            return True
+    return False
+
+
+def _header_present(*paths: str) -> bool:
+    return any(os.path.isfile(p) for p in paths)
+
+
+def _python_dev_present() -> bool:
+    try:
+        import sysconfig
+        inc = sysconfig.get_path('include')
+        return bool(inc) and os.path.isfile(os.path.join(inc, 'Python.h'))
+    except Exception:
+        return False
+
+
+def self_check() -> dict:
+    """收集运行时 + 编译依赖自检数据。编译依赖标 ``optional_prebuilt=True``
+    (预编译模式下不需要)。返回 ``{runtime:[...], compile:[...], mode:{...}}``。"""
+    active = boot.BUILD_DIR
+    engine_libs = glob.glob(os.path.join(active, 'lib*.so')) if os.path.isdir(active) else []
+    runtime = [
+        {'name': '桥接层扩展 LGTBot_ElainaBot.so',
+         'ok': bool(boot.LGTBOT_AVAILABLE),
+         'detail': '已加载' if boot.LGTBOT_AVAILABLE else (boot.IMPORT_ERROR or '未加载')},
+        {'name': '引擎共享库 (build/lib*.so)',
+         'ok': len(engine_libs) > 0,
+         'detail': f'{len(engine_libs)} 个' if engine_libs else '缺失,需下载预编译包或本地编译'},
+        {'name': 'Python 版本',
+         'ok': sys.version_info[:2] >= (3, 11),
+         'detail': f'{prebuilt.local_python_tag()}(框架要求 3.11+)'},
+    ]
+
+    which = shutil.which
+
+    def _dep(name: str, ok: bool, detail: str = '') -> dict:
+        return {'name': name, 'ok': bool(ok),
+                'detail': detail or ('已检测到' if ok else '未检测到'),
+                'optional_prebuilt': True}
+
+    cxx = which('g++') or which('clang++')
+    compile_deps = [
+        _dep('CMake', which('cmake'), which('cmake') or '未安装'),
+        _dep('C++ 编译器 (g++/clang++)', cxx, cxx or '未安装'),
+        _dep('libcurl 开发头', _header_present('/usr/include/curl/curl.h') or _lib_present('libcurl')),
+        _dep('Python 开发头 (python3-dev)', _python_dev_present(),
+             'Python.h ' + ('存在' if _python_dev_present() else '缺失')),
+        _dep('Boost.Python', _lib_present('libboost_python')),
+        _dep('Boost.System', _lib_present('libboost_system')),
+        _dep('gflags', _lib_present('libgflags')),
+        _dep('glog', _lib_present('libglog')),
+        _dep('SQLite3 开发', _header_present('/usr/include/sqlite3.h') or _lib_present('libsqlite3')),
+        _dep('Protobuf', _lib_present('libprotobuf') or which('protoc'), which('protoc') or ''),
+    ]
+
+    # Qt WebEngine(markdown2image 渲染用)—— Qt5 / Qt6 **二选一**即可,本地编译才需要。
+    # 有其一则另一项标注「已存在 XXX(二选一即可)」并视为满足;两者皆无 → 都标「预编译无需」。
+    qt6 = _lib_present('libQt6WebEngineCore')
+    qt5 = _lib_present('libQt5WebKit')     # 匹配 libQt5WebKit{,Core,Widgets}*.so
+
+    def _qt_detail(mine: bool, other: bool, other_name: str) -> str:
+        if mine:
+            return '已检测到'
+        if other:
+            return f'已存在 {other_name}'
+        return '未检测到'
+
+    compile_deps += [
+        _dep('Qt6 WebEngine (markdown2image)', qt6 or qt5, _qt_detail(qt6, qt5, 'Qt5 WebEngine')),
+        _dep('Qt5 WebEngine (markdown2image)', qt5 or qt6, _qt_detail(qt5, qt6, 'Qt6 WebEngine')),
+    ]
+    return {'runtime': runtime, 'compile': compile_deps, 'mode': prebuilt.mode_info()}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -464,6 +572,7 @@ def get_data() -> str:
         'bridge': _bridge_repo_link(),
         'submodule': _get_submodule_info(query_remote=False),
         'cache': _cache_sizes(),
+        'self_check': self_check(),
     }
     data_json = json.dumps(payload, ensure_ascii=False, default=str)
     return data_json.replace('</script>', '<\\/script>')
@@ -641,7 +750,9 @@ def _fetch_releases() -> dict:
         return {'error': 'bad-payload', 'releases': []}
     rels = []
     for rel in data:
-        if not isinstance(rel, dict) or rel.get('draft'):
+        # 跳过 draft 与 prerelease —— 后者含 CI 滚动的 `prebuilt` 预发布包,
+        # 它不是版本发布,不该出现在「新版本说明」卡里(其 tag 也非 semver)。
+        if not isinstance(rel, dict) or rel.get('draft') or rel.get('prerelease'):
             continue
         rels.append({
             'tag_name': rel.get('tag_name', ''),

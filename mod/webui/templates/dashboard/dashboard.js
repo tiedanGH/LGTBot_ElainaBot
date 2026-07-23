@@ -246,9 +246,34 @@ function dashRenderRelease(rel) {
   box.innerHTML = list.map(r => dashReleaseCard(r, single)).join('');
 }
 
+/* ──── 运行环境自检(数据来自 prebuilt.self_check,随 dashboard-data 下发) ──── */
+function dashRenderCheckItems(id, items, isCompile) {
+  const box = document.getElementById(id);
+  if (!box) return;
+  if (!items || !items.length) { box.innerHTML = '<div class="dash-check-empty">无</div>'; return; }
+  box.innerHTML = items.map(it => {
+    /* 编译依赖缺失但可用预编译规避 → 灰点 +「预编译无需」标,不算错误(红) */
+    let dotCls, skipTag = '';
+    if (it.ok) dotCls = 'dot-ok';
+    else if (isCompile) { dotCls = 'dot-skip'; skipTag = '<span class="dash-check-skip">预编译无需</span>'; }
+    else dotCls = 'dot-bad';
+    return '<div class="dash-check-item"><span class="dash-check-dot ' + dotCls + '"></span>' +
+      '<span class="dash-check-name">' + escapeHtml(it.name || '') + '</span>' + skipTag +
+      '<span class="dash-check-detail">' + escapeHtml(it.detail || '') + '</span></div>';
+  }).join('');
+}
+function dashRenderSelfCheck(sc) {
+  if (!sc) return;
+  dashRenderCheckItems('dash-runtime-list', sc.runtime, false);
+  dashRenderCheckItems('dash-compile-list', sc.compile, true);
+}
+
 function dashApplyData(data) {
   /* 进行中的对局 */
   dashRenderMatches(data);
+
+  /* 运行环境自检 */
+  dashRenderSelfCheck(data.self_check);
 
   /* 机器人绑定列表 */
   dashRenderBots(data);
@@ -263,9 +288,12 @@ function dashApplyData(data) {
     statusEl.textContent = '运行中';
     statusEl.className = 'dash-badge dash-badge-ok';
   } else {
-    statusEl.textContent = '未运行';
-    statusEl.className = 'dash-badge dash-badge-warn';
+    statusEl.textContent = '引擎未运行';
+    statusEl.className = 'dash-badge dash-badge-err';
   }
+  /* 引擎未运行 → 亮出「📦 预编译部署」跳转按钮(免编译快速部署引导) */
+  const jumpBtn = document.getElementById('dash-prebuilt-jump');
+  if (jumpBtn) jumpBtn.style.display = data.engine_running ? 'none' : '';
 
   /* 子模块初始状态(get_data 只填本地 commit,远端留给检查更新按钮)*/
   if (data.submodule) {
@@ -812,4 +840,14 @@ window.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-clear]').forEach(btn => {
     btn.addEventListener('click', () => dashClearCache(btn.dataset.clear));
   });
+
+  /* 引擎未运行时的「📦 预编译部署」跳转 → 切到该标签 */
+  const jumpBtn = document.getElementById('dash-prebuilt-jump');
+  if (jumpBtn) jumpBtn.addEventListener('click', () => {
+    const t = document.querySelector('.tabs .tab[data-tab="prebuilt"]');
+    if (t) t.click();
+  });
+  /* 运行环境自检「重新检测」→ 重新拉 dashboard-data(含最新 self_check) */
+  const scBtn = document.getElementById('dash-selfcheck-refresh');
+  if (scBtn) scBtn.addEventListener('click', dashRefreshAll);
 });
