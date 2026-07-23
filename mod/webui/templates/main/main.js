@@ -275,4 +275,5 @@ window.addEventListener('DOMContentLoaded', () => {
   logsLoadInline();
   usersLoadInline();
   setInterval(logsRefresh, REFRESH_MS);
+  setInterval(dashMatchesRefresh, REFRESH_MS);
 });

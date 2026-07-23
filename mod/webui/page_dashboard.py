@@ -484,6 +484,14 @@ def _fragment(payload: dict) -> str:
     return f'<pre id="result">{_html.escape(body)}</pre>'
 
 
+def render_matches() -> str:
+    """只读轻量端点:只返回进行中对局列表,供前端每几秒实时轮询。
+
+    刻意**不**复用 get_data() —— 那会顺带跑缓存目录 os.walk / 机器人列表等较重逻辑,
+    不适合高频轮询;这里只读内存里的 state.active_matches(+ 群备注 / 昵称查表),开销极小。"""
+    return _fragment({'matches': _active_matches_view()})
+
+
 def _bridge_repo_link() -> dict:
     """桥接层(本插件)自身的 GitHub 仓库跳转链接字段。
 

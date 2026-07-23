@@ -15,6 +15,7 @@ const DASH_KEYS = {
   clear_match_all:    '__lgtbot_dash_clear_match_all',
   clear_match_7d:     '__lgtbot_dash_clear_match_7d',
   init_repo:          '__lgtbot_dash_init_repo',
+  matches:            '__lgtbot_dash_matches',
 };
 
 /* 机器人绑定换绑端点(register_route 真路由,带 ?appid= 参数) */
@@ -97,6 +98,17 @@ function dashRenderMatches(data) {
       (since ? '<span class="dash-match-since" title="已进行时长">🕒 ' + since + '</span>' : '') +
       '</div>';
   }).join('');
+}
+
+/* 进行中对局实时刷新 —— 由 main.js 的 setInterval 每几秒调一次。走只读轻量端点
+ * (只返回对局列表,不跑缓存 os.walk 等重活),失败静默不打扰。与日志页同理。 */
+async function dashMatchesRefresh() {
+  try {
+    const data = await dashCallAction(DASH_KEYS.matches);
+    dashRenderMatches(data);
+  } catch (e) {
+    /* 静默:偶发网络抖动不干扰,下个周期自愈 */
+  }
 }
 
 /* ──── 机器人绑定 ──── */
@@ -795,10 +807,6 @@ window.addEventListener('DOMContentLoaded', () => {
   /* 桥接层行按钮: dashRepoStatus 决定调 dashInitRepo 还是 dashDoUpdate */
   document.getElementById('dash-do-update').addEventListener('click', dashBridgeButtonClick);
   document.getElementById('dash-update-submodule').addEventListener('click', dashDoUpdateSubmodule);
-
-  /* 进行中对局刷新 —— 重新抠 dashboard-data 只刷本标签,不破坏其他标签状态 */
-  const matchesRefresh = document.getElementById('dash-matches-refresh');
-  if (matchesRefresh) matchesRefresh.addEventListener('click', dashRefreshAll);
 
   /* 缓存清理按钮(委托) */
   document.querySelectorAll('[data-clear]').forEach(btn => {
