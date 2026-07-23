@@ -262,10 +262,29 @@ function dashRenderCheckItems(id, items, isCompile) {
       '<span class="dash-check-detail">' + escapeHtml(it.detail || '') + '</span></div>';
   }).join('');
 }
+function dashSetSelfcheckCollapsed(collapsed) {
+  const body = document.getElementById('dash-selfcheck-body');
+  const caret = document.getElementById('dash-selfcheck-caret');
+  if (body) body.classList.toggle('collapsed', collapsed);
+  if (caret) caret.textContent = collapsed ? '▸' : '▾';
+}
+
+/* 折叠态只在首屏按「有无红色异常」自动决定一次;之后(重新检测 / 换绑 / 清缓存等
+   任何刷新)只更新检查项与红字计数,**不改变折叠态** —— 此后折叠与否只由用户点标题控制。 */
+let dashSelfcheckInited = false;
+
 function dashRenderSelfCheck(sc) {
   if (!sc) return;
   dashRenderCheckItems('dash-runtime-list', sc.runtime, false);
   dashRenderCheckItems('dash-compile-list', sc.compile, true);
+  /* 严重异常 = 运行时依赖缺失(红点);编译依赖缺失走「预编译无需」灰点,不计入 */
+  const critical = (sc.runtime || []).filter(it => !it.ok).length;
+  const badge = document.getElementById('dash-selfcheck-badge');
+  if (badge) badge.textContent = critical > 0 ? ('⚠ ' + critical + ' 项异常') : '';
+  if (!dashSelfcheckInited) {
+    dashSetSelfcheckCollapsed(critical === 0);   // 首屏:无异常折叠 / 有异常展开
+    dashSelfcheckInited = true;
+  }
 }
 
 function dashApplyData(data) {
@@ -847,7 +866,14 @@ window.addEventListener('DOMContentLoaded', () => {
     const t = document.querySelector('.tabs .tab[data-tab="prebuilt"]');
     if (t) t.click();
   });
-  /* 运行环境自检「重新检测」→ 重新拉 dashboard-data(含最新 self_check) */
+  /* 标题点击 → 展开 / 折叠(折叠态此后完全由用户控制) */
+  const scToggle = document.getElementById('dash-selfcheck-toggle');
+  if (scToggle) scToggle.addEventListener('click', () => {
+    const body = document.getElementById('dash-selfcheck-body');
+    dashSetSelfcheckCollapsed(!(body && body.classList.contains('collapsed')));
+  });
+  /* 运行环境自检「重新检测」→ 只重新拉 dashboard-data(含最新 self_check)刷新
+     检查项与红字计数,**不改变折叠态**(见 dashRenderSelfCheck 的首屏一次性规则) */
   const scBtn = document.getElementById('dash-selfcheck-refresh');
   if (scBtn) scBtn.addEventListener('click', dashRefreshAll);
 });
