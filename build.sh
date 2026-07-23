@@ -113,6 +113,22 @@ if [[ ! -f "lgtbot/CMakeLists.txt" ]]; then
     fi
 fi
 
+# ── TODO lgtbot Qt5 multiarch 探测补丁(上游 PR c87143b2 未合并前的兜底) ──────────
+# 上游 CMakeLists 的 Qt5 预检漏了 Debian/Ubuntu 的 multiarch 路径(/usr/lib/x86_64-linux-gnu/...),
+# 导致 markdown2image 的 Qt5 WebKit 后端在这些发行版探测不到 → 图片渲染被禁。
+# 配置前把补丁临时打到 lgtbot/ **工作区**(不提交子模块改动)。幂等:已含该路径 / 上游已合并 / 补丁打不上 → 跳过并提示,不中断构建。
+_QT5_PATCH="$SCRIPT_DIR/tools/patches/lgtbot-qt5-multiarch.patch"
+if [[ -f "$_QT5_PATCH" && -f "lgtbot/CMakeLists.txt" ]]; then
+    if grep -q 'x86_64-linux-gnu/cmake/Qt5Core' lgtbot/CMakeLists.txt; then
+        :   # 已含 multiarch 路径(补丁已打 / 上游已合并),跳过
+    elif patch -p1 -d lgtbot --forward < "$_QT5_PATCH" >/dev/null 2>&1; then
+        echo "✅ 已应用 lgtbot Qt5 multiarch 探测补丁 (上游 PR c87143b2)"
+    else
+        echo "[!] Qt5 multiarch 补丁未能应用 (缺 patch 命令 / 上游已变动);"
+        echo "    multiarch 布局下 Qt5 WebKit 可能仍探测不到,markdown2image 将无图。"
+    fi
+fi
+
 # ── 依赖自检 ─────────────────────────────────────────────────────────────
 echo "── 依赖检查 ─────────────"
 need=()

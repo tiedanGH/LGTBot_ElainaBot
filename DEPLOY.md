@@ -15,7 +15,7 @@
 ```bash
 sudo apt update
 sudo apt install -y \
-    build-essential cmake git \
+    build-essential cmake git patch \
     libcurl4-openssl-dev \
     python3-dev \
     libboost-python-dev libboost-system-dev \
@@ -28,7 +28,7 @@ sudo apt install -y \
 ### CentOS / RHEL
 ```bash
 sudo yum install -y \
-    gcc-c++ cmake git \
+    gcc-c++ cmake git patch \
     libcurl-devel python3-devel \
     boost-python3-devel boost-devel \
     gflags-devel glog-devel sqlite-devel \

@@ -1,0 +1,34 @@
+Subject: add Debian/Ubuntu multiarch Qt5 search paths for markdown2image
+
+lgtbot 上游 CMakeLists 的 Qt5 预检只在 /usr/lib/cmake、/usr/lib64/cmake 找
+Qt5CoreConfig.cmake、mkspecs 也只找非 multiarch 路径,导致 Debian/Ubuntu 的
+multiarch 布局(/usr/lib/x86_64-linux-gnu/...)下探测不到 Qt5 → markdown2image
+的 Qt5 WebKit 后端被跳过 → 图片渲染禁用。补丁把 multiarch 路径补进去。
+
+对应上游 PR: https://github.com/Slontia/lgtbot/commit/c87143b2480d03b96fe7bc515691b649e55801e7
+(未合并前由 build.sh 在配置前临时打到 lgtbot/ 工作区,不提交子模块改动。)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ef40ae10..526af81f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -80,7 +80,8 @@ if (WITH_IMAGE)
+     PATHS
+       /usr/local/lib/cmake/Qt5Core
+       /usr/lib/cmake/Qt5Core
+-      /usr/lib64/cmake/Qt5Core)
++      /usr/lib64/cmake/Qt5Core
++      /usr/lib/x86_64-linux-gnu/cmake/Qt5Core)
+   set(_qt5_usable FALSE)
+   if (_qt5_core_cfg_path)
+     # install prefix = Qt5CoreConfig.cmake dir / ../../.. (3 levels up)
+@@ -95,7 +96,8 @@ if (WITH_IMAGE)
+         "${_qt5_prefix}/mkspecs"
+         "${_qt5_prefix}/lib64/qt5/mkspecs"
+         "${_qt5_prefix}/lib/qt5/mkspecs"
+-        "${_qt5_prefix}/share/qt5/mkspecs")
++        "${_qt5_prefix}/share/qt5/mkspecs"
++        "/usr/lib/x86_64-linux-gnu/qt5/mkspecs")
+       if (EXISTS "${_qt5_mkspecs_dir}")
+         set(_qt5_mkspecs_ok TRUE)
+         break()
