@@ -18,8 +18,18 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 # conftest.py 已 inject 假 boot,这里安全 import
-from plugins.LGTBot_ElainaBot.mod import callbacks, state
+from plugins.LGTBot_ElainaBot.mod import callbacks, quota, state
+
+
+@pytest.fixture(autouse=True)
+def _clean_active_targets():
+    """_active_targets 是 callbacks 模块级非持久 set,逐测清理避免串扰。"""
+    callbacks._active_targets.clear()
+    yield
+    callbacks._active_targets.clear()
 
 
 def _flat_buttons(key: str) -> list[dict]:
@@ -139,3 +149,79 @@ async def test_dm_whitelist_member_pushed_others_dropped(monkeypatch):
     sender.send_to_user.reset_mock()
     await callbacks._send_text_quota_managed('OTHER_U', True, 'hi', None)
     sender.send_to_user.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 崩溃中断通知:进行中对局缓存(事件流维护)+ fan-out 去重 + 发送分支
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_match_event_game_started_adds_active_targets():
+    """真正开局(game_started)→ 加入缓存;群局与私聊局都进。"""
+    callbacks.cb_match_event('777', False, 'game_started', '')
+    callbacks.cb_match_event('U_HOST', True, 'game_started', '')
+    assert callbacks._active_targets == {('777', False), ('U_HOST', True)}
+
+
+def test_match_event_waiting_room_not_active():
+    """等待房间(new_game)不发 game_started → 不算进行中,不进缓存。"""
+    callbacks.cb_match_event('888', False, 'new_game', '五子棋')
+    assert ('888', False) not in callbacks._active_targets
+
+
+def test_match_event_game_over_discards():
+    """结束事件 → 从缓存移除本 target(群局)。"""
+    callbacks.cb_match_event('888', False, 'game_started', '')
+    callbacks.cb_match_event('999', False, 'game_started', '')
+    callbacks.cb_match_event('888', False, 'game_over', '')
+    assert callbacks._active_targets == {('999', False)}   # 888 被剔除
+
+
+def test_match_event_dm_dissolve_discards():
+    """私聊局解散(all_left)→ 从缓存移除;discard 对未在缓存者也幂等安全。"""
+    callbacks.cb_match_event('U9', True, 'game_started', '')
+    callbacks.cb_match_event('U9', True, 'all_left', '')
+    assert ('U9', True) not in callbacks._active_targets
+    callbacks.cb_match_event('never', False, 'terminate', '')   # 不在缓存也不报错
+
+
+def test_collateral_targets_excludes_crash_source():
+    active = {('g1', False), ('g2', False), ('u1', True)}
+    assert callbacks._collateral_targets(active, 'g1', False) == {('g2', False), ('u1', True)}
+    assert callbacks._collateral_targets(active, 'u1', True) == {('g1', False), ('g2', False)}
+    # 崩溃源不在进行中列表(如崩溃在等待房间)→ 原样全发
+    assert callbacks._collateral_targets(active, 'gX', False) == active
+    # 快照独立:改原集合不影响已返回结果
+    snap = callbacks._collateral_targets(active, 'g1', False)
+    active.clear()
+    assert snap == {('g2', False), ('u1', True)}
+
+
+async def test_collateral_notice_active_when_no_ref(monkeypatch):
+    """无有效引用 → 立即主动消息(空 kwargs,不等 15s)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    await callbacks._send_collateral_notice('GROUP_X', False)
+    sender.send_to_group.assert_awaited_once()
+    args, kwargs = sender.send_to_group.call_args
+    assert args[0] == 'GROUP_X'
+    assert 'msg_id' not in kwargs and 'event_id' not in kwargs
+
+
+async def test_collateral_notice_passive_when_ref(monkeypatch):
+    """有未超额引用 → 被动(带 msg_id)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    key = callbacks.helpers.target_key('GROUP_P', False)
+    quota.refresh_ref(key, 'msg_id', 'MID123', 'appid1')
+    await callbacks._send_collateral_notice('GROUP_P', False)
+    _args, kwargs = sender.send_to_group.call_args
+    assert kwargs.get('msg_id') == 'MID123'
+
+
+async def test_collateral_notice_dm_uses_send_to_user(monkeypatch):
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    await callbacks._send_collateral_notice('USER_X', True)
+    sender.send_to_user.assert_awaited_once()
+    sender.send_to_group.assert_not_called()

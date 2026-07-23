@@ -52,8 +52,7 @@ _CRASH_APOLOGY_MD = (
     '\n'
     '崩溃报告已自动转发至官方群，非常抱歉给您带来不便，我们会尽快修复 🌹'
 )
-# 补发路径(OnCxxTerminate marker)专用文案:发出时进程已经重启完成,原本
-# 「30 秒后自动重启」会误导玩家以为还要等 —— 改成「已恢复服务」更贴合实情。
+# 补发路径(OnCxxTerminate marker)专用文案:发出时进程已经重启完成。
 _CRASH_APOLOGY_MD_BELATED = (
     '## 💥 游戏模块发生致命错误\n'
     '\n'
@@ -62,6 +61,23 @@ _CRASH_APOLOGY_MD_BELATED = (
     '\n'
     '崩溃报告已自动转发至官方群，非常抱歉给您带来不便，我们会尽快修复 🌹'
 )
+# 受牵连对局的中断通知 —— 崩溃源在别处,本群/私聊的对局被连累中断。
+_CRASH_COLLATERAL_MD = (
+    '## 💥 对局意外中断\n'
+    '\n'
+    'LGT-Bot 引擎因**其他游戏**发生崩溃，**所有进行中的对局已丢失**，无法继续进行。\n'
+    '进程正在自动重启，请稍后**重新开始游戏**。\n'
+    '\n'
+    '非常抱歉给您带来不便，我们会尽快修复 🌹'
+)
+
+# 进行中(已开局)对局的目标缓存,元素为 (target_id, is_uid) —— 群局 is_uid=False、私聊局 True。
+# 由 cb_match_event 以引擎「开局 / 结束」事件维护(纯 Python,**不回调引擎**:
+# cb_match_event 永远在引擎持 Match::mutex_ 的栈内触发,此刻枚举对局会死锁)。
+# 引擎崩溃时 heap 已坏本就不能再查,善后 fan-out 用这份崩溃前缓存给受牵连对局发通知。
+# **非持久**(模块级,热重载 / execv 重建即空)—— 重启后引擎所有 match 已失联,空集正是正确态;
+# 崩溃 fan-out 读的是崩溃进程自身内存,持久无意义。
+_active_targets: set[tuple[str, bool]] = set()
 # 严重问题通知群 openid —— 由 config.py::_apply_runtime_tunables 按 yaml 配置覆盖。
 # 空字符串 = 不推送。设了的话,引擎崩溃时除了给玩家发道歉,还向此群主动推送
 # 一条崩溃报告。通常填管理员监控的全量群 —— 该群在 QQ 后台开了全量推送权限,
@@ -199,6 +215,13 @@ async def _send_crash_messages(uid: str, gid: str, is_uid: bool,
     target_id = uid if is_uid else gid
     if target_id:
         coros.append(_try_send_crash_apology(target_id, is_uid))
+    # fan-out:给其他进行中对局(群 / 私聊)发中断通知,去重崩溃源(它已收源道歉)。
+    crash_id = uid if is_uid else gid
+    collateral = _collateral_targets(_active_targets, crash_id, is_uid)
+    if collateral:
+        log.error(f'💥 向 {len(collateral)} 个进行中对局推送中断通知')
+        for tid, tid_is_uid in collateral:
+            coros.append(_send_collateral_notice(tid, tid_is_uid))
     if not coros:
         return
     try:
@@ -240,6 +263,39 @@ async def _try_send_crash_apology(target_id: str, is_uid: bool,
                                        buttons.build_support_buttons())
     except Exception as e:
         log.warning(f'崩溃道歉发送失败 ({target_id}): {e}')
+
+
+def _collateral_targets(active: set, crash_id: str, crash_is_uid: bool) -> set:
+    """从进行中对局缓存里选出要发中断通知的目标 —— 剔除崩溃源(群 / 私聊同理,它已单独收到源道歉)。返回快照,不随原缓存后续变动。"""
+    out = set(active)
+    out.discard((crash_id, crash_is_uid))
+    return out
+
+
+async def _send_collateral_notice(target_id: str, is_uid: bool) -> None:
+    """给受牵连的进行中对局发中断通知。被动未超额发被动,超额**直接主动、不等刷新**
+    (崩溃即将 execv,没时间等 15s;普通群主动会被 QQ 拒、全量群 / 私聊可达,尽力送达)。
+    附官方群 / 反馈 link 按钮(不依赖回调,execv 前也安全)。"""
+    try:
+        key = helpers.target_key(target_id, is_uid)
+        consumed = quota.try_consume_ref(key)
+        if consumed:
+            ref_type, ref_value, _count, ref_appid = consumed
+            sender, kwargs = helpers.get_sender(ref_appid), {ref_type: ref_value}
+        else:
+            sender, kwargs = helpers.get_sender(''), {}
+        if sender is None:
+            return
+        page_logs.log_outgoing(target_id, is_uid, _CRASH_COLLATERAL_MD)
+        with log_attribution.mark_outbound():
+            if is_uid:
+                await sender.send_to_user(target_id, _CRASH_COLLATERAL_MD,
+                                          buttons=buttons.build_support_buttons(), **kwargs)
+            else:
+                await sender.send_to_group(target_id, _CRASH_COLLATERAL_MD,
+                                           buttons=buttons.build_support_buttons(), **kwargs)
+    except Exception as e:
+        log.warning(f'对局中断通知发送失败 ({target_id}): {e}')
 
 
 async def _try_send_crash_notification(notify_group: str, sig_name: str,
@@ -840,6 +896,14 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         state.current_game.pop(key, None)
     elif game_name:
         state.current_game[key] = game_name
+
+    # 进行中对局缓存:纯 Python 事件流维护,**不回调引擎**。cb_match_event 永远在引擎持 Match::mutex_ 的栈内触发
+    # (GameStart 全程持锁直到「游戏开始」广播),此刻调任何拿 Match::mutex_ 的引擎方法(如枚举对局要读 HostUserId)会死锁。
+    # game_started = 真正开局才加(等待房间 / 单机秒结算局不发此事件,不算进行中);结束 / 解散移除(discard 幂等,孤儿 game_over 也安全)。
+    if kind == 'game_started':
+        _active_targets.add((target_id, is_uid))
+    elif kind in ('game_over', 'game_over_unrecorded', 'all_left', 'terminate'):
+        _active_targets.discard((target_id, is_uid))
 
     # 按钮挂载 —— new_game / join_leave 都挂同样一组:
     #   · 群聊:  「加入 / 退出」+ 「📖《X》规则」 两行
