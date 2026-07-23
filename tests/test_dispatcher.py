@@ -277,3 +277,26 @@ def test_data_stats_command_is_exclusive():
     assert dispatcher._is_exclusive_command('数据统计')
     assert dispatcher._is_exclusive_command('/数据统计')
     assert not dispatcher._is_exclusive_command('数据统计2')   # 不误伤带参形态
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 9. _capture_pending_game_name:单机局游戏名兜底(供 dashboard / 重开按钮)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_capture_pending_game_name_group_and_dm():
+    """「/新游戏 X …」记 pending 游戏名(第一个 token,群 / 私聊各自 key);
+    裸「/新游戏」与「/随机游戏」不记。"""
+    _state.pending_new_game_name.clear()
+    ev_g = _mock_event(is_group=True, group_id='G1')
+    dispatcher._capture_pending_game_name('/新游戏 决胜五子 单机', ev_g, 'G1', 'U1')
+    assert _state.pending_new_game_name.get('g:G1') == '决胜五子'   # 只取第一个 token
+
+    ev_d = _mock_event(is_direct=True, user_id='U1')
+    dispatcher._capture_pending_game_name('/新游戏 炼金术士', ev_d, '', 'U1')
+    assert _state.pending_new_game_name.get('u:U1') == '炼金术士'
+
+    _state.pending_new_game_name.clear()
+    dispatcher._capture_pending_game_name('/新游戏', ev_g, 'G1', 'U1')      # 裸命令无名
+    dispatcher._capture_pending_game_name('/随机游戏', ev_g, 'G1', 'U1')    # 随机游戏无名
+    assert _state.pending_new_game_name == {}

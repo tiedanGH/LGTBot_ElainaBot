@@ -59,6 +59,46 @@ function dashFmtVersion(v) {
   return /^v/i.test(v) ? v : 'v' + v;
 }
 
+/* ──── 进行中的对局 ──── */
+/* 开局至今的时长文案(客户端按 since epoch 秒粗算,秒/分/时/天四档)。 */
+function dashFmtSince(ts) {
+  if (!ts) return '';
+  const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (secs < 60) return secs + ' 秒';
+  if (secs < 3600) return Math.floor(secs / 60) + ' 分钟';
+  if (secs < 86400) return Math.floor(secs / 3600) + ' 小时';
+  return Math.floor(secs / 86400) + ' 天';
+}
+
+function dashRenderMatches(data) {
+  const wrap = document.getElementById('dash-matches-list');
+  const countEl = document.getElementById('dash-matches-count');
+  if (!wrap) return;
+  const matches = data.matches || [];
+  if (countEl) countEl.textContent = matches.length ? ' (' + matches.length + ')' : '';
+  if (!matches.length) {
+    wrap.innerHTML = '<div class="dash-matches-empty">当前没有进行中的对局</div>';
+    return;
+  }
+  wrap.innerHTML = matches.map(m => {
+    const isUid = !!m.is_uid;
+    const idText = escapeHtml(String(m.id || ''));
+    /* 昵称(私信)/ 备注名(群聊)存在就只显示它;否则回退 openid(灰字 mono)。 */
+    const loc = m.name
+      ? escapeHtml(m.name)
+      : '<span class="dash-mono dash-match-id">' + idText + '</span>';
+    const game = m.game ? escapeHtml(m.game) : '未知游戏';
+    const since = dashFmtSince(m.since);
+    return '<div class="dash-match-row">' +
+      '<span class="dash-match-type ' + (isUid ? 'dm' : 'grp') + '">' +
+        (isUid ? '私信' : '群聊') + '</span>' +
+      '<span class="dash-match-game" title="游戏">' + game + '</span>' +
+      '<span class="dash-match-loc" title="' + (isUid ? '用户' : '群') + '">' + loc + '</span>' +
+      (since ? '<span class="dash-match-since" title="已进行时长">🕒 ' + since + '</span>' : '') +
+      '</div>';
+  }).join('');
+}
+
 /* ──── 机器人绑定 ──── */
 function dashRenderBots(data) {
   const wrap = document.getElementById('dash-bot-list');
@@ -195,6 +235,9 @@ function dashRenderRelease(rel) {
 }
 
 function dashApplyData(data) {
+  /* 进行中的对局 */
+  dashRenderMatches(data);
+
   /* 机器人绑定列表 */
   dashRenderBots(data);
 
@@ -752,6 +795,10 @@ window.addEventListener('DOMContentLoaded', () => {
   /* 桥接层行按钮: dashRepoStatus 决定调 dashInitRepo 还是 dashDoUpdate */
   document.getElementById('dash-do-update').addEventListener('click', dashBridgeButtonClick);
   document.getElementById('dash-update-submodule').addEventListener('click', dashDoUpdateSubmodule);
+
+  /* 进行中对局刷新 —— 重新抠 dashboard-data 只刷本标签,不破坏其他标签状态 */
+  const matchesRefresh = document.getElementById('dash-matches-refresh');
+  if (matchesRefresh) matchesRefresh.addEventListener('click', dashRefreshAll);
 
   /* 缓存清理按钮(委托) */
   document.querySelectorAll('[data-clear]').forEach(btn => {

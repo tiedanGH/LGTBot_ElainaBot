@@ -56,6 +56,8 @@ _persistent: dict = {
     # message_log 等模块也可能要的 key,占位避免 KeyError
     'pending_buttons': {},
     'current_game': {},
+    'active_matches': {},
+    'pending_new_game_name': {},
     'full_volume_groups': set(),
 }
 
@@ -109,6 +111,8 @@ def _clean_runtime_state():
     _persistent['ref_waiters'].clear()
     _persistent['pending_buttons'].clear()
     _persistent['current_game'].clear()
+    _persistent['active_matches'].clear()
+    _persistent['pending_new_game_name'].clear()
     _persistent['full_volume_groups'].clear()
 
     # 清 uploader 模块状态(若已被 import)

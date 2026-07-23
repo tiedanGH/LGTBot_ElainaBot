@@ -122,6 +122,8 @@ _PERSIST_DEFAULTS: dict = {
     'active_ref':              {},
     'ref_waiters':             {},
     'current_game':            {},
+    'active_matches':          {},
+    'pending_new_game_name':   {},
     'full_volume_groups':      set(),
     'log_attribution_ctxvar':  None,
 }

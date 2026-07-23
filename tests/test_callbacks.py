@@ -25,11 +25,16 @@ from plugins.LGTBot_ElainaBot.mod import callbacks, quota, state
 
 
 @pytest.fixture(autouse=True)
-def _clean_active_targets():
-    """_active_targets 是 callbacks 模块级非持久 set,逐测清理避免串扰。"""
-    callbacks._active_targets.clear()
+def _clean_active_matches():
+    """state.active_matches 逐测清理避免串扰(与 conftest 持久 dict 同源)。"""
+    state.active_matches.clear()
     yield
-    callbacks._active_targets.clear()
+    state.active_matches.clear()
+
+
+def _active_pairs():
+    """把 state.active_matches 摊平成 {(target_id, is_uid)} 便于断言。"""
+    return {(r['target_id'], r['is_uid']) for r in state.active_matches.values()}
 
 
 def _flat_buttons(key: str) -> list[dict]:
@@ -157,32 +162,70 @@ async def test_dm_whitelist_member_pushed_others_dropped(monkeypatch):
 
 
 def test_match_event_game_started_adds_active_targets():
-    """真正开局(game_started)→ 加入缓存;群局与私聊局都进。"""
+    """真正开局(game_started)→ 记入 active_matches;群局与私聊局都进。"""
     callbacks.cb_match_event('777', False, 'game_started', '')
     callbacks.cb_match_event('U_HOST', True, 'game_started', '')
-    assert callbacks._active_targets == {('777', False), ('U_HOST', True)}
+    assert _active_pairs() == {('777', False), ('U_HOST', True)}
+
+
+def test_match_event_game_name_snapshotted_from_current_game():
+    """game_started 广播本身无 brief → 游戏名从此前 new_game 写入的 current_game 快照。"""
+    callbacks.cb_match_event('777', False, 'new_game', '五子棋')  # 建房,写 current_game
+    callbacks.cb_match_event('777', False, 'game_started', '')     # 开局,game_name 为空
+    rec = state.active_matches['g:777']
+    assert rec['game'] == '五子棋'
+    assert rec['target_id'] == '777' and rec['is_uid'] is False
+    assert isinstance(rec['since'], float)
 
 
 def test_match_event_waiting_room_not_active():
-    """等待房间(new_game)不发 game_started → 不算进行中,不进缓存。"""
+    """等待房间(new_game)不发 game_started → 不算进行中,不进 active_matches。"""
     callbacks.cb_match_event('888', False, 'new_game', '五子棋')
-    assert ('888', False) not in callbacks._active_targets
+    assert ('888', False) not in _active_pairs()
 
 
 def test_match_event_game_over_discards():
-    """结束事件 → 从缓存移除本 target(群局)。"""
+    """结束事件 → 从 active_matches 移除本 target(群局)。"""
     callbacks.cb_match_event('888', False, 'game_started', '')
     callbacks.cb_match_event('999', False, 'game_started', '')
     callbacks.cb_match_event('888', False, 'game_over', '')
-    assert callbacks._active_targets == {('999', False)}   # 888 被剔除
+    assert _active_pairs() == {('999', False)}   # 888 被剔除
 
 
 def test_match_event_dm_dissolve_discards():
-    """私聊局解散(all_left)→ 从缓存移除;discard 对未在缓存者也幂等安全。"""
+    """私聊局解散(all_left)→ 从 active_matches 移除;pop 对未记录者也幂等安全。"""
     callbacks.cb_match_event('U9', True, 'game_started', '')
     callbacks.cb_match_event('U9', True, 'all_left', '')
-    assert ('U9', True) not in callbacks._active_targets
-    callbacks.cb_match_event('never', False, 'terminate', '')   # 不在缓存也不报错
+    assert ('U9', True) not in _active_pairs()
+    callbacks.cb_match_event('never', False, 'terminate', '')   # 不在记录里也不报错
+
+
+def test_match_event_single_player_name_from_pending():
+    """单机局:无 new_game / current_game,game_started 从 pending 命令名取游戏名,
+    并写回 current_game 供结算重开按钮。"""
+    state.pending_new_game_name['g:sp1'] = '决胜五子'
+    callbacks.cb_match_event('sp1', False, 'game_started', '')
+    assert state.active_matches['g:sp1']['game'] == '决胜五子'
+    assert state.current_game['g:sp1'] == '决胜五子'          # 写回
+    assert 'g:sp1' not in state.pending_new_game_name          # 已消费
+
+
+def test_match_event_multiplayer_prefers_current_game_over_pending():
+    """多人局:current_game 已由 new_game 写入,game_started 用它而非 pending;pending 仍清掉。"""
+    state.current_game['g:mp1'] = '炼金术士'           # 模拟 new_game 已写入
+    state.pending_new_game_name['g:mp1'] = '数字蜂巢'  # 陈旧 pending(如此前失败的命令)
+    callbacks.cb_match_event('mp1', False, 'game_started', '')
+    assert state.active_matches['g:mp1']['game'] == '炼金术士'
+    assert 'g:mp1' not in state.pending_new_game_name
+
+
+def test_single_player_game_over_restart_button_has_name():
+    """单机局结算(game_over_unrecorded):重开按钮 data 为「/新游戏 <名>」(名字来自 pending)。"""
+    state.pending_new_game_name['u:spuser'] = '天赋云巢'
+    callbacks.cb_match_event('spuser', True, 'game_started', '')
+    callbacks.cb_match_event('spuser', True, 'game_over_unrecorded', '')
+    flat = [b for row in (state.pending_buttons.get('u:spuser') or []) for b in row]
+    assert any(b.get('data') == '/新游戏 天赋云巢' for b in flat)
 
 
 def test_collateral_targets_excludes_crash_source():

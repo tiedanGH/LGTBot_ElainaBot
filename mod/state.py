@@ -41,6 +41,15 @@ pending_buttons: dict[str, list] = _p['pending_buttons']  # 'g:gid'/'u:uid' → 
 # /新游戏 X 时记录;/加入 时回查给「📜 规则」按钮用 —— 跨热重载持久,
 # 进程重启即丢(失忆群按 /加入 时该按钮会缺规则,无大碍)。
 current_game: dict[str, str] = _p['current_game']  # target_key → 游戏名
+# 进行中(已开局)的对局 —— target_key → {'target_id','is_uid','game','since'}。
+# 由 callbacks.cb_match_event 以引擎「开局 / 结束」事件维护(game_started 加、结算 / 解散移除)。
+# 供仪表盘「进行中的对局」展示 + 引擎崩溃时给受牵连对局 fan-out 中断通知。
+# 跨热重载持久(挂持久字典,与 current_game 同源,重载时活跃对局不丢);进程 execv 重启后引擎所有 match 已失联,空 dict 正是正确态。
+active_matches: dict[str, dict] = _p['active_matches']
+# 「/新游戏 X …」命令里抓下的游戏名(target_key → 游戏名),由 dispatcher 在派发给引擎前写入,callbacks 的 game_started 消费。
+# 单机局引擎跳过 new_game 广播、game_started 又无 brief,current_game 拿不到名字 → 回退用这里抓的命令名;
+# 多人局仍以引擎 new_game 的 brief 为准,这份只在 current_game 为空时兜底。跨热重载持久。
+pending_new_game_name: dict[str, str] = _p['pending_new_game_name']
 # 运行时观测到 ``GROUP_MESSAGE_CREATE`` 的群 openid 集合 —— 由 dispatcher 填入。
 #
 # 这是「真·全量群」的唯一判定信号。理由:

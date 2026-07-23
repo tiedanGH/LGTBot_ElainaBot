@@ -707,6 +707,16 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
         return "terminate";
     }
 
+    // 2.5 游戏中途中断 —— 子进程意外终止(match.cc「[错误] 游戏进程意外终止，游戏
+    // 已中断」)或全员支持中断(match.cc「全员支持中断游戏，游戏已中断，谢谢大家参与」)。
+    // 两者都无 brief、无结算广播,但对局确实结束。之前不识别 → 返回 nullptr →
+    // Python 侧收不到事件 → 进行中缓存(state.active_matches)残留已结束的对局。
+    // 归到 terminate(同样清状态、不挂按钮);marker 取两条广播的公共子串「游戏已中断」。
+    static const std::string kInterrupted = "游戏已中断";
+    if (content.find(kInterrupted) != std::string::npos) {
+        return "terminate";
+    }
+
     // 3. 未知指令分类 —— 顺序敏感:特化的 unknown_config / unknown_game 都
     // 在尾部带了 unknown_meta 的兜底句,所以必须先匹配前两者再兜底
     if (content.find(kUnknownConfig) != std::string::npos) {

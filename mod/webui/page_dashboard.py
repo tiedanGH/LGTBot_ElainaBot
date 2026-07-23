@@ -41,7 +41,7 @@ import urllib.request
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import audit, boot, helpers, state
+from .. import audit, boot, helpers, state, userdb
 from .. import config as _config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -393,6 +393,58 @@ def _cache_sizes() -> dict:
 # 管理」tab,见 mod/webui/page_config.py,本文件不再 read lgtbot.json / yaml)
 # ─────────────────────────────────────────────────────────────────────────
 
+def _group_remarks() -> dict:
+    """读主框架 ``data/group_remarks.json``(由框架 Web 面板维护的群备注名)。
+
+    格式 ``{gid: {"name": .., "qq": ..}}``,兼容旧版纯字符串值。文件缺失 / 解析
+    失败返回空 dict(降级到 openid 展示)。项目根 = 插件目录的上上级。
+    """
+    path = os.path.join(os.path.dirname(os.path.dirname(boot.PLUGIN_DIR)),
+                        'data', 'group_remarks.json')
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        log.debug(f'读取 group_remarks.json 失败: {e}')
+        return {}
+
+
+def _remark_name(val) -> str:
+    """从 group_remarks 的单条值取备注名(兼容 dict / 旧版纯字符串)。"""
+    if isinstance(val, dict):
+        return val.get('name', '') or ''
+    return str(val) if val else ''
+
+
+def _active_matches_view() -> list:
+    """把 ``state.active_matches`` 整理成仪表盘可渲染的进行中对局列表(最近开始的在前)。
+
+    展示名:私聊局用 userdb 缓存的昵称;群局优先用主框架的群备注名。两者查不到时前端回退显示 openid。
+    ``game`` 为空(如单机局开局广播无 brief且此前无 new_game)时交给前端显示「未知游戏」。
+    ``since`` 为开局时刻的 epoch 秒,时长由前端计算。
+    """
+    matches = list(state.active_matches.values())
+    # 仅在存在群局时才读备注文件,省掉纯私聊场景的磁盘 IO
+    remarks = _group_remarks() if any(not m.get('is_uid') for m in matches) else {}
+    out = []
+    for rec in matches:
+        is_uid = bool(rec.get('is_uid'))
+        tid = str(rec.get('target_id', ''))
+        name = (userdb.get_name(tid) or '') if is_uid else _remark_name(remarks.get(tid))
+        out.append({
+            'is_uid': is_uid,
+            'id': tid,
+            'name': name,
+            'game': rec.get('game', '') or '',
+            'since': rec.get('since', 0) or 0,
+        })
+    out.sort(key=lambda m: m['since'], reverse=True)
+    return out
+
+
 def get_data() -> str:
     """返回可嵌入 ``<script id="dashboard-data">`` 的 JSON 字符串。
 
@@ -404,6 +456,7 @@ def get_data() -> str:
         'version': meta.get('version', ''),
         'github_url': meta.get('github', ''),
         'engine_running': bool(boot.is_engine_running()),
+        'matches': _active_matches_view(),
         'bots': helpers.list_framework_bots(),
         'bound_appid': helpers.get_bound_appid(),
         'bind_configured': state.bind_bot_appid or '',

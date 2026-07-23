@@ -122,6 +122,29 @@ _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
 # # 与 / 前缀都认(引擎元指令上游为 #,本插件使用 /),不带前缀的裸指令也拦。
 _NEW_GAME_RE = re.compile(r'^[/#]?(新游戏|随机游戏)')
 
+# 从「/新游戏 <游戏名> [单机/配置…]」里抓游戏名(第一个 token;lgtbot 游戏名均无空格)。
+# 单机局(引擎跳过 new_game 广播、game_started 无 brief)靠这个兜底拿游戏名,
+# 见 state.pending_new_game_name / callbacks.cb_match_event。「随机游戏」不含名字,不匹配。
+_NEW_GAME_NAME_RE = re.compile(r'^[/#]?新游戏\s+(\S+)')
+
+
+def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
+    """派发给引擎前,把「/新游戏 X …」的游戏名记到 state.pending_new_game_name[key]。
+
+    仅在命令确实带游戏名时记(裸「/新游戏」/「随机游戏」不记)。
+    多人局最终以引擎 new_game 的 brief 为准,这份只在 current_game 为空(单机局)时兜底。
+    放在屏蔽 / 计划重启闸之后调用,被拦下的命令不会污染。"""
+    m = _NEW_GAME_NAME_RE.match(content)
+    if not m:
+        return
+    if event.is_group and gid:
+        key = helpers.target_key(gid, False)
+    elif event.is_direct and uid:
+        key = helpers.target_key(uid, True)
+    else:
+        return
+    state.pending_new_game_name[key] = m.group(1)
+
 _PLANNED_RESTART_NOTICE = (
     '## 🚧 维护提醒\n'
     '\n'
@@ -602,6 +625,9 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 
     page_logs.log_incoming(uid, gid if event.is_group else '', content)
 
+    # 单机局游戏名兜底:派发前从「/新游戏 X」命令抓游戏名(见 _capture_pending_game_name)
+    _capture_pending_game_name(content, event, gid, uid)
+
     # 派发给 C++ 引擎（独立线程，避免 C++ match-lock 与 asyncio loop 互锁）
     try:
         if event.is_group and gid:
@@ -731,6 +757,9 @@ async def lgtbot_interaction_dispatch(event, match):
                               'event_id', event.event_id, appid_str)
 
     page_logs.log_incoming(uid, gid if event.is_group else '', content)
+
+    # 单机局游戏名兜底:与 lgtbot_dispatch 对称,按钮 data 若为「/新游戏 X」也抓一手
+    _capture_pending_game_name(content, event, gid, uid)
 
     try:
         if event.is_group and gid:

@@ -71,13 +71,6 @@ _CRASH_COLLATERAL_MD = (
     '非常抱歉给您带来不便，我们会尽快修复 🌹'
 )
 
-# 进行中(已开局)对局的目标缓存,元素为 (target_id, is_uid) —— 群局 is_uid=False、私聊局 True。
-# 由 cb_match_event 以引擎「开局 / 结束」事件维护(纯 Python,**不回调引擎**:
-# cb_match_event 永远在引擎持 Match::mutex_ 的栈内触发,此刻枚举对局会死锁)。
-# 引擎崩溃时 heap 已坏本就不能再查,善后 fan-out 用这份崩溃前缓存给受牵连对局发通知。
-# **非持久**(模块级,热重载 / execv 重建即空)—— 重启后引擎所有 match 已失联,空集正是正确态;
-# 崩溃 fan-out 读的是崩溃进程自身内存,持久无意义。
-_active_targets: set[tuple[str, bool]] = set()
 # 严重问题通知群 openid —— 由 config.py::_apply_runtime_tunables 按 yaml 配置覆盖。
 # 空字符串 = 不推送。设了的话,引擎崩溃时除了给玩家发道歉,还向此群主动推送
 # 一条崩溃报告。通常填管理员监控的全量群 —— 该群在 QQ 后台开了全量推送权限,
@@ -217,7 +210,8 @@ async def _send_crash_messages(uid: str, gid: str, is_uid: bool,
         coros.append(_try_send_crash_apology(target_id, is_uid))
     # fan-out:给其他进行中对局(群 / 私聊)发中断通知,去重崩溃源(它已收源道歉)。
     crash_id = uid if is_uid else gid
-    collateral = _collateral_targets(_active_targets, crash_id, is_uid)
+    active = {(r['target_id'], r['is_uid']) for r in state.active_matches.values()}
+    collateral = _collateral_targets(active, crash_id, is_uid)
     if collateral:
         log.error(f'💥 向 {len(collateral)} 个进行中对局推送中断通知')
         for tid, tid_is_uid in collateral:
@@ -897,13 +891,25 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
     elif game_name:
         state.current_game[key] = game_name
 
-    # 进行中对局缓存:纯 Python 事件流维护,**不回调引擎**。cb_match_event 永远在引擎持 Match::mutex_ 的栈内触发
-    # (GameStart 全程持锁直到「游戏开始」广播),此刻调任何拿 Match::mutex_ 的引擎方法(如枚举对局要读 HostUserId)会死锁。
-    # game_started = 真正开局才加(等待房间 / 单机秒结算局不发此事件,不算进行中);结束 / 解散移除(discard 幂等,孤儿 game_over 也安全)。
+    # 进行中对局跟踪:game_started = 真正开局才记(等待房间 / 单机秒结算局不发此事件,不算进行中);结束 / 解散移除(pop 幂等,孤儿 game_over 也安全)。
+    # 游戏名从current_game 快照(game_started 广播本身无 brief;多人局在此前的 new_game 已写入)。
     if kind == 'game_started':
-        _active_targets.add((target_id, is_uid))
+        # 游戏名:多人局 current_game 已由 new_game 的 brief 写入,优先用;单机局引擎跳过
+        # new_game、game_started 又无 brief → current_game 为空,回退到 dispatcher
+        # 从「/新游戏 X」命令抓下的 pending 名。pop 无论命中与否都清掉 pending,不残留。
+        pending = state.pending_new_game_name.pop(key, '')
+        game = state.current_game.get(key) or pending
+        if game:
+            # 写回 current_game,让单机局结算时的「重开一局」按钮也能回查到游戏名
+            state.current_game[key] = game
+        state.active_matches[key] = {
+            'target_id': target_id,
+            'is_uid': is_uid,
+            'game': game,
+            'since': time.time(),
+        }
     elif kind in ('game_over', 'game_over_unrecorded', 'all_left', 'terminate'):
-        _active_targets.discard((target_id, is_uid))
+        state.active_matches.pop(key, None)
 
     # 按钮挂载 —— new_game / join_leave 都挂同样一组:
     #   · 群聊:  「加入 / 退出」+ 「📖《X》规则」 两行

@@ -53,6 +53,18 @@
     <div id="dash-bot-msg" class="dash-cache-msg"></div>
   </section>
 
+  <!-- ──── 进行中的对局 ──── -->
+  <section class="dash-section">
+    <div class="dash-matches-head">
+      <h2 class="dash-section-title">🎮 进行中的对局<span id="dash-matches-count" class="dash-matches-count"></span></h2>
+      <button id="dash-matches-refresh" class="dash-btn dash-btn-small" title="刷新进行中对局列表">🔄 刷新</button>
+    </div>
+    <p class="dash-pluginconf-desc">
+      仅统计<b>已开局</b>的对局（等待中的房间不计入）。以引擎事件跟踪，跨热重载保持，进程重启后清空。
+    </p>
+    <div id="dash-matches-list" class="dash-matches-list"></div>
+  </section>
+
   <!-- ──── 缓存清理 ──── -->
   <section class="dash-section">
     <h2 class="dash-section-title">🧹 缓存清理</h2>

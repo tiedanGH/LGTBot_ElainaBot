@@ -82,6 +82,52 @@
 .dash-cache-msg { margin-top: 12px; font-size: 12px; min-height: 16px; }
 .dash-cache-msg:empty { display: none; }
 
+/* ──── 进行中的对局 ──── */
+/* 仪表盘里「标题→描述」下方留出呼吸,避免描述紧贴机器人列表 / 对局列表。 */
+.dashboard .dash-pluginconf-desc { margin-bottom: 5px; }
+
+.dash-matches-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.dash-matches-head .dash-section-title { margin: 0; }
+.dash-matches-count { color: var(--text-muted); font-size: 13px; font-weight: 400; }
+/* 屏幕越宽列数越多: 1 列 - 3 列 */
+.dash-matches-list { display: grid; gap: 8px; grid-template-columns: 1fr; }
+@media (min-width: 720px)  { .dash-matches-list { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1200px) { .dash-matches-list { grid-template-columns: repeat(3, 1fr); } }
+.dash-matches-empty {
+  grid-column: 1 / -1;   /* 无对局时占满整行,不被网格挤成单列宽 */
+  color: var(--text-muted); font-size: 13px;
+  padding: 14px 12px; text-align: center;
+  background: var(--panel-2); border: 1px dashed var(--border); border-radius: 8px;
+}
+.dash-match-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; font-size: 13px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.dash-match-type {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.dash-match-type.grp {
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
+}
+.dash-match-type.dm {
+  background: color-mix(in srgb, var(--in) 18%, transparent); color: var(--in);
+}
+.dash-match-game { font-weight: 600; color: var(--text); white-space: nowrap; }
+.dash-match-loc {
+  color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px;
+  min-width: 0; flex: 1 1 auto;
+}
+.dash-match-id {
+  color: var(--text-faint); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.dash-match-since { color: var(--text-muted); font-size: 12px; white-space: nowrap; margin-left: auto; }
+
 /* ──── 机器人绑定 ──── */
 /* 大屏 2 列,窄屏(≤600px)回落 1 列 */
 .dash-bot-list {
