@@ -185,14 +185,17 @@ async function buildCallAction(key) {
   return JSON.parse(el.textContent);
 }
 
-/* 拉一次最新日志 + 状态 */
+/* 拉一次最新日志 + 状态,并让轮询与运行态保持同步:
+ *   running     → 确保在轮询(幂等 start)
+ *   非 running  → 确保停轮询(幂等 stop)
+ * 关键:buildStartPolling / buildStopPolling **都不回调 buildPullOnce**。 */
 async function buildPullOnce() {
   try {
     const data = await buildCallAction(BUILD_KEYS.log);
     const state = data.state || {};
     buildApplyState(state, data.log_segments || [], data.log_size || 0);
-    /* 跑完了就停轮询 */
-    if (!state.running) buildStopPolling();
+    if (state.running) buildStartPolling();
+    else buildStopPolling();
   } catch (e) {
     /* 网络抖动不弹错,只 console */
     console.warn('[build] poll failed:', e);
@@ -200,18 +203,15 @@ async function buildPullOnce() {
 }
 
 function buildStartPolling() {
-  if (buildPollTimer) return;
+  if (buildPollTimer) return;              // 已在轮询 —— 幂等,不重复起定时器
   buildPollTimer = setInterval(buildPullOnce, 2000);
-  buildPullOnce();  // 立即拉一次,不等 2s
+  buildPullOnce();  // 立即拉一次,不等 2s(此刻 timer 已置位,再入 start 会直接返回)
 }
 
 function buildStopPolling() {
-  if (buildPollTimer) {
-    clearInterval(buildPollTimer);
-    buildPollTimer = null;
-  }
-  /* 停轮询后再拉一次,确保拿到最终状态 / 完整日志 */
-  buildPullOnce();
+  if (!buildPollTimer) return;             // 本就没轮询 —— 直接返回,打破递归
+  clearInterval(buildPollTimer);
+  buildPollTimer = null;
 }
 
 /* 统一启动入口:弹 confirm → 调端点 → 启动轮询
