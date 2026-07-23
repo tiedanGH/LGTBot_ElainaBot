@@ -188,9 +188,13 @@
 /* 标题即折叠开关;无红色异常默认折叠,严重异常个数以红字常驻标题(折叠也可见) */
 .dash-selfcheck-title { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .dash-selfcheck-caret { font-size: 11px; color: var(--text-muted); }
-.dash-selfcheck-badge { font-size: 13px; font-weight: 700; color: #dc3545; }
+.dash-selfcheck-badge { font-size: 13px; font-weight: 700; }
+.dash-selfcheck-badge.bad { color: #dc3545; }    /* 有红色异常:红字计数 */
+.dash-selfcheck-badge.ok  { color: var(--in); }  /* 环境正常:绿字提示 */
 .dash-selfcheck-badge:empty { display: none; }
 .dash-selfcheck-body.collapsed { display: none; }
+/* 折叠时标题下方不再需要间距 */
+#dash-selfcheck-section.is-collapsed .dash-section-header { margin-bottom: 0; }
 .dash-check-group { margin-top: 14px; }
 .dash-check-group:first-of-type { margin-top: 4px; }
 .dash-check-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }

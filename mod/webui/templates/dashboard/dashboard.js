@@ -265,8 +265,10 @@ function dashRenderCheckItems(id, items, isCompile) {
 function dashSetSelfcheckCollapsed(collapsed) {
   const body = document.getElementById('dash-selfcheck-body');
   const caret = document.getElementById('dash-selfcheck-caret');
+  const section = document.getElementById('dash-selfcheck-section');
   if (body) body.classList.toggle('collapsed', collapsed);
   if (caret) caret.textContent = collapsed ? '▸' : '▾';
+  if (section) section.classList.toggle('is-collapsed', collapsed);
 }
 
 /* 折叠态只在首屏按「有无红色异常」自动决定一次;之后(重新检测 / 换绑 / 清缓存等
@@ -280,7 +282,15 @@ function dashRenderSelfCheck(sc) {
   /* 严重异常 = 运行时依赖缺失(红点);编译依赖缺失走「预编译无需」灰点,不计入 */
   const critical = (sc.runtime || []).filter(it => !it.ok).length;
   const badge = document.getElementById('dash-selfcheck-badge');
-  if (badge) badge.textContent = critical > 0 ? ('⚠ ' + critical + ' 项异常') : '';
+  if (badge) {
+    if (critical > 0) {
+      badge.textContent = '⚠ ' + critical + ' 项异常';
+      badge.className = 'dash-selfcheck-badge bad';   // 红字
+    } else {
+      badge.textContent = '✓ 环境正常';
+      badge.className = 'dash-selfcheck-badge ok';    // 绿字
+    }
+  }
   if (!dashSelfcheckInited) {
     dashSetSelfcheckCollapsed(critical === 0);   // 首屏:无异常折叠 / 有异常展开
     dashSelfcheckInited = true;
