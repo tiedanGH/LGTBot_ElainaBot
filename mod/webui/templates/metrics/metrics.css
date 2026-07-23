@@ -83,6 +83,20 @@
   color: var(--text-faint); font-size: 13px;
 }
 
+/* ── 图床可用性徽章(运行指标区,图床成功率卡 label 右侧) ── */
+.metrics-label-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.metrics-badge {
+  font-size: 10px; font-weight: 600; line-height: 1; white-space: nowrap;
+  padding: 3px 7px; border-radius: 10px;
+  font-family: 'Consolas', 'Menlo', monospace;
+}
+.metrics-badge-ok    { background: color-mix(in srgb, var(--in) 18%, transparent);         color: var(--in); }
+.metrics-badge-warn  { background: color-mix(in srgb, var(--img) 18%, transparent);        color: var(--img); }
+.metrics-badge-err   { background: color-mix(in srgb, #dc3545 18%, transparent);           color: #dc3545; }
+.metrics-badge-muted { background: color-mix(in srgb, var(--text-faint) 18%, transparent); color: var(--text-faint); }
+
 /* ── 移动端微调 ── */
 @media (max-width: 600px) {
   .metrics-status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }

@@ -20,7 +20,7 @@ import json
 import os
 import time
 
-from .. import metrics, userdb
+from .. import metrics, uploader, userdb
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 
@@ -61,6 +61,8 @@ def _payload() -> dict:
         'runtime': {
             **snap,
             'upload_rate': None if total == 0 else round((total - fail) / total * 100, 3),
+            # 图床可用性:仅查配置 + 主框架 status(),不做真实上传探测
+            'hosting': uploader.hosting_availability(),
             'metrics_path': metrics.METRICS_PATH,
         },
         # ③ 游戏数据(含 errors / available)+ 今日主动消息概况

@@ -138,6 +138,41 @@ def _get_hosting():
         return None
 
 
+def hosting_availability() -> dict:
+    """检测配置的图床是否可用 —— **仅查配置 + 主框架 image_hosting.status()**,
+    不做真实上传探测(不打网络),供指标面板的可用性徽章用。
+
+    返回 ``{'backend', 'state', 'label'}``:
+      · ``backend``  当前 config 选定的图床名(空 = 未配置)
+      · ``state``    'unset'(未配置,回退 msg_type=7)/ 'ok'(可用)/
+                     'module_off'(image_hosting 模块未启用)/
+                     'backend_off'(模块启用但该图床未开)/ 'unknown'(未知图床名)
+      · ``label``    面向用户的简短中文说明(徽章 tooltip 用)
+
+    与 ``_do_upload`` 的早退判定同源:后者也是先 ``SELECTED_BACKEND`` → 校验
+    backend 名 → ``_get_hosting()`` → ``status().get(backend)``,所以徽章「可用」
+    等价于「真实上传不会因配置 / 模块未启用而早退」(仍可能因网络失败,那是
+    成功率指标的范畴,不在本函数职责内)。
+    """
+    backend = SELECTED_BACKEND
+    if not backend:
+        return {'backend': '', 'state': 'unset', 'label': '未配置图床，游戏图直发 msg_type=7'}
+    if backend not in _UPLOADERS_MAP:
+        return {'backend': backend, 'state': 'unknown', 'label': f'未知图床名 {backend!r}'}
+    hosting = _get_hosting()
+    if hosting is None:
+        return {'backend': backend, 'state': 'module_off',
+                'label': '主框架 image_hosting 模块未启用'}
+    try:
+        status = hosting.status() if hasattr(hosting, 'status') else {}
+    except Exception:
+        status = {}
+    if status.get(backend):
+        return {'backend': backend, 'state': 'ok', 'label': f'{backend} 已就绪'}
+    return {'backend': backend, 'state': 'backend_off',
+            'label': f'主框架 image_hosting 未启用 {backend}'}
+
+
 # ──────── 并发安全 + 去重上传 ─────────────────────────────────────────────
 # 解决两个独立 bug,同一份机制覆盖:
 #

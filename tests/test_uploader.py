@@ -234,3 +234,63 @@ async def test_upload_image_cached_benefits_from_inflight(mock_backend):
     assert len({r['url'] for r in results}) == 1
     # backend 只被调 1 次(in-flight 在 upload_image 层去重)
     assert len(calls) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# hosting_availability —— 仅查配置 + 主框架 status(),不做真实上传探测
+# (指标面板图床可用性徽章的数据源;SELECTED_BACKEND 由 autouse fixture 复位为 '')
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _FakeHosting:
+    """假 image_hosting 模块 —— 只实现徽章检测用到的 status()。"""
+    def __init__(self, status_map):
+        self._status = status_map
+
+    def status(self):
+        return self._status
+
+
+def test_hosting_availability_unset():
+    """未配置图床 → unset,游戏图走 msg_type=7。"""
+    uploader.SELECTED_BACKEND = ''
+    assert uploader.hosting_availability()['state'] == 'unset'
+
+
+def test_hosting_availability_unknown_backend():
+    """配了个不认识的图床名 → unknown(config.py 正常会挡,这里防御性覆盖)。"""
+    uploader.SELECTED_BACKEND = 'nonexistent'
+    r = uploader.hosting_availability()
+    assert r['state'] == 'unknown' and r['backend'] == 'nonexistent'
+
+
+def test_hosting_availability_module_off(monkeypatch):
+    """选了图床但主框架 image_hosting 模块没启用 → module_off。"""
+    uploader.SELECTED_BACKEND = 'cos'
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: None)
+    assert uploader.hosting_availability()['state'] == 'module_off'
+
+
+def test_hosting_availability_backend_off(monkeypatch):
+    """模块在,但 status() 里该图床是 False → backend_off。"""
+    uploader.SELECTED_BACKEND = 'cos'
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: _FakeHosting({'cos': False}))
+    assert uploader.hosting_availability()['state'] == 'backend_off'
+
+
+def test_hosting_availability_ok(monkeypatch):
+    """模块在 + status() 里该图床为 True → ok,backend 名回传。"""
+    uploader.SELECTED_BACKEND = 'cos'
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: _FakeHosting({'cos': True}))
+    r = uploader.hosting_availability()
+    assert r['state'] == 'ok' and r['backend'] == 'cos'
+
+
+def test_hosting_availability_status_raises_is_backend_off(monkeypatch):
+    """status() 抛异常时吞掉按未启用处理,不让徽章检测把面板拖崩。"""
+    class _Boom:
+        def status(self):
+            raise RuntimeError('boom')
+    uploader.SELECTED_BACKEND = 'cos'
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: _Boom())
+    assert uploader.hosting_availability()['state'] == 'backend_off'

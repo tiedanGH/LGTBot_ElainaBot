@@ -43,6 +43,24 @@ function metricsRenderRuntime(rt) {
   document.getElementById('metrics-upload-sub').textContent =
     total > 0 ? ('总 ' + total + ' 次 · 失败 ' + fail + ' 次') : '暂无上传记录';
 
+  /* 图床可用性徽章(仅查配置 + 主框架 status(),非真实上传探测):
+     ok=绿 / unset=黄 / 其余=红。文字带 backend 名,完整原因进 title tooltip。 */
+  const badge = document.getElementById('metrics-hosting-badge');
+  if (badge) {
+    const h = r.hosting || {};
+    const MAP = {
+      ok:          {cls: 'ok',    text: '可用'},
+      unset:       {cls: 'warn',  text: '未配置'},
+      module_off:  {cls: 'err',   text: '模块未启用'},
+      backend_off: {cls: 'err',   text: '未启用'},
+      unknown:     {cls: 'err',   text: '未知图床'},
+    };
+    const info = MAP[h.state] || MAP.unset;
+    badge.textContent = (h.backend ? h.backend + ' · ' : '') + info.text;
+    badge.className = 'metrics-badge metrics-badge-' + info.cls;
+    badge.title = h.label || '';
+  }
+
   /* 配额压力:大数字 = 等待超时次数,小字 = 耗尽次数 */
   document.getElementById('metrics-quota-timeout').textContent =
     (r.quota_wait_timeout || 0) + ' 次';
