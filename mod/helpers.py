@@ -92,15 +92,41 @@ def humanize_mentions(text: str) -> str:
 # 解析每次调用惰性完成(bot 列表在框架侧可能晚于插件加载就绪,启动时缓存会拿到空)。
 # 来自其他 bot 的入站事件由 ``is_foreign_event`` 在 dispatcher 各 handler 顶部静默挡掉。
 
+def _count_full_volume_groups(appid: str) -> int | None:
+    """查指定 bot 的 data.db ``full_access_groups`` 表行数(该 bot 的全量群数量)。
+
+    数据是框架 ``core\\bot\\event.py::_record_full_access_group`` 按实际收到
+    GROUP_MESSAGE_CREATE 落库的 per-bot 持久事实,不依赖运行时集合,故每个
+    bot(含未绑定的)都能各自统计。bot 未加载 / 查询失败 → None(前端显 —)。
+    """
+    try:
+        from core.bot.manager import _bot_manager_ref
+        if _bot_manager_ref is None:
+            return None
+        bot = _bot_manager_ref._bots.get(appid)
+        if bot is None:
+            return None
+        rows = bot.log_service.query_data('SELECT COUNT(*) AS n FROM full_access_groups')
+        return int(rows[0].get('n')) if rows else 0
+    except Exception as e:
+        log.warning(f'查询 bot {appid} 全量群数失败: {e}')
+        return None
+
+
 def list_framework_bots() -> list[dict]:
-    """枚举主框架 bot.yaml 里配置的机器人,``[{'appid', 'qq'}]``,供面板选择。"""
+    """枚举主框架 bot.yaml 里配置的机器人,``[{'appid', 'qq', 'full_volume'}]``,
+    供面板选择;``full_volume`` 为该 bot 的全量群数量(未加载 / 查询失败为 None)。"""
     try:
         from core.base.config import cfg as core_cfg
         out = []
         for b in core_cfg.get_bot_configs() or []:
             appid = str(b.get('appid') or '').strip()
             if appid:
-                out.append({'appid': appid, 'qq': str(b.get('robot_qq') or '').strip()})
+                out.append({
+                    'appid': appid,
+                    'qq': str(b.get('robot_qq') or '').strip(),
+                    'full_volume': _count_full_volume_groups(appid),
+                })
         return out
     except Exception as e:
         log.warning(f'枚举框架 bot 配置失败: {e}')

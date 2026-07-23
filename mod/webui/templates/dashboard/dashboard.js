@@ -72,9 +72,12 @@ function dashRenderBots(data) {
   wrap.innerHTML = bots.map(b => {
     const isBound = b.appid === bound;
     const qq = b.qq ? ('QQ：' + b.qq) : 'QQ 未配置';
+    const vol = (b.full_volume == null) ? '—' : b.full_volume;
     return '<div class="dash-bot-row' + (isBound ? ' bound' : '') + '">' +
       '<span class="dash-mono">' + escapeHtml(b.appid) + '</span>' +
       '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
+      '<span class="dash-bot-vol" title="该机器人的全量群数量">🌐 全量群 ' +
+        escapeHtml(String(vol)) + '</span>' +
       (isBound
         ? '<span class="dash-badge dash-badge-ok">当前绑定</span>'
         : '<button class="dash-btn dash-btn-small" data-bind-appid="' +

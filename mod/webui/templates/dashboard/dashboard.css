@@ -83,16 +83,28 @@
 .dash-cache-msg:empty { display: none; }
 
 /* ──── 机器人绑定 ──── */
-.dash-bot-list { display: flex; flex-direction: column; gap: 8px; }
+/* 大屏 2 列,窄屏(≤600px)回落 1 列 */
+.dash-bot-list {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+}
+/* 只有一个机器人时横跨整行,不留半行空白 */
+.dash-bot-row:only-child { grid-column: 1 / -1; }
 .dash-bot-row {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 8px 12px; border: 1px solid var(--border);
   border-radius: 8px; font-size: 13px;
 }
 .dash-bot-row.bound { border-color: var(--accent); }
 .dash-bot-qq { color: var(--text-muted); }
+/* 全量群数量,紧跟 QQ 右侧 */
+.dash-bot-vol { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .dash-bot-row .dash-btn,
 .dash-bot-row .dash-badge { margin-left: auto; }
+
+@media (max-width: 600px) {
+  .dash-bot-list { grid-template-columns: 1fr; }
+}
 
 /* ──── Release 折叠卡(检查更新后出现;跨多版本升级会堆叠多张) ──── */
 #dash-release-notes:empty { display: none; }
