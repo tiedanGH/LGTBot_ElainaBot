@@ -232,25 +232,42 @@ def mark_engine_running(running: bool):
         except Exception:
             pass
 
+def _import_extension() -> tuple[object, str]:
+    """import 真正的 C++ 扩展并校验身份。返回 ``(module, '')`` 或 ``(None, err)``。
+
+    关键陷阱:仓库根 / plugins 下存在同名**目录** ``LGTBot_ElainaBot/``(开发副本、
+    插件目录本身),当 .so 不存在时 ``import LGTBot_ElainaBot`` 不会抛 ImportError,
+    而是把该目录当**命名空间包**导入 —— 得到一个没有任何扩展函数的空模块对象。
+    若不校验,``LGTBOT_AVAILABLE`` 会假阳性为 True:自检误报「已加载」、重启走到
+    ``release_bot_if_not_processing_games()`` 直接 AttributeError 500。
+    这里用扩展一定导出的 ``start`` 作探针;不是真扩展就当作未加载,并把命名空间包
+    从 sys.modules 剔除,免得缓存污染后续导入。
+    """
+    try:
+        import LGTBot_ElainaBot as _lib  # noqa: F401
+    except ImportError as e:
+        return None, str(e)
+    if not hasattr(_lib, 'start'):
+        where = getattr(_lib, '__file__', None) or getattr(_lib, '__path__', '?')
+        sys.modules.pop('LGTBot_ElainaBot', None)
+        return None, f'导入到的不是 C++ 扩展(疑似同名目录被当成命名空间包): {where}'
+    return _lib, ''
+
+
 if hasattr(sys, 'setdlopenflags') and hasattr(os, 'RTLD_GLOBAL'):
     # 仅 POSIX；Windows 上 sys.setdlopenflags 不存在，对应平台也不需要此操作
     _old_flags = sys.getdlopenflags()
     sys.setdlopenflags(os.RTLD_NOW | os.RTLD_GLOBAL)
     try:
-        import LGTBot_ElainaBot as _lib  # noqa: F401
-        LGTBot_ElainaBot = _lib
-        LGTBOT_AVAILABLE = True
-    except ImportError as e:
-        IMPORT_ERROR = str(e)
+        _lib, IMPORT_ERROR = _import_extension()
     finally:
         sys.setdlopenflags(_old_flags)
 else:
-    try:
-        import LGTBot_ElainaBot as _lib
-        LGTBot_ElainaBot = _lib
-        LGTBOT_AVAILABLE = True
-    except ImportError as e:
-        IMPORT_ERROR = str(e)
+    _lib, IMPORT_ERROR = _import_extension()
+
+if _lib is not None:
+    LGTBot_ElainaBot = _lib
+    LGTBOT_AVAILABLE = True
 
 # 立即恢复主框架的 CWD（避免全局 CWD 漂移导致 ElainaBot 自身路径错乱）
 if _chdir_ok:

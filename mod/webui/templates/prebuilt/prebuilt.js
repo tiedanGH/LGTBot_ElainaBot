@@ -83,6 +83,13 @@ function pbRenderMode(mode) {
   if (usePb) usePb.disabled = !mode.prebuilt_installed;
 }
 
+// 下载 / 上传安装成功后即时解锁「📦 用预编译包」——按钮 disabled 原本只在首屏
+// get_data() 的 mode.prebuilt_installed 里算,不刷新页面就一直是禁用态。
+function pbEnableUsePrebuilt() {
+  const usePb = document.getElementById('pb-use-prebuilt');
+  if (usePb) usePb.disabled = false;
+}
+
 async function pbSwitch(usePrebuilt) {
   const target = usePrebuilt ? '预编译包' : '本地编译';
   const ok = await dashConfirm('切换构建来源为「' + target + '」?\n\n切换后需重启 LGTBot 才会生效。', { level: 'warn' });
@@ -260,6 +267,7 @@ async function pbPollOnce() {
   if (!st.running) {
     pbStopPoll();
     if (st.stage === 'done') {
+      pbEnableUsePrebuilt();      // 刚装好 → 立即解锁「📦 用预编译包」,无需刷新页面
       pbShowMsg('✅ 已下载安装。到「构建来源」点「📦 用预编译包」并重启 LGTBot 生效。', 'ok');
       pbRefreshList();
       if (typeof dashAlert === 'function')
@@ -325,6 +333,7 @@ async function pbUpload(file) {
     try { data = await r.json(); } catch (e) {}
     pbUploadStopPoll();
     if (data.success) {
+      pbEnableUsePrebuilt();      // 刚装好 → 立即解锁「📦 用预编译包」,无需刷新页面
       pbRenderProgress({ stage: 'done', progress: 100 });
       pbShowMsg('✅ ' + (data.message || '上传包已安装'), 'ok');
       pbRefreshList();

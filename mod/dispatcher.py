@@ -795,7 +795,9 @@ async def lgtbot_interaction_dispatch(event, match):
 def check_and_prepare_restart() -> tuple[bool, str]:
     """同步检查并准备重启。返回 (是否可重启, 给用户的提示文案)。
 
-    · 引擎未加载   → (False, 无需重启提示)
+    · 引擎未加载   → (True, 正在重启提示);没有 C++ 引擎要释放,直接换进程即可 ——
+                     无编译产物 / 刚下载完预编译包待切换时,用户正是要靠重启让 boot
+                     按最新 marker 重新加载产物,这里若拒绝重启用户就永远起不来。
     · 活跃 match   → (False, 拒绝原因);引擎保持运行
     · 否则         → (True, 正在重启提示),并已干净释放 C++ 引擎、把
                      state.started / boot.is_engine_running 置 False;
@@ -803,7 +805,8 @@ def check_and_prepare_restart() -> tuple[bool, str]:
                      「Python 还在 / C++ 引擎已无」的半残状态。
     """
     if not boot.LGTBOT_AVAILABLE:
-        return False, 'ℹ️ LGTBot 引擎未加载，无需重启。'
+        state.started = False
+        return True, '🔁 LGTBot 正在重启（当前引擎未加载，将按最新构建来源重新加载）...'
     if not boot.LGTBot_ElainaBot.release_bot_if_not_processing_games():
         return False, '⚠️ 当前存在进行中的游戏，请等待对局结束后再重启！'
     state.started = False
