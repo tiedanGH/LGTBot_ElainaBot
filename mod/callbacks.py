@@ -1071,8 +1071,9 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     if consumed is None:
         # 指标:「真耗尽」= TTL 内引用的 5 条真用完(has_valid_ref True);
         # 无引用 / 已过期的场景(无事件上下文的推送、私信丢弃)不算配额压力。
+        # 且仅统计**无主动直推资格**的目标:全量群 / 沙箱私信配额满后可无缝转主动消息、消息照常送达,没有实际影响,不计入配额压力。
         had_valid_ref = quota.has_valid_ref(key)
-        if had_valid_ref:
+        if had_valid_ref and not is_active_push:
             metrics.record_quota_exhausted()
         if is_active_push:
             # 全量群 / 沙箱私信:配额满 → 直接主动消息,不等刷新按钮
@@ -1224,9 +1225,9 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
 
     consumed = quota.try_consume_ref(key)
     if consumed is None:
-        # 指标口径同 _send_text_quota_managed:仅 TTL 内引用真用完算耗尽
+        # 指标口径同 _send_text_quota_managed:仅 TTL 内引用真用完、且无主动直推资格(全量群 / 沙箱私信可转主动消息,无影响,不计)才算配额压力。
         had_valid_ref = quota.has_valid_ref(key)
-        if had_valid_ref:
+        if had_valid_ref and not is_active_push:
             metrics.record_quota_exhausted()
         if is_active_push:
             tag = '私信直推' if is_sandbox_dm else '全量直推'

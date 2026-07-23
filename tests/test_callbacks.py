@@ -157,6 +157,52 @@ async def test_dm_whitelist_member_pushed_others_dropped(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 配额耗尽指标口径:仅统计「无主动直推资格」目标(全量群 / 沙箱私信不计)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _exhaust_ref(key):
+    """建一个 TTL 内引用并把 5 条被动额度用尽 → 之后 try_consume 返回 None、
+    has_valid_ref 仍为 True(即「真耗尽」而非「无上下文」)。"""
+    quota.refresh_ref(key, 'msg_id', 'M1', 'APP')
+    for _ in range(quota.REF_QUOTA):
+        quota.try_consume_ref(key)
+
+
+async def test_quota_exhausted_not_counted_for_full_volume_group(monkeypatch):
+    """全量群配额耗尽后可无缝转主动消息、无影响 → 不计入配额压力。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    calls = []
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: calls.append(1))
+    key = callbacks.helpers.target_key('GFULL', False)
+    _exhaust_ref(key)
+    state.full_volume_groups.add('GFULL')          # 标记全量群 → is_active_push True
+
+    await callbacks._send_text_quota_managed('GFULL', False, 'hi', None)
+
+    assert calls == []                             # 未计入
+    sender.send_to_group.assert_awaited_once()     # 仍走主动消息送达
+
+
+async def test_quota_exhausted_counted_for_normal_group(monkeypatch):
+    """普通群配额耗尽无主动兜底(阻塞等刷新)→ 计入配额压力。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    calls = []
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: calls.append(1))
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_wait_timeout', lambda: None)
+    # 普通群耗尽会阻塞等刷新 → mock 立即返回 None,避免测试挂满超时
+    monkeypatch.setattr(callbacks.quota, 'wait_and_consume', AsyncMock(return_value=None))
+    key = callbacks.helpers.target_key('GNORM', False)
+    _exhaust_ref(key)                              # 不加入 full_volume_groups
+
+    await callbacks._send_text_quota_managed('GNORM', False, 'hi', None)
+
+    assert calls == [1]                            # 计入一次
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # 崩溃中断通知:进行中对局缓存(事件流维护)+ fan-out 去重 + 发送分支
 # ─────────────────────────────────────────────────────────────────────────
 
