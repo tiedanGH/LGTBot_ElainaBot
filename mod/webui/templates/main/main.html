@@ -23,6 +23,8 @@ __BACKUP_CSS__
 
 __AUDIT_CSS__
 
+__CRASH_CSS__
+
 __PREBUILT_CSS__
   </style>
 </head>
@@ -46,6 +48,7 @@ __PREBUILT_CSS__
       <button class="tab" data-tab="build">🛠️ 引擎编译</button>
       <button class="tab" data-tab="backup">💾 数据备份</button>
       <button class="tab" data-tab="logs">📜 消息日志<span class="tab-live-badge" id="live-badge">实时</span></button>
+      <button class="tab" data-tab="crash">💥 崩溃转储</button>
       <button class="tab" data-tab="audit">🛡️ 操作审计</button>
       <button class="tab" data-tab="users">👥 用户数据</button>
     </div>
@@ -84,6 +87,10 @@ __LOGS_HTML__
 __AUDIT_HTML__
     </div>
 
+    <div id="tab-crash" class="tab-pane">
+__CRASH_HTML__
+    </div>
+
     <div id="tab-users" class="tab-pane">
 __USERS_HTML__
     </div>
@@ -114,6 +121,7 @@ __USERS_HTML__
   <script id="user-data" type="application/json">__USER_DATA__</script>
   <script id="backup-data" type="application/json">__BACKUP_DATA__</script>
   <script id="audit-data" type="application/json">__AUDIT_DATA__</script>
+  <script id="crash-data" type="application/json">__CRASH_DATA__</script>
   <script id="prebuilt-data" type="application/json">__PREBUILT_DATA__</script>
   <script>
 __MAIN_JS__
@@ -133,6 +141,8 @@ __USERS_JS__
 __BACKUP_JS__
 
 __AUDIT_JS__
+
+__CRASH_JS__
 
 __PREBUILT_JS__
   </script>

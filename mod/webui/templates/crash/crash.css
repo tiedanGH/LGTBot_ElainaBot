@@ -1,0 +1,117 @@
+/* 「💥 崩溃转储」标签样式 */
+
+.crash-status-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.crash-status-card {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.crash-status-label { font-size: 12px; color: var(--text-muted); }
+.crash-status-value {
+  font-size: 20px; font-weight: 600; color: var(--accent);
+  font-family: 'Consolas', 'Menlo', monospace;
+}
+.crash-status-sub { font-size: 11px; color: var(--text-faint); }
+
+/* 转储列表标题栏右侧操作区(提示 / 刷新 / 删除) */
+.crash-list-actions { gap: 10px; flex-wrap: wrap; }
+.crash-action-msg {
+  font-size: 12px; color: var(--text-muted);
+  max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── 列表 ── */
+.crash-table-wrap { overflow-x: auto; }
+.crash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.crash-table th, .crash-table td {
+  padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.crash-table th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+.crash-table tbody tr:hover { background: var(--hover); }
+.crash-empty td { color: var(--text-faint); text-align: center; padding: 16px 10px; }
+.crash-col-chk { width: 1%; text-align: center; }
+.crash-col-chk input { cursor: pointer; }
+/* 文件名列收窄到内容宽度(width:1% + 全局 nowrap),把剩余宽度让给用户 / 群聊列 */
+.crash-col-name { width: 1%; }
+.crash-col-name .dash-mono { color: var(--text-muted); font-size: 12px; }
+/* 触发源两列:用户 / 群聊 —— 完整显示,长 ID 换行,吸收剩余宽度 */
+.crash-col-uid, .crash-col-gid { font-size: 12px; white-space: normal; word-break: break-all; }
+.crash-none { color: var(--text-faint); }
+/* 可点击复制的完整 ID */
+.crash-copy { cursor: pointer; color: var(--text-muted); }
+.crash-copy:hover { color: var(--accent); text-decoration: underline; }
+.crash-copied { color: var(--accent) !important; }
+/* 私信触发徽章(列表「群」列 + 弹窗「群」项:无群号,标记为私信) */
+.crash-dm {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
+}
+
+/* 信号徽章:SIGABRT 橙、SIGSEGV/SIGBUS 红、其余灰 */
+.crash-sig {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.crash-sig.seg  { background: color-mix(in srgb, #dc3545 18%, transparent); color: #dc3545; }
+.crash-sig.abrt { background: color-mix(in srgb, var(--img) 18%, transparent); color: var(--img); }
+.crash-sig.misc { background: var(--tag-bg); color: var(--tag-text); }
+
+.crash-act-btns { display: inline-flex; gap: 6px; }
+.crash-note { margin-top: 12px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+
+/* ── 查看大弹窗 ── */
+.crash-modal-backdrop {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.crash-modal-backdrop.hidden { display: none; }
+.crash-modal {
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-top: 3px solid var(--accent); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  width: 100%; max-width: 860px; max-height: 88vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.crash-modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--panel-2);
+}
+.crash-modal-title { margin: 0; font-size: 15px; font-weight: 600; }
+.crash-view-actions { display: inline-flex; gap: 6px; }
+.crash-modal-body {
+  padding: 16px 18px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.crash-meta-grid {
+  display: grid; gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+.crash-meta-item {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px;
+}
+.crash-meta-label { font-size: 11px; color: var(--text-muted); }
+.crash-meta-value { font-size: 13px; color: var(--text); word-break: break-all; }
+.crash-meta-block-label { font-size: 12px; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
+.crash-view-msg {
+  margin: 0; max-height: 160px; overflow: auto;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 12px; line-height: 1.5; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+.crash-view-body {
+  margin: 0; flex: 1; min-height: 160px; overflow: auto;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 14px; font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 12px; line-height: 1.55; color: var(--text);
+  white-space: pre; tab-size: 2;
+}

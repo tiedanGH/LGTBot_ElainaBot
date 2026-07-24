@@ -44,6 +44,7 @@ import os
 from core.plugin import web_pages
 from .. import audit, metrics
 from .. import state as _plugin_state
+from . import page_crash
 from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
                page_logs, page_metrics, page_prebuilt, page_users)
 
@@ -84,6 +85,7 @@ _BACKUP_CREATE_KEY  = '__lgtbot_backup_create'
 _BACKUP_LIST_KEY    = '__lgtbot_backup_list'
 # 操作审计标签的唯一 action 端点(只读刷新)
 _AUDIT_LIST_KEY     = '__lgtbot_audit_list'
+_CRASH_LIST_KEY     = '__lgtbot_crash_list'       # 崩溃转储列表刷新(只读 fragment)
 # 指标面板标签的唯一 action 端点(统一刷新:数据统计 + 运行指标 + 游戏数据)
 _METRICS_REFRESH_KEY = '__lgtbot_metrics_refresh'
 # 预编译部署标签的无参 action 端点(JS 侧 PREBUILT_KEYS 与此一一对应)
@@ -97,6 +99,10 @@ _BACKUP_RESTORE_ROUTE = '/api/ext/lgtbot/backup/restore'
 _BACKUP_DELETE_ROUTE  = '/api/ext/lgtbot/backup/delete'
 # 仪表盘「机器人绑定」换绑端点(要接 ?appid= 参数,同样走 register_route)
 _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
+# 崩溃转储查看正文 / 下载单个 dump / 删除选中(都接 ?name=,可多个,走 register_route)
+_CRASH_VIEW_ROUTE     = '/api/ext/lgtbot/crash/view'
+_CRASH_DOWNLOAD_ROUTE = '/api/ext/lgtbot/crash/download'
+_CRASH_DELETE_ROUTE   = '/api/ext/lgtbot/crash/delete'
 # 带 schema 校验的配置保存(config.yaml / lgtbot.json),POST body 传内容
 _CONFIG_SAVE_ROUTE    = '/api/ext/lgtbot/config/save'
 # 预编译下载(POST {name,mirror?},后台起 task)/ 镜像测速(POST {customs?})/ 记住下载镜像(POST {mirror})
@@ -135,6 +141,7 @@ _HIDDEN_KEYS = frozenset({
     _BACKUP_CREATE_KEY,
     _BACKUP_LIST_KEY,
     _AUDIT_LIST_KEY,
+    _CRASH_LIST_KEY,
     _METRICS_REFRESH_KEY,
     _PREBUILT_LIST_KEY,
     _PREBUILT_STATE_KEY,
@@ -171,6 +178,7 @@ def _render_html() -> str:
             .replace('__USERS_CSS__', page_users.TAB_CSS)
             .replace('__BACKUP_CSS__', page_backup.TAB_CSS)
             .replace('__AUDIT_CSS__', page_audit.TAB_CSS)
+            .replace('__CRASH_CSS__', page_crash.TAB_CSS)
             .replace('__PREBUILT_CSS__', page_prebuilt.TAB_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
             .replace('__METRICS_HTML__', page_metrics.TAB_HTML)
@@ -180,6 +188,7 @@ def _render_html() -> str:
             .replace('__USERS_HTML__', page_users.TAB_HTML)
             .replace('__BACKUP_HTML__', page_backup.TAB_HTML)
             .replace('__AUDIT_HTML__', page_audit.TAB_HTML)
+            .replace('__CRASH_HTML__', page_crash.TAB_HTML)
             .replace('__PREBUILT_HTML__', page_prebuilt.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
             .replace('__METRICS_DATA__', page_metrics.get_data())
@@ -189,6 +198,7 @@ def _render_html() -> str:
             .replace('__USER_DATA__', page_users.get_data())
             .replace('__BACKUP_DATA__', page_backup.get_data())
             .replace('__AUDIT_DATA__', page_audit.get_data())
+            .replace('__CRASH_DATA__', page_crash.get_data())
             .replace('__PREBUILT_DATA__', page_prebuilt.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
             .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
@@ -199,6 +209,7 @@ def _render_html() -> str:
             .replace('__USERS_JS__', page_users.TAB_JS)
             .replace('__BACKUP_JS__', page_backup.TAB_JS)
             .replace('__AUDIT_JS__', page_audit.TAB_JS)
+            .replace('__CRASH_JS__', page_crash.TAB_JS)
             .replace('__PREBUILT_JS__', page_prebuilt.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
             .replace('__RESTART_KEY__', RESTART_KEY)
@@ -388,6 +399,9 @@ def register():
     # 操作审计 action 端点(只读刷新;审计流不设清空 / 删除端点)
     _register_hidden_action(_AUDIT_LIST_KEY, page_audit.render_list)
 
+    # 崩溃转储 action 端点(只读刷新;查看正文 / 下载走下方带 ?name= 的真路由)
+    _register_hidden_action(_CRASH_LIST_KEY, page_crash.render_list)
+
     # 指标面板 action 端点(统一刷新:数据统计 + 运行指标 + 游戏数据)
     _register_hidden_action(_METRICS_REFRESH_KEY, page_metrics.render_refresh)
 
@@ -401,6 +415,9 @@ def register():
     web_pages.register_route('GET', _BACKUP_RESTORE_ROUTE, page_backup.restore_handler, auth=True)
     web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
     web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)
+    web_pages.register_route('GET', _CRASH_VIEW_ROUTE, page_crash.view_handler, auth=True)
+    web_pages.register_route('GET', _CRASH_DOWNLOAD_ROUTE, page_crash.download_handler, auth=True)
+    web_pages.register_route('GET', _CRASH_DELETE_ROUTE, page_crash.delete_handler, auth=True)
     web_pages.register_route('POST', _CONFIG_SAVE_ROUTE, page_config.save_config_handler, auth=True)
     # 预编译:下载 / 镜像测速 / 记住下载镜像(均 POST)
     web_pages.register_route('POST', _PREBUILT_DOWNLOAD_ROUTE, page_prebuilt.download_handler, auth=True)

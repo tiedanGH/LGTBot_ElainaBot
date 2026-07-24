@@ -266,12 +266,22 @@ void SigSegvHandler(int sig, siginfo_t* info, void* /*ucontext*/)
 // game_path 形如 ".../plugins/LGTBot_ElainaBot/build/plugins" —— 去掉
 // "/build/plugins" 后缀就是 plugin 根目录。失败时 g_crash_dump_dir 保持空,
 // handler 里的 dump 会自动跳过。
+//
+// 预编译模式 game_path 形如 ".../LGTBot_ElainaBot/build_prebuilt/build/plugins",
+// 上面截出的 base 末尾会多一层 "/build_prebuilt";剥掉它,让崩溃转储无论本地 /
+// 预编译都**固定落在插件根** /LGTBot_CRASH_DUMPS,面板才统一读得到。
 inline void DeriveCrashDumpDir(const char* game_path) {
     if (!game_path) return;
     const char marker[] = "/build/plugins";
     const char* found = std::strstr(game_path, marker);
     if (!found) return;
     size_t base_len = static_cast<size_t>(found - game_path);
+    const char pre[] = "/build_prebuilt";
+    const size_t pre_len = sizeof(pre) - 1;   // 不含 '\0'
+    if (base_len >= pre_len &&
+        std::memcmp(game_path + base_len - pre_len, pre, pre_len) == 0) {
+        base_len -= pre_len;                  // 预编译:再剥掉 /build_prebuilt → 插件根
+    }
     const char suffix[] = "/LGTBot_CRASH_DUMPS";
     if (base_len + sizeof(suffix) > sizeof(g_crash_dump_dir)) return;
     std::memcpy(g_crash_dump_dir, game_path, base_len);

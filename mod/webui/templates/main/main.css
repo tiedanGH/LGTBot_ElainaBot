@@ -186,6 +186,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .config-tab,
 .backup,
 .audit,
+.crash,
 .metrics,
 .prebuilt { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
 

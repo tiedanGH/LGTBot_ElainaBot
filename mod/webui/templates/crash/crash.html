@@ -1,0 +1,89 @@
+<div class="crash">
+
+  <!-- ──── 状态卡 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">💥 崩溃转储</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">目录</span>
+        <span id="crash-dir" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+
+    <div class="crash-status-grid">
+      <div class="crash-status-card">
+        <div class="crash-status-label">引擎崩溃重启</div>
+        <div id="crash-restart-total" class="crash-status-value">—</div>
+        <div id="crash-restart-sub" class="crash-status-sub">—</div>
+      </div>
+      <div class="crash-status-card">
+        <div class="crash-status-label">转储数量</div>
+        <div id="crash-count" class="crash-status-value">—</div>
+        <div class="crash-status-sub">crash_&lt;时间&gt;_&lt;pid&gt;_&lt;tid&gt;.log</div>
+      </div>
+      <div class="crash-status-card">
+        <div class="crash-status-label">占用大小</div>
+        <div id="crash-size" class="crash-status-value">—</div>
+        <div class="crash-status-sub">本地保存，可下载后自行清理</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ──── 转储列表 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📋 转储列表</h2>
+      <div class="dash-section-meta crash-list-actions">
+        <span id="crash-action-msg" class="crash-action-msg"></span>
+        <button id="crash-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新</button>
+        <button id="crash-delete-btn" class="dash-btn dash-btn-small dash-btn-warn" disabled>🗑 删除选中 (0)</button>
+      </div>
+    </div>
+    <div class="crash-table-wrap">
+      <table class="crash-table">
+        <thead>
+          <tr>
+            <th class="crash-col-chk"><input type="checkbox" id="crash-check-all" title="全选 / 全不选"></th>
+            <th class="crash-col-time">时间</th>
+            <th class="crash-col-sig">信号</th>
+            <th class="crash-col-size">大小</th>
+            <th class="crash-col-name">文件</th>
+            <th class="crash-col-uid">用户</th>
+            <th class="crash-col-gid">群聊</th>
+            <th class="crash-col-act">操作</th>
+          </tr>
+        </thead>
+        <tbody id="crash-table-body">
+          <tr class="crash-empty"><td colspan="8">暂无崩溃转储 —— 引擎未发生过 SIGSEGV / SIGBUS / SIGABRT</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="crash-note">
+      引擎（C++ 桥接层）在崩溃时以 async-signal-safe 方式落盘信号 / si_addr / pid / tid + 触发源（uid·gid）+ backtrace 栈。
+      点「👁 查看」在弹窗中查看 dump 完整信息与 backtrace，「⬇ 下载」保存原始 dump 用于排障。
+    </p>
+  </section>
+
+  <!-- ──── 查看大弹窗(点「👁 查看」后打开) ──── -->
+  <div id="crash-modal-backdrop" class="crash-modal-backdrop hidden" aria-hidden="true">
+    <div id="crash-modal" class="crash-modal" role="dialog" aria-modal="true">
+      <div class="crash-modal-head">
+        <h2 class="crash-modal-title">🔍 崩溃转储 · <span id="crash-view-name" class="dash-mono">—</span></h2>
+        <div class="crash-view-actions">
+          <button id="crash-view-download" class="dash-btn dash-btn-small">⬇ 下载</button>
+          <button id="crash-view-close" class="dash-btn dash-btn-small">✕ 关闭</button>
+        </div>
+      </div>
+      <div class="crash-modal-body">
+        <div id="crash-view-meta" class="crash-meta-grid"></div>
+        <div id="crash-view-msg-wrap" class="crash-view-msg-wrap" style="display:none">
+          <div class="crash-meta-block-label">触发消息</div>
+          <pre id="crash-view-msg" class="crash-view-msg"></pre>
+        </div>
+        <div class="crash-meta-block-label">backtrace 栈</div>
+        <pre id="crash-view-body" class="crash-view-body">加载中……</pre>
+      </div>
+    </div>
+  </div>
+
+</div>
