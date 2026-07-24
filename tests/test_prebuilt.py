@@ -335,6 +335,64 @@ def test_extract_and_swap_replaces_existing(tmp_path):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# tools/trim_prebuilt_release.py —— CI 滚动 release 批次清理(保留两个版本)
+# ─────────────────────────────────────────────────────────────────────────
+
+def _trim_tool():
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        'tools', 'trim_prebuilt_release.py')
+    spec = importlib.util.spec_from_file_location('trim_prebuilt_release', path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _trim_batch(sha, ts):
+    return [{'name': f'lgtbot-{o}-py3.11-{sha}.zip', 'createdAt': ts}
+            for o in ('ubuntu-22.04', 'ubuntu-24.04', 'debian-12')]
+
+
+def test_trim_release_keeps_two_batches():
+    """上传后 release 恒收敛到 ≤2 批:现存 1 批不删;现存 2 批删最旧;残留 3 批收敛。"""
+    t = _trim_tool()
+    old = _trim_batch('a' * 7, '2026-07-18T00:00:00Z')
+    mid = _trim_batch('b' * 7, '2026-07-20T00:00:00Z')
+    new = _trim_batch('c' * 7, '2026-07-22T00:00:00Z')
+    assert t.plan_trim(old, 'd' * 7) == []                       # 1 批 + 新批 → 不删
+    dels = t.plan_trim(old + mid, 'd' * 7)
+    assert len(dels) == 3 and all('aaaaaaa' in n for n in dels)  # 2 批 + 新批 → 删最旧
+    assert len(t.plan_trim(old + mid + new, 'd' * 7)) == 6       # 3 批残留 → 收敛到 2
+
+
+def test_trim_release_rerun_same_commit_keeps_both():
+    """重跑同 commit:上传同名覆盖、不新增批 → 现存两批都保留,不误删上一版。"""
+    t = _trim_tool()
+    assets = (_trim_batch('a' * 7, '2026-07-18T00:00:00Z')
+              + _trim_batch('b' * 7, '2026-07-20T00:00:00Z'))
+    assert t.plan_trim(assets, 'b' * 7) == []
+
+
+def test_trim_release_ignores_foreign_assets():
+    """不匹配预编译命名的 asset 一律不动;sha=unknown 也算独立批。"""
+    t = _trim_tool()
+    assets = (_trim_batch('unknown', '2026-07-20T00:00:00Z')
+              + [{'name': 'README.txt', 'createdAt': '2020-01-01T00:00:00Z'}])
+    assert t.plan_trim(assets, 'e' * 7) == []
+
+
+def test_trim_release_incoming_sha(tmp_path):
+    """从 dist 目录 zip 名解析本次批 sha;无可识别 zip 时报错退出。"""
+    t = _trim_tool()
+    (tmp_path / 'lgtbot-debian-12-py3.11-abc1234.zip').write_bytes(b'')
+    assert t.incoming_sha(str(tmp_path)) == 'abc1234'
+    empty = tmp_path / 'empty'
+    empty.mkdir()
+    with pytest.raises(SystemExit):
+        t.incoming_sha(str(empty))
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # self_check
 # ─────────────────────────────────────────────────────────────────────────
 

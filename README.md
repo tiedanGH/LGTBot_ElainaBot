@@ -173,7 +173,8 @@ plugins/LGTBot_ElainaBot/
 │   └── logo_transparent_colorful.png   欢迎菜单顶部 logo
 │
 ├── tools/
-│   └── pack_prebuilt.sh     CI 打包脚本：收运行时子集 + manifest.json → dist/*.zip
+│   ├── pack_prebuilt.sh     CI 打包脚本：收运行时子集 + manifest.json → dist/*.zip
+│   └── trim_prebuilt_release.py  CI 发布前清理：滚动 release 仅保留最新 + 上一批两个版本
 │
 ├── .github/workflows/       GitHub Actions CI
 │   ├── cmake.yml            Ubuntu 编译 + ctest + 桥接冒烟

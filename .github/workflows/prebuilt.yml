@@ -83,11 +83,16 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
-  # 单独的发布 job:始终覆盖 `prebuilt` 这一个滚动预发布 tag 的同名 asset。
+  # 单独的发布 job:始终覆盖 `prebuilt` 这一个滚动预发布 tag
   publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout tools
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -97,20 +102,16 @@ jobs:
       - name: List assets
         run: ls -lh dist
 
-      - name: Remove stale assets
+      - name: Trim rolling release to two batches
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          if gh release view prebuilt --repo "${{ github.repository }}" \
-               --json assets -q '.assets[].name' > stale_assets.txt 2>/dev/null; then
-            while IFS= read -r name; do
-              [ -n "$name" ] || continue
-              echo "delete stale asset: $name"
-              gh release delete-asset prebuilt "$name" --repo "${{ github.repository }}" -y || true
-            done < stale_assets.txt
-          else
-            echo "prebuilt release not found; first publish, nothing to clean"
+          if ! gh release view prebuilt --repo "$REPO" --json assets > assets.json 2>/dev/null; then
+            echo "prebuilt release not found; first publish, nothing to trim"
+            exit 0
           fi
+          python3 tools/trim_prebuilt_release.py assets.json dist
 
       - name: Publish to rolling prebuilt release
         uses: softprops/action-gh-release@v2
@@ -119,9 +120,9 @@ jobs:
           prerelease: true
           name: 预编译包（滚动更新）
           body: |
-            自动构建的预编译包，**滚动更新、始终为最新**。
+            自动构建的预编译包，**滚动更新，仅保留最新的 2 个版本**。
 
-            - 由 commit `${{ github.sha }}` 触发构建
+            - 最新版由 commit `${{ github.sha }}` 触发构建
             - 每档 zip 对应一个发行版 + Python ABI（见 asset 名与包内 `manifest.json`）
             - 下载后在插件 Web 面板「📦 预编译部署」页安装、切换、重启即可，**无需本地编译工具链**
 
