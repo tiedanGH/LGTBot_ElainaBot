@@ -99,6 +99,44 @@ def test_annotate_matches_latest_installed(monkeypatch):
     assert out[1]['installed'] and not out[0]['installed']
 
 
+def test_annotate_splits_os_and_py_match(monkeypatch):
+    """系统与 Python 分别对比:os_match / py_match 独立,matches_local = 两者都中。
+    前端据此细分「系统不匹配(红)/ Python 不匹配(橙)」及下载确认的完全 / 部分不匹配。"""
+    monkeypatch.setattr(prebuilt, 'local_os_tag', lambda: 'debian-12')
+    monkeypatch.setattr(prebuilt, 'local_python_tag', lambda: '3.11')
+    monkeypatch.setattr(prebuilt, 'installed_manifest', lambda: None)
+    assets = [
+        {'os': 'debian-12',    'python_tag': '3.11', 'sha': 'a' * 7, 'updated_at': ''},  # 全匹配
+        {'os': 'debian-12',    'python_tag': '3.10', 'sha': 'b' * 7, 'updated_at': ''},  # 仅 py 不匹配(部分)
+        {'os': 'ubuntu-22.04', 'python_tag': '3.11', 'sha': 'c' * 7, 'updated_at': ''},  # 仅系统不匹配
+        {'os': 'ubuntu-22.04', 'python_tag': '3.10', 'sha': 'd' * 7, 'updated_at': ''},  # 完全不匹配
+    ]
+    full, py_off, os_off, both_off = prebuilt._annotate(assets)
+    assert full['os_match'] and full['py_match'] and full['matches_local']
+    assert py_off['os_match'] and not py_off['py_match'] and not py_off['matches_local']
+    assert not os_off['os_match'] and os_off['py_match'] and not os_off['matches_local']
+    assert not both_off['os_match'] and not both_off['py_match']
+
+
+def test_list_remote_sorts_newest_first(monkeypatch):
+    """列表按 updated_at 倒序(新的在上);同批内按 os/py 稳定排序。"""
+    monkeypatch.setattr(prebuilt, 'local_os_tag', lambda: 'debian-12')
+    monkeypatch.setattr(prebuilt, 'local_python_tag', lambda: '3.11')
+    monkeypatch.setattr(prebuilt, 'installed_manifest', lambda: None)
+    fake_rel = {'assets': [
+        {'name': 'lgtbot-ubuntu-22.04-py3.10-aaaaaaa.zip', 'size': 1,
+         'updated_at': '2026-07-20T00:00:00Z', 'browser_download_url': 'u'},
+        {'name': 'lgtbot-ubuntu-22.04-py3.10-bbbbbbb.zip', 'size': 1,
+         'updated_at': '2026-07-24T00:00:00Z', 'browser_download_url': 'u'},
+        {'name': 'lgtbot-debian-12-py3.11-ccccccc.zip', 'size': 1,
+         'updated_at': '2026-07-22T00:00:00Z', 'browser_download_url': 'u'},
+    ]}
+    monkeypatch.setattr(prebuilt, '_api_get_json', lambda p: fake_rel)
+    out = prebuilt.list_remote()
+    assert out['success']
+    assert [a['sha'][0] for a in out['assets']] == ['b', 'c', 'a']   # 新 → 旧
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # marker 切换
 # ─────────────────────────────────────────────────────────────────────────

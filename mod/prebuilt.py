@@ -327,7 +327,10 @@ def _parse_asset(a: dict) -> dict | None:
 
 
 def _annotate(assets: list[dict]) -> list[dict]:
-    """给每个 asset 标 matches_local / is_latest / installed。"""
+    """给每个 asset 标 os_match / py_match / matches_local / is_latest / installed。
+
+    系统(发行版)与 Python 版本**分别**对比 —— 前端据此细分「系统不匹配 /
+    Python 不匹配」标签,下载确认也区分完全 / 部分不匹配(系统权重更高)。"""
     my_os, my_py = local_os_tag(), local_python_tag()
     inst = installed_manifest() or {}
     inst_sha = inst.get('bridge_sha', '')
@@ -338,7 +341,9 @@ def _annotate(assets: list[dict]) -> list[dict]:
         if a['updated_at'] > prev:
             latest_by_os[a['os']] = a['updated_at']
     for a in assets:
-        a['matches_local'] = (a['os'] == my_os and a['python_tag'] == my_py)
+        a['os_match'] = (a['os'] == my_os)
+        a['py_match'] = (a['python_tag'] == my_py)
+        a['matches_local'] = a['os_match'] and a['py_match']
         a['is_latest'] = bool(a['updated_at']) and a['updated_at'] == latest_by_os.get(a['os'])
         a['installed'] = bool(inst_sha) and a['sha'] == inst_sha
     return assets
@@ -379,7 +384,9 @@ def list_remote() -> dict:
                 'installed': installed_manifest()}
     raw_assets = (rel or {}).get('assets', []) if isinstance(rel, dict) else []
     parsed = [p for a in raw_assets if (p := _parse_asset(a))]
+    # 新的在上:主键 updated_at 倒序;同批(时间相同)内按 os / py 稳定排序
     parsed.sort(key=lambda a: (a['os'], a['python_tag']))
+    parsed.sort(key=lambda a: a['updated_at'], reverse=True)
     return {
         'success': True,
         'assets': _annotate(parsed),

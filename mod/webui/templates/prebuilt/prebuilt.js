@@ -173,9 +173,21 @@ async function pbSelectMirror(m) {
 }
 
 /* ──── 包列表 ──── */
+/* 本机 {os, python},pbRenderList 时缓存,供下载确认弹窗拼「本机 X / 包 Y」对比文案 */
+let _pbLocal = {};
+
+/* 系统与 Python 分别对比(系统权重更高)。后端已给 os_match/py_match,
+   老数据没有时回退用 local 字段现算,保证任何时候都能细分。 */
+function pbMatchFlags(a) {
+  const osOk = (a.os_match != null) ? !!a.os_match : (a.os === (_pbLocal.os || ''));
+  const pyOk = (a.py_match != null) ? !!a.py_match : (a.python_tag === (_pbLocal.python || ''));
+  return { osOk, pyOk };
+}
+
 function pbRenderList(data) {
   const body = document.getElementById('pb-table-body');
   const plat = document.getElementById('pb-local-plat');
+  if (data.local) _pbLocal = data.local;
   if (plat && data.local) plat.textContent = (data.local.os || '?') + ' · py' + (data.local.python || '?');
   if (!body) return;
   if (!data.success) {
@@ -188,14 +200,22 @@ function pbRenderList(data) {
     return;
   }
   body.innerHTML = _pbAssets.map(a => {
+    const { osOk, pyOk } = pbMatchFlags(a);
     const tags = [];
     if (a.is_latest) tags.push('<span class="pb-tag pb-tag-latest">最新</span>');
-    tags.push(a.matches_local
-      ? '<span class="pb-tag pb-tag-match">本机匹配</span>'
-      : '<span class="pb-tag pb-tag-mismatch">不匹配</span>');
+    if (osOk && pyOk) {
+      tags.push('<span class="pb-tag pb-tag-match">本机匹配</span>');
+    } else {
+      /* 系统与 Python 分开标注:系统不匹配红(底层 ABI 必然不符,更严重),
+         Python 不匹配橙;匹配的那一半也标出来,一眼看出是「部分匹配」 */
+      tags.push(osOk ? '<span class="pb-tag pb-tag-match">系统匹配</span>'
+                     : '<span class="pb-tag pb-tag-bad">系统不匹配</span>');
+      tags.push(pyOk ? '<span class="pb-tag pb-tag-match">py 匹配</span>'
+                     : '<span class="pb-tag pb-tag-mismatch">py 不匹配</span>');
+    }
     if (a.installed) tags.push('<span class="pb-tag pb-tag-installed">已安装</span>');
     const btn = '<button class="dash-btn dash-btn-small pb-dl" data-name="' + escapeHtml(a.name) + '">⬇ 下载</button>';
-    return '<tr class="' + (a.matches_local ? 'pb-row-match' : '') + '">' +
+    return '<tr class="' + ((osOk && pyOk) ? 'pb-row-match' : '') + '">' +
            '<td>' + escapeHtml(a.os || '') + '</td>' +
            '<td class="dash-mono">' + escapeHtml(a.python_tag || '') + '</td>' +
            '<td class="dash-mono">' + pbFmtSize(a.size) + '</td>' +
@@ -282,10 +302,28 @@ async function pbPollOnce() {
 async function pbDownload(name) {
   if (!name) return;
   const asset = _pbAssets.find(a => a.name === name) || {};
+  const { osOk, pyOk } = pbMatchFlags(asset);
+  const locOs = _pbLocal.os || '?', locPy = _pbLocal.python || '?';
   let warn = '确认下载预编译包「' + name + '」?\n\n';
-  if (!asset.matches_local) warn += '⚠️ 该包与本机发行版 / Python 不匹配，安装后可能无法加载。\n';
+  let level = 'warn';
+  /* 不匹配分级提示:系统(发行版)权重更高 —— 系统不一致基本必然无法加载(danger);
+     仅 Python 不一致属「部分匹配」,同样大概率加载失败但严重度次之(warn)。 */
+  if (!osOk && !pyOk) {
+    warn += '🚫 完全不匹配：系统(本机 ' + locOs + ' / 包 ' + (asset.os || '?') + ')与 ' +
+            'Python(本机 py' + locPy + ' / 包 py' + (asset.python_tag || '?') + ')均不一致，' +
+            '安装后几乎必然无法加载。\n';
+    level = 'danger';
+  } else if (!osOk) {
+    warn += '🚫 系统不匹配：本机 ' + locOs + '，包为 ' + (asset.os || '?') +
+            '(Python 一致)。发行版不同底层库 ABI 不符，基本无法加载。\n';
+    level = 'danger';
+  } else if (!pyOk) {
+    warn += '⚠️ 部分匹配：系统一致，但 Python 版本不一致(本机 py' + locPy +
+            '，包为 py' + (asset.python_tag || '?') + ')。桥接层锁定 Boost.Python ABI，' +
+            '安装后可能无法加载。\n';
+  }
   warn += '包较大，下载期间请勿关闭面板；完成后需切换到预编译并重启生效。';
-  const ok = await dashConfirm(warn, { level: asset.matches_local ? 'warn' : 'danger' });
+  const ok = await dashConfirm(warn, { level });
   if (!ok) return;
   const body = { name };
   if (_pbSelected !== null) body.mirror = _pbSelected;

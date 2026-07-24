@@ -45,6 +45,7 @@
 .pb-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
 .pb-tag-latest    { background: color-mix(in srgb, var(--out) 18%, transparent); color: var(--out); }
 .pb-tag-match     { background: color-mix(in srgb, var(--in) 18%, transparent);  color: var(--in); }
+.pb-tag-bad       { background: color-mix(in srgb, #dc3545 18%, transparent);   color: #dc3545; }
 .pb-tag-mismatch  { background: color-mix(in srgb, var(--img) 18%, transparent); color: var(--img); }
 .pb-tag-installed { background: color-mix(in srgb, var(--text-faint) 18%, transparent); color: var(--text-faint); }
 .pb-empty td { text-align: center; padding: 24px 16px; color: var(--text-faint); font-size: 13px; }

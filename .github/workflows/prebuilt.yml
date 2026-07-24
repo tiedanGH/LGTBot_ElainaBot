@@ -97,6 +97,21 @@ jobs:
       - name: List assets
         run: ls -lh dist
 
+      - name: Remove stale assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view prebuilt --repo "${{ github.repository }}" \
+               --json assets -q '.assets[].name' > stale_assets.txt 2>/dev/null; then
+            while IFS= read -r name; do
+              [ -n "$name" ] || continue
+              echo "delete stale asset: $name"
+              gh release delete-asset prebuilt "$name" --repo "${{ github.repository }}" -y || true
+            done < stale_assets.txt
+          else
+            echo "prebuilt release not found; first publish, nothing to clean"
+          fi
+
       - name: Publish to rolling prebuilt release
         uses: softprops/action-gh-release@v2
         with:
@@ -104,12 +119,12 @@ jobs:
           prerelease: true
           name: 预编译包（滚动更新）
           body: |
-            自动构建的预编译包，**滚动更新、始终为最新**（每次构建覆盖，不保留历史）。
+            自动构建的预编译包，**滚动更新、始终为最新**。
 
             - 由 commit `${{ github.sha }}` 触发构建
             - 每档 zip 对应一个发行版 + Python ABI（见 asset 名与包内 `manifest.json`）
             - 下载后在插件 Web 面板「📦 预编译部署」页安装、切换、重启即可，**无需本地编译工具链**
 
-            > 本预发布仅承载预编译产物，独立于 2.x.0 正式版 Release。
+            > 本预发布仅承载预编译产物，独立于正式版 Release。
           files: dist/*.zip
           fail_on_unmatched_files: true

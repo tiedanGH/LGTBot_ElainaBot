@@ -121,8 +121,8 @@ CI 已为 **Ubuntu 22.04 / 24.04、Debian 12** 各预编译一份引擎核心 + 
 5. 到**构建来源**分区点「📦 用预编译包」，再点右上角「🔁 重启 LGTBot」生效
 
 - 预编译包解压到 `plugins/LGTBot_ElainaBot/build_prebuilt/`，与本地 `build/` **并存**，可随时切换（每次切换都需要重启）。
-- 匹配以**发行版 + Python 小版本**为准：桥接层 `.so` 锁定 Boost.Python ABI，不匹配的包无法加载。列表会自动标注并推荐匹配项。
-- 远程有更新时列表按 asset 时间戳 / sha 标「最新」，与已安装 `build_prebuilt/manifest.json` 对比提示。
+- 匹配以**发行版 + Python 小版本**为准：桥接层 `.so` 锁定 Boost.Python ABI，不匹配的包无法加载。列表对**系统与 Python 分别标注**（系统不匹配红、Python 不匹配橙，系统权重更高），下载时按「完全不匹配 / 系统不匹配 / 部分匹配」分级提示。
+- 列表按时间倒序，与已安装 `build_prebuilt/manifest.json` 对比提示。
 
 > 需要改桥接层源码或用未覆盖的发行版 / Python 时，仍走 §3 本地编译。
 
