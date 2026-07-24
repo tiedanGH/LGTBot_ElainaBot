@@ -112,10 +112,10 @@ bash build.sh --help                   # 查看所有参数
 
 ### 3.1 预编译包部署（免本地工具链）
 
-CI 已为 **Ubuntu 22.04 / 24.04、Debian 12** 各预编译一份引擎核心 + 全部游戏，发布到本仓库滚动的 `prebuilt` 预发布 release。若本机在此范围，无需 §1 的编译依赖，直接在 Web 面板下载：
+CI 已为 **Ubuntu 22.04 / 24.04、Debian 12** 各预编译一份引擎核心 + 全部游戏，发布到本仓库滚动的预发布 release。若本机在此范围，无需 §1 的编译依赖，直接在 Web 面板下载：
 
 1. 启动主框架后打开 Web 面板 → 侧边栏「LGTBot 机器人」→「📦 预编译部署」tab
-2. 在**仪表盘「🧪 运行环境自检」**看依赖：运行时依赖齐全即可；编译依赖标灰「预编译无需」可忽略
+2. 在**仪表盘「🧪 运行环境」**看依赖：运行时依赖齐全即可；编译依赖标灰「预编译无需」可忽略
 3. 点「📶 测速」选择延迟低的下载镜像，刷新**预编译包**列表
 4. 在**预编译包**列表选**与本机匹配**（发行版 + Python 版本一致）的包，点「⬇ 下载」，等进度条完成
 5. 到**构建来源**分区点「📦 用预编译包」，再点右上角「🔁 重启 LGTBot」生效
@@ -128,23 +128,26 @@ CI 已为 **Ubuntu 22.04 / 24.04、Debian 12** 各预编译一份引擎核心 + 
 
 ### 3.2 在 Docker / 纯运行时环境用预编译包所需的运行时库
 
-预编译包只含**引擎自己编译出的产物**，不含它运行时动态链接的系统库。像主框架官方镜像 `python:3.11-slim`（基于 Debian 12，Dockerfile 只 `pip`、无 `apt`）这类纯运行时环境，缺这些库会让 `import LGTBot_ElainaBot` 直接失败——仪表盘「🧪 运行环境自检」的**运行时依赖**会把它们标红。
+预编译包只含**引擎自己编译出的产物**，不含它运行时动态链接的系统库。像主框架镜像这类纯运行时环境，缺这些库会让 import 直接失败。
 
-用哪档包：`python:3.11-slim` = **Debian 12 + Python 3.11**，选 `lgtbot-debian-12-py3.11` 那档（桥接层 `.so` 锁定 Boost.Python ABI，发行版 + Python 小版本必须匹配）。
+`python:3.11-slim`（**Debian 12 + Python 3.11**），需选择 `lgtbot-debian-12-py3.11` 预编译包。
 
-需补装的**运行时（非 `-dev`）库**——Debian 12 对应包名：
+需补装的**运行时库**，Debian 12 对应包名：
 
 ```dockerfile
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libboost-python1.74.0 libboost-system1.74.0 \
-        libgoogle-glog0v5 libgflags2.2 libprotobuf32 \
-        libcurl4 libsqlite3-0 \
+        libboost-python1.74.0 libprotobuf32 libcurl4 libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 ```
 
-- **以自检面板红项为准**：装完「运行时依赖」应全绿;`libsqlite3-0` 在 slim 镜像里通常已自带。
-- 「编译依赖」标灰「预编译无需」可忽略;Qt（仅 markdown2image 出图用）缺失只影响图片渲染，引擎照常启动。
-- 其他发行版包名不同（如 RHEL/CentOS 用 `boost-python3` / `glog` / `gflags` / `protobuf` / `libcurl` / `sqlite-libs`），按自检红项逐一对应安装即可。
+图片渲染：`markdown2image` 引擎出图需要 Qt 运行库，仅图片渲染不可用，补装图片渲染：
+
+```bash
+apt-get install -y --no-install-recommends libqt5webkit5
+```
+
+- **以自检面板为准**：面板对真实产物跑 `ldd` 实测，「编译依赖」标灰「预编译无需」可忽略。
+- 其他发行版包名不同（如 RHEL/CentOS 用 `boost-python3` / `protobuf` / `libcurl` / `sqlite-libs`），按自检红项提示的 soname 逐一对应安装即可。
 
 ---
 

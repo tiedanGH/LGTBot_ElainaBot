@@ -252,10 +252,11 @@ function dashRenderCheckItems(id, items, isCompile) {
   if (!box) return;
   if (!items || !items.length) { box.innerHTML = '<div class="dash-check-empty">无</div>'; return; }
   box.innerHTML = items.map(it => {
-    /* 编译依赖缺失但可用预编译规避 → 灰点 +「预编译无需」标,不算错误(红) */
+    /* 编译依赖缺失但可用预编译规避 → 灰点 +「预编译无需」标,不算错误(红); 运行时 warn 项缺失 → 黄点,计警告不计严重异常 */
     let dotCls, skipTag = '';
     if (it.ok) dotCls = 'dot-ok';
     else if (isCompile) { dotCls = 'dot-skip'; skipTag = '<span class="dash-check-skip">预编译无需</span>'; }
+    else if (it.warn) dotCls = 'dot-warn';
     else dotCls = 'dot-bad';
     return '<div class="dash-check-item"><span class="dash-check-dot ' + dotCls + '"></span>' +
       '<span class="dash-check-name">' + escapeHtml(it.name || '') + '</span>' + skipTag +
@@ -271,28 +272,36 @@ function dashSetSelfcheckCollapsed(collapsed) {
   if (section) section.classList.toggle('is-collapsed', collapsed);
 }
 
-/* 折叠态只在首屏按「有无红色异常」自动决定一次;之后(重新检测 / 换绑 / 清缓存等
-   任何刷新)只更新检查项与红字计数,**不改变折叠态** —— 此后折叠与否只由用户点标题控制。 */
+/* 折叠态只在首屏按「有无异常 / 警告」自动决定一次(有红色异常或黄色警告都展开,
+   全绿才折叠);之后(重新检测 / 换绑 / 清缓存等任何刷新)只更新检查项与红黄计数,
+   **不改变折叠态** —— 此后折叠与否只由用户点标题控制。 */
 let dashSelfcheckInited = false;
 
 function dashRenderSelfCheck(sc) {
   if (!sc) return;
   dashRenderCheckItems('dash-runtime-list', sc.runtime, false);
   dashRenderCheckItems('dash-compile-list', sc.compile, true);
-  /* 严重异常 = 运行时依赖缺失(红点);编译依赖缺失走「预编译无需」灰点,不计入 */
-  const critical = (sc.runtime || []).filter(it => !it.ok).length;
+  /* 严重异常 = 运行时硬依赖缺失(红点);warn 项缺失只计警告(黄点);
+     编译依赖缺失走「预编译无需」灰点,两者都不计 */
+  const critical = (sc.runtime || []).filter(it => !it.ok && !it.warn).length;
+  const warns    = (sc.runtime || []).filter(it => !it.ok && it.warn).length;
   const badge = document.getElementById('dash-selfcheck-badge');
+  const warnBadge = document.getElementById('dash-selfcheck-badge-warn');
   if (badge) {
     if (critical > 0) {
       badge.textContent = '⚠ ' + critical + ' 项异常';
       badge.className = 'dash-selfcheck-badge bad';   // 红字
+    } else if (warns > 0) {
+      badge.textContent = '';                          // 有警告 → 不显示「环境正常」
+      badge.className = 'dash-selfcheck-badge';
     } else {
-      badge.textContent = '✓ 环境正常';
+      badge.textContent = '✓ 环境正常';                // 无异常且无警告才算正常
       badge.className = 'dash-selfcheck-badge ok';    // 绿字
     }
   }
+  if (warnBadge) warnBadge.textContent = warns > 0 ? ('⚠ ' + warns + ' 项警告') : '';
   if (!dashSelfcheckInited) {
-    dashSetSelfcheckCollapsed(critical === 0);   // 首屏:无异常折叠 / 有异常展开
+    dashSetSelfcheckCollapsed(critical === 0 && warns === 0);   // 首屏:有异常或警告都展开,全绿才折叠
     dashSelfcheckInited = true;
   }
 }

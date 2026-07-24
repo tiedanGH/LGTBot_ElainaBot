@@ -97,7 +97,15 @@ def _lib_present(token: str) -> bool:
 
 
 def _header_present(*paths: str) -> bool:
-    return any(os.path.isfile(p) for p in paths)
+    """开发头是否存在。除给定路径外,对 ``/usr/include/<x>`` 额外探 multiarch 目录 ``/usr/include/<triplet>/<x>``
+    (Debian/Ubuntu 把 curl.h 等放这里,如 ``/usr/include/x86_64-linux-gnu/curl/curl.h``)"""
+    for p in paths:
+        if os.path.isfile(p):
+            return True
+        prefix = '/usr/include/'
+        if p.startswith(prefix) and glob.glob(f'{prefix}*-linux-gnu/{p[len(prefix):]}'):
+            return True
+    return False
 
 
 def _python_dev_present() -> bool:
@@ -109,29 +117,60 @@ def _python_dev_present() -> bool:
         return False
 
 
+# ldd 结果缓存:path → (mtime, missing_set)。产物 mtime 不变就不重跑 subprocess。
+_ldd_cache: dict = {}
+
+
+def _run_ldd(path: str):
+    """对单个 ELF 跑 ``ldd``,返回其中 ``=> not found`` 的 soname 集合;ldd 不可用 /
+    执行失败返回 ``None``(调用方回退静态检查)。结果按 mtime 缓存。"""
+    try:
+        mtime = os.path.getmtime(path)
+        hit = _ldd_cache.get(path)
+        if hit and hit[0] == mtime:
+            return hit[1]
+        out = subprocess.run(['ldd', path], capture_output=True, text=True, timeout=10)
+        if not out.stdout:
+            return None
+        missing = {line.strip().split('=>')[0].strip()
+                   for line in out.stdout.splitlines() if 'not found' in line}
+        _ldd_cache[path] = (mtime, missing)
+        return missing
+    except Exception:
+        return None
+
+
+# 已知运行时硬依赖 —— 逐项在面板列出(面板友好名, soname 前缀, 备注)。
+# 判定:ldd 在场时看实测缺失集是否有该前缀的 soname(精确 / 带版本);否则回退 ldconfig/lib 目录静态判定。
+_RUNTIME_LIBS = (
+    ('Boost.Python 运行时', 'libboost_python', ''),
+    ('libcurl 运行时',      'libcurl',         ''),
+    ('SQLite3 运行时',      'libsqlite3',      'slim 镜像通常自带'),
+    ('Protobuf 运行时',     'libprotobuf',     ''),
+)
+_RUNTIME_PREFIXES = tuple(t for _, t, _ in _RUNTIME_LIBS)
+
+
 def self_check() -> dict:
     """收集运行时 + 编译依赖自检数据。
 
-    runtime = 引擎「跑起来」的硬依赖:桥接层 .so / 引擎共享库 / Python 版本,以及桥接层与
-    bot_core **运行时动态链接的系统库**(Boost.Python/System、glog、gflags、Protobuf、
-    libcurl、SQLite3)。缺任一都会让 ``import LGTBot_ElainaBot`` 直接失败,故缺失报红并计入
-    严重异常。预编译包(tools/pack_prebuilt.sh)只含引擎自编译产物、**不含**这些系统库,
-    所以它们绝不是「预编译无需」——纯运行时环境(如主框架的 python:3.11-slim,只 pip 无 apt)
-    缺库正是最容易踩的坑。
+    runtime = 引擎「跑起来」的硬依赖(缺失报红、计入严重异常):桥接层 .so / 引擎共享库 /
+    Python 版本 + **逐项列出**的系统库(Boost.Python、libcurl、SQLite3、Protobuf)。系统库
+    判定优先用 ldd 实测:对真实产物(桥接 .so、build/lib*.so、runner)跑 ``ldd``,某库若出现
+    在 ``not found`` 集里即判缺(soname 版本精确、自动适应 --glog 等条件构建,不会像 ldconfig
+    静态子串那样误报;实测 Boost.System 是 header-only、glog 默认 OFF、gflags 被 --as-needed
+    丢弃 —— 都**不是**运行时依赖,不列)。ldd 还会额外揪出清单外的缺失外部库。产物 / ldd
+    不可用时回退 ldconfig/lib 目录静态判定。
 
-    compile = 仅本地从源码编译时才需要(标 ``optional_prebuilt=True``,预编译模式下灰显、
-    不计入异常):CMake、编译器、各 -dev 头、protoc、Qt(仅出图,缺了只是图片渲染坏)。
+    warn 级(``warn: True``,前端黄点、计入警告计数、不算严重异常):Qt 图片渲染 ——
+    markdown2image 需要 Qt5 WebKit 或 Qt6 WebEngine **其一**(二选一,detail 注明当前后端),
+    缺失引擎仍可启动、只是图片渲染不可用。
+
+    compile = 仅本地从源码编译时才需要(标 ``optional_prebuilt=True``,灰显、不计异常)。
     返回 ``{runtime:[...], compile:[...], mode:{...}}``。"""
     active = boot.BUILD_DIR
     engine_libs = glob.glob(os.path.join(active, 'lib*.so')) if os.path.isdir(active) else []
-
-    def _rt_lib(name: str, token: str, note: str = '') -> dict:
-        """运行时系统库项 —— 普通 dict(无 optional_prebuilt),前端渲染红点 dot-bad、
-        计入 dashRenderSelfCheck 的严重异常红字计数。用 .so 判定(``_lib_present``)。"""
-        present = _lib_present(token)
-        base = '已检测到' if present else '未检测到,需安装运行时库(见 DEPLOY)'
-        return {'name': name, 'ok': present,
-                'detail': base + (f'({note})' if note else '')}
+    engine_root = getattr(boot, 'ENGINE_ROOT', boot.PLUGIN_DIR)
 
     runtime = [
         {'name': '桥接层扩展 LGTBot_ElainaBot.so',
@@ -143,15 +182,60 @@ def self_check() -> dict:
         {'name': 'Python 版本',
          'ok': sys.version_info[:2] >= (3, 11),
          'detail': f'{prebuilt.local_python_tag()}(框架要求 3.11+)'},
-        # 桥接层 / bot_core 运行时动态链接的系统库(预编译包不含,缺了 import 直接失败)
-        _rt_lib('Boost.Python 运行时', 'libboost_python'),
-        _rt_lib('Boost.System 运行时', 'libboost_system'),
-        _rt_lib('glog 运行时', 'libglog'),
-        _rt_lib('gflags 运行时', 'libgflags'),
-        _rt_lib('Protobuf 运行时', 'libprotobuf'),   # 只判 .so,protoc 是编译期工具,留在 compile
-        _rt_lib('libcurl 运行时', 'libcurl'),          # 只判 .so,curl.h 头留在 compile
-        _rt_lib('SQLite3 运行时', 'libsqlite3', note='slim 镜像通常自带'),
     ]
+
+    # ── 系统库运行时依赖:逐项列出;ldd 在场以链接器真相判定,否则静态回退 ────────
+    bridge_so = os.path.join(engine_root, 'LGTBot_ElainaBot.so')
+    runners = [os.path.join(active, n) for n in ('config_runner', 'match_game_runner')]
+    targets = [p for p in [bridge_so, *engine_libs, *runners] if os.path.isfile(p)]
+    # 引擎自有库(相互 NEEDED,由 boot 预加载 / LD_LIBRARY_PATH 解析,ldd 裸跑必然 not found)。
+    # 用 lib*.so* 通配:NEEDED 记录的是带版本 soname(如 libmd4c-html.so.0),lib*.so 收不到
+    own_libs = ({os.path.basename(p)
+                 for p in glob.glob(os.path.join(active, 'lib*.so*'))}
+                | {'LGTBot_ElainaBot.so'})
+
+    # ldd 实测缺失的外部 soname 集;None = 没跑 ldd(回退 ldconfig 静态判定)
+    missing_ext = None
+    if targets and shutil.which('ldd'):
+        results = [_run_ldd(p) for p in targets]
+        if all(r is not None for r in results):
+            missing_ext = set()
+            for r in results:
+                missing_ext |= {s for s in r if s not in own_libs}
+
+    for label, token, note in _RUNTIME_LIBS:
+        if missing_ext is not None:
+            miss = sorted(s for s in missing_ext if s.startswith(token))
+            ok = not miss
+            detail = ('已检测到(ldd)' if ok
+                      else f'缺 {miss[0]},需安装运行时库(见 DEPLOY)')
+        else:
+            ok = _lib_present(token)
+            detail = ('已检测到' if ok else '未检测到,需安装运行时库(见 DEPLOY)') \
+                     + (f'({note})' if note else '')
+        runtime.append({'name': label, 'ok': ok, 'detail': detail})
+
+    # ldd 揪出的、不在已知清单里的其他缺失外部库(catch-all;Qt 由下方 warn 项单独管)
+    if missing_ext:
+        for so in sorted(missing_ext):
+            if not so.startswith(_RUNTIME_PREFIXES) and not so.startswith('libQt'):
+                runtime.append({'name': f'系统库 {so}', 'ok': False,
+                                'detail': f'缺 {so},需安装运行时库(见 DEPLOY)'})
+
+    # ── Qt 图片渲染(warn 级:二选一,缺失黄点计警告,引擎仍可启动) ─────────────
+    # markdown2image 出图后端:Qt5 走 WebKit、Qt6 走 WebEngine,**二选一**即可。
+    # 用 _lib_present 区分并命名当前后端(与旧版一致);缺失只影响图片渲染。
+    qt5 = _lib_present('libQt5WebKit')          # 匹配 libQt5WebKit{,Widgets}*.so
+    qt6 = _lib_present('libQt6WebEngineCore')
+    qt_ok = qt5 or qt6
+    if qt5:
+        qt_detail = '已检测到 Qt5 WebKit'
+    elif qt6:
+        qt_detail = '已检测到 Qt6 WebEngine'
+    else:
+        qt_detail = '未检测到 Qt5 WebKit / Qt6 WebEngine(二选一),缺失仅影响图片渲染,引擎仍可启动'
+    runtime.append({'name': '图片渲染 Qt (markdown2image)', 'ok': qt_ok,
+                    'warn': True, 'detail': qt_detail})
 
     which = shutil.which
 
@@ -164,29 +248,13 @@ def self_check() -> dict:
     compile_deps = [
         _dep('CMake', which('cmake'), which('cmake') or '未安装'),
         _dep('C++ 编译器 (g++/clang++)', cxx, cxx or '未安装'),
+        _dep('Boost.Python 开发 (libboost-python-dev)', _lib_present('libboost_python')),
+        _dep('gflags 开发 (libgflags-dev)', _lib_present('libgflags')),
         _dep('libcurl 开发头', _header_present('/usr/include/curl/curl.h')),
         _dep('Python 开发头 (python3-dev)', _python_dev_present(),
              'Python.h ' + ('存在' if _python_dev_present() else '缺失')),
         _dep('SQLite3 开发头', _header_present('/usr/include/sqlite3.h')),
         _dep('Protobuf 编译器 (protoc)', which('protoc'), which('protoc') or '未安装'),
-    ]
-
-    # markdown2image 的 HTML 渲染依赖 —— Qt5 用 **WebKit**、Qt6 用 **WebEngine**
-    # (上游 markdown2image 在 Qt5 下走 WebKit),**二选一**即可,本地编译才需要。
-    # 缺失仅影响图片渲染(引擎仍能启动),故维持可选、灰显、不报红。
-    qt6 = _lib_present('libQt6WebEngineCore')
-    qt5 = _lib_present('libQt5WebKit')     # 匹配 libQt5WebKit{,Widgets}*.so
-
-    def _qt_detail(mine: bool, other: bool, other_name: str) -> str:
-        if mine:
-            return '已检测到'
-        if other:
-            return f'已存在 {other_name}'
-        return '未检测到(缺失仅影响图片渲染)'
-
-    compile_deps += [
-        _dep('Qt6 WebEngine (markdown2image)', qt6 or qt5, _qt_detail(qt6, qt5, 'Qt5 WebKit')),
-        _dep('Qt5 WebKit (markdown2image)', qt5 or qt6, _qt_detail(qt5, qt6, 'Qt6 WebEngine')),
     ]
     return {'runtime': runtime, 'compile': compile_deps, 'mode': prebuilt.mode_info()}
 

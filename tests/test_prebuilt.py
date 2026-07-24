@@ -314,48 +314,88 @@ def test_self_check_shape():
     assert sc['mode']['running'] in ('local', 'prebuilt')
 
 
-def test_self_check_qt_either_or(monkeypatch):
-    """Qt5 WebKit / Qt6 WebEngine 二选一:有其一另一项也算满足并注明「已存在」;都无则都不满足。"""
-    pd = _dash()
-
-    def _qt(names):
-        return lambda t: t in names
-    # 只有 Qt6 → 两行都 ok,Qt5 行 detail 注明已存在 Qt6
-    monkeypatch.setattr(pd, '_lib_present', _qt({'libQt6WebEngineCore'}))
-    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if c['name'].startswith('Qt')}
-    assert comp['Qt6']['ok'] and comp['Qt5']['ok'] and 'Qt6' in comp['Qt5']['detail']
-    # 只有 Qt5 → 对称
-    monkeypatch.setattr(pd, '_lib_present', _qt({'libQt5WebKit'}))
-    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if c['name'].startswith('Qt')}
-    assert comp['Qt5']['ok'] and comp['Qt6']['ok'] and 'Qt5' in comp['Qt6']['detail']
-    # 两者皆无 → 都不满足(前端据此标「预编译无需」),仍是可选项
-    monkeypatch.setattr(pd, '_lib_present', lambda t: False)
-    comp = {c['name'][:3]: c for c in pd.self_check()['compile'] if c['name'].startswith('Qt')}
-    assert not comp['Qt6']['ok'] and not comp['Qt5']['ok']
-    assert all(c['optional_prebuilt'] for c in comp.values())
-
-
-def test_self_check_runtime_syslibs():
-    """桥接层 / bot_core 运行时动态链接的系统库应归到 runtime(缺失报红、计入严重异常),
-    而不是 compile 的「预编译无需」;编译期工具(protoc / 各 -dev 头 / CMake)仍留 compile。"""
+def test_self_check_runtime_static_fallback():
+    """无构建产物(或无 ldd)时回退静态检查:runtime 含预编译产物实测的 4 个外部依赖;
+    ldd 证实非运行时依赖的 Boost.System(header-only)/ glog(默认 OFF)/ gflags
+    (--as-needed 丢弃)不再出现;Qt 图片渲染是唯一 warn 项。"""
     sc = _dash().self_check()
     rt_names = ' '.join(c['name'] for c in sc['runtime'])
-    for kw in ('Boost.Python', 'Boost.System', 'glog', 'gflags', 'Protobuf 运行时', 'libcurl 运行时', 'SQLite3 运行时'):
+    for kw in ('Boost.Python', 'libcurl 运行时', 'SQLite3 运行时', 'Protobuf 运行时'):
         assert kw in rt_names, f'{kw} 应在 runtime'
-    # runtime 项一律不带 optional_prebuilt(前端据此渲染红点 + 计入严重异常红字)
+    for kw in ('Boost.System', 'glog', 'gflags'):
+        assert kw not in rt_names, f'{kw} 不应在 runtime(ldd 实测非运行时依赖)'
+    assert 'protoc' not in rt_names            # protoc 是编译期工具
     assert all('optional_prebuilt' not in c for c in sc['runtime'])
-    # 编译期工具仍在 compile(灰显、预编译无需)
+    warns = [c for c in sc['runtime'] if c.get('warn')]
+    assert len(warns) == 1 and warns[0]['name'].startswith('图片渲染 Qt')
     comp_names = ' '.join(c['name'] for c in sc['compile'])
     assert 'protoc' in comp_names and 'CMake' in comp_names and '开发头' in comp_names
-    # runtime 不应再出现编译期 protoc(Protobuf 运行时只判 .so)
-    assert 'protoc' not in rt_names
+    assert 'Qt' not in comp_names              # Qt 从 compile 移到 runtime warn
 
 
-def test_self_check_runtime_syslib_missing_reports_red(monkeypatch):
-    """系统库缺失时:runtime 项 ok=False(前端红点),detail 给可操作文案,不再是「预编译无需」。"""
+def test_self_check_runtime_missing_reports_red(monkeypatch):
+    """硬依赖缺失:ok=False 且无 warn(前端红点计严重异常),detail 可操作。"""
     pd = _dash()
     monkeypatch.setattr(pd, '_lib_present', lambda t: False)   # 所有 .so 都缺
     sc = pd.self_check()
     boost = next(c for c in sc['runtime'] if c['name'].startswith('Boost.Python'))
-    assert boost['ok'] is False
+    assert boost['ok'] is False and not boost.get('warn')
     assert 'DEPLOY' in boost['detail'] and '预编译无需' not in boost['detail']
+
+
+def test_self_check_qt_warn_item(monkeypatch):
+    """Qt 图片渲染是 warn 级:缺失 ok=False + warn=True(前端黄点计警告不计异常);
+    Qt5 WebKit / Qt6 WebEngine 任一存在即 ok。"""
+    pd = _dash()
+    monkeypatch.setattr(pd, '_lib_present', lambda t: t.startswith('libQt5WebKit'))
+    qt = next(c for c in pd.self_check()['runtime'] if c.get('warn'))
+    assert qt['ok'] and 'Qt5' in qt['detail']
+    monkeypatch.setattr(pd, '_lib_present', lambda t: t == 'libQt6WebEngineCore')
+    qt = next(c for c in pd.self_check()['runtime'] if c.get('warn'))
+    assert qt['ok'] and 'Qt6' in qt['detail']
+    monkeypatch.setattr(pd, '_lib_present', lambda t: False)
+    qt = next(c for c in pd.self_check()['runtime'] if c.get('warn'))
+    assert qt['ok'] is False and '仍可启动' in qt['detail']
+
+
+def test_self_check_ldd_scan(monkeypatch):
+    """有产物 + ldd 可用:逐项系统库按 ldd 实测缺失集判定(soname 精确匹配);
+    引擎自有库(相互 NEEDED,ldd 裸跑必 not found)被排除,不误报为缺失。"""
+    pd = _dash()
+    from plugins.LGTBot_ElainaBot.mod import boot
+    fake_so = os.path.join(boot.BUILD_DIR, 'libbot_core.so')
+    open(fake_so, 'w').close()
+    try:
+        monkeypatch.setattr(pd.shutil, 'which',
+                            lambda n: '/usr/bin/ldd' if n == 'ldd' else None)
+        # 缺 boost_python(精确版本 soname)+ 自有库 libbot_core(应被排除)
+        monkeypatch.setattr(pd, '_run_ldd',
+                            lambda p: {'libboost_python310.so.1.74.0', 'libbot_core.so'})
+        rt = pd.self_check()['runtime']
+        boost = next(c for c in rt if c['name'] == 'Boost.Python 运行时')
+        assert boost['ok'] is False and 'libboost_python310' in boost['detail']
+        curl = next(c for c in rt if c['name'] == 'libcurl 运行时')      # 未缺 → 仍逐项列出且 ok
+        assert curl['ok'] is True and 'ldd' in curl['detail']
+        assert not any('libbot_core' in c['name'] for c in rt)          # 自有库被排除
+        # 全部可解析 → 4 项系统库都 ok,Boost.Python 仍**逐项在列**(不折叠成汇总)
+        monkeypatch.setattr(pd, '_run_ldd', lambda p: set())
+        rt = pd.self_check()['runtime']
+        boost = next(c for c in rt if c['name'] == 'Boost.Python 运行时')
+        assert boost['ok'] is True
+    finally:
+        os.remove(fake_so)
+
+
+def test_self_check_header_multiarch(monkeypatch, tmp_path):
+    """curl.h 等在 Debian multiarch 路径(/usr/include/<triplet>/curl/curl.h)时也应检出,
+    不因只查 /usr/include/curl/curl.h 而误报缺失。"""
+    pd = _dash()
+    inc = tmp_path / 'usr' / 'include'
+    (inc / 'x86_64-linux-gnu' / 'curl').mkdir(parents=True)
+    (inc / 'x86_64-linux-gnu' / 'curl' / 'curl.h').write_text('')
+    # 把 _header_present 里硬编码的 /usr/include/ 前缀重定向到 tmp,验证 multiarch 分支
+    real_glob = pd.glob.glob
+    monkeypatch.setattr(pd.glob, 'glob',
+                        lambda pat: real_glob(pat.replace('/usr/include/', str(inc) + '/')))
+    monkeypatch.setattr(pd.os.path, 'isfile', lambda p: False)   # 非 multiarch 直查路径不存在
+    assert pd._header_present('/usr/include/curl/curl.h') is True

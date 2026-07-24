@@ -189,8 +189,9 @@
 .dash-selfcheck-title { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .dash-selfcheck-caret { font-size: 11px; color: var(--text-muted); }
 .dash-selfcheck-badge { font-size: 13px; font-weight: 700; }
-.dash-selfcheck-badge.bad { color: #dc3545; }    /* 有红色异常:红字计数 */
-.dash-selfcheck-badge.ok  { color: var(--in); }  /* 环境正常:绿字提示 */
+.dash-selfcheck-badge.bad  { color: #dc3545; }    /* 有红色异常:红字计数 */
+.dash-selfcheck-badge.ok   { color: var(--in); }  /* 无异常且无警告:绿字「环境正常」 */
+.dash-selfcheck-badge.warn { color: #e6a23c; }    /* 警告计数:黄字(与红字计数可并存) */
 .dash-selfcheck-badge:empty { display: none; }
 .dash-selfcheck-body.collapsed { display: none; }
 /* 折叠时标题下方不再需要间距 */
@@ -209,6 +210,7 @@
 .dash-check-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
 .dash-check-dot.dot-ok   { background: var(--in); }
 .dash-check-dot.dot-bad  { background: #dc3545; }
+.dash-check-dot.dot-warn { background: #e6a23c; }
 .dash-check-dot.dot-skip { background: var(--text-faint); }
 .dash-check-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dash-check-skip { font-size: 10px; color: var(--text-faint); border: 1px solid var(--border);
