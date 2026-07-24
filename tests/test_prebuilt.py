@@ -204,8 +204,9 @@ def test_download_mirror_order_prefers_selected(monkeypatch):
 
 def test_mode_info_shape():
     mi = prebuilt.mode_info()
-    assert set(mi.keys()) == {'running', 'selected', 'prebuilt_installed'}
+    assert set(mi.keys()) == {'running', 'selected', 'prebuilt_installed', 'pending_install'}
     assert mi['running'] in ('local', 'prebuilt')
+    assert mi['pending_install'] is False   # 无暂存时为 False
 
 
 def test_prebuilt_ready_requires_build_subdir():
@@ -332,6 +333,123 @@ def test_extract_and_swap_replaces_existing(tmp_path):
     assert not os.path.exists(os.path.join(prebuilt.PREBUILT_DIR, 'stale.txt'))
     with open(os.path.join(prebuilt.PREBUILT_DIR, 'LGTBot_ElainaBot.so'), 'rb') as f:
         assert f.read() == b'v2'
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 目录被占用的暂存换入(_prebuilt_swap + _extract_and_swap 降级)
+# ─────────────────────────────────────────────────────────────────────────
+
+from plugins.LGTBot_ElainaBot.mod import _prebuilt_swap as swp  # noqa: E402  零依赖
+
+
+def test_prebuilt_swap_stage_and_finalize(tmp_path):
+    """正常链:staging 暂存为 pending → finalize 换入,旧目录退场、无残留。"""
+    pre = str(tmp_path / 'build_prebuilt')
+    staging = str(tmp_path / 'staging')
+    os.makedirs(os.path.join(pre, 'build'))
+    (tmp_path / 'build_prebuilt' / 'manifest.json').write_text('OLD')
+    os.makedirs(staging)
+    (tmp_path / 'staging' / 'manifest.json').write_text('NEW')
+
+    swp.stage_pending(staging, pre)
+    assert not os.path.isdir(staging) and os.path.isdir(swp.pending_dir(pre))
+
+    ok, msg = swp.finalize_pending(pre)
+    assert ok and msg
+    assert (tmp_path / 'build_prebuilt' / 'manifest.json').read_text() == 'NEW'
+    assert not os.path.isdir(swp.pending_dir(pre))
+    assert not os.path.isdir(pre + '.old')
+
+
+def test_prebuilt_swap_finalize_noop_cleans_old(tmp_path):
+    """无 pending:返回 (True,'') 且顺手清理上次换入残留的 .old。"""
+    pre = str(tmp_path / 'build_prebuilt')
+    os.makedirs(pre + '.old')
+    ok, msg = swp.finalize_pending(pre)
+    assert ok and msg == ''
+    assert not os.path.isdir(pre + '.old')
+
+
+def test_prebuilt_swap_finalize_busy_keeps_state(tmp_path, monkeypatch):
+    """换入时仍被占用(第一步 rename 失败)→ 不破坏现状,pending 保留待下次重试。"""
+    pre = str(tmp_path / 'build_prebuilt')
+    os.makedirs(pre)
+    (tmp_path / 'build_prebuilt' / 'manifest.json').write_text('OLD')
+    os.makedirs(swp.pending_dir(pre))
+    real = os.rename
+
+    def busy(src, dst):
+        if str(dst).endswith('.old'):
+            raise PermissionError(13, 'busy')
+        return real(src, dst)
+    monkeypatch.setattr(swp.os, 'rename', busy)
+    ok, msg = swp.finalize_pending(pre)
+    assert not ok and '占用' in msg
+    assert (tmp_path / 'build_prebuilt' / 'manifest.json').read_text() == 'OLD'
+    assert os.path.isdir(swp.pending_dir(pre))
+
+
+def test_prebuilt_swap_finalize_rollback(tmp_path, monkeypatch):
+    """第二步(pending → build_prebuilt)失败 → 回滚 .old,build_prebuilt 仍可用。"""
+    pre = str(tmp_path / 'build_prebuilt')
+    pend = swp.pending_dir(pre)
+    os.makedirs(pre)
+    (tmp_path / 'build_prebuilt' / 'manifest.json').write_text('OLD')
+    os.makedirs(pend)
+    real = os.rename
+
+    def fail_second(src, dst):
+        if src == pend:
+            raise PermissionError(13, 'busy')
+        return real(src, dst)
+    monkeypatch.setattr(swp.os, 'rename', fail_second)
+    ok, msg = swp.finalize_pending(pre)
+    assert not ok
+    assert (tmp_path / 'build_prebuilt' / 'manifest.json').read_text() == 'OLD'   # 已回滚
+
+
+def test_extract_and_swap_stages_pending_when_busy(tmp_path, monkeypatch):
+    """引擎运行中换入被目录锁挡下(WSL /mnt、Windows 盘)→ 降级暂存:
+    现有 build_prebuilt 原样保留、新版本进 pending、返回 pending=True,
+    mode_info 暴露 pending_install 供前端提示。"""
+    os.makedirs(prebuilt._PREBUILT_BUILD_DIR, exist_ok=True)
+    with open(prebuilt.INSTALLED_MANIFEST, 'w', encoding='utf-8') as f:
+        f.write('{"bridge_sha": "oldsha00"}')
+    pkg = str(tmp_path / 'new.zip')
+    _build_pkg(pkg, {'LGTBot_ElainaBot.so': b'NEW', 'build/libbot_core.so': b'NEW'})
+    real = os.rename
+
+    def busy(src, dst):
+        if str(dst).endswith('.old'):
+            raise PermissionError(13, 'Permission denied')
+        return real(src, dst)
+    monkeypatch.setattr(prebuilt.os, 'rename', busy)
+    try:
+        out = prebuilt._extract_and_swap(pkg)
+        assert out == {'success': True, 'pending': True}
+        with open(prebuilt.INSTALLED_MANIFEST, encoding='utf-8') as f:
+            assert 'oldsha00' in f.read()                     # 旧版未被破坏
+        pend = swp.pending_dir(prebuilt.PREBUILT_DIR)
+        assert os.path.isfile(os.path.join(pend, 'LGTBot_ElainaBot.so'))
+        assert not os.path.isdir(prebuilt._STAGING_DIR)       # staging 已清
+        assert prebuilt.mode_info()['pending_install'] is True
+    finally:
+        shutil.rmtree(swp.pending_dir(prebuilt.PREBUILT_DIR), ignore_errors=True)
+        shutil.rmtree(prebuilt.PREBUILT_DIR, ignore_errors=True)
+
+
+def test_extract_and_swap_success_discards_stale_pending(tmp_path):
+    """直接换入成功时作废过时暂存 —— 否则重启会把旧 pending 反盖到新安装上。"""
+    pend = swp.pending_dir(prebuilt.PREBUILT_DIR)
+    os.makedirs(pend, exist_ok=True)
+    pkg = str(tmp_path / 'new.zip')
+    _build_pkg(pkg, {'LGTBot_ElainaBot.so': b'v3', 'build/libbot_core.so': b'v3'})
+    try:
+        out = prebuilt._extract_and_swap(pkg)
+        assert out == {'success': True, 'pending': False}
+        assert not os.path.isdir(pend)                        # 过时暂存已作废
+    finally:
+        shutil.rmtree(prebuilt.PREBUILT_DIR, ignore_errors=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────

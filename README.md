@@ -144,6 +144,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── audit.py             状态变更操作审计（持久化最近 500 条,record 永不抛异常）
 │   ├── metrics.py           运行指标计数（上传 / 崩溃 / 配额,重启不丢）+ lgtbot.db 统计查询
 │   ├── prebuilt.py          预编译包下载 / 校验 / 原子安装 / 本地·预编译切换 + 依赖自检
+│   ├── _prebuilt_swap.py    build_prebuilt 暂存换入:目录被运行中引擎占用时暂存 pending,boot 重启换入
 │   ├── log_attribution.py   类级 monkey-patch ，把本插件 push 的消息在 Web 面板正确归类
 │   └── webui/               Web 面板拓展页（侧边栏「LGTBot 机器人」/ 多标签）
 │       ├── __init__.py

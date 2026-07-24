@@ -75,9 +75,12 @@ function pbRenderMode(mode) {
   }
   const note = document.getElementById('pb-switch-note');
   if (note) {
-    note.textContent = (mode.selected !== mode.running)
-      ? ('已选「' + (mode.selected === 'prebuilt' ? '预编译包' : '本地编译') + '」，重启 LGTBot 后生效。')
-      : '';
+    const parts = [];
+    if (mode.selected !== mode.running)
+      parts.push('已选「' + (mode.selected === 'prebuilt' ? '预编译包' : '本地编译') + '」，重启 LGTBot 后生效。');
+    if (mode.pending_install)
+      parts.push('⏳ 已暂存新版本预编译包，重启 LGTBot 后自动完成安装。');
+    note.textContent = parts.join(' ');
   }
   const usePb = document.getElementById('pb-use-prebuilt');
   if (usePb) usePb.disabled = !mode.prebuilt_installed;
@@ -288,10 +291,19 @@ async function pbPollOnce() {
     pbStopPoll();
     if (st.stage === 'done') {
       pbEnableUsePrebuilt();      // 刚装好 → 立即解锁「📦 用预编译包」,无需刷新页面
-      pbShowMsg('✅ 已下载安装。到「构建来源」点「📦 用预编译包」并重启 LGTBot 生效。', 'ok');
-      pbRefreshList();
-      if (typeof dashAlert === 'function')
-        dashAlert('预编译包已下载安装完成。\n到本页「🔀 构建来源」点「📦 用预编译包」切换，再点右上角「🔁 重启 LGTBot」生效。');
+      if (st.note) {
+        /* 换入被运行中引擎占用挡下,已暂存 pending —— 重启后 boot 自动完成安装 */
+        pbShowMsg('✅ 已下载校验。' + st.note + '。', 'ok');
+        pbRefreshList();
+        if (typeof dashAlert === 'function')
+          dashAlert('预编译包已下载并校验完成。\n' + st.note + '。\n' +
+                    '确认「🔀 构建来源」已选「📦 用预编译包」，再点右上角「🔁 重启 LGTBot」即可。');
+      } else {
+        pbShowMsg('✅ 已下载安装。到「构建来源」点「📦 用预编译包」并重启 LGTBot 生效。', 'ok');
+        pbRefreshList();
+        if (typeof dashAlert === 'function')
+          dashAlert('预编译包已下载安装完成。\n到本页「🔀 构建来源」点「📦 用预编译包」切换，再点右上角「🔁 重启 LGTBot」生效。');
+      }
     } else if (st.stage === 'error') {
       pbShowMsg('❌ 下载失败：' + (st.error || ''), 'err');
     } else if (st.stage === 'cancelled') {

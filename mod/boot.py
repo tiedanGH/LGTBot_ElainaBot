@@ -66,6 +66,14 @@ def _resolve_active_build() -> tuple[str, str]:
     return PLUGIN_DIR, LOCAL_BUILD_DIR
 
 
+# 上次预编译安装若因 build_prebuilt/ 被运行中引擎占用而暂存 (WSL /mnt、Windows语义盘上加载中的 .so 会锁住整目录 rename → EACCES),
+# 此刻进程刚启动、尚未加载任何 .so,是完成换入的唯一安全窗口。必须在 _resolve_active_build() 选定 ENGINE_ROOT / RTLD_GLOBAL 预加载之前。
+# _prebuilt_swap 零依赖,不会引入循环 import。
+from . import _prebuilt_swap
+_pending_ok, _pending_msg = _prebuilt_swap.finalize_pending(PREBUILT_DIR)
+if _pending_msg:
+    (log.info if _pending_ok else log.warning)(f'[prebuilt] {_pending_msg}')
+
 ENGINE_ROOT, BUILD_DIR = _resolve_active_build()     # (桥接 .so 目录, 编译产物目录)
 ENGINE_DIR = os.path.join(DATA_DIR, 'engine')        # LGTBot 引擎内部文件目录
 GAME_PATH  = os.path.join(BUILD_DIR, 'plugins')      # 各 libgame.so 所在目录

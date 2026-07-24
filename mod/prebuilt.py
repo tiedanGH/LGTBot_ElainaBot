@@ -35,7 +35,7 @@ import time
 import urllib.request
 
 from core.base.logger import get_logger, PLUGIN
-from . import boot
+from . import _prebuilt_swap, boot
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -155,6 +155,8 @@ def mode_info() -> dict:
         'running': active_mode_running(),     # 本进程实际加载的
         'selected': current_mode(),           # marker 最新选择(可能待重启)
         'prebuilt_installed': prebuilt_ready(),
+        # 有暂存待换入的新版本(安装时目录被占用降级)→ 前端提示重启后自动完成
+        'pending_install': os.path.isdir(_prebuilt_swap.pending_dir(PREBUILT_DIR)),
     }
 
 
@@ -439,7 +441,11 @@ _EXECUTABLES = ('build/markdown2image', 'build/match_game_runner', 'build/config
 
 
 def _extract_and_swap(zip_path: str) -> dict:
-    """校验 zip → 解压到 staging → chmod +x → 原子换入 build_prebuilt/。同步阻塞。"""
+    """校验 zip → 解压到 staging → chmod +x → 原子换入 build_prebuilt/。同步阻塞。
+
+    换入失败(引擎运行中,加载中的 .so 在 WSL /mnt、Windows 语义盘上会锁住整目录 rename → EACCES)时**降级为暂存**:
+    staging 挪到 ``build_prebuilt.pending``,boot 下次启动最早期(尚未加载任何 .so)完成换入 —— 预编译包本就需重启生效,
+    对用户流程无额外负担。返回 ``{'success': True, 'pending': bool}``。"""
     import zipfile
     shutil.rmtree(_STAGING_DIR, ignore_errors=True)
     os.makedirs(_STAGING_DIR, exist_ok=True)
@@ -458,13 +464,24 @@ def _extract_and_swap(zip_path: str) -> dict:
         # 原子换入:旧目录先改名再删,失败也不至于两头空
         old = PREBUILT_DIR + '.old'
         shutil.rmtree(old, ignore_errors=True)
-        if os.path.isdir(PREBUILT_DIR):
-            os.rename(PREBUILT_DIR, old)
-        os.rename(_STAGING_DIR, PREBUILT_DIR)
+        try:
+            if os.path.isdir(PREBUILT_DIR):
+                os.rename(PREBUILT_DIR, old)
+            os.rename(_STAGING_DIR, PREBUILT_DIR)
+        except OSError as e:
+            # build_prebuilt 被运行中引擎占用 → 暂存,重启时由 boot 完成换入
+            if not os.path.isdir(PREBUILT_DIR) and os.path.isdir(old):
+                os.rename(old, PREBUILT_DIR)          # 第二步才失败的回滚(罕见)
+            _prebuilt_swap.stage_pending(_STAGING_DIR, PREBUILT_DIR)
+            log.warning(f'[prebuilt] build_prebuilt 被占用({e}),'
+                        f'新版本已暂存为 pending,重启 LGTBot 后自动完成安装')
+            return {'success': True, 'pending': True}
         shutil.rmtree(old, ignore_errors=True)
+        # 直接换入成功 → 作废过时的暂存,防止重启时旧 pending 反把新安装盖掉
+        shutil.rmtree(_prebuilt_swap.pending_dir(PREBUILT_DIR), ignore_errors=True)
     finally:
         shutil.rmtree(_STAGING_DIR, ignore_errors=True)
-    return {'success': True}
+    return {'success': True, 'pending': False}
 
 
 def _download_mirror_order(preferred: str | None) -> list[str]:
@@ -527,7 +544,7 @@ async def download(asset_name: str, preferred_mirror: str | None = None) -> dict
 
         _write_state(running=True, stage='verify', asset=asset_name, progress=100)
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _extract_and_swap, _DOWNLOAD_TMP)
+        swap = await loop.run_in_executor(None, _extract_and_swap, _DOWNLOAD_TMP)
     except asyncio.CancelledError:
         # 用户取消(page_prebuilt 对本 task 调 task.cancel()):置「已取消」终态,
         # finally 会删掉未完成的临时文件。re-raise 让 task 正常标记为已取消。
@@ -544,10 +561,14 @@ async def download(asset_name: str, preferred_mirror: str | None = None) -> dict
         except OSError:
             pass
 
-    _write_state(running=False, stage='done', asset=asset_name, progress=100, error='')
-    log.info(f'[prebuilt] ✅ 已安装 {asset_name} → build_prebuilt/')
-    return {'success': True, 'asset': asset_name,
-            'message': '下载安装完成,切到「预编译」并重启 LGTBot 生效'}
+    note = ('目录被运行中引擎占用，新版本已暂存；重启 LGTBot 后自动完成安装'
+            if swap.get('pending') else '')
+    _write_state(running=False, stage='done', asset=asset_name, progress=100, error='',
+                 note=note)
+    log.info(f'[prebuilt] ✅ 已安装 {asset_name} → '
+             + ('build_prebuilt.pending/(暂存,重启后换入)' if swap.get('pending') else 'build_prebuilt/'))
+    return {'success': True, 'asset': asset_name, 'pending': swap.get('pending', False),
+            'message': (note or '下载安装完成,切到「📦 用预编译包」并重启 LGTBot 生效')}
 
 
 async def _download_one(url: str, asset: dict) -> None:
@@ -589,7 +610,7 @@ def install_uploaded(zip_path: str) -> dict:
     """
     _write_state(running=True, stage='verify', asset='(本地上传)', progress=100, error='')
     try:
-        _extract_and_swap(zip_path)
+        swap = _extract_and_swap(zip_path)
     except Exception as e:
         log.error(f'[prebuilt] 安装上传包失败: {e}')
         _write_state(running=False, stage='error', asset='(本地上传)', error=str(e))
@@ -599,6 +620,11 @@ def install_uploaded(zip_path: str) -> dict:
             os.remove(zip_path)
         except OSError:
             pass
-    _write_state(running=False, stage='done', asset='(本地上传)', progress=100, error='')
-    log.info('[prebuilt] ✅ 已从上传包安装 → build_prebuilt/')
-    return {'success': True, 'message': '上传包已安装,切到「📦 用预编译包」并重启 LGTBot 生效'}
+    note = ('目录被运行中引擎占用，新版本已暂存；重启 LGTBot 后自动完成安装'
+            if swap.get('pending') else '')
+    _write_state(running=False, stage='done', asset='(本地上传)', progress=100, error='',
+                 note=note)
+    log.info('[prebuilt] ✅ 已从上传包安装 → '
+             + ('build_prebuilt.pending/(暂存,重启后换入)' if swap.get('pending') else 'build_prebuilt/'))
+    return {'success': True, 'pending': swap.get('pending', False),
+            'message': (note or '上传包已安装,切到「📦 用预编译包」并重启 LGTBot 生效')}
