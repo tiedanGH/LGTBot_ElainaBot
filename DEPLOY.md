@@ -54,6 +54,8 @@ sudo yum install -y \
    - 后端用 `git -c url.https://...insteadOf=git@github.com:` **临时改写 SSH→HTTPS**，递归生效到 lgtbot 嵌套的 7 个子模块，**不需要 SSH key**
 5. 切到「引擎编译」tab → 「🛠 完整编译」
 
+> 💡 **没装 git 也能检查与更新版本**：「版本与更新」的检查不依赖本地 git；检测到新版本时会出现 **「⬇ 下载更新」** 按钮，直接下载最新 release 源码包覆盖更新。初始化 git 仓库仅在需要 `git pull` / 开发时才必须。
+
 ### 2.2 从源仓库 clone (开发者路径)
 
 如果你自己 clone 了本仓库到 `plugins/LGTBot_ElainaBot/`，`lgtbot/` 是上游的 git 子模块。若该目录为空:

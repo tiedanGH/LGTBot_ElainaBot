@@ -58,6 +58,7 @@ _DASH_DO_UPDATE_KEY         = '__lgtbot_dash_do_update'           # 更新桥接
 _DASH_DO_UPDATE_FORCE_KEY   = '__lgtbot_dash_do_update_force'     # 强制更新桥接层 (git reset --hard origin/main)
 _DASH_UPDATE_SUBMODULE_KEY  = '__lgtbot_dash_update_submodule'    # 更新 / 初始化 lgtbot 子模块
 _DASH_INIT_REPO_KEY         = '__lgtbot_dash_init_repo'           # 市场用户:把插件目录初始化为 git 仓库
+_DASH_DOWNLOAD_UPDATE_KEY   = '__lgtbot_dash_download_update'     # 免 git:下载源码 zip 覆盖更新
 _DASH_CLEAR_AVATAR_KEY      = '__lgtbot_dash_clear_avatar'
 _DASH_CLEAR_AVATAR_7D_KEY   = '__lgtbot_dash_clear_avatar_7d'
 _DASH_CLEAR_GEN_KEY         = '__lgtbot_dash_clear_gen'
@@ -113,6 +114,7 @@ _HIDDEN_KEYS = frozenset({
     _DASH_DO_UPDATE_FORCE_KEY,
     _DASH_UPDATE_SUBMODULE_KEY,
     _DASH_INIT_REPO_KEY,
+    _DASH_DOWNLOAD_UPDATE_KEY,
     _DASH_CLEAR_AVATAR_KEY,
     _DASH_CLEAR_AVATAR_7D_KEY,
     _DASH_CLEAR_GEN_KEY,
@@ -354,6 +356,7 @@ def register():
     _register_hidden_action(_DASH_DO_UPDATE_FORCE_KEY,   page_dashboard.render_do_update_force)
     _register_hidden_action(_DASH_UPDATE_SUBMODULE_KEY,  page_dashboard.render_update_submodule)
     _register_hidden_action(_DASH_INIT_REPO_KEY,         page_dashboard.render_init_repo)
+    _register_hidden_action(_DASH_DOWNLOAD_UPDATE_KEY,   page_dashboard.render_download_update)
     _register_hidden_action(_DASH_CLEAR_AVATAR_KEY,      page_dashboard.render_clear_avatar)
     _register_hidden_action(_DASH_CLEAR_AVATAR_7D_KEY,   page_dashboard.render_clear_avatar_7d)
     _register_hidden_action(_DASH_CLEAR_GEN_KEY,         page_dashboard.render_clear_gen)

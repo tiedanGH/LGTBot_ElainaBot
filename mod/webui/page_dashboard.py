@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import glob
 import html as _html
+import io
 import json
 import os
 import shutil
@@ -38,6 +39,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 
 from aiohttp import web
 
@@ -1124,12 +1126,13 @@ def render_init_repo() -> str:
     """
     plugin_dir = boot.PLUGIN_DIR
 
-    # 1. git 客户端探测
+    # 1. git 客户端探测(git_missing 让前端弹「改用下载更新 / 插件市场」引导)
     try:
         proc = _git_run(['git', '--version'], timeout=5.0)
     except FileNotFoundError:
         return _fragment({
             'success': False,
+            'git_missing': True,
             'message': '未找到 git 命令，请先安装 git 客户端再使用本功能',
         })
     except Exception as e:
@@ -1249,6 +1252,99 @@ def render_init_repo() -> str:
                     f'(HEAD = {version_tag_used or "origin/main"})。'
                     f'工作区文件全部保留，可继续使用「⬇ 更新桥接层」'
                     f'和「⬇ 初始化子模块」按钮。'),
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 免 git 下载更新 —— no_git(插件市场安装)场景直接下 GitHub 源码 zip 覆盖
+# ─────────────────────────────────────────────────────────────────────────
+
+# 覆盖更新绝不触碰的顶层目录:运行时数据 / 编译产物 / 子模块
+# (archive zip 不含 子模块内容,覆盖会清掉本地 lgtbot)/ git 元数据 / 崩溃转储
+_UPDATE_PROTECTED = ('data', 'build', 'build_prebuilt', 'lgtbot',
+                     '.git', 'LGTBot_CRASH_DUMPS')
+
+
+def _apply_source_zip(content: bytes) -> dict:
+    """把 GitHub 源码 archive zip 覆盖解压到插件目录,返回 ``{'files': n}``。
+
+    参考主框架插件市场 ``_extract_zip_subset`` 的处理:自动剥离 archive 的
+    根目录前缀(``repo-2.5.0/``)、跳过 ``__pycache__``、防路径穿越
+    (realpath 必须落在插件目录内)。只**覆盖 / 新增**,不删除任何本地文件;
+    ``_UPDATE_PROTECTED`` 顶层目录整棵跳过。"""
+    plugin_dir = os.path.realpath(boot.PLUGIN_DIR)
+    files = 0
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        flist = zf.namelist()
+        roots = {f.split('/')[0] for f in flist if '/' in f}
+        prefix = (roots.pop() + '/') if len(roots) == 1 else ''
+        for fp in flist:
+            if fp.endswith('/'):
+                continue
+            rel = fp[len(prefix):] if fp.startswith(prefix) else fp
+            if not rel or '__pycache__' in rel:
+                continue
+            if rel.split('/')[0] in _UPDATE_PROTECTED:
+                continue
+            dest = os.path.realpath(os.path.join(plugin_dir, rel))
+            if not dest.startswith(plugin_dir + os.sep):
+                log.warning(f'[download-update] 跳过越界成员(疑似路径穿越): {fp!r}')
+                continue
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with zf.open(fp) as src, open(dest, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+            files += 1
+    if files == 0:
+        raise RuntimeError('zip 内没有可解压的文件')
+    return {'files': files}
+
+
+def render_download_update() -> str:
+    """免 git 覆盖更新:下载最新 release 的源码 zip 直接覆盖插件目录。
+
+    服务给 no_git(插件市场安装、无 git 环境)场景 —— 与「⬇ 更新桥接层」 (git pull)互为替代。
+    服务端**重新查一次**最新版本(不信前端传参),已是最新则拒绝。zip 走 prebuilt 的镜像顺序逐个尝试
+    (源码包仅几 MB,步下载可接受,前端按钮转「下载中…」)。"""
+    check = _bridge_check_payload()
+    if not check.get('success'):
+        return _fragment({'success': False,
+                          'message': f'检查更新失败：{check.get("error", "未知错误")}'})
+    if not check.get('has_update'):
+        return _fragment({'success': False, 'message': '已是最新版本，无需下载更新'})
+    remote = (check.get('remote_version') or '').strip()
+    tag = remote if remote.startswith(('v', 'V')) else f'v{remote}'
+    owner, repo = _parse_github_owner_repo(_get_plugin_meta().get('github', '') or '')
+    url = f'https://github.com/{owner}/{repo}/archive/refs/tags/{tag}.zip'
+
+    content, last_err = None, None
+    for mirror in prebuilt._download_mirror_order(None):
+        try:
+            req = urllib.request.Request(prebuilt._build_mirror_url(mirror, url),
+                                         headers={'User-Agent': 'LGTBot-Dashboard'})
+            with urllib.request.urlopen(req, timeout=60.0) as r:
+                content = r.read()
+            break
+        except Exception as e:
+            last_err = e
+    if content is None:
+        audit.record('update', '下载更新 (源码 zip)', f'{tag} 下载失败: {last_err}', ok=False)
+        return _fragment({'success': False, 'message': f'下载失败(所有镜像均不可用): {last_err}'})
+
+    try:
+        result = _apply_source_zip(content)
+    except Exception as e:
+        audit.record('update', '下载更新 (源码 zip)', f'{tag} 解压覆盖失败: {e}', ok=False)
+        return _fragment({'success': False, 'message': f'解压覆盖失败: {e}'})
+
+    log.info(f'[download-update] 已覆盖更新到 {tag}({result["files"]} 个文件)')
+    audit.record('update', '下载更新 (源码 zip)', f'{tag}，覆盖 {result["files"]} 个文件')
+    return _fragment({
+        'success': True,
+        'version': remote,
+        'files': result['files'],
+        'message': (f'✅ 已下载 {tag} 并覆盖更新（{result["files"]} 个文件；'
+                    f'data / build / lgtbot 等均未触碰，未删除任何本地文件）。'
+                    f'重启 LGTBot 或整个进程后生效。'),
     })
 
 

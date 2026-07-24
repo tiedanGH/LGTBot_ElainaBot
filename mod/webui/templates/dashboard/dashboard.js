@@ -15,6 +15,7 @@ const DASH_KEYS = {
   clear_match_all:    '__lgtbot_dash_clear_match_all',
   clear_match_7d:     '__lgtbot_dash_clear_match_7d',
   init_repo:          '__lgtbot_dash_init_repo',
+  download_update:    '__lgtbot_dash_download_update',
   matches:            '__lgtbot_dash_matches',
 };
 
@@ -42,6 +43,13 @@ function dashBridgeRepoLink() {
   return ' · 仓库 <a href="' + escapeHtml(r.repo_url) +
          '" target="_blank" rel="noopener">' +
          escapeHtml(r.repo_owner + '/' + r.repo_name) + '</a>';
+}
+
+/* no_git(插件市场安装)时桥接层行的第二行提示 —— 版本检测照常走 GitHub API,
+   不依赖本地 git;git 只影响「⬇ 更新桥接层」那条路,有新版本时可用「⬇ 下载更新」替代 */
+function dashGitWarnHtml() {
+  return '<br><span class="dash-msg-warn dash-bridge-gitwarn">⚠️ 未检测到 .git/（可能从插件市场安装）：' +
+         '可点「📥 初始化为 git 仓库」启用 git 更新；或有新版本时直接「⬇ 下载更新」覆盖更新。</span>';
 }
 
 function dashFmtBytes(n) {
@@ -343,11 +351,8 @@ function dashApplyData(data) {
   const bDetail = document.getElementById('dash-bridge-detail');
   const bBtn = document.getElementById('dash-do-update');
   if (dashRepoStatus === 'no_git') {
-    /* no_git 时主动把按钮切到「初始化」状态 */
-    bDetail.innerHTML = '<span class="dash-msg-warn">⚠️ 未检测到 .git/ '
-                      + '(可能从插件市场安装)。点击右侧按钮把当前目录'
-                      + '初始化为 git 仓库，方可使用更新功能。</span>'
-                      + dashBridgeRepoLink();
+    /* no_git:右侧按钮切「初始化」;「⬇ 下载更新」等检查出新版本后由 dashRenderBridgeStatus 显示 */
+    bDetail.innerHTML = '点击「检查更新」查看版本' + dashBridgeRepoLink() + dashGitWarnHtml();
     bBtn.textContent = '📥 初始化为 git 仓库';
     bBtn.style.display = '';
   } else {
@@ -438,40 +443,35 @@ async function dashCheckUpdate() {
 function dashRenderBridgeStatus(bridge) {
   const detail = document.getElementById('dash-bridge-detail');
   const btn = document.getElementById('dash-do-update');
+  const dlBtn = document.getElementById('dash-do-download');
 
   /* 检查更新结果里带仓库链接字段,存起来供本行各分支拼接(同 get_data) */
   if (bridge && (bridge.repo_url || bridge.repo_owner)) dashBridgeRepo = bridge;
   const repoLink = dashBridgeRepoLink();
 
-  /* 最高优先级: 插件目录不是 git 仓库 → 把这一行整个切到「初始化」分支,
-     不展示版本对比信息(也对比不了,本地没 git history) */
-  if (dashRepoStatus === 'no_git') {
-    detail.innerHTML = '<span class="dash-msg-warn">⚠️ 未检测到 .git/ '
-                     + '(可能从插件市场安装)。点击右侧按钮把当前目录'
-                     + '初始化为 git 仓库，方可使用更新功能。</span>' + repoLink;
-    btn.textContent = '📥 初始化为 git 仓库';
-    btn.style.display = '';
-    return;
-  }
-
-  /* 正常路径: 显式还原按钮文案(防止用户之前看到过初始化按钮文案残留) */
-  btn.textContent = '⬇ 更新桥接层';
+  /* no_git(插件市场安装):版本检测走 GitHub API,;右侧按钮保持「初始化」,有新版本再追加「⬇ 下载更新」 */
+  const noGit = dashRepoStatus === 'no_git';
+  const gitWarn = noGit ? dashGitWarnHtml() : '';
+  if (dlBtn) dlBtn.style.display = 'none';
+  btn.textContent = noGit ? '📥 初始化为 git 仓库' : '⬇ 更新桥接层';
 
   if (!bridge || !bridge.success) {
     detail.innerHTML = '<span class="dash-msg-err">❌ ' +
-      escapeHtml(bridge && bridge.error ? bridge.error : '检查失败') + '</span>' + repoLink;
-    btn.style.display = 'none';
+      escapeHtml(bridge && bridge.error ? bridge.error : '检查失败') + '</span>' + repoLink + gitWarn;
+    btn.style.display = noGit ? '' : 'none';   // no_git 时保留初始化按钮
     return;
   }
   const local = dashFmtVersion(bridge.local_version);
   const remote = dashFmtVersion(bridge.remote_version);
   if (bridge.has_update) {
     detail.innerHTML = '<span class="dash-msg-warn">✨ 本地 <b>' +
-      escapeHtml(local) + '</b> → 远端 <b>' + escapeHtml(remote) + '</b></span>' + repoLink;
+      escapeHtml(local) + '</b> → 远端 <b>' + escapeHtml(remote) + '</b></span>' + repoLink + gitWarn;
+    /* 有更新:git 仓库走「更新桥接层」;no_git 走「下载更新」(初始化按钮并存) */
     btn.style.display = '';
+    if (noGit && dlBtn) dlBtn.style.display = '';
   } else {
-    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本 (' + escapeHtml(remote) + ')</span>' + repoLink;
-    btn.style.display = 'none';
+    detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本 (' + escapeHtml(remote) + ')</span>' + repoLink + gitWarn;
+    btn.style.display = noGit ? '' : 'none';   // 最新:无下载按钮;no_git 仍可初始化
   }
 }
 
@@ -687,6 +687,12 @@ async function dashInitRepo() {
     } else {
       parts.push('<div class="dash-msg-err">❌ ' +
                  escapeHtml(data.message || '初始化失败') + '</div>');
+      /* 本机没有 git 环境 → 引导走免 git 路径,不让用户卡死在装 git 上 */
+      if (data.git_missing) {
+        parts.push('<div class="dash-msg-warn">💡 没有 git 也可更新：' +
+                   '点「🔍 检查更新」，有新版本时会出现「⬇ 下载更新」按钮，' +
+                   '可直接下载覆盖更新；或从插件市场重新安装最新版。</div>');
+      }
     }
     if (Array.isArray(data.stages) && data.stages.length) {
       const items = data.stages.map(s => {
@@ -719,6 +725,34 @@ async function dashInitRepo() {
 async function dashBridgeButtonClick() {
   if (dashRepoStatus === 'no_git') return dashInitRepo();
   return dashDoUpdate();
+}
+
+/* ──── 免 git 下载更新(no_git + 有新版本时出现)────
+   下载最新 release 源码 zip 直接覆盖插件目录 —— 同插件市场的安装方式。
+   服务端会重新校验「确有更新」,并保护 data/build/build_prebuilt/lgtbot/.git。 */
+async function dashDoDownloadUpdate() {
+  const ok = await dashConfirm(
+    '确认下载最新版并覆盖更新？\n\n' +
+    '将从 GitHub 下载最新 release 源码包，直接覆盖当前插件目录（无需 git）。\n' +
+    '配置、编译产物、子模块均不受影响，不删除任何本地文件。\n\n' +
+    '完成后需重启 LGTBot 或整个进程生效。',
+    {level: 'warn'}
+  );
+  if (!ok) return;
+  const dlBtn = document.getElementById('dash-do-download');
+  const resEl = document.getElementById('dash-update-result');
+  if (dlBtn) { dlBtn.disabled = true; dlBtn.textContent = '⏬ 下载中……'; }
+  try {
+    const data = await dashCallAction(DASH_KEYS.download_update);
+    resEl.innerHTML = data.success
+      ? '<div class="dash-msg-ok">' + escapeHtml(data.message || '✅ 更新完成') + '</div>'
+      : '<div class="dash-msg-err">❌ ' + escapeHtml(data.message || '更新失败') + '</div>';
+    if (data.success) dashRefreshAll();
+  } catch (e) {
+    resEl.innerHTML = '<div class="dash-msg-err">❌ 请求失败：' + escapeHtml(e.message) + '</div>';
+  } finally {
+    if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = '⬇ 下载更新'; }
+  }
 }
 
 /* ──── 更新 / 初始化 lgtbot 子模块 ──── */
@@ -872,6 +906,9 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dash-check-update').addEventListener('click', dashCheckUpdate);
   /* 桥接层行按钮: dashRepoStatus 决定调 dashInitRepo 还是 dashDoUpdate */
   document.getElementById('dash-do-update').addEventListener('click', dashBridgeButtonClick);
+  /* 免 git 下载更新(no_git + 有新版本时显示) */
+  const dlBtn = document.getElementById('dash-do-download');
+  if (dlBtn) dlBtn.addEventListener('click', dashDoDownloadUpdate);
   document.getElementById('dash-update-submodule').addEventListener('click', dashDoUpdateSubmodule);
 
   /* 缓存清理按钮(委托) */

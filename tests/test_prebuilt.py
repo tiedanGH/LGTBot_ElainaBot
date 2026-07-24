@@ -424,6 +424,49 @@ def test_self_check_ldd_scan(monkeypatch):
         os.remove(fake_so)
 
 
+def test_apply_source_zip_protects_runtime_dirs():
+    """免 git 下载更新的覆盖解压:剥 archive 根前缀、写入普通文件;
+    data/lgtbot 等保护目录整棵跳过、__pycache__ 跳过、路径穿越成员拒绝;不删除本地文件。"""
+    import io as _io
+    import zipfile as _zip
+    pd = _dash()
+    from plugins.LGTBot_ElainaBot.mod import boot
+    plugin_dir = boot.PLUGIN_DIR
+    data_cfg = os.path.join(plugin_dir, 'data', 'config.yaml')
+    os.makedirs(os.path.dirname(data_cfg), exist_ok=True)
+    with open(data_cfg, 'w', encoding='utf-8') as f:
+        f.write('old')
+    lgt_keep = os.path.join(plugin_dir, 'lgtbot', 'keep.cc')
+    os.makedirs(os.path.dirname(lgt_keep), exist_ok=True)
+    with open(lgt_keep, 'w', encoding='utf-8') as f:
+        f.write('keep')
+
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, 'w') as zf:
+        zf.writestr('LGTBot_ElainaBot-9.9.9/newfile.txt', 'NEW')
+        zf.writestr('LGTBot_ElainaBot-9.9.9/mod/newmod.txt', 'NEW2')
+        zf.writestr('LGTBot_ElainaBot-9.9.9/data/config.yaml', 'EVIL')        # 保护目录
+        zf.writestr('LGTBot_ElainaBot-9.9.9/lgtbot/hack.cc', 'EVIL')          # 保护目录
+        zf.writestr('LGTBot_ElainaBot-9.9.9/mod/__pycache__/x.pyc', 'x')      # 跳过
+        zf.writestr('LGTBot_ElainaBot-9.9.9/../evil.txt', 'EVIL')             # 路径穿越
+    created = [os.path.join(plugin_dir, 'newfile.txt'),
+               os.path.join(plugin_dir, 'mod', 'newmod.txt')]
+    try:
+        out = pd._apply_source_zip(buf.getvalue())
+        assert out['files'] == 2                                   # 只有两个普通文件落盘
+        assert open(created[0], encoding='utf-8').read() == 'NEW'
+        assert open(created[1], encoding='utf-8').read() == 'NEW2'
+        assert open(data_cfg, encoding='utf-8').read() == 'old'    # data 未被覆盖
+        assert open(lgt_keep, encoding='utf-8').read() == 'keep'   # lgtbot 未被触碰
+        assert not os.path.isfile(os.path.join(plugin_dir, 'lgtbot', 'hack.cc'))
+        parent = os.path.dirname(os.path.realpath(plugin_dir))
+        assert not os.path.isfile(os.path.join(parent, 'evil.txt'))  # 穿越被拒
+    finally:
+        for p in created:
+            if os.path.isfile(p):
+                os.remove(p)
+
+
 def test_self_check_header_multiarch(monkeypatch, tmp_path):
     """curl.h 等在 Debian multiarch 路径(/usr/include/<triplet>/curl/curl.h)时也应检出,
     不因只查 /usr/include/curl/curl.h 而误报缺失。"""

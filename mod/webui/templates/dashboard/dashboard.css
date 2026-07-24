@@ -52,6 +52,11 @@
 .dash-update-row .dash-update-detail {
   color: var(--text-muted); font-family: 'Consolas', 'Menlo', monospace;
 }
+/* no_git 的 git 警告:字号与第一行一致;inline-block 让 margin-top 生效,与上一行拉开 2px */
+.dash-bridge-gitwarn {
+  display: inline-block; margin-top: 2px;
+  font-family: -apple-system, 'Segoe UI', sans-serif;
+}
 .dash-update-row .dash-update-actions {
   display: inline-flex; gap: 6px; flex-wrap: wrap;
 }
