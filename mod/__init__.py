@@ -25,7 +25,8 @@
                       接收侧适配全量群 GROUP_MESSAGE_CREATE
     config            ``data/config.yaml`` 读写 + 运行时下发(refresh_wait_timeout
                       / image_hosting / menu_game_buttons / crash_notify_group)
-    userdb            用户昵称 / 头像 SQLite 持久化(pending dict + 5 min flush)
+    userinfo          主框架用户数据只读门面(data.db/wakeup.db/statistics.db;
+                      昵称缓存 + 变化时经 db_queue 写回最新昵称)
     uploader          图床上传调度(COS / B站 等) + 图片尺寸解析
     log_attribution   ``MessageSender._log_push`` 类级 monkey-patch + ContextVar,
                       让本插件 push 在主框架 Web 面板归类到「LGTBot 消息派发」

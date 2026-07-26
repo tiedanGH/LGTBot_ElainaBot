@@ -23,11 +23,18 @@ const metricsFmtNum = (v) => (v == null ? '—' : String(v));
 /* ──── ① 数据统计区 ──── */
 function metricsRenderStats(stats) {
   const s = stats || {};
-  document.getElementById('metrics-stat-user-cache').textContent = metricsFmtNum(s.user_cache_total);
+  document.getElementById('metrics-stat-user-cache').textContent = metricsFmtNum(s.users_total);
   document.getElementById('metrics-stat-lgt-users').textContent = metricsFmtNum(s.lgtbot_users);
   document.getElementById('metrics-stat-matches').textContent = metricsFmtNum(s.lgtbot_matches);
   document.getElementById('metrics-stat-attendances').textContent = metricsFmtNum(s.lgtbot_match_attendances);
   document.getElementById('metrics-stat-achievements').textContent = metricsFmtNum(s.lgtbot_achievements);
+
+  /* 玩家转化(跨库:lgtbot 注册 ÷ 框架用户):任一缺失 → — */
+  document.getElementById('metrics-stat-conversion').textContent =
+    (s.player_conversion == null) ? '—' : (s.player_conversion + '%');
+
+  /* 近 10 日私信用户(wakeup.db,日粒度),数据随 stats 下发,在此一并渲染 */
+  document.getElementById('metrics-stat-dm10').textContent = metricsFmtNum(s.dm_active_10d);
 }
 
 /* ──── ② 运行指标区 ──── */

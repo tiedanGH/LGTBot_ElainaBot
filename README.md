@@ -92,7 +92,7 @@ cd ../.. && python3 main.py
 | **数据库备份**     | 每日自动 + 手动按钮 + 一键恢复 + 下载到本地 + 自动轮转保留 7 份；zip 存主框架 `data/backup/lgtbot/`，SQLite 在线备份用 `Connection.backup()` API，引擎运行中也安全                                                      |
 | **对局安全保护**    | 「计划重启」维护模式暂停创建新游戏而不影响进行中对局与已建房间；重启 / 退出时进行中对局拒绝释放引擎，避免战绩丢失；状态跨热重载保持、真重启后自动恢复                                                                                                |
 | **进行中对局跟踪**   | 仪表盘实时列出所有**已开局**的对局（群 / 私聊、游戏名、已进行时长）；引擎崩溃（SIGSEGV）时向这些对局推送中断通知；按引擎「开局 / 结束」事件跟踪、自动去重崩溃源、跨热重载保持，进程重启后清空                                                                     |
-| **运维观测**      | **指标面板**（数据统计 / 图床上传成功率 / 崩溃与重启累计 / 配额压力 / 今日主动消息 / 排行榜 / 10 日趋势）+ **操作审计**（编译 / 备份 / 清缓存 / 更新 / 配置 / 重启 / 换绑等状态变更）+ **崩溃转储**（查看引擎 SIGSEGV/SIGBUS/SIGABRT 的 backtrace dump） |
+| **运维观测**      | **指标面板**（数据统计、图床上传成功率、崩溃与重启累计、配额压力、今日主动消息、排行榜、10 日趋势）+ **操作审计**（编译 / 备份 / 清缓存 / 更新 / 配置 / 重启 / 换绑等状态变更）+ **崩溃转储**（查看引擎 SIGSEGV/SIGBUS/SIGABRT 的 backtrace dump） |
 | **市场安装兼容**    | 插件市场 zip 不含 `.git/`；仪表盘可初始化 git 仓库来修复，子模块 init 内置 SSH→HTTPS 改写，不需要 SSH key 也能拉 lgtbot 嵌套子模块                                                                                 |
 
 ## 开发计划（TODO）
@@ -102,7 +102,7 @@ cd ../.. && python3 main.py
 - [x] **CI 预编译产物** —— GitHub Actions 三发行版矩阵编译引擎核心 + 50+ 游戏插件，发布到滚动 `prebuilt` release；面板「📦 预编译部署」下载切换，用户无需本地搭 Boost.Python / C++20 工具链
 - [x] **破坏性操作历史日志** —— 恢复 / 删除 / 清缓存 / 编译等危险端点的「何时 / 做了什么」写入持久化文件并在面板可查，形成可追溯的审计流
 - [x] **CI 真桥接冒烟测试** —— 在 CI 里 import 真编译出的 `.so`，用临时 db 启动引擎、发送指令断言响应、再走 restart-release 路径，覆盖 mock 单测照不到的 Boost.Python ABI 与 `g_bot_core` 生命周期回归
-- [ ] **复用主框架用户数据** —— 去掉插件私有的 `data/user_cache.db`，昵称 / 头像直接从 ElainaBot 主框架的用户数据库读取，消除一份冗余缓存及其同步开销
+- [x] **复用主框架用户数据** —— 昵称 / 头像 / 活跃 / 消息统计全部改读 ElainaBot 主框架数据库（data.db / wakeup.db / statistics.db），插件私有的 `data/user_cache.db` 完全停用；昵称变化由插件比对后经框架写队列回写保持最新
 
 ## QQ 协议相关限制（已知）
 
@@ -128,7 +128,7 @@ plugins/LGTBot_ElainaBot/
 ├── README.md                本文档
 ├── LICENSE                  LGPLv2 许可证
 │
-├── mod/                     插件功能模块（用 `mod/` 而非 `app/` 是为了让 Web 面板「插件管理」不把内部子模块当 toggle 项暴露,误关会崩）
+├── mod/                     插件功能模块
 │   ├── __init__.py
 │   ├── state.py             共享运行时状态容器（含跨重载持久化）
 │   ├── boot.py              C++ 扩展加载（chdir + lib*.so 预加载 + RTLD_GLOBAL）
@@ -138,27 +138,27 @@ plugins/LGTBot_ElainaBot/
 │   ├── callbacks.py         C++ 引擎回调（cb_* 入口 + 异步发送实现）
 │   ├── dispatcher.py        @handler 注册（消息派发 + INTERACTION 处理）
 │   ├── config.py            data/config.yaml 读写
-│   ├── userdb.py            用户昵称 / 头像 SQLite 持久化（5 min 批量 flush）
+│   ├── userinfo.py          主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
 │   ├── uploader.py          图床上传调度（COS / B站）+ 图片尺寸解析
 │   ├── backup.py            数据备份（创建 / 恢复 / 删除 / 轮转 + 启动自动检查）
-│   ├── audit.py             状态变更操作审计（持久化最近 500 条,record 永不抛异常）
+│   ├── audit.py             状态变更操作审计（持久化最近 500 条）
 │   ├── metrics.py           运行指标计数（上传 / 崩溃 / 配额,重启不丢）+ lgtbot.db 统计查询
 │   ├── prebuilt.py          预编译包下载 / 校验 / 原子安装 / 本地·预编译切换 + 依赖自检
-│   ├── _prebuilt_swap.py    build_prebuilt 暂存换入:目录被运行中引擎占用时暂存 pending,boot 重启换入
+│   ├── _prebuilt_swap.py    build_prebuilt 暂存换入:目录被运行中引擎占用时暂存 pending，boot 重启换入
 │   ├── log_attribution.py   类级 monkey-patch ，把本插件 push 的消息在 Web 面板正确归类
 │   └── webui/               Web 面板拓展页（侧边栏「LGTBot 机器人」/ 多标签）
 │       ├── __init__.py
 │       ├── main.py          入口：页面注册 + 主页面拼装（读 templates/ 并填充占位）+ 隐藏 action 端点路由
 │       ├── page_dashboard.py「仪表盘」标签：版本 / 机器人绑定 / 运行环境自检 / 进行中对局 / 缓存清理 + 检查更新 / git pull / 子模块 update
-│       ├── page_metrics.py  「指标面板」标签：数据统计 + 运行指标 + 游戏数据（统一刷新）
+│       ├── page_metrics.py  「指标面板」标签：数据统计 + 运行指标 + 游戏数据
 │       ├── page_config.py   「配置管理」标签：插件和引擎全部配置的内置编辑器 + 热重载
 │       ├── page_build.py    「引擎编译」标签：子进程 + state.json + build.log + ANSI 解析成结构化段 + 编译动作
 │       ├── page_prebuilt.py 「预编译部署」标签：镜像测速·选择 / 包列表 / 下载进度 / 本地·预编译切换
-│       ├── page_backup.py   「数据备份」标签：列出 / 创建 / 恢复 / 删除备份 zip
+│       ├── page_backup.py   「数据备份」标签：列出 / 创建 / 恢复 / 下载 / 删除备份 zip
 │       ├── page_logs.py     「消息日志」标签 + 日志缓冲数据层（log_incoming / log_outgoing / get_logs / clear_logs）
-│       ├── page_audit.py    「操作审计」标签：只读展示审计记录（唯一 action 是刷新）
-│       ├── page_crash.py    「崩溃转储」标签：崩溃重启概况 + 列出（含触发源 uid·gid）/ 大弹窗查看 / 下载 / 删除 dump
-│       ├── page_users.py    「用户数据」标签：查 user_cache.db + 模板加载
+│       ├── page_audit.py    「操作审计」标签：只读展示审计记录
+│       ├── page_crash.py    「崩溃转储」标签：崩溃重启概况 + 列出 / 查看 / 下载 / 删除 dump
+│       ├── page_users.py    「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
 │       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
 │           ├── main/        主骨架 / 全局 + 通用 CSS / 公共 JS
 │           ├── dashboard/   「仪表盘」标签 HTML / CSS / JS
@@ -195,19 +195,19 @@ plugins/LGTBot_ElainaBot/
 ├── build_prebuilt/          📦 下载的预编译包解压目录（与 build/ 并存）
 │   ├── LGTBot_ElainaBot.so   预编译的桥接层（预编译模式下 boot 从此 import）
 │   ├── build/               编译产物（同顶层 build/ 布局：libbot_core.so / runner / plugins/…）
-│   └── manifest.json        包元数据（平台 / Python / sha,用于对比更新）
+│   └── manifest.json        包元数据（平台 / Python / sha，用于对比更新）
 │
 └── data/                    🗂 运行时数据（自动创建）
     ├── config.yaml          插件配置（Web UI 可在线编辑）
-    ├── user_cache.db        用户昵称 / 头像缓存（删除可自动重建，无副作用）
+    ├── user_cache.db        *旧版昵称缓存遗留文件（已完全停用，可删除）*
     ├── build/               引擎编译状态 + 日志（WebUI「引擎编译」标签使用）
     │   ├── state.json       当前 / 上次编译的 PID + 命令 + 时间
     │   ├── build.log        子进程 stdout/stderr（含 ANSI 颜色码）
     │   └── build_target_input.json  自定义目标名临时参数（前端 POST 写入）
     ├── audit/               操作审计（WebUI「操作审计」标签使用）
-    │   └── audit.json       最近 500 条状态变更记录（重启不丢,滚动淘汰最旧）
+    │   └── audit.json       最近 500 条状态变更记录
     ├── metrics/             运行指标（WebUI「指标面板」标签使用）
-    │   └── metrics.json     上传 / 崩溃 / 配额计数器（重启不丢）
+    │   └── metrics.json     上传 / 崩溃 / 配额计数器
     ├── prebuilt/            预编译部署状态（WebUI「预编译部署」标签使用）
     │   ├── active           构建来源开关：build | build_prebuilt（boot 启动时读）
     │   └── state.json       下载进度（前端轮询）

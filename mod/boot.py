@@ -83,8 +83,8 @@ IMG_PATH   = os.path.join(ENGINE_DIR, 'images')
 # 引擎自身的配置文件 —— 放在 data/engine/ 子目录避免污染 Web UI 的「插件 → 配置」
 # 入口（该入口非递归扫描 data/，子文件夹自动不可见，与 config.yaml 区分清楚）
 CONF_PATH  = os.path.join(ENGINE_DIR, 'lgtbot.json')
-# 插件管理的用户昵称 / 头像缓存（userdb 模块用），放 data/ 根方便用户感知
-USER_CACHE_DB = os.path.join(DATA_DIR, 'user_cache.db')
+# 注:data/user_cache.db 是旧版私有昵称缓存的遗留文件
+# 用户数据现全部读主框架数据库(mod/userinfo.py),本插件不再连接 / 读写 / 备份它;可删除。
 
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -175,9 +175,6 @@ if _chdir_ok:
 #
 # 这样旧 callback（持有旧模块引用）和新 dispatcher（新模块引用）操作的都是
 # 同一份字典，热重载后玩家命令仍能正确路由到旧引擎里仍在进行的游戏。
-#
-# 注：早期版本这里还有 'user_cache'，已迁移到 SQLite 持久化（见 userdb.py），
-# 跨重载共享走 DB 而非内存 dict；旧版本残留的该 key 会被下面 pop 掉。
 _PERSIST_ATTR = '_elaina_persistent'
 _ENGINE_RUNNING_ATTR = '_elaina_engine_running'
 

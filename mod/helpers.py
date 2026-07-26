@@ -7,13 +7,9 @@ import re
 import asyncio
 
 from core.base.logger import get_logger, PLUGIN
-from . import state, userdb
+from . import state, userinfo
 
 log = get_logger(PLUGIN, 'LGTBot')
-
-# QQ 官方机器人头像直链（未在 SDK 文档，但实测可用）
-# 尺寸：40 / 100 / 140 / 640；LGTBot 渲染头像约 100x100
-QQ_AVATAR_URL = 'https://q.qlogo.cn/qqapp/{appid}/{openid}/100'
 
 # 媒体消息（msg_type=7）的 content 字段是 QQ 协议层不解析 <@openid> 的纯文本，
 # 图文同条场景下把 mention 退化为 "@昵称"（损失：无 ping 通知）
@@ -69,15 +65,14 @@ def humanize_mentions(text: str) -> str:
     """把 <@openid> 转成 @昵称（用于图文消息 content）
 
     QQ msg_type=7 的 content 不解析 <@openid> 提及语法，会原样显示为字面字符串。
-    本函数从 ``userdb`` (SQLite) 取对应昵称替换，保持图文单条消息的同时让
-    文字可读。DB 未命中时退化为截短 uid 占位。
+    本函数从 ``userinfo``(主框架 data.db users 表)取对应昵称替换,保持图文单条消息的同时让文字可读。未命中时退化为截短 uid 占位。
     """
     if not text or '<@' not in text:
         return text
 
     def _repl(m):
         uid = m.group(1)
-        name = userdb.get_name(uid)
+        name = userinfo.get_name(uid)
         if name:
             # 输出只用于纯文本语境(媒体 caption / 日志),不做 md 转义
             return f'@{name}'

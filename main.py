@@ -42,7 +42,6 @@ _state.plugin_ctx = _ctx_mod.ctx
 # 顺序敏感：boot 必须最先（处理 C++ 扩展导入 + chdir + RTLD_GLOBAL 副作用），
 # 其他模块依赖 boot.LGTBot_ElainaBot / boot.BUILD_DIR / boot.LGTBOT_AVAILABLE 等
 from plugins.LGTBot_ElainaBot.mod import boot              # noqa: F401  C++ 引擎与路径
-from plugins.LGTBot_ElainaBot.mod import userdb            # noqa: F401  用户昵称 / 头像 SQLite
 from plugins.LGTBot_ElainaBot.mod.webui import main as webui  # noqa: F401  Web 面板侧边栏页面入口
 # page_logs 既是日志缓冲(callbacks / dispatcher 调 log_incoming/log_outgoing),
 # 也是「消息日志」tab 的页面模块,合并后单一文件入口。webui.main 已 import 它,
@@ -97,10 +96,6 @@ async def _setup():
 
     # 捕获主事件循环 —— C++ 工作线程通过 run_coroutine_threadsafe 调度到此循环
     _state.event_loop = asyncio.get_running_loop()
-
-    # 启动 userdb 5 分钟周期 flusher（在所有 early-return 之前，热重载复用
-    # 旧引擎那条路径上 dispatcher 仍会 mark_dirty，flusher 必须就位）
-    userdb.start_flusher(_state.event_loop)
 
     # 上一轮 C++ 异常 (std::terminate) 路径若留下了 pending_apology_* marker,
     # 现在干净进程已经就绪,调度异步补发道歉 + 通知群推送（5s 延后,避开 boot 抖动）。
@@ -178,14 +173,6 @@ async def _setup():
 
 @on_unload
 async def _teardown():
-    # userdb：先停 flusher，再同步 flush 一次 pending 到盘，最后关连接。
-    # 任何 SQLite 异常吞掉，避免阻断后续 webui.unregister / 引擎释放
-    try:
-        userdb.stop_flusher()
-        userdb.flush_now()
-    except Exception as e:
-        log.warning(f'userdb 关停异常: {e}')
-
     # 注销 Web 面板页面（无论引擎状态如何）
     try:
         webui.unregister()
@@ -201,10 +188,3 @@ async def _teardown():
     else:
         # 关键：保留 mark_engine_running(True)，下次 @on_load 据此跳过 start()
         log.warning('存在进行中的游戏 —— 引擎未释放，热重载后将复用旧引擎以保持游戏状态')
-
-    # 注意:不在此处调用 userdb.close() —— 跨重载共享的 SQLite 连接放在
-    # boot._get_persistent() 字典里 (见 userdb.py::_get_state),关掉它会让
-    # 旧 callbacks → 旧 userdb 路径在重载窗口里查询昵称全部返空,游戏内
-    # 玩家昵称会突然变成截断 openid。连接的生命周期与进程绑定即可:
-    # `os.execv` 整进程重启时 OS 自动关 fd,WAL checkpoint 走 sqlite 自身
-    # 的 `PRAGMA journal_mode = WAL` 写时机制即可,无需显式 close。

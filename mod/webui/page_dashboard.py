@@ -44,7 +44,7 @@ import zipfile
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import audit, boot, helpers, prebuilt, state, userdb
+from .. import audit, boot, helpers, prebuilt, state, userinfo
 from .. import config as _config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -624,7 +624,7 @@ def _remark_name(val) -> str:
 def _active_matches_view() -> list:
     """把 ``state.active_matches`` 整理成仪表盘可渲染的进行中对局列表(最近开始的在前)。
 
-    展示名:私聊局用 userdb 缓存的昵称;群局优先用主框架的群备注名。两者查不到时前端回退显示 openid。
+    展示名:私聊局用主框架 users 表昵称(userinfo);群局优先用主框架的群备注名。两者查不到时前端回退显示 openid。
     ``game`` 为空(如单机局开局广播无 brief且此前无 new_game)时交给前端显示「未知游戏」。
     ``since`` 为开局时刻的 epoch 秒,时长由前端计算。
     """
@@ -635,7 +635,7 @@ def _active_matches_view() -> list:
     for rec in matches:
         is_uid = bool(rec.get('is_uid'))
         tid = str(rec.get('target_id', ''))
-        name = (userdb.get_name(tid) or '') if is_uid else _remark_name(remarks.get(tid))
+        name = (userinfo.get_name(tid) or '') if is_uid else _remark_name(remarks.get(tid))
         out.append({
             'is_uid': is_uid,
             'id': tid,

@@ -124,7 +124,7 @@ mod/quota: fix race                            # 不要带路径
 | `callbacks`       | C++ 引擎回调实现（`cb_*` 入口 + 异步发送）                                                     |
 | `dispatcher`      | `@handler` 注册（消息派发 + INTERACTION）                                                |
 | `config`          | `data/config.yaml` 读写                                                            |
-| `userdb`          | 用户昵称 / 头像 SQLite 持久化（pending dict + 5 min 批量 flush）                              |
+| `userinfo`        | 主框架用户数据只读门面（data.db/wakeup.db/statistics.db；昵称缓存 + 变化时写回）                        |
 | `uploader`        | 图床上传调度 + 图片尺寸解析                                                                  |
 | `log_attribution` | 类级 monkey-patch `MessageSender._log_push`,让本插件的 push 在主框架 Web 面板归类为「LGTBot 消息派发」 |
 | `webui/`          | Web 面板侧边栏页面                                                                      |

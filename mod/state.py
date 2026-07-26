@@ -9,7 +9,7 @@
 挂在 C++ 扩展模块对象上常驻进程，新旧模块实例引用同一份字典 —— 这样
 热重载时即便旧 callback 还在用旧 state 对象，读到的还是同一份数据。
 
-用户昵称 / 头像缓存改走 SQLite 持久化（见 ``userdb.py``），不在此模块。
+用户昵称 / 头像等用户数据改读主框架数据库（见 ``userinfo.py``），不在此模块。
 """
 
 from __future__ import annotations

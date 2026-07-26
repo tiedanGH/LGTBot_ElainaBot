@@ -79,7 +79,6 @@ def _make_fake_boot() -> types.ModuleType:
     m.DB_PATH = os.path.join(m.ENGINE_DIR, 'lgtbot.db')
     m.IMG_PATH = os.path.join(m.ENGINE_DIR, 'images')
     m.CONF_PATH = os.path.join(m.ENGINE_DIR, 'lgtbot.json')
-    m.USER_CACHE_DB = os.path.join(_TEST_DATA_DIR, 'user_cache.db')
     os.makedirs(m.ENGINE_DIR, exist_ok=True)
     os.makedirs(m.GAME_PATH, exist_ok=True)
     os.makedirs(m.IMG_PATH, exist_ok=True)

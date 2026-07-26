@@ -4,7 +4,7 @@
 
 顶部独立标题栏放统一刷新按钮与查询时间;三个区共用一个刷新端点
 (``render_refresh``,一次返回完整 payload):
-  1. 📊 数据统计 —— 用户总数(user_cache.db)+ lgtbot.db 四个基础 COUNT
+  1. 📊 数据统计 —— 用户总数(主框架 data.db users 表)+ lgtbot.db 基础 COUNT + 玩家转化
   2. 📈 运行指标 —— mod/metrics.py 的持久计数器(图床上传成功率 / 主动重启次数 / 配额压力 / 引擎崩溃重启)
   3. 🎮 游戏数据 —— lgtbot.db 只读统计(今日对局 / 活跃玩家 / 活跃群聊、
      游戏局数总榜、本周游戏榜、本周玩家参与榜、近 10 日趋势)+ 今日主动消息
@@ -20,7 +20,7 @@ import json
 import os
 import time
 
-from .. import metrics, uploader, userdb
+from .. import metrics, uploader, userinfo
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 
@@ -47,14 +47,23 @@ def _payload() -> dict:
     snap = metrics.snapshot()
     total = snap.get('upload_total') or 0
     fail = snap.get('upload_fail') or 0
+    users_total = userinfo.count_users()
+    lgtbot_users = game.get('lgtbot_users')
+    # 玩家转化率:lgtbot 注册用户 ÷ 框架 users 总数(任一缺失 → None,前端显 —)。
+    # 注:lgtbot 的「注册」并不必然等于「参与过对局」—— 引擎 AddHonor(授予头衔) 也会把从未打过对局的用户插进 user 表(db_manager.cc:GetBirthCountOfUser),
+    # 但差异极罕见且面板不展示该差异,分子直接用 user 表 COUNT。
+    conversion = (round(lgtbot_users / users_total * 100, 1)
+                  if users_total and lgtbot_users is not None else None)
     return {
-        # ① 数据统计:user_cache 总数 + lgtbot 基础 COUNT
+        # ① 数据统计:框架 users 总数 + lgtbot 基础 COUNT + 跨库转化 + 私信近活
         'stats': {
-            'user_cache_total': userdb.count_users(),
-            'lgtbot_users': game.get('lgtbot_users'),
+            'users_total': users_total,
+            'lgtbot_users': lgtbot_users,
             'lgtbot_matches': game.get('lgtbot_matches'),
             'lgtbot_match_attendances': game.get('lgtbot_match_attendances'),
             'lgtbot_achievements': game.get('lgtbot_achievements'),
+            'player_conversion': conversion,
+            'dm_active_10d': userinfo.dm_active_count(10),
         },
         # ② 运行指标:计数器 + 服务端算好的成功率
         # (4 位小数,百万级样本下才能区分极高成功率:1e6 次里失败 1 次 = 99.9999%;

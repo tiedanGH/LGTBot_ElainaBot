@@ -1,6 +1,6 @@
 let usersCache = [];
 let usersQueryTs = 0;
-let usersTotal = 0;        // DB + pending 去重总数(独立于 usersCache 长度)
+let usersTotal = 0;        // 主框架 users 表全量总数(独立于 usersCache 长度)
 let usersPage = 1;
 const usersWideMQ = window.matchMedia('(min-width: 1200px)');
 
@@ -31,17 +31,22 @@ function usersFmtDateTime(ts) {
 }
 
 function usersRowHtml(u, serial) {
-  /* serial 是该用户在按 last_seen 降序的完整列表中的全局名次(1-indexed,
+  /* serial 是该用户在按最后活跃日期降序的完整列表中的全局名次(1-indexed,
      跨页累加),始终唯一,即便切换 1/2 列模式或翻页也对得上。 */
   const avatar = u.avatar
     ? '<img class="avatar-img" src="' + escapeHtml(u.avatar) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
     : '<div class="avatar-img"></div>';
   const name = escapeHtml(u.name || '—');
+  /* 消息数:统计聚合截至昨日,无统计行(null)显 — */
+  const msgs = (u.total_messages == null) ? '—' : String(u.total_messages);
+  /* 最后活跃:日粒度('YYYY-MM-DD',三源取最新);空 = 无任何活跃记录 */
+  const seen = u.last_active_date ? escapeHtml(u.last_active_date) : '从未';
   return '<div class="user-row">' +
     '<div class="col-idx">' + serial + '</div>' +
     '<div class="col-user">' + avatar + '<span class="user-name">' + name + '</span></div>' +
     '<div class="col-openid">' + escapeHtml(u.openid || '') + '</div>' +
-    '<div class="col-seen">' + usersFmtDateTime(u.last_seen) + '</div>' +
+    '<div class="col-msgs">' + msgs + '</div>' +
+    '<div class="col-seen">' + seen + '</div>' +
   '</div>';
 }
 

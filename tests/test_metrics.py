@@ -257,7 +257,7 @@ def test_top_players_nickname_and_mask(monkeypatch):
     _make_db([('五子棋', 0, 'G1', ['user_openid_abcdefgh', 'U2']),
               ('五子棋', 0, 'G1', ['user_openid_abcdefgh']),
               ('五子棋', 3, 'G1', ['user_openid_abcdefgh'])])    # 本周内、非今日
-    monkeypatch.setattr(metrics.userdb, 'get_name',
+    monkeypatch.setattr(metrics.userinfo, 'get_name',
                         lambda uid: '铁蛋' if uid == 'user_openid_abcdefgh' else '')
     g = metrics.query_game_stats()
     # 本周口径含 3 天前那局;今日口径只含 2 局
@@ -265,7 +265,7 @@ def test_top_players_nickname_and_mask(monkeypatch):
     assert g['top_players_week'][1] == {'display': 'U2', 'count': 1}   # ≤6 字符原样
     assert g['top_players_today'][0] == {'display': '铁蛋', 'count': 2}
 
-    monkeypatch.setattr(metrics.userdb, 'get_name', lambda uid: '')
+    monkeypatch.setattr(metrics.userinfo, 'get_name', lambda uid: '')
     g2 = metrics.query_game_stats()
     assert g2['top_players_week'][0]['display'] == 'use****fgh'        # 脱敏兜底
 

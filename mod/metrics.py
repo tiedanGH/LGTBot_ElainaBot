@@ -41,7 +41,7 @@ from datetime import datetime, timedelta
 
 from core.base.logger import get_logger, PLUGIN
 
-from . import boot, userdb
+from . import boot, userinfo
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -302,7 +302,7 @@ _TREND_PLAYERS_SQL = ('SELECT date(m.finish_time) d, COUNT(DISTINCT uwm.user_id)
 def query_game_stats() -> dict:
     """lgtbot.db 游戏统计快照(只读)。任何失败不抛 —— 单项置 None/空 + errors。
 
-    参与榜在此完成昵称解析(userdb.get_name)与脱敏兜底(mask_id),
+    参与榜在此完成昵称解析(userinfo.get_name,主框架 users 表)与脱敏兜底(mask_id),
     原始 openid 不出本模块。榜单双口径:本周(近 7 天,面板展示)与今日
     (/数据统计 指令用)。trend_10d 恒 10 项(缺失日补 0,含今天,新→旧),
     每项含当日对局数与当日活跃玩家数。
@@ -341,7 +341,7 @@ def query_game_stats() -> dict:
             return [{'game_name': str(g), 'count': int(c)} for g, c in _rows(sql, tag)]
 
         def _players(sql: str, tag: str) -> list:
-            return [{'display': userdb.get_name(str(uid)) or mask_id(str(uid)),
+            return [{'display': userinfo.get_name(str(uid)) or mask_id(str(uid)),
                      'count': int(c)} for uid, c in _rows(sql, tag)]
 
         out['top_games_all'] = _games(_TOP_GAMES_ALL_SQL, 'top_games_all')

@@ -10,7 +10,7 @@
     <span class="page-total">/ <span id="users-page-total">1</span></span>
     <button id="users-next" title="下一页">›</button>
   </div>
-  <button id="users-refresh" title="重新查询用户数据库">🔄 刷新数据</button>
+  <button id="users-refresh" title="重新查询主框架用户数据库">🔄 刷新数据</button>
 </div>
 
 <div class="users-grid">
@@ -20,7 +20,8 @@
         <div class="col-idx">序号</div>
         <div class="col-user">用户</div>
         <div class="col-openid">OpenID</div>
-        <div class="col-seen">上次活跃</div>
+        <div class="col-msgs">消息数</div>
+        <div class="col-seen">最后活跃</div>
       </div>
     </div>
     <div id="users-list-1"></div>
@@ -31,9 +32,14 @@
         <div class="col-idx">序号</div>
         <div class="col-user">用户</div>
         <div class="col-openid">OpenID</div>
-        <div class="col-seen">上次活跃</div>
+        <div class="col-msgs">消息数</div>
+        <div class="col-seen">最后活跃</div>
       </div>
     </div>
     <div id="users-list-2"></div>
   </div>
 </div>
+
+<p class="users-note">
+  数据来自主框架数据库：昵称 / 消息数 / 活跃日期由框架按事件记录，消息数为终身累计（每日凌晨聚合，<b>统计截至昨日</b>）。
+</p>

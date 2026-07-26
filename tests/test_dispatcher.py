@@ -60,19 +60,19 @@ def _mock_event(*, event_type=None, is_group=False, is_direct=False,
 def patched_downstream():
     """patch lgtbot_dispatch / lgtbot_interaction_* 用到的下游,让函数体能跑完。
 
-    关键点:**不 patch quota.refresh_ref**(那是被测目标),其他副作用(userdb /
-    page_logs / _send_welcome_menu / threading.Thread)全 patch 成 noop。
+    关键点:**不 patch quota.refresh_ref**(那是被测目标),其他副作用(userinfo
+    写回 / page_logs / _send_welcome_menu / threading.Thread)全 patch 成 noop。
     """
     # threading.Thread 起线程跑 boot.LGTBot_ElainaBot.on_public_message 等
     # —— boot 已是 fake (conftest),on_public_message 是 MagicMock,调用安全;
     # 但起真线程拖慢测试,直接 patch Thread.start 为 noop
     with patch.object(dispatcher, '_send_welcome_menu', new=AsyncMock()) as _swm, \
-         patch.object(dispatcher.userdb, 'mark_dirty') as _md, \
+         patch.object(dispatcher.userinfo, 'note_username') as _nu, \
          patch.object(dispatcher.page_logs, 'log_incoming') as _li, \
          patch.object(dispatcher.threading.Thread, 'start') as _ts:
         yield {
             '_send_welcome_menu': _swm,
-            'mark_dirty': _md,
+            'note_username': _nu,
             'log_incoming': _li,
             'thread_start': _ts,
         }

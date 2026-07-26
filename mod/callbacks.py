@@ -28,7 +28,7 @@ import sys
 import time
 
 from core.base.logger import get_logger, PLUGIN
-from . import state, quota, helpers, boot, uploader, userdb, buttons, log_attribution, metrics
+from . import state, quota, helpers, boot, uploader, userinfo, buttons, log_attribution, metrics
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -180,7 +180,7 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
 
     # ── Phase 2: 调度 30s 后整进程 execv (不阻塞,asyncio loop 跑) ────────────
     # 此时道歉 + 通知 HTTP 已经发出或失败,工作线程可以返回了。30s buffer 留给
-    # 主框架其他清理工作(WebUI 日志 flush、userdb 收尾等)。中途若工作线程退出
+    # 主框架其他清理工作(WebUI 日志 flush、框架写队列落盘等)。中途若工作线程退出
     # 触发 SIGABRT,C++ 桥接层的 SigAbrtHandler 会用预存的 execv 参数立即重启。
     try:
         asyncio.run_coroutine_threadsafe(
@@ -961,37 +961,26 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
 
 
 def cb_get_user_name(uid: str) -> str:
-    """C++ → Python：返回用户昵称（DB 未命中时返回 uid 兜底）
+    """C++ → Python：返回用户昵称(主框架 data.db users 表;未命中返回 uid 兜底)
 
-    昵称经 ``helpers.sanitize_md_name`` 按 markdown 语境转义
+    ``userinfo.get_name`` 同步且线程安全(缓存命中零 I/O;未命中走框架
+    log_service 的独立只读连接),可从引擎工作线程直调。昵称经
+    ``helpers.sanitize_md_name`` 按 markdown 语境转义。
 
     非 markdown 出站路径(媒体兜底 msg_type=7 / WebUI 消息日志)在各自出口
     用 ``helpers.strip_md_escapes`` 还原,不会露出反斜杠。已知残留:引擎自渲
     的对局图片(HTML)里带特殊字符的昵称会显示 ``\\`` 前缀,暂无干净解法。
     """
-    return helpers.sanitize_md_name(userdb.get_name(uid) or uid)
+    return helpers.sanitize_md_name(userinfo.get_name(uid) or uid)
 
 
 def cb_get_user_avatar_url(uid: str) -> str:
-    """C++ → Python：返回头像 URL
+    """C++ → Python：返回头像 URL(按绑定 bot 的 appid 即时推导,不落库)
 
-    优先从 userdb 取（写入时 appid 正确，多 bot 部署下用 DB 缓存的 URL
-    比临时 fallback 更准确）；DB 未命中（如历史排行榜里的离线用户）则
-    用任一活跃 Bot 的 appid 临时推导，不写回 DB —— 等用户下次发消息时
-    dispatcher 会用真正的 event.appid 落盘。
-    C++ 端 DownloadUserAvatar 会用 libcurl 下载，失败则跳过。
+    QQ 官方头像直链仅由 appid + openid 决定,推导即最新 —— 换绑 bot 后也
+    天然正确。无绑定 bot 时返回 '',C++ 端 DownloadUserAvatar 会跳过下载。
     """
-    cached = userdb.get_avatar(uid)
-    if cached:
-        return cached
-    try:
-        # DB 未命中时用**绑定 bot** 的 appid 临时推导
-        appid = helpers.get_bound_appid()
-        if appid:
-            return helpers.QQ_AVATAR_URL.format(appid=appid, openid=uid)
-    except Exception:
-        pass
-    return ''
+    return userinfo.avatar_url(uid)
 
 
 # ──────── 文本发送 ────────────────────────────────────────────────────────

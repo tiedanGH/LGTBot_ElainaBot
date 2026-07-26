@@ -22,7 +22,7 @@ from core.message.event import (
     INTERACTION_CREATE,
 )
 
-from . import state, quota, helpers, boot, buttons, uploader, userdb, audit, metrics
+from . import state, quota, helpers, boot, buttons, uploader, userinfo, audit, metrics
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -206,16 +206,16 @@ def _is_blocked_command(text: str) -> bool:
 
 @handler(_P_QUERY_ID,
          name='查询用户',
-         desc='查缓存中的昵称 / 头像 / 上次活跃',
+         desc='查主框架库中的昵称 / 头像 / 最后活跃',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS)
 async def lgtbot_query_user(event, match):
-    """以输入的 openid 在用户缓存 DB 中查单条记录,markdown 输出。
+    """以输入的 openid 查主框架用户数据(userinfo 门面),markdown 输出。
 
     - openid 长度必须严格 32 位,否则只回报错不查库
-    - 查不到 → 「查询失败:该 ID 不存在」
-    - 命中 → ``## 查询成功`` + 一行内嵌头像 + 昵称 + 一行上次活跃时间戳
+    - 四源(users / wakeup / 群活跃 / 统计)均查无 → 「查询失败:该 ID 不存在」
+    - 活跃时间精度:日志留存期(默认 5 天)内精确到秒,更早降为日粒度(按日),全无记录显示「从未活跃」
     """
     # 非绑定 bot 的事件静默忽略
     # (多 bot 部署下本插件只服务绑定 bot,不回复不打日志;下同,所有 handler 的第一道闸)
@@ -226,7 +226,9 @@ async def lgtbot_query_user(event, match):
         await event.reply(f'❌ ID 长度不正确（需 32 位，当前 {len(target)} 位）')
         return
 
-    user = userdb.get_user(target)
+    # get_user 含多次同步 SQLite 查询(ms 级),丢 executor 不占用事件循环
+    user = await asyncio.get_running_loop().run_in_executor(
+        None, userinfo.get_user, target)
     if user is None:
         await event.reply('❌ 查询失败：该 ID 不存在')
         return
@@ -235,19 +237,28 @@ async def lgtbot_query_user(event, match):
     raw_name = user.get('name') or ''
     name = helpers.sanitize_md_name(raw_name) if raw_name else '[未知昵称]'
     avatar = user.get('avatar') or ''
-    last_seen = user.get('last_seen', 0) or 0
-    time_str = (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_seen))
-                if last_seen else '从未活跃')
+    exact = user.get('last_active_exact') or ''
+    day = user.get('last_active_date') or ''
+    if exact:
+        time_str = exact
+    elif day:
+        time_str = f'{day}（长期未活跃）'
+    else:
+        time_str = '从未活跃'
     # 内嵌头像 —— QQ markdown 用 `#WIDTHpx #HEIGHTpx` alt-text 控制尺寸,
     # 40px 是「小头像」典型尺寸,行内 + 昵称 一目了然
     avatar_md = (f'![头像 #40px #40px]({avatar})' if avatar else '[未知]')
+    total = user.get('total_messages')
+    stats_line = (f'累计消息 {total} 条（统计截至昨日）\n'
+                  if total is not None else '')
     md = (
         '## ✅ 查询成功\n'
         '\n'
         f'{avatar_md} | **{name}**\n'
         '\n'
-        f'```上次活跃\n'
+        f'```最后活跃\n'
         f'{time_str}\n'
+        f'{stats_line}'
         f'```'
     )
     await event.reply(md)
@@ -592,12 +603,10 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         await event.reply(_PLANNED_RESTART_NOTICE)
         return
 
-    # 用户缓存：昵称 + 头像 URL（事件携带 username + 用 appid 推导头像）
-    # 走 userdb 落盘，5 分钟批量 flush；name / avatar 任一为空时不会覆盖 DB 旧值
+    # 昵称写回:框架自身按「首见即定」记录 users.name,这里补"最新化" ——
+    # 与内存缓存比对,真变化才经 db_queue 落框架库(活跃跟踪已由框架完成)。
     if uid:
-        appid = event.appid or ''
-        avatar = helpers.QQ_AVATAR_URL.format(appid=appid, openid=uid) if appid else ''
-        userdb.mark_dirty(uid, name=getattr(event, 'username', '') or '', avatar=avatar)
+        userinfo.note_username(uid, getattr(event, 'username', '') or '')
 
     # 用户消息 → 用 msg_id 刷新被动引用配额（5 条新额度）
     #
@@ -739,12 +748,11 @@ async def lgtbot_interaction_dispatch(event, match):
         await event.reply(_PLANNED_RESTART_NOTICE)
         return
 
-    # 按钮点击本身就是一次活跃事件 —— mark_dirty 现在不要求 name/avatar 非空,
-    # 仅刷 last_seen 也会被记下(INTERACTION 事件没有 username 字段是正常的)
+    # 昵称写回(与 lgtbot_dispatch 对称)。按钮活跃本身由框架记录 ——
+    # INTERACTION 也走 core/bot/event.py 的用户追踪;此处 username 常为空,
+    # note_username 第一层闸直接返回,近零开销。
     if uid:
-        appid = event.appid or ''
-        avatar = helpers.QQ_AVATAR_URL.format(appid=appid, openid=uid) if appid else ''
-        userdb.mark_dirty(uid, name=getattr(event, 'username', '') or '', avatar=avatar)
+        userinfo.note_username(uid, getattr(event, 'username', '') or '')
 
     appid_str = event.appid or ''
     # 互斥分支同 lgtbot_interaction_relay:event_id 不能跨场景使用
