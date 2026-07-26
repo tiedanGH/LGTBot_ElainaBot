@@ -57,10 +57,11 @@ def _payload() -> dict:
             'lgtbot_achievements': game.get('lgtbot_achievements'),
         },
         # ② 运行指标:计数器 + 服务端算好的成功率
-        # (3 位小数;总数 0 时 None → 前端显 —。round 后经 JSON 传输,末尾 0 天然省略:98.900 → 98.9)
+        # (4 位小数,百万级样本下才能区分极高成功率:1e6 次里失败 1 次 = 99.9999%;
+        #  总数 0 时 None → 前端显 —。round 后经 JSON 传输,末尾 0 天然省略:99.99900 → 99.999)
         'runtime': {
             **snap,
-            'upload_rate': None if total == 0 else round((total - fail) / total * 100, 3),
+            'upload_rate': None if total == 0 else round((total - fail) / total * 100, 4),
             # 图床可用性:仅查配置 + 主框架 status(),不做真实上传探测
             'hosting': uploader.hosting_availability(),
             'metrics_path': metrics.METRICS_PATH,
