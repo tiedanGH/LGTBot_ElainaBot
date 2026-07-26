@@ -52,7 +52,7 @@ def _payload() -> dict:
     # 玩家转化率:lgtbot 注册用户 ÷ 框架 users 总数(任一缺失 → None,前端显 —)。
     # 注:lgtbot 的「注册」并不必然等于「参与过对局」—— 引擎 AddHonor(授予头衔) 也会把从未打过对局的用户插进 user 表(db_manager.cc:GetBirthCountOfUser),
     # 但差异极罕见且面板不展示该差异,分子直接用 user 表 COUNT。
-    conversion = (round(lgtbot_users / users_total * 100, 1)
+    conversion = (round(lgtbot_users / users_total * 100, 2)
                   if users_total and lgtbot_users is not None else None)
     return {
         # ① 数据统计:框架 users 总数 + lgtbot 基础 COUNT + 跨库转化 + 私信近活
