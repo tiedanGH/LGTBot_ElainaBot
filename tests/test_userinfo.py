@@ -192,6 +192,16 @@ def test_note_username_gates_and_writeback(fake_bot):
     assert userinfo.get_name('U1') == '又改名'
 
 
+def test_note_username_first_write_on_freshly_booted_host(fake_bot, monkeypatch):
+    """回归:monotonic 起点为系统启动,刚开机(now < 冷却窗)时首次写回不得被
+    误判为「冷却中」吞掉(CI runner 必现;生产主机重启后前 10 分钟同理)。"""
+    base = fake_bot.log_service._base_dir
+    _init_data_db(base, users=[('U1', '旧名')])
+    monkeypatch.setattr(userinfo.time, 'monotonic', lambda: 5.0)   # 开机 5 秒
+    userinfo.note_username('U1', '新名')
+    assert len(fake_bot.log_service.queued) == 1                   # 首次写回必须发生
+
+
 def test_note_username_cooldown_expiry(fake_bot, monkeypatch):
     base = fake_bot.log_service._base_dir
     _init_data_db(base, users=[('U1', '')])

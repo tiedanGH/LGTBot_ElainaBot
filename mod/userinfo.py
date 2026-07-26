@@ -150,8 +150,11 @@ def note_username(openid: str, username: str) -> None:
         if get_name(openid) == username:
             return                          # 库里已是最新,get_name 已填缓存
     _cache_put(openid, username)            # 本地立即生效(引擎 / 面板读到最新)
+    # 冷却判定:「从未写过」必须与「时刻 0 写过」区分 —— monotonic 起点是系统启动,
+    # 刚开机的主机(如 CI runner)now 本身 < 冷却窗,用 0.0 兜底会把首次写回误判为冷却中。
     now = time.monotonic()
-    if now - _LAST_WRITE_TS.get(openid, 0.0) < _WRITE_COOLDOWN_S:
+    last = _LAST_WRITE_TS.get(openid)
+    if last is not None and now - last < _WRITE_COOLDOWN_S:
         return                              # 冷却窗内:只更新缓存,不落库
     bot = _bound_bot()
     if bot is None:
