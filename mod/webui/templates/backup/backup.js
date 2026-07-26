@@ -91,6 +91,7 @@ function backupApplyData(data) {
       <td class="backup-col-time">${escapeHtml(backupFmtRelative(b.mtime_ts))}</td>
       <td class="backup-col-size">${escapeHtml(backupFmtBytes(b.size_bytes))}</td>
       <td class="backup-col-ops">
+        <button class="dash-btn dash-btn-small backup-btn-download" data-name="${safeName}">⬇ 下载</button>
         <button class="dash-btn dash-btn-small backup-btn-restore" data-name="${safeName}">↩ 恢复</button>
         <button class="dash-btn dash-btn-small dash-btn-warn backup-btn-delete" data-name="${safeName}">🗑 删除</button>
       </td>
@@ -98,6 +99,9 @@ function backupApplyData(data) {
   }).join('');
 
   /* 绑事件(每次渲染重新绑,因为 innerHTML 重写了节点) */
+  tbody.querySelectorAll('.backup-btn-download').forEach(btn => {
+    btn.addEventListener('click', () => backupDownload(btn.dataset.name));
+  });
   tbody.querySelectorAll('.backup-btn-restore').forEach(btn => {
     btn.addEventListener('click', () => backupRestore(btn.dataset.name));
   });
@@ -210,6 +214,21 @@ async function backupRefresh() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🔄 刷新列表'; }
   }
+}
+
+
+/* ──── 下载 ────
+ * Content-Disposition: attachment → 浏览器直接下载;不能用 fetch(会读进内存),
+ * 拼好带鉴权 token 的 URL 后 window.open 到新窗口触发下载(不影响面板)。 */
+function backupDownload(name) {
+  if (!name) return;
+  const search = new URLSearchParams({name});
+  if (TOKEN_QS) {
+    const tokenSearch = new URLSearchParams(TOKEN_QS.slice(1));
+    for (const [k, v] of tokenSearch) search.set(k, v);
+  }
+  const url = BACKUP_ROUTE_BASE + '/download?' + search.toString();
+  window.open(url, '_blank', 'noopener');
 }
 
 

@@ -59,13 +59,13 @@
 .backup-table tbody tr:last-child td { border-bottom: none; }
 .backup-table tbody tr:hover { background: var(--hover); }
 
-.backup-col-name { width: 50%; word-break: break-all; }
-.backup-col-time { width: 18%; color: var(--text-muted); font-size: 12px; }
+.backup-col-name { width: 42%; word-break: break-all; }
+.backup-col-time { width: 16%; color: var(--text-muted); font-size: 12px; }
 .backup-col-size {
   width: 12%; color: var(--text); font-family: 'Consolas', 'Menlo', monospace;
 }
 .backup-col-ops {
-  width: 20%; white-space: nowrap;
+  width: 30%; white-space: nowrap;
 }
 .backup-col-ops .dash-btn { margin-right: 4px; }
 

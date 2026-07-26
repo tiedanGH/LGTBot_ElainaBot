@@ -20,9 +20,10 @@ Python 侧职责:
   · ``render_create`` / ``render_list`` —— 无参 endpoint,沿用本插件的
     ``<pre id="result">JSON</pre>`` fragment 协议，由 ``webui/main.py`` 用
     ``_register_hidden_action`` 注册到 ``web_pages._registry`` 隐藏列表
-  · ``restore_handler`` / ``delete_handler`` —— 带 ``?name=<zip_name>``
-    query 参数的 HTTP route(``/api/ext/lgtbot/backup/{restore,delete}``),
-    由 ``webui/main.py`` 用 ``web_pages.register_route`` 注册到 aiohttp 路由表
+  · ``restore_handler`` / ``delete_handler`` / ``download_handler`` —— 带
+    ``?name=<zip_name>`` query 参数的 HTTP route(``/api/ext/lgtbot/backup/
+    {restore,delete,download}``),由 ``webui/main.py`` 用
+    ``web_pages.register_route`` 注册到 aiohttp 路由表
 """
 
 from __future__ import annotations
@@ -170,3 +171,24 @@ async def delete_handler(request: 'web.Request') -> 'web.Response':
     audit.record('backup', '删除备份',
                  name if ok else f'{name}; {result.get("message") or ""}', ok=ok)
     return web.json_response(result)
+
+
+async def download_handler(request: 'web.Request') -> 'web.Response':
+    """``GET /api/ext/lgtbot/backup/download?name=<zip>`` —— 附件下载指定备份 zip。
+
+    纯只读。沿用 restore/delete 的路径穿越防护(禁 ``/`` ``\\`` ``..``),并要求
+    ``LGTBot_*.zip`` 命名(与 ``list_backups`` 过滤一致),文件须落在 ``BACKUP_DIR``
+    内且存在。命中即以 ``Content-Disposition: attachment`` 让浏览器直接下载。
+    """
+    name = (request.query.get('name') or '').strip()
+    if (not name or '/' in name or '\\' in name or '..' in name
+            or not name.startswith('LGTBot_') or not name.endswith('.zip')):
+        return web.json_response({'success': False, 'message': '非法备份文件名'}, status=400)
+    zip_path = os.path.join(backup.BACKUP_DIR, name)
+    if not os.path.isfile(zip_path):
+        return web.json_response({'success': False, 'message': f'备份文件不存在: {name}'}, status=404)
+    audit.record('backup', '下载备份', name, ok=True)
+    # name 已过 LGTBot_*.zip 白名单,无引号 / 特殊字符,可安全放进 header
+    return web.FileResponse(zip_path, headers={
+        'Content-Disposition': f'attachment; filename="{name}"',
+    })

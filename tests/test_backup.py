@@ -396,3 +396,41 @@ async def test_on_load_check_triggers_when_stale_or_missing():
         await backup._on_load_check_coro()
 
     mock_create.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# download_handler —— 附件下载(路径穿越防护 + 存在性校验)
+# page_backup 顶层 import aiohttp,dev 机常无 → importorskip(CI / 装了 aiohttp 才真跑)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _FakeReq:
+    """模拟 aiohttp Request:query.get('name') 返回给定值。"""
+    def __init__(self, name):
+        self.query = {} if name is None else {'name': name}
+
+
+def _page_backup():
+    pytest.importorskip('aiohttp')
+    from plugins.LGTBot_ElainaBot.mod.webui import page_backup
+    return page_backup
+
+
+async def test_download_handler_serves_existing_zip():
+    """合法命名 + 文件存在 → 200 + Content-Disposition 附件名为该 zip。"""
+    pb = _page_backup()
+    name = 'LGTBot_2026-01-02_030405.zip'
+    _make_plain_file(os.path.join(backup.BACKUP_DIR, name), 'zipbytes')
+    resp = await pb.download_handler(_FakeReq(name))
+    assert getattr(resp, 'status', 200) == 200
+    assert name in resp.headers.get('Content-Disposition', '')
+
+
+async def test_download_handler_rejects_bad_name_and_missing():
+    """路径穿越 / 非 LGTBot_*.zip 命名 → 400;命名合法但文件不存在 → 404。"""
+    pb = _page_backup()
+    for bad in ('', '../../etc/passwd', 'foo.zip', 'LGTBot_x.txt', 'a/b.zip'):
+        resp = await pb.download_handler(_FakeReq(bad))
+        assert getattr(resp, 'status', None) == 400
+    resp = await pb.download_handler(_FakeReq('LGTBot_9999-99-99_000000.zip'))
+    assert getattr(resp, 'status', None) == 404

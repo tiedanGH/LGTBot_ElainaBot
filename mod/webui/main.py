@@ -95,8 +95,9 @@ _PREBUILT_CANCEL_KEY          = '__lgtbot_prebuilt_cancel'      # 取消下载 +
 _PREBUILT_SWITCH_LOCAL_KEY    = '__lgtbot_prebuilt_switch_local'    # 切回本地编译
 _PREBUILT_SWITCH_PREBUILT_KEY = '__lgtbot_prebuilt_switch_prebuilt'  # 切到预编译
 # register_route 的 path,必须以 /api/ext/ 开头(core/plugin/web_pages.py 要求)
-_BACKUP_RESTORE_ROUTE = '/api/ext/lgtbot/backup/restore'
-_BACKUP_DELETE_ROUTE  = '/api/ext/lgtbot/backup/delete'
+_BACKUP_RESTORE_ROUTE  = '/api/ext/lgtbot/backup/restore'
+_BACKUP_DELETE_ROUTE   = '/api/ext/lgtbot/backup/delete'
+_BACKUP_DOWNLOAD_ROUTE = '/api/ext/lgtbot/backup/download'
 # 仪表盘「机器人绑定」换绑端点(要接 ?appid= 参数,同样走 register_route)
 _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
 # 崩溃转储查看正文 / 下载单个 dump / 删除选中(都接 ?name=,可多个,走 register_route)
@@ -414,6 +415,7 @@ def register():
 
     web_pages.register_route('GET', _BACKUP_RESTORE_ROUTE, page_backup.restore_handler, auth=True)
     web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
+    web_pages.register_route('GET', _BACKUP_DOWNLOAD_ROUTE, page_backup.download_handler, auth=True)
     web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)
     web_pages.register_route('GET', _CRASH_VIEW_ROUTE, page_crash.view_handler, auth=True)
     web_pages.register_route('GET', _CRASH_DOWNLOAD_ROUTE, page_crash.download_handler, auth=True)
@@ -437,6 +439,7 @@ def unregister():
     # 是另一张表 ``web_pages._routes``,要显式 unregister)
     web_pages.unregister_route('GET', _BACKUP_RESTORE_ROUTE)
     web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
+    web_pages.unregister_route('GET', _BACKUP_DOWNLOAD_ROUTE)
     web_pages.unregister_route('GET', _BIND_BOT_ROUTE)
     web_pages.unregister_route('POST', _CONFIG_SAVE_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_DOWNLOAD_ROUTE)
