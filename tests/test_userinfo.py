@@ -235,23 +235,29 @@ def test_list_users_merges_three_day_sources(fake_bot):
         groups=[('G1', json.dumps([
             {'userid': 'UB', 'last_active': _day(-1)},      # 乙:群内昨天
             {'userid': 'UC', 'last_active': _day(-9)},
+            # 仅入群未互动的成员(进群事件入名单,不在 users 表)—— 不得进列表,
+            # 否则行数会超过「总用户」并挤爆 limit(实测 923 总数 vs 1000 行)
+            {'userid': 'UX_ROSTER_ONLY', 'last_active': _day(0)},
         ]), 1)],
     )
     _init_wakeup_db(base, rows=[('UA', _day(0))])            # 甲:私信今天
     _init_stats_db(base, rows=[
         ('UC', 42, 7, {_day(-3): 5}),                        # 丙:统计 3 天前
-        ('UE', 9, 9, {_day(-2): 9}),                         # 仅统计源的用户
+        ('UE', 9, 9, {_day(-2): 9}),                         # 统计源独有(不在 users 表)
     ])
     out = userinfo.list_users()
     by_id = {r['openid']: r for r in out}
-    assert [r['openid'] for r in out[:3]] == ['UA', 'UB', 'UE']   # 日期倒序
+    # 基准集 = users 表:行数与 count_users 同口径
+    assert len(out) == 4 == userinfo.count_users()
+    assert 'UX_ROSTER_ONLY' not in by_id                     # 名单独有 → 不建行
+    assert 'UE' not in by_id                                 # 统计独有 → 不建行
+    assert [r['openid'] for r in out[:3]] == ['UA', 'UB', 'UC']   # 日期倒序
     assert by_id['UA']['last_active_date'] == _day(0)
     assert by_id['UB']['last_active_date'] == _day(-1)
     assert by_id['UC']['last_active_date'] == _day(-3)       # 统计日 > 群内 9 天前
     assert by_id['UC']['total_messages'] == 42
     assert by_id['UA']['total_messages'] is None             # 无统计行
     assert by_id['UD']['last_active_date'] == ''             # 无任何活跃源
-    assert 'UE' in by_id                                     # 统计源独有也进列表
     assert by_id['UA']['avatar'].endswith('/UA/100')
 
 
@@ -261,6 +267,20 @@ def test_list_users_limit_and_missing_stats_db(fake_bot):
     out = userinfo.list_users(limit=3)
     assert len(out) == 3
     assert all(r['total_messages'] is None for r in out)     # statistics.db 缺失
+
+
+def test_list_users_default_all_and_offset_blocks(fake_bot):
+    """回归:默认无上限(1000+ 全量);limit+offset 分块与全量逐段一致。"""
+    base = fake_bot.log_service._base_dir
+    _init_data_db(base, users=[(f'U{i:04d}', f'名{i}') for i in range(1005)])
+    out = userinfo.list_users()
+    assert len(out) == 1005 == userinfo.count_users()
+    b0 = userinfo.list_users(limit=1000)
+    b1 = userinfo.list_users(limit=1000, offset=1000)
+    assert len(b0) == 1000 and len(b1) == 5
+    # 分块拼接 == 全量(排序全局一致,块间无重叠 / 无遗漏)
+    assert [r['openid'] for r in b0 + b1] == [r['openid'] for r in out]
+    assert userinfo.list_users(limit=1000, offset=2000) == []   # 越界块为空
 
 def test_list_users_corrupt_group_json_skipped(fake_bot):
     base = fake_bot.log_service._base_dir

@@ -229,49 +229,56 @@ def _group_activity(bot) -> dict[str, str]:
     return out
 
 
-def list_users(limit: int = 1000) -> list[dict]:
-    """全量用户列表(框架四源一次合并),按最后活跃日期倒序。
+def list_users(limit: int | None = None, offset: int = 0) -> list[dict]:
+    """用户列表:以框架 ``users`` 表为**基准集**,按最后活跃日期倒序。
+
+    基准集 = 与机器人交互过的用户(与 ``count_users`` 同口径,总数与行数一致,
+    面板分页因此永远能翻到最后一名)。wakeup / 群名单 / 统计三源仅**补充**活跃
+    日期与消息数,不新增行 —— ``groups_users`` 名单含仅入群未互动的成员
+    (GROUP_MEMBER_ADD 进群事件直接入名单,不经过 users 表的消息/按钮追踪),
+    若为其建行会让列表大于「总用户」。
+
+    ``limit``/``offset`` 供面板分块拉取(每次 1000 条):合并与排序键跨三源,
+    无法下推 SQL,**每次调用仍全量合并排序**后切片 —— 分块的收益在 payload
+    体积与前端解析,不在服务端查询量。切片后才补 avatar(只为返回行拼 URL)。
 
     返回元素:``{'openid','name','avatar','total_messages','private_messages',
     'last_active_date'}``;total/private 无统计行时为 None(前端显 —)。
-    供 WebUI「用户数据」标签使用;无 bot 时返回 []。
+    无 bot 时返回 []。
     """
     bot = _bound_bot()
     if bot is None:
         return []
     recs: dict[str, dict] = {}
-
-    def _rec(uid: str) -> dict:
-        return recs.setdefault(uid, {
-            'openid': uid, 'name': '', 'total_messages': None,
-            'private_messages': None, 'last_active_date': '',
-        })
-
     try:
         for r in bot.log_service.query_data('SELECT user_id, name FROM users') or []:
             uid = str(r.get('user_id') or '')
             if uid:
-                _rec(uid)['name'] = str(r.get('name') or '')
+                recs[uid] = {
+                    'openid': uid, 'name': str(r.get('name') or ''),
+                    'total_messages': None, 'private_messages': None,
+                    'last_active_date': '',
+                }
     except Exception as e:
         log.debug(f'userinfo.list_users users 查询异常: {e}')
     try:
         for r in bot.log_service.query(
                 'wakeup', 'SELECT openid, last_msg_date FROM log') or []:
-            uid = str(r.get('openid') or '')
+            rec = recs.get(str(r.get('openid') or ''))
             day = str(r.get('last_msg_date') or '')
-            if uid and day > _rec(uid)['last_active_date']:
-                _rec(uid)['last_active_date'] = day
+            if rec is not None and day > rec['last_active_date']:
+                rec['last_active_date'] = day
     except Exception as e:
         log.debug(f'userinfo.list_users wakeup 查询异常: {e}')
     for uid, day in _group_activity(bot).items():
-        if day > _rec(uid)['last_active_date']:
-            _rec(uid)['last_active_date'] = day
+        rec = recs.get(uid)
+        if rec is not None and day > rec['last_active_date']:
+            rec['last_active_date'] = day
     for r in _stats_rows(bot, 'SELECT userid, total_messages, private_messages, '
                               'daily_messages FROM user_stats'):
-        uid = str(r.get('userid') or '')
-        if not uid:
+        rec = recs.get(str(r.get('userid') or ''))
+        if rec is None:
             continue
-        rec = _rec(uid)
         rec['total_messages'] = int(r.get('total_messages') or 0)
         rec['private_messages'] = int(r.get('private_messages') or 0)
         day = _max_daily_key(r.get('daily_messages'))
@@ -280,7 +287,11 @@ def list_users(limit: int = 1000) -> list[dict]:
 
     out = sorted(recs.values(),
                  key=lambda r: (r['last_active_date'], r['total_messages'] or 0),
-                 reverse=True)[:limit]
+                 reverse=True)
+    if offset > 0:
+        out = out[offset:]
+    if limit is not None:
+        out = out[:limit]
     for r in out:
         r['avatar'] = avatar_url(r['openid'])
     return out

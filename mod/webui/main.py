@@ -104,6 +104,8 @@ _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
 _CRASH_VIEW_ROUTE     = '/api/ext/lgtbot/crash/view'
 _CRASH_DOWNLOAD_ROUTE = '/api/ext/lgtbot/crash/download'
 _CRASH_DELETE_ROUTE   = '/api/ext/lgtbot/crash/delete'
+# 用户数据懒加载(?offset=,首屏只内嵌前 1000 条,深翻页/搜索时一次取剩余全部)
+_USERS_PAGE_ROUTE     = '/api/ext/lgtbot/users/page'
 # 带 schema 校验的配置保存(config.yaml / lgtbot.json),POST body 传内容
 _CONFIG_SAVE_ROUTE    = '/api/ext/lgtbot/config/save'
 # 预编译下载(POST {name,mirror?},后台起 task)/ 镜像测速(POST {customs?})/ 记住下载镜像(POST {mirror})
@@ -420,6 +422,7 @@ def register():
     web_pages.register_route('GET', _CRASH_VIEW_ROUTE, page_crash.view_handler, auth=True)
     web_pages.register_route('GET', _CRASH_DOWNLOAD_ROUTE, page_crash.download_handler, auth=True)
     web_pages.register_route('GET', _CRASH_DELETE_ROUTE, page_crash.delete_handler, auth=True)
+    web_pages.register_route('GET', _USERS_PAGE_ROUTE, page_users.page_handler, auth=True)
     web_pages.register_route('POST', _CONFIG_SAVE_ROUTE, page_config.save_config_handler, auth=True)
     # 预编译:下载 / 镜像测速 / 记住下载镜像(均 POST)
     web_pages.register_route('POST', _PREBUILT_DOWNLOAD_ROUTE, page_prebuilt.download_handler, auth=True)
@@ -441,6 +444,10 @@ def unregister():
     web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
     web_pages.unregister_route('GET', _BACKUP_DOWNLOAD_ROUTE)
     web_pages.unregister_route('GET', _BIND_BOT_ROUTE)
+    web_pages.unregister_route('GET', _CRASH_VIEW_ROUTE)
+    web_pages.unregister_route('GET', _CRASH_DOWNLOAD_ROUTE)
+    web_pages.unregister_route('GET', _CRASH_DELETE_ROUTE)
+    web_pages.unregister_route('GET', _USERS_PAGE_ROUTE)
     web_pages.unregister_route('POST', _CONFIG_SAVE_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_DOWNLOAD_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_TESTMIRRORS_ROUTE)
