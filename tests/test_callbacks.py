@@ -265,6 +265,29 @@ def test_match_event_multiplayer_prefers_current_game_over_pending():
     assert 'g:mp1' not in state.pending_new_game_name
 
 
+def test_dm_warning_only_marked_for_group_creation():
+    """带开局私信的游戏:仅**群聊(公屏)**新建才记入 _pending_dm_warn_keys
+    (稍后追发「主动私信」提示);私信里新建不打标 —— 玩家已在私信会话内,无需再提示。"""
+    game = next(iter(callbacks._DM_LIMITED_GAMES))     # 任取一个带开局私信的游戏
+    callbacks._pending_dm_warn_keys.clear()
+    state.current_game.clear()
+    state.pending_buttons.clear()
+    try:
+        # 群聊新建 → 打标
+        callbacks.cb_match_event('grp1', False, 'new_game', game)
+        assert 'g:grp1' in callbacks._pending_dm_warn_keys
+        # 私信新建同款游戏 → 不打标
+        callbacks.cb_match_event('usr1', True, 'new_game', game)
+        assert 'u:usr1' not in callbacks._pending_dm_warn_keys
+        # 群聊新建不带开局私信的游戏 → 不打标(sanity)
+        callbacks.cb_match_event('grp2', False, 'new_game', '五子棋')
+        assert 'g:grp2' not in callbacks._pending_dm_warn_keys
+    finally:
+        callbacks._pending_dm_warn_keys.clear()
+        state.current_game.clear()
+        state.pending_buttons.clear()
+
+
 def test_single_player_game_over_restart_button_has_name():
     """单机局结算(game_over_unrecorded):重开按钮 data 为「/新游戏 <名>」(名字来自 pending)。"""
     state.pending_new_game_name['u:spuser'] = '天赋云巢'

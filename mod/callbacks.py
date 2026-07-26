@@ -640,13 +640,13 @@ async def _alert_crash_loop_tripped(count: int) -> None:
 _pending_tip_keys: set[str] = set()
 
 # ─────────────────────────────────────────────────────────────────────────
-# 「带开局私信」游戏白名单 —— 此集合内的游戏在 cb_match_event(kind='new_game')
-# 时会被记入 _pending_dm_warn_keys,在开局公告发完后追加一条「主动私信受限」
-# 提示给用户。
+# 「带开局私信」游戏白名单 —— 此集合内的游戏在**群聊**里 cb_match_event(kind='new_game')
+# 时会被记入 _pending_dm_warn_keys,在开局公告发完后追加一条「主动私信受限」提示给群内玩家。
+# **私信里新建游戏不提示**(玩家已在私信会话内)。
 #
 # 触发逻辑:
 #   1. C++ 引擎调 cb_match_event(kind='new_game', game_name='XXX')
-#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内,key 进 _pending_dm_warn_keys
+#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内**且为群聊(is_uid=False)**,key 进 _pending_dm_warn_keys
 #   3. 引擎随后调 cb_send_text_message 发出「房间已创建」公告
 #   4. _serialized_text_send 在 Lock 内调 _consume_pending_dm_warn,
 #      pop 出 key 并调度 _schedule_dm_warning —— 该 task 抢同把 Lock 排在
@@ -927,7 +927,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         # 新建房间时若该游戏带「开局私信」,先打标;待开局公告通过 cb_send_text
         # 同步发完后,_consume_pending_dm_warn 会调度独立 task 追发「私信限制」
         # 提示(per-target Lock 保证顺序在公告之后)。
-        if kind == 'new_game' and game_name and game_name in _DM_LIMITED_GAMES:
+        # 仅**公屏(群聊)**开局才提示:私信里新建游戏时玩家本就在与 bot 的私信会话内。
+        if kind == 'new_game' and not is_uid and game_name and game_name in _DM_LIMITED_GAMES:
             _pending_dm_warn_keys.add(key)
     elif kind == 'all_left':
         state.pending_buttons[key] = buttons.build_dissolve_buttons()
