@@ -42,7 +42,7 @@ DEFAULT_CONFIG = {
 CONFIG_COMMENTS = {
     'bind_bot_appid': '绑定机器人 appid（可在仪表盘配置）。留空 = 自动使用框架第一个 bot；绑定后仅处理该 bot 的消息，其他 bot 的事件静默忽略',
     'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
-    'image_hosting': '游戏图片走 markdown 内嵌时使用的图床（可选值：cos / nature / bilibili / chatglm / ukaka / xingye）。上传失败回退 msg_type=7',
+    'image_hosting': '游戏图片走 markdown 内嵌时使用的图床（单选提升效率，可选值以主框架 image_hosting 模块为准：cos / bilibili / chatglm / xingye / nature / qq_file；填 any 则自动依次尝试全部可用图床）。上传失败回退 msg_type=7',
     'refresh_wait_timeout': '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
     'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
@@ -150,15 +150,26 @@ def _apply_runtime_tunables(cfg: dict):
         log.info(f'全量群集合已从绑定 bot({helpers.get_bound_appid() or "?"}) 数据库载入: {seeded} 个')
 
     # ── image_hosting ─────────────────────────────────────────────────────
+    # 图床名单**动态**取自主框架模块 status()(≥2.0.0 beds/ 自动发现);模块
+    # 未加载时无法校验,保留原值 —— 运行时 _do_upload 会按 status 早退,
+    # 可用性徽章也会如实显示 unknown / module_off。'any' 恒为合法值。
     backend = cfg.get('image_hosting', '')
     if not isinstance(backend, str):
         log.warning(f'image_hosting 应为字符串，已忽略 (got {backend!r})')
         backend = ''
     backend = backend.strip().lower()
-    valid = {name for name, _ in uploader._UPLOADERS}
-    if backend and backend not in valid:
-        log.warning(f'image_hosting 未知图床 {backend!r}，可选值：{sorted(valid)}；已禁用')
-        backend = ''
+    if backend and backend != 'any':
+        hosting = uploader._get_hosting()
+        valid: set = set()
+        if hosting is not None and hasattr(hosting, 'status'):
+            try:
+                valid = set((hosting.status() or {}).keys())
+            except Exception:
+                valid = set()
+        if valid and backend not in valid:
+            log.warning(f'image_hosting 未知图床 {backend!r}，'
+                        f'可选值：{sorted(valid)} 或 any；已禁用')
+            backend = ''
     if uploader.SELECTED_BACKEND != backend:
         old = uploader.SELECTED_BACKEND or '(未启用)'
         new = backend or '(未启用)'

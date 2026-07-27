@@ -41,7 +41,7 @@ def mock_backend():
     calls: list = []
     original = uploader._do_upload
 
-    async def fake_do_upload(data, filename, user_id=''):
+    async def fake_do_upload(data, filename, user_id='', target_id='', target_is_uid=False):
         calls.append((data[:4], filename, user_id))
         await asyncio.sleep(0.02)   # 模拟图床 RTT
         return f'https://fake.cdn/{filename}'
@@ -140,7 +140,7 @@ async def test_upload_image_inflight_dedup(mock_backend):
     # 用 module 顶层 mock:_do_upload 已被 mock_backend 替换,这里仍需 mock
     # _get_hosting 等让 upload_image 不短路。实际上 _do_upload 是真正调用 backend
     # 的入口,我们 mock 它,upload_image 的去重逻辑测试与 backend 无关。
-    # 但 upload_image 仍会检查 SELECTED_BACKEND 和 _UPLOADERS_MAP —— 让它走完
+    # 但 upload_image 仍会检查 SELECTED_BACKEND —— 让它走完
     # 实际上 mock_backend 直接替换的是 _do_upload,upload_image 包装层会跳过
     # SELECTED_BACKEND 检查直接调它(因为我们没 mock 包装层)。
     # 看 upload_image 实现:它**调** _do_upload 之前没检查 SELECTED_BACKEND,
@@ -242,13 +242,24 @@ async def test_upload_image_cached_benefits_from_inflight(mock_backend):
 # ─────────────────────────────────────────────────────────────────────────
 
 
+class _FakeBed:
+    def __init__(self, display_name=''):
+        self.display_name = display_name
+
+
 class _FakeHosting:
-    """假 image_hosting 模块 —— 只实现徽章检测用到的 status()。"""
-    def __init__(self, status_map):
+    """假 image_hosting 模块(2.0.0 形状)—— status() / get_bed() / 动态 upload_*。"""
+    def __init__(self, status_map, beds=None, **methods):
         self._status = status_map
+        self._beds = beds or {}
+        for k, v in methods.items():
+            setattr(self, k, v)
 
     def status(self):
         return self._status
+
+    def get_bed(self, name):
+        return self._beds.get(name)
 
 
 def test_hosting_availability_unset():
@@ -257,11 +268,12 @@ def test_hosting_availability_unset():
     assert uploader.hosting_availability()['state'] == 'unset'
 
 
-def test_hosting_availability_unknown_backend():
-    """配了个不认识的图床名 → unknown(config.py 正常会挡,这里防御性覆盖)。"""
-    uploader.SELECTED_BACKEND = 'nonexistent'
+def test_hosting_availability_unknown_backend(monkeypatch):
+    """配了模块里不存在的图床名(如已移除的 ukaka)→ unknown。"""
+    uploader.SELECTED_BACKEND = 'ukaka'
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: _FakeHosting({'cos': True}))
     r = uploader.hosting_availability()
-    assert r['state'] == 'unknown' and r['backend'] == 'nonexistent'
+    assert r['state'] == 'unknown' and r['backend'] == 'ukaka'
 
 
 def test_hosting_availability_module_off(monkeypatch):
@@ -294,3 +306,124 @@ def test_hosting_availability_status_raises_is_backend_off(monkeypatch):
     uploader.SELECTED_BACKEND = 'cos'
     monkeypatch.setattr(uploader, '_get_hosting', lambda: _Boom())
     assert uploader.hosting_availability()['state'] == 'backend_off'
+
+
+def test_hosting_availability_display_name(monkeypatch):
+    """徽章显示名走 get_bed().display_name(中文名),拿不到回退 backend。"""
+    uploader.SELECTED_BACKEND = 'qq_file'
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: _FakeHosting(
+        {'qq_file': True}, beds={'qq_file': _FakeBed('QQ分片文件')}))
+    r = uploader.hosting_availability()
+    assert r['state'] == 'ok' and r['display'] == 'QQ分片文件'
+
+
+def test_hosting_availability_any(monkeypatch):
+    """any:有任一启用图床 → ok(label 列出启用名单);全灭 → backend_off。"""
+    uploader.SELECTED_BACKEND = 'any'
+    monkeypatch.setattr(uploader, '_get_hosting',
+                        lambda: _FakeHosting({'cos': True, 'nature': False}))
+    r = uploader.hosting_availability()
+    assert r['state'] == 'ok' and r['display'] == '自动' and 'cos' in r['label']
+    monkeypatch.setattr(uploader, '_get_hosting',
+                        lambda: _FakeHosting({'cos': False}))
+    assert uploader.hosting_availability()['state'] == 'backend_off'
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# _do_upload / _call_backend —— 动态派发 + kwargs 按签名过滤 + any 分支
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _no_bound_bot(monkeypatch):
+    monkeypatch.setattr(uploader, '_bound_sender_and_tm', lambda: (None, None))
+
+
+async def test_do_upload_prefers_url_variant_and_filters_kwargs(monkeypatch):
+    """cos:优先 upload_cos_url,按签名收到 filename+user_id,不收 sender/target。"""
+    seen = {}
+
+    async def upload_cos_url(data, filename='image.png', user_id=None, custom_path=None):
+        seen.update(filename=filename, user_id=user_id)
+        return 'https://cdn.example/x.png'
+
+    hosting = _FakeHosting({'cos': True}, upload_cos_url=upload_cos_url)
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: hosting)
+    _no_bound_bot(monkeypatch)
+    uploader.SELECTED_BACKEND = 'cos'
+    url = await uploader._do_upload(b'x', 'a.png', 'U1', 'G1', False)
+    assert url == 'https://cdn.example/x.png'
+    assert seen == {'filename': 'a.png', 'user_id': 'U1'}
+
+
+async def test_do_upload_simple_backend_positional_only(monkeypatch):
+    """nature 这类只收 data 的后端:kwargs 全被过滤,dict/元组语义归一。"""
+    calls = []
+
+    async def upload_nature(image_data):
+        calls.append(image_data)
+        return 'https://download.nature.qq.com/y.png'
+
+    hosting = _FakeHosting({'nature': True}, upload_nature=upload_nature)
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: hosting)
+    _no_bound_bot(monkeypatch)
+    uploader.SELECTED_BACKEND = 'nature'
+    url = await uploader._do_upload(b'img', 'a.png', '', '', False)
+    assert url and calls == [b'img']
+
+
+async def test_do_upload_qq_file_gets_sender_and_scope(monkeypatch):
+    """qq_file:收到 file_name / 绑定 sender / 当前消息目标作用域(群→group)。"""
+    seen = {}
+
+    async def upload_qq_file_url(data, file_type=1, *, file_name=None, sender=None,
+                                 target_id=None, target_type=None):
+        seen.update(file_name=file_name, sender=sender,
+                    target_id=target_id, target_type=target_type)
+        return 'https://qq-cos.example/z.png?sig=1'
+
+    hosting = _FakeHosting({'qq_file': True}, upload_qq_file_url=upload_qq_file_url)
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: hosting)
+    monkeypatch.setattr(uploader, '_bound_sender_and_tm', lambda: ('SENDER', 'TM'))
+    uploader.SELECTED_BACKEND = 'qq_file'
+    url = await uploader._do_upload(b'img', 'match.png', '', 'GROUP1', False)
+    assert url and seen == {'file_name': 'match.png', 'sender': 'SENDER',
+                            'target_id': 'GROUP1', 'target_type': 'group'}
+    # 私信目标 → target_type=user
+    await uploader._do_upload(b'img', 'match.png', '', 'USERX', True)
+    assert seen['target_type'] == 'user' and seen['target_id'] == 'USERX'
+
+
+async def test_do_upload_any_uses_upload_any(monkeypatch):
+    """any:调模块 upload_any,附带绑定 bot 的 sender / token_manager。"""
+    seen = {}
+
+    async def upload_any(data, filename='image.png', *, token_manager=None, sender=None):
+        seen.update(filename=filename, tm=token_manager, sender=sender)
+        return 'https://any.example/ok.png'
+
+    hosting = _FakeHosting({}, upload_any=upload_any)
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: hosting)
+    monkeypatch.setattr(uploader, '_bound_sender_and_tm', lambda: ('SND', 'TOK'))
+    uploader.SELECTED_BACKEND = 'any'
+    url = await uploader._do_upload(b'img', 'a.png', '', '', False)
+    assert url == 'https://any.example/ok.png'
+    assert seen == {'filename': 'a.png', 'tm': 'TOK', 'sender': 'SND'}
+
+
+async def test_do_upload_removed_backend_returns_none(monkeypatch):
+    """配置里残留已移除的图床名(status 无此键)→ 早退 None,不抛异常。"""
+    hosting = _FakeHosting({'cos': True})
+    monkeypatch.setattr(uploader, '_get_hosting', lambda: hosting)
+    uploader.SELECTED_BACKEND = 'ukaka'
+    assert await uploader._do_upload(b'img', 'a.png', '', '', False) is None
+
+
+async def test_upload_image_cached_caps_ttl_for_presigned(mock_backend):
+    """qq_file / any 的长缓存自动收紧(预签名直链带 ttl,23h 缓存会挂过期链接)。"""
+    uploader.SELECTED_BACKEND = 'qq_file'
+    import time as _t
+    before = _t.monotonic()
+    entry = await uploader.upload_image_cached(
+        b'LOGO2' + b'\x02' * 100, 'menu_logo.png', cache_key='menu:logo2')
+    assert entry is not None
+    assert entry['expires_at'] - before <= uploader._PRESIGNED_CACHE_TTL_CAP + 5

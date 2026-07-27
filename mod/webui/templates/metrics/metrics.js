@@ -63,7 +63,8 @@ function metricsRenderRuntime(rt) {
       unknown:     {cls: 'err',   text: '未知图床'},
     };
     const info = MAP[h.state] || MAP.unset;
-    badge.textContent = (h.backend ? h.backend + ' · ' : '') + info.text;
+    const shown = h.display || h.backend;   // 中文显示名优先(any → 自动)
+    badge.textContent = (shown ? shown + ' · ' : '') + info.text;
     badge.className = 'metrics-badge metrics-badge-' + info.cls;
     badge.title = h.label || '';
   }

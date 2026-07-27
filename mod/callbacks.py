@@ -1258,8 +1258,10 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
         metrics.record_active_push(target_id, is_uid)
 
     # ── 通道 A：尝试图床 → markdown 内嵌 ─────────────────────────────────
+    # target 一并透传:qq_file 图床用当前消息目标作上传作用域(其余图床忽略)
     user_id_for_cos = target_id if is_uid else ''
-    image_url = await uploader.upload_image(data, filename, user_id=user_id_for_cos)
+    image_url = await uploader.upload_image(data, filename, user_id=user_id_for_cos,
+                                            target_id=target_id, target_is_uid=is_uid)
     if image_url:
         if await _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
                                       raw_content, image_url, data, count,

@@ -259,10 +259,17 @@ def render_reload_config() -> str:
 # 先语法解析 + 字段 schema 校验,全部通过才原子落盘,一个格式错误不再让插件加载回退默认配置或引擎启动失败。
 # 路径由服务端按 target 解析,不信任客户端传路径。
 
-# 图床合法值延迟取自 uploader._UPLOADERS —— 与运行时校验同源,避免两处漂移
+# 图床合法值**动态**取自主框架 image_hosting 模块 status()(≥2.0.0 beds/ 自动发现,与运行时校验同源,避免两处漂移)。
+# 模块未加载 / 查询失败时返回空集 = 无法校验,放行 —— 运行时 _do_upload 会按 status 早退,可用性徽章如实显示。
 def _valid_backends() -> set:
     from .. import uploader as _uploader
-    return {name for name, _ in _uploader._UPLOADERS}
+    hosting = _uploader._get_hosting()
+    if hosting is None or not hasattr(hosting, 'status'):
+        return set()
+    try:
+        return set((hosting.status() or {}).keys())
+    except Exception:
+        return set()
 
 
 # 纯数字 ID 类字段:不带引号时 yaml 解析成 int,运行时
@@ -319,12 +326,14 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
             if isinstance(val, bool) or not isinstance(val, (int, float)):
                 errors.append(f'{key} 应为数值，当前是 {type(val).__name__}')
 
-    # 值级规则(类型已过关的字段才检查)
+    # 值级规则(类型已过关的字段才检查)。'any' 恒合法(自动依次尝试);
+    # 合法名单为空(模块未加载)时无法校验,放行给运行时兜底。
     backend = data.get('image_hosting')
     if isinstance(backend, str) and backend.strip():
+        b = backend.strip().lower()
         valid = _valid_backends()
-        if backend.strip().lower() not in valid:
-            errors.append(f'image_hosting 未知图床 {backend!r}，可选: {sorted(valid)} 或留空')
+        if b != 'any' and valid and b not in valid:
+            errors.append(f'image_hosting 未知图床 {backend!r}，可选: {sorted(valid)}、any 或留空')
     timeout = data.get('refresh_wait_timeout')
     if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout <= 0:
         errors.append(f'refresh_wait_timeout 应为正数，当前 {timeout}')
