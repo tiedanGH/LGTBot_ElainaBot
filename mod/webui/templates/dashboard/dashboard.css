@@ -144,12 +144,11 @@
 .dash-match-since { color: var(--text-muted); font-size: 12px; white-space: nowrap; margin-left: auto; }
 
 /* ──── 机器人绑定 ──── */
-/* 大屏 2 列,窄屏(≤600px)回落 1 列 */
-.dash-bot-list {
-  display: grid; gap: 8px;
-  grid-template-columns: repeat(2, 1fr);
-}
-/* 只有一个机器人时横跨整行,不留半行空白 */
+/* 响应式 1-3 列(720px 2 列 / 1200px 3 列) */
+.dash-bot-list { display: grid; gap: 8px; grid-template-columns: 1fr; }
+@media (min-width: 720px)  { .dash-bot-list { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1200px) { .dash-bot-list { grid-template-columns: repeat(3, 1fr); } }
+/* 只有一个机器人时横跨整行,不留 2/3 行空白 */
 .dash-bot-row:only-child { grid-column: 1 / -1; }
 .dash-bot-row {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -162,10 +161,6 @@
 .dash-bot-vol { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .dash-bot-row .dash-btn,
 .dash-bot-row .dash-badge { margin-left: auto; }
-
-@media (max-width: 600px) {
-  .dash-bot-list { grid-template-columns: 1fr; }
-}
 
 /* ──── Release 折叠卡(检查更新后出现;跨多版本升级会堆叠多张) ──── */
 #dash-release-notes:empty { display: none; }
