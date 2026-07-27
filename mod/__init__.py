@@ -27,7 +27,8 @@
                       / image_hosting / menu_game_buttons / crash_notify_group)
     userinfo          主框架用户数据只读门面(data.db/wakeup.db/statistics.db;
                       昵称缓存 + 变化时经 db_queue 写回最新昵称)
-    uploader          图床上传调度(COS / B站 等) + 图片尺寸解析
+    uploader          图床上传调度(名单随主框架模块动态发现) + 图片尺寸解析
+    stats_image       「数据统计」指令的 PIL 统计卡片渲染(缺 PIL/字体回退文本)
     log_attribution   ``MessageSender._log_push`` 类级 monkey-patch + ContextVar,
                       让本插件 push 在主框架 Web 面板归类到「LGTBot 消息派发」
                       而不是默认的 'proactive'

@@ -139,6 +139,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── dispatcher.py        @handler 注册（消息派发 + INTERACTION 处理）
 │   ├── config.py            data/config.yaml 读写
 │   ├── userinfo.py          主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
+│   ├── stats_image.py       「数据统计」指令的统计卡片渲染（PIL，缺字体自动回退文本）
 │   ├── uploader.py          图床上传调度（COS / B站）+ 图片尺寸解析
 │   ├── backup.py            数据备份（创建 / 恢复 / 删除 / 轮转 + 启动自动检查）
 │   ├── audit.py             状态变更操作审计（持久化最近 500 条）

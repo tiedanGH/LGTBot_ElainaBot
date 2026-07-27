@@ -22,7 +22,7 @@ from core.message.event import (
     INTERACTION_CREATE,
 )
 
-from . import state, quota, helpers, boot, buttons, uploader, userinfo, audit, metrics
+from . import state, quota, helpers, boot, buttons, uploader, userinfo, audit, metrics, stats_image
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -446,9 +446,15 @@ async def lgtbot_update_notice(event, match):
 async def lgtbot_data_stats(event, match):
     """收到「数据统计」(文本或按钮)→ 输出 lgtbot.db 游戏数据摘要(dau 风格)。
 
-    仅游戏数据 —— 两个榜单均为今日口径(00:00 起)且 TOP3 截断控制消息长度(面板另有总榜与本周榜);
-    玩家无缓存昵称时以脱敏 ID(前3****后3)展示。序号用「1、」而非「1.」—— QQ 客户端
-    会把「1.」解析成 markdown 有序列表并自行重排编号,导致显示错乱。
+    配置了图床(image_hosting 非空)时优先走**图片通道**(参照主框架 dau 指令):
+    stats_image 渲染统计卡片(线程池,不阻塞事件循环)→ uploader 上传 →
+    markdown 内嵌图回复;渲染失败(无 PIL / 无中文字体)或上传失败时回退下方
+    纯文本 —— 图片是增强,文本是保底。
+
+    文本口径:仅游戏数据 —— 两个榜单均为今日口径(00:00 起)且 TOP3 截断控制
+    消息长度(面板另有总榜与本周榜);玩家无缓存昵称时以脱敏 ID(前3****后3)
+    展示。序号用「1、」而非「1.」—— QQ 客户端会把「1.」解析成 markdown 有序
+    列表并自行重排编号,导致显示错乱。
     """
     if helpers.is_foreign_event(event):
         return
@@ -461,6 +467,26 @@ async def lgtbot_data_stats(event, match):
     if not g.get('available'):
         await event.reply('❌ 数据统计暂不可用，请稍后再试')
         return
+
+    # ── 图片通道 ──────────────────────────────────────────────────────────
+    if uploader.SELECTED_BACKEND:
+        sub = f'截至 {time.strftime("%H:%M")}'
+        loop = asyncio.get_running_loop()
+        img = await loop.run_in_executor(
+            None, stats_image.render_stats_image, g, sub)
+        if img:
+            uid = event.user_id or ''
+            gid = event.group_id or event.channel_id or ''
+            is_group = bool(event.is_group and gid)
+            url = await uploader.upload_image(
+                img, 'lgtbot_stats.png',
+                target_id=(gid if is_group else uid),
+                target_is_uid=not is_group)
+            if url:
+                w, h = uploader.get_image_size(img)
+                await event.reply(f'<@{uid}>![数据统计 #{w}px #{h}px]({url})')
+                return
+        # 渲染 / 上传失败 → 落到下方文本保底
 
     def _n(v):
         return '—' if v is None else v
