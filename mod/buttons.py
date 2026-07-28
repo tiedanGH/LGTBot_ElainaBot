@@ -273,6 +273,7 @@ def build_support_buttons() -> list[list[dict]]:
 
     当前调用方:
       · dispatcher.lgtbot_troubleshooting —— 疑难解答 Q&A 末尾
+      · dispatcher 两个 catch-all 的「计划重启」维护提示 —— 即将 execv 重启
       · callbacks._try_send_crash_apology —— 引擎崩溃道歉末尾
     """
     return [[

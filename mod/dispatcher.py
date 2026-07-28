@@ -627,10 +627,11 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 
     # 「计划重启」维护闸:仅拦新建房间,回维护提示,不派发给引擎。
     # 放在 refresh_ref 之前 —— 该消息不进配额表,提示走消息自己的被动额度。
+    # 底部挂官方群 / 问题反馈 link 按钮 —— 即将 execv 重启的场景下 link 按钮。
     if state.is_planned_restart() and _NEW_GAME_RE.match(content):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
-        await event.reply(_PLANNED_RESTART_NOTICE)
+        await event.reply(_PLANNED_RESTART_NOTICE, buttons=buttons.build_support_buttons())
         return
 
     # 昵称写回:框架自身按「首见即定」记录 users.name,这里补"最新化" ——
@@ -775,7 +776,7 @@ async def lgtbot_interaction_dispatch(event, match):
     if state.is_planned_restart() and _NEW_GAME_RE.match(content):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
-        await event.reply(_PLANNED_RESTART_NOTICE)
+        await event.reply(_PLANNED_RESTART_NOTICE, buttons=buttons.build_support_buttons())
         return
 
     # 昵称写回(与 lgtbot_dispatch 对称)。按钮活跃本身由框架记录 ——

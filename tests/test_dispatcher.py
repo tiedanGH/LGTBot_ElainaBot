@@ -284,6 +284,22 @@ def test_data_stats_command_is_exclusive():
 # ─────────────────────────────────────────────────────────────────────────
 
 
+async def test_planned_restart_notice_carries_support_buttons(patched_downstream, monkeypatch):
+    """计划重启维护提示底部挂「官方群聊 / 问题反馈」link 按钮(execv 前安全可点)。"""
+    from plugins.LGTBot_ElainaBot.mod import buttons
+    _state.started = True
+    monkeypatch.setattr(dispatcher.state, 'is_planned_restart', lambda: True)
+
+    event = _mock_event(is_group=True, group_id='G1', user_id='U1',
+                        content='/新游戏 五子棋', message_id='M1')
+    event.reply = AsyncMock()
+    await dispatcher.lgtbot_dispatch(event, None)
+
+    event.reply.assert_awaited_once()
+    assert event.reply.await_args.args[0] == dispatcher._PLANNED_RESTART_NOTICE
+    assert event.reply.await_args.kwargs['buttons'] == buttons.build_support_buttons()
+
+
 async def test_welcome_menu_full_volume_cmd_line(monkeypatch):
     """欢迎菜单:非全量群追加「全量申请」内联指令行;全量群 / 私信不追加。"""
     from plugins.LGTBot_ElainaBot.mod import buttons, state
