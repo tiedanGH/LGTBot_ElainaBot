@@ -859,6 +859,10 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
       ``terminate``      清空当前游戏名,不挂按钮(/新游戏 前置解散 / 管理员
                          主动结束等场景,紧接着会有真正的新建消息覆盖,或就该
                          安静收尾)。
+      ``mid_quit``       玩家中途强退广播。**仅私信**按 terminate 语义清理 ——
+                         私信对局全员 LEFT 后的解散广播私发不到任何人(桥接层
+                         2.6 注释),这条可送达的中途退出就是对局对该目标结束
+                         的最后信号;群聊对局仍在继续,不动任何状态。
       ``game_over``      游戏自然结束的结算广播 —— 挂「📊 查看战绩 + 🔄 重开一局」。
                          结算广播无 brief,重开按钮的游戏名从 ``current_game`` 回查,
                          取完即清(对局已随结算释放)。
@@ -885,8 +889,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         return
     key = helpers.target_key(target_id, is_uid)
 
-    # 状态更新
-    if kind in ('all_left', 'terminate'):
+    # 状态更新(mid_quit 仅私信按解散处理:群聊对局还有其他玩家,继续进行)
+    if kind in ('all_left', 'terminate') or (kind == 'mid_quit' and is_uid):
         state.current_game.pop(key, None)
     elif game_name:
         state.current_game[key] = game_name
@@ -908,7 +912,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
             'game': game,
             'since': time.time(),
         }
-    elif kind in ('game_over', 'game_over_unrecorded', 'all_left', 'terminate'):
+    elif kind in ('game_over', 'game_over_unrecorded', 'all_left', 'terminate') \
+            or (kind == 'mid_quit' and is_uid):
         state.active_matches.pop(key, None)
 
     # 按钮挂载 —— new_game / join_leave 都挂同样一组:

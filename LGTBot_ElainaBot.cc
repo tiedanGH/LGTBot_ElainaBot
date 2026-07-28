@@ -647,6 +647,7 @@ void NotifyCrashToPython(int sig) {
  *   "所有玩家都退出了游戏"   全员退出,房间解散       -> "all_left"
  *   "所有玩家都强制退出..."  全员强制退出,房间解散   -> "all_left"
  *   "游戏已解散"             Terminate(主动/新建前置) -> "terminate" (清状态,不挂按钮)
+ *   "中途退出了游戏"         Match::Leave force 分支  -> "mid_quit" (私信=对局结束按 terminate 清理;群聊=对局继续,不动)
  *   "游戏开始，您可以使用"  Match::GameStart 成功后  -> "game_started" (触发「刷新按钮使用说明」教学)
  *   "游戏结束，公布分数"    Match 结算 Boardcast     -> "game_over" (挂「查看战绩 / 重开一局」;此广播无 brief,游戏名由 Python 侧 current_game 回查)
  *     └ 同串 + "游戏结果不记录"(单机 / 非正式局 / 未连接数据库) -> "game_over_unrecorded" (不挂「查看战绩」;游戏名也未知时整组不挂)
@@ -727,6 +728,16 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
         return "terminate";
     }
 
+    // 2.6 玩家中途强退(match.cc::Leave force 分支「玩家 @X 中途退出了游戏，他将不再参与后续的游戏进程」)。此广播发出后引擎才把该玩家标 LEFT;
+    // 若这是最后一个在场玩家,随后的「所有玩家都强制退出…游戏解散」广播在**私信对局**里走逐参与者私发(boardcast_private_sender_),
+    // 而全员已 LEFT → 发不给任何人,桥接层永远看不到那条 all_left → active_matches 残留(群聊对局发群里,必达,不受影响)。
+    // 所以把可送达的「中途退出」本身上报为 mid_quit,由 Python 侧按目标类型处置:私信 = 唯一人类玩家退场,对局对该目标已结束,
+    // 按 terminate 清理;群聊 = 对局仍在继续,不动状态。必须在第 6 步 brief 拦截之前(此广播无 brief),且不会与 all_left 混淆(其文本不含「中途」,且 all_left 判定在前)。
+    static const std::string kMidQuit = "中途退出了游戏";
+    if (content.find(kMidQuit) != std::string::npos) {
+        return "mid_quit";
+    }
+
     // 3. 未知指令分类 —— 顺序敏感:特化的 unknown_config / unknown_game 都
     // 在尾部带了 unknown_meta 的兜底句,所以必须先匹配前两者再兜底
     if (content.find(kUnknownConfig) != std::string::npos) {
@@ -782,9 +793,9 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
         return "join_leave";
     }
     if (content.find(kLeft) != std::string::npos) {
-        // "退出了游戏" 含义可能是「中途强制退出」(无 brief,已被 name_pos 拦截)
-        // 或「等待中退出」(有 brief)。后者若是最后一人,下一条消息会带 all_left
-        // 按钮,本条不再附,避免重复 / 玩家误点解散后的「加入」。
+        // 走到这里的 "退出了游戏" 只剩「等待中退出」(有 brief;「中途强制退出」
+        // 无 brief 且已在 2.6 提前返回 mid_quit)。若是最后一人,下一条消息会带
+        // all_left 按钮,本条不再附,避免重复 / 玩家误点解散后的「加入」。
         const size_t zpos = content.find(kZeroUsers);
         if (zpos != std::string::npos) {
             const size_t after = zpos + kZeroUsers.size();

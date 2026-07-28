@@ -265,6 +265,26 @@ def test_match_event_multiplayer_prefers_current_game_over_pending():
     assert 'g:mp1' not in state.pending_new_game_name
 
 
+def test_mid_quit_clears_dm_match_but_not_group():
+    """mid_quit(玩家中途强退广播):私信对局全员 LEFT 后的解散广播私发不达,
+    这条就是终止信号 → 清 active_matches + current_game;群聊对局仍在进行 →
+    两者都不动。回归:私信单机/私信局中途退出后「进行中的对局」永久卡住。"""
+    # 私信局:开局 → mid_quit → 清理
+    state.current_game['u:dm1'] = '单机游戏'
+    callbacks.cb_match_event('dm1', True, 'game_started', '')
+    assert 'u:dm1' in state.active_matches
+    callbacks.cb_match_event('dm1', True, 'mid_quit', '')
+    assert 'u:dm1' not in state.active_matches
+    assert 'u:dm1' not in state.current_game
+    assert 'u:dm1' not in state.pending_buttons          # 不挂按钮
+    # 群聊局:一人中途退出,对局继续 → 状态保留
+    state.current_game['g:grp9'] = '狼人杀'
+    callbacks.cb_match_event('grp9', False, 'game_started', '')
+    callbacks.cb_match_event('grp9', False, 'mid_quit', '')
+    assert 'g:grp9' in state.active_matches
+    assert state.current_game.get('g:grp9') == '狼人杀'
+
+
 def test_dm_warning_only_marked_for_group_creation():
     """带开局私信的游戏:仅**群聊(公屏)**新建才记入 _pending_dm_warn_keys
     (稍后追发「主动私信」提示);私信里新建不打标 —— 玩家已在私信会话内,无需再提示。"""
