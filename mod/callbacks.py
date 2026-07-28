@@ -627,26 +627,34 @@ async def _alert_crash_loop_tripped(count: int) -> None:
         log.warning(f'崩溃熔断告警推送失败 ({notify_group}): {e}')
 
 
-# ──────── 「刷新按钮使用说明」教学提示(game_started 触发,紧跟开局公告发出) ────
-# 触发流:LGTBot_ElainaBot.cc::ClassifyMatchEvent 识别引擎「游戏开始,您可以使用」
-# 广播 → 调 cb_match_event(kind='game_started') → 此处把 key 记入
-# _pending_tip_keys。**真正的发送时机被推迟到本帧的 cb_send_text_message /
-# cb_send_image_message 把引擎那条开局公告排进 asyncio 发送队列之后**:
+# ──────── 「消息回复限制」教学提示(新建房间触发,紧跟建房公告发出) ──────────
+# 触发流:LGTBot_ElainaBot.cc::ClassifyMatchEvent 识别引擎「现在玩家可以…」建房
+# 广播(/新游戏、/随机游戏 共用同一条 NewMatch 广播)→ 调 cb_match_event(kind='new_game') →
+# 此处把 key 记入 _pending_tip_keys。**真正的发送时机被推迟到本帧的
+# cb_send_text_message / cb_send_image_message 把那条建房公告排进 asyncio
+# 发送队列之后**:
 #   1. C++ 调 cb_match_event(只标记,不立刻发) → 立即返回
-#   2. C++ 调 cb_send_text_message → 投递「开局公告」send task 到 asyncio + per-key
+#   2. C++ 调 cb_send_text_message → 投递「房间已创建」send task 到 asyncio + per-key
 #      Lock 排队(见下面 _send_locks);Lock 保证 QQ 端按 cb 调用顺序送达
-#   3. 开局公告 send task 跑完后,我们才在同一个 task 末尾调 _consume_pending_tip
-#      → 调度教学提示 task,后者再次抢同一把 Lock 排到开局公告后面 → 顺序得证。
+#   3. 建房公告 send task 跑完后,我们才在同一个 task 末尾调 _consume_pending_tip
+#      → 调度教学提示 task,后者再次抢同一把 Lock 排到建房公告后面 → 顺序得证。
+#
+# 为什么挂 new_game 而不是 game_started(旧实现):
+# 建房广播是对 /新游戏 命令 msg_id 的**第 1 条**回复,教学提示紧随其后为第 2 条,必然在 5 条配额内送达;
+# 而游戏开始的消息发得晚(开局刷屏高峰),常常已超 5 条把提示吞掉。单机局无 new_game 广播 → 不再发教学。
 _pending_tip_keys: set[str] = set()
 
 # ─────────────────────────────────────────────────────────────────────────
-# 「带开局私信」游戏白名单 —— 此集合内的游戏在**群聊**里 cb_match_event(kind='new_game')
-# 时会被记入 _pending_dm_warn_keys,在开局公告发完后追加一条「主动私信受限」提示给群内玩家。
+# 「带开局私信」游戏白名单 —— 此集合内的游戏在**全量群**里 cb_match_event(kind='new_game')
+# 时会被记入 _pending_dm_warn_keys,在建房公告发完后追加一条「主动私信」提示给群内玩家。
+# 与「消息回复限制」教学**互斥**:非全量群建房时发的是回复限制教学(覆盖面更广,
+# 含刷新按钮机制),私信提示被抑制;全量群不需要教学,才轮到私信提示。
 # **私信里新建游戏不提示**(玩家已在私信会话内)。
 #
 # 触发逻辑:
 #   1. C++ 引擎调 cb_match_event(kind='new_game', game_name='XXX')
-#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内**且为群聊(is_uid=False)**,key 进 _pending_dm_warn_keys
+#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内**且为全量群**(群聊 + is_full_volume_group),
+#      key 进 _pending_dm_warn_keys;非全量群该位置标记的是 _pending_tip_keys
 #   3. 引擎随后调 cb_send_text_message 发出「房间已创建」公告
 #   4. _serialized_text_send 在 Lock 内调 _consume_pending_dm_warn,
 #      pop 出 key 并调度 _schedule_dm_warning —— 该 task 抢同把 Lock 排在
@@ -767,7 +775,7 @@ def _schedule_refresh_tip(target_id: str, is_uid: bool) -> None:
 
 
 def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
-    """若本 key 之前在 cb_match_event 里被打了 game_started 标记,这里弹掉并发出。
+    """若本 key 之前在 cb_match_event(kind='new_game')里被打了标记,这里弹掉并发出。
 
     由 ``_serialized_text_send`` / ``_serialized_image_send`` 在 per-target Lock
     持有期间、``_send_text/image_quota_managed`` 已 await 完毕之后调用。
@@ -852,7 +860,9 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
 
       ``announce``       仅刷新 ``state.current_game[key]``(brief 出现但非
                          新建/加入/退出场景,如 /设置 成功后的回执),不动按钮。
-      ``new_game``       刷新游戏名;在下一条文本回复挂「加入 / 退出 + 规则」。
+      ``new_game``       刷新游戏名;在下一条文本回复挂「加入 / 退出 + 规则」;
+                         标记「消息回复限制」教学(建房公告后紧随发出;全量群
+                         改标「主动私信」提示,两者互斥,教学优先)。
       ``join_leave``     刷新游戏名;同上挂「加入 / 退出 + 规则」(玩家加入/
                          退出时也补一个规则按钮,方便随时查阅)。
       ``all_left``       清空当前游戏名;挂「游戏列表 / 创建房间」引导。
@@ -870,11 +880,12 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
                          未连接数据库) —— 本局没进战绩,不挂「查看战绩」;
                          若游戏名也未知则整组不挂。
       ``game_started``   引擎 Match::GameStart 成功后的 BoardcastAtAll —— 不动
-                         按钮,只把 key 记入 ``_pending_tip_keys``;真正发出
-                         「刷新按钮使用说明」由本帧 cb_send_text/image 同步
-                         送完开局公告后立刻触发(_consume_pending_tip)。比
-                         Python 侧匹配 /开始 用户输入更可靠:用户瞎敲 /开始
-                         不在房间里时引擎不会广播这条,自然不会误教学。
+                         按钮,只做进行中对局跟踪(active_matches)。「消息回复
+                         限制」教学已前移到 ``new_game`` 建房时标记:开局消息发
+                         得晚,配额可能已耗尽把提示吞掉;建房公告是命令的第 1 条
+                         回复,教学紧随其后必达。同时若建房游戏带「开局私信」,
+                         仅在全量群(教学不发送)才改发「主动私信」提示 ——
+                         两条提示互斥,回复限制优先。
       ``unknown_meta``       未参与游戏 / 不在本群的游戏 —— 挂「元指令帮助」。
       ``unknown_config``     等待房间里输错配置 —— 挂「配置帮助 + 元指令帮助」。
       ``unknown_game``       游戏进行中输错游戏指令 —— 挂「游戏帮助 + 元指令帮助」。
@@ -929,12 +940,18 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         )
         if btns:
             state.pending_buttons[key] = btns
-        # 新建房间时若该游戏带「开局私信」,先打标;待开局公告通过 cb_send_text
-        # 同步发完后,_consume_pending_dm_warn 会调度独立 task 追发「私信限制」
-        # 提示(per-target Lock 保证顺序在公告之后)。
-        # 仅**公屏(群聊)**开局才提示:私信里新建游戏时玩家本就在与 bot 的私信会话内。
-        if kind == 'new_game' and not is_uid and game_name and game_name in _DM_LIMITED_GAMES:
-            _pending_dm_warn_keys.add(key)
+        if kind == 'new_game':
+            # 「消息回复限制」教学:新建房间即标记(见 _pending_tip_keys 段注释),
+            # 建房公告 send task 末尾 consume → 提示作为第 2 条回复必达;是否真发
+            # 由 _consume_pending_tip 按目标过滤(全量群 / 直推私信跳过)。
+            _pending_tip_keys.add(key)
+            # 带开局私信的游戏:仅当回复限制提示**不会**发送(全量群)时才发
+            # 「主动私信」提示 —— 非全量群里两条提示都跟在建房公告后太吵,
+            # 回复限制优先、私信提示抑制;私信里新建游戏不发私信提示
+            # (玩家已在私信会话内)。
+            if (not is_uid and game_name and game_name in _DM_LIMITED_GAMES
+                    and helpers.is_full_volume_group(target_id)):
+                _pending_dm_warn_keys.add(key)
     elif kind == 'all_left':
         state.pending_buttons[key] = buttons.build_dissolve_buttons()
     elif kind in ('game_over', 'game_over_unrecorded'):
@@ -957,12 +974,9 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         state.pending_buttons[key] = buttons.build_game_list_buttons()
     elif kind == 'about':
         state.pending_buttons[key] = buttons.build_about_buttons()
-    elif kind == 'game_started':
-        # 仅标记 —— 本帧 cb_send_text_message / cb_send_image_message 在引擎
-        # 开局公告同步落地后调 _consume_pending_tip 真正发出教学提示,保证 QQ
-        # 端的顺序是「游戏开始」→「刷新按钮使用说明」,而不是反过来。
-        _pending_tip_keys.add(key)
-    # 'announce' / 'terminate' 不挂按钮
+    # 'announce' / 'terminate' / 'game_started' 不挂按钮
+    # (「消息回复限制」教学已随 new_game 建房时标记,不再挂到 game_started ——
+    #  开局时配额可能已耗尽把提示吞掉)
 
 
 def cb_get_user_name(uid: str) -> str:

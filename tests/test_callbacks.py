@@ -285,25 +285,38 @@ def test_mid_quit_clears_dm_match_but_not_group():
     assert state.current_game.get('g:grp9') == '狼人杀'
 
 
-def test_dm_warning_only_marked_for_group_creation():
-    """带开局私信的游戏:仅**群聊(公屏)**新建才记入 _pending_dm_warn_keys
-    (稍后追发「主动私信」提示);私信里新建不打标 —— 玩家已在私信会话内,无需再提示。"""
+def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
+    """新建房间(new_game)即标记「消息回复限制」教学(开局消息发得晚,配额可能已耗尽把提示吞掉);带开局私信的游戏在**非全量群**只发教学、私信提示被抑制,
+    **全量群**(教学不发)才标私信提示;私信新建不标私信提示;game_started 不再标教学。"""
     game = next(iter(callbacks._DM_LIMITED_GAMES))     # 任取一个带开局私信的游戏
     callbacks._pending_dm_warn_keys.clear()
+    callbacks._pending_tip_keys.clear()
     state.current_game.clear()
     state.pending_buttons.clear()
     try:
-        # 群聊新建 → 打标
+        # 非全量群新建(带开局私信游戏)→ 标教学,私信提示被抑制
         callbacks.cb_match_event('grp1', False, 'new_game', game)
-        assert 'g:grp1' in callbacks._pending_dm_warn_keys
-        # 私信新建同款游戏 → 不打标
+        assert 'g:grp1' in callbacks._pending_tip_keys
+        assert 'g:grp1' not in callbacks._pending_dm_warn_keys
+        # 全量群新建同款 → 私信提示打标(教学 consume 时会因全量群跳过)
+        state.full_volume_groups.add('grpF')
+        callbacks.cb_match_event('grpF', False, 'new_game', game)
+        assert 'g:grpF' in callbacks._pending_dm_warn_keys
+        # 全量群新建非私信游戏 → 不标私信提示
+        callbacks._pending_dm_warn_keys.clear()
+        callbacks.cb_match_event('grpF', False, 'new_game', '五子棋')
+        assert 'g:grpF' not in callbacks._pending_dm_warn_keys
+        # 私信新建 → 标教学(consume 时按直推私信过滤),不标私信提示
         callbacks.cb_match_event('usr1', True, 'new_game', game)
+        assert 'u:usr1' in callbacks._pending_tip_keys
         assert 'u:usr1' not in callbacks._pending_dm_warn_keys
-        # 群聊新建不带开局私信的游戏 → 不打标(sanity)
-        callbacks.cb_match_event('grp2', False, 'new_game', '五子棋')
-        assert 'g:grp2' not in callbacks._pending_dm_warn_keys
+        # game_started 不再标教学(教学已前移到建房)
+        callbacks._pending_tip_keys.clear()
+        callbacks.cb_match_event('grp1', False, 'game_started', '')
+        assert 'g:grp1' not in callbacks._pending_tip_keys
     finally:
         callbacks._pending_dm_warn_keys.clear()
+        callbacks._pending_tip_keys.clear()
         state.current_game.clear()
         state.pending_buttons.clear()
 
