@@ -284,6 +284,29 @@ def test_data_stats_command_is_exclusive():
 # ─────────────────────────────────────────────────────────────────────────
 
 
+async def test_welcome_menu_full_volume_cmd_line(monkeypatch):
+    """欢迎菜单:非全量群追加「全量申请」内联指令行;全量群 / 私信不追加。"""
+    from plugins.LGTBot_ElainaBot.mod import buttons, state
+    monkeypatch.setattr(dispatcher, '_resolve_menu_logo', AsyncMock(return_value=None))
+
+    async def _menu_md(ev):
+        ev.reply = AsyncMock()
+        await dispatcher._send_welcome_menu(ev)
+        return ev.reply.await_args.args[0]
+
+    # 非全量群 → 追加
+    md = await _menu_md(_mock_event(is_group=True, group_id='GNORM', user_id='U1'))
+    assert buttons.MENU_FULL_VOLUME_CMD_MD.strip() in md
+    assert 'qqbot-cmd-input text="全量申请"' in md
+    # 全量群 → 不追加
+    state.full_volume_groups.add('GFULL')
+    md = await _menu_md(_mock_event(is_group=True, group_id='GFULL', user_id='U1'))
+    assert '全量申请' not in md
+    # 私信 → 不追加
+    md = await _menu_md(_mock_event(is_direct=True, user_id='U1'))
+    assert '全量申请' not in md
+
+
 def test_capture_pending_game_name_group_and_dm():
     """「/新游戏 X …」记 pending 游戏名(第一个 token,群 / 私聊各自 key);
     裸「/新游戏」与「/随机游戏」不记。"""

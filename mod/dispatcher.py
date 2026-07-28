@@ -74,6 +74,10 @@ async def _send_welcome_menu(event) -> None:
             md = (buttons.MENU_TEXT_HEADER
                   + buttons.MENU_TEXT_BODY
                   + buttons.MENU_HEADER_EXTRA_MD)
+        # 非全量群追加「全量申请」内联指令行(全量群已免限制、私信无群概念,不加)
+        menu_gid = event.group_id or event.channel_id or ''
+        if event.is_group and menu_gid and not helpers.is_full_volume_group(menu_gid):
+            md += buttons.MENU_FULL_VOLUME_CMD_MD
         await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
         uid = event.user_id or ''
         gid = event.group_id or event.channel_id or ''

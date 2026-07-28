@@ -337,3 +337,10 @@ def cmd_input(text: str, show: str, reference: bool = False) -> str:
 MENU_HEADER_EXTRA_MD = (
     cmd_input('更新公告', '✨ 点击查看最近更新') + '\n'
 )
+
+# 非全量群的菜单追加行:引导发起「全量申请」(免刷新授权)。
+# 是否拼接由 dispatcher 按事件判定 —— 仅群聊且 **非全量群** 显示;
+# 实际命令由另一插件实现,本插件只提供入口(与 _REFRESH_TIP_GROUP_TAIL / 全量申请按钮同源引导)。
+MENU_FULL_VOLUME_CMD_MD = (
+    cmd_input('全量申请', '⚡ 免刷新授权（大幅改善体验）') + '\n'
+)
