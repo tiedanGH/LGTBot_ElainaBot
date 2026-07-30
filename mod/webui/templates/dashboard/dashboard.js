@@ -380,16 +380,20 @@ function dashLoadInline() {
 }
 
 /* 整页刷新 → 抠出新的 dashboard-data JSON,只刷新本标签的状态(用户的标签切换 / 编辑器脏标记都不会被破坏)。
- * 无专属刷新按钮 —— 由换绑 / 清缓存 / 初始化仓库等操作成功后程序化调用。 */
-async function dashRefreshAll() {
+ * 由换绑 / 清缓存 / 初始化仓库等操作成功后程序化调用,也被「🔄 刷新」按钮复用。
+ * ``quiet=true``(默认)吞掉异常只打 console —— 程序化调用方都是「顺带刷新」,
+ * 不该因刷新失败覆盖掉自己的成功提示;按钮调用传 false 以便给出失败反馈。 */
+async function dashRefreshAll(quiet = true) {
   try {
     const r = await fetch(apiUrl(PAGE_KEY), { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const text = await r.text();
     const m = text.match(/<script id="dashboard-data"[^>]*>([\s\S]*?)<\/script>/);
-    if (m) dashApplyData(JSON.parse(m[1]));
+    if (!m) throw new Error('响应不含 dashboard-data');
+    dashApplyData(JSON.parse(m[1]));
   } catch (e) {
     console.warn('[dashboard] refresh failed:', e);
+    if (!quiet) throw e;
   }
 }
 
@@ -896,6 +900,27 @@ async function dashClearCache(which) {
   }
 }
 
+/* 「🔄 刷新」—— 重新统计三个缓存目录的文件数与大小。
+   复用 dashRefreshAll(整页 payload 里已含 cache 统计,后端每次都是实时 os.walk),
+   不新增端点;期间禁用按钮并在消息行给反馈。 */
+async function dashRefreshCache() {
+  const btn = document.getElementById('dash-cache-refresh');
+  const msgEl = document.getElementById('dash-cache-msg');
+  btn.disabled = true;
+  msgEl.textContent = '⏳ 统计中……';
+  msgEl.className = 'dash-cache-msg dash-msg-info';
+  try {
+    await dashRefreshAll(false);   // 失败要抛出,好在消息行给反馈
+    msgEl.textContent = '✅ 已刷新';
+    msgEl.className = 'dash-cache-msg dash-msg-ok';
+  } catch (e) {
+    msgEl.textContent = '❌ ' + e.message;
+    msgEl.className = 'dash-cache-msg dash-msg-err';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* 注:dashReloadConfig 已搬到 templates/config/config.js 的 cfgReloadConfig,
    action key 不变(__lgtbot_dash_reload_config),webui/main.py 中 provider
    现在是 page_config.render_reload_config。 */
@@ -915,6 +940,9 @@ window.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-clear]').forEach(btn => {
     btn.addEventListener('click', () => dashClearCache(btn.dataset.clear));
   });
+  /* 缓存区「🔄 刷新占用」—— 重新统计文件数与大小 */
+  const cacheRefreshBtn = document.getElementById('dash-cache-refresh');
+  if (cacheRefreshBtn) cacheRefreshBtn.addEventListener('click', dashRefreshCache);
 
   /* 引擎未运行时的「📦 预编译部署」跳转 → 切到该标签 */
   const jumpBtn = document.getElementById('dash-prebuilt-jump');
