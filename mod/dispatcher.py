@@ -115,10 +115,11 @@ _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启$'
 _P_PLANNED  = r'^/?计划重启$'
 _P_STATS    = r'^/?数据统计$'
+_P_MATCHLIST = r'^/?赛事列表$'
 
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
-    _P_RESTART, _P_PLANNED, _P_STATS,
+    _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST,
 ))
 
 
@@ -894,6 +895,64 @@ def toggle_planned_restart() -> tuple[bool, str]:
         return True, '🚧 计划重启已启用：已禁用新游戏创建。'
     log.warning('✅ [计划重启] 维护模式已取消：恢复新游戏创建')
     return False, '✅ 计划重启已取消：已恢复新游戏创建。'
+
+
+@handler(_P_MATCHLIST,
+         name='LGTBot 赛事列表',
+         desc='列出全部公开 / 私密赛事 (引擎元指令，限制为主人可用)',
+         owner_only=True,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE},
+         priority=100,
+         block=True)
+async def lgtbot_match_list(event, match):
+    """抢占引擎的「赛事列表」元指令并加主人权限,主人触发时原样透传给引擎。
+
+    引擎的 show_matches(message_handlers.cc)会把**全部**公开 + 私密赛事列成表格,普通玩家不该看到别人的私密房间;
+    框架的 ``owner_only=True`` 在非主人触发时直接回模板、不进函数体,主人触发才走到这里由引擎生成真正的列表。
+
+    ``priority=100`` + ``block=True`` 抢在 catch-all(-100)之前;指令同时登记进
+    ``_EXCLUSIVE_RES``,即便框架链语义变化,catch-all 也不会重复派发给引擎。
+    """
+    if helpers.is_foreign_event(event):
+        return
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    if not state.started:
+        await event.reply('⏳ LGTBot 引擎尚未就绪，请稍后再试')
+        return
+    uid = event.user_id or ''
+    gid = event.group_id or event.channel_id or ''
+    # 本 handler block=True 抢在 catch-all 之前,catch-all 里的 refresh_ref 不会执行,
+    # 必须自己登记本次事件的引用 —— 否则引擎生成的列表走插件配额通道时没有可用
+    appid_str = event.appid or ''
+    ref_type, ref_value = ('event_id', event.event_id) if event.is_interaction \
+        else ('msg_id', event.message_id)
+    if ref_value:
+        if event.is_group and gid:
+            quota.refresh_ref(helpers.target_key(gid, False), ref_type, ref_value, appid_str)
+        elif event.is_direct and uid:
+            quota.refresh_ref(helpers.target_key(uid, True), ref_type, ref_value, appid_str)
+    # 引擎认的是带前导斜杠的元指令(META_COMMAND_SIGN),框架可能已把 / 剥掉,这里统一补齐再透传。
+    cmd = '/赛事列表'
+    page_logs.log_incoming(uid, gid if event.is_group else '', cmd)
+    try:
+        if event.is_group and gid:
+            threading.Thread(
+                target=boot.LGTBot_ElainaBot.on_public_message,
+                args=(cmd, uid, gid),
+                daemon=True,
+            ).start()
+        elif event.is_direct and uid:
+            threading.Thread(
+                target=boot.LGTBot_ElainaBot.on_private_message,
+                args=(cmd, uid),
+                daemon=True,
+            ).start()
+    except Exception as e:
+        log.warning(f'派发赛事列表失败: {e}')
 
 
 @handler(_P_PLANNED,

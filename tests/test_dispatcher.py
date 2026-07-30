@@ -300,6 +300,46 @@ async def test_planned_restart_notice_carries_support_buttons(patched_downstream
     assert event.reply.await_args.kwargs['buttons'] == buttons.build_support_buttons()
 
 
+def test_match_list_is_exclusive_command():
+    """「赛事列表」已登记进专属指令表 → catch-all 不再派发给引擎(否则普通玩家
+    仍能通过 catch-all 拿到全部公开 + 私密赛事)。带 / 与不带 / 两种输入都要挡。"""
+    assert dispatcher._is_exclusive_command('赛事列表')
+    assert dispatcher._is_exclusive_command('/赛事列表')
+    # 前缀相同但不是本指令的文本不受影响
+    assert not dispatcher._is_exclusive_command('赛事列表2')
+    assert not dispatcher._is_exclusive_command('/赛事')
+
+
+async def test_match_list_relays_to_engine_with_quota_ref(patched_downstream):
+    """主人触发(owner_only 由框架前置放行)→ 补齐引用配额并把 /赛事列表 透传引擎。
+
+    block=True 抢在 catch-all 前,catch-all 的 refresh_ref 不会跑,本 handler
+    必须自己登记 msg_id,否则引擎生成的列表没有可用引用会被丢弃。
+    """
+    _state.started = True
+    event = _mock_event(is_group=True, group_id='GML', user_id='UML',
+                        content='赛事列表', message_id='M_ML')
+
+    await dispatcher.lgtbot_match_list(event, None)
+
+    # 配额引用已登记到群 key(不污染 u:<uid>)
+    assert quota._active_ref['g:GML']['ref_value'] == 'M_ML'
+    assert 'u:UML' not in quota._active_ref
+    # 已起线程把指令派进引擎(patched_downstream 把 Thread.start 换成 noop mock)
+    assert patched_downstream['thread_start'].called
+
+
+async def test_match_list_replies_when_engine_not_ready(patched_downstream):
+    """引擎未就绪 → 回提示,不派发。"""
+    _state.started = False
+    event = _mock_event(is_group=True, group_id='G1', user_id='U1',
+                        content='赛事列表', message_id='M1')
+    event.reply = AsyncMock()
+    await dispatcher.lgtbot_match_list(event, None)
+    event.reply.assert_awaited_once()
+    assert '引擎尚未就绪' in event.reply.await_args.args[0]
+
+
 async def test_welcome_menu_full_volume_cmd_line(monkeypatch):
     """欢迎菜单:非全量群追加「全量申请」内联指令行;全量群 / 私信不追加。"""
     from plugins.LGTBot_ElainaBot.mod import buttons, state
