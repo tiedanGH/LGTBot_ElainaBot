@@ -284,6 +284,192 @@ def test_data_stats_command_is_exclusive():
 # ─────────────────────────────────────────────────────────────────────────
 
 
+async def test_admin_interrupt_proxies_for_group_admin(patched_downstream, monkeypatch):
+    """群管理发 %中断 → 用**已配置的引擎管理员 uid** 派发(引擎据此放行),
+    并记一条对局干预审计;普通群员 / 私信 → 原样用本人 uid(交引擎裁决)。"""
+    from plugins.LGTBot_ElainaBot.mod import audit, boot, config as _config
+    _state.started = True
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ('OWNER_UID',))
+    sent = []
+    monkeypatch.setattr(boot.LGTBot_ElainaBot, 'on_public_message',
+                        lambda *a: sent.append(a))
+    monkeypatch.setattr(boot.LGTBot_ElainaBot, 'on_private_message',
+                        lambda *a: sent.append(a))
+    audits = []
+    monkeypatch.setattr(audit, 'record', lambda *a, **k: audits.append(a))
+    # patched_downstream 把 Thread.start 变 noop,这里要真跑 target
+    monkeypatch.setattr(dispatcher.threading, 'Thread',
+                        lambda target, args, daemon=True: type(
+                            'T', (), {'start': lambda s: target(*args)})())
+
+    # ① 群管理 → 换成引擎管理员 uid
+    ev = _mock_event(is_group=True, group_id='G1', user_id='ADMIN_USER',
+                     content='%中断', message_id='M1')
+    ev.member_role = 'admin'
+    await dispatcher.lgtbot_admin_interrupt(ev, None)
+    assert sent == [('%中断', 'OWNER_UID', 'G1')]
+    assert audits and audits[0][0] == 'match'
+
+    # ② 普通群员 → 用本人 uid,不审计
+    sent.clear(); audits.clear()
+    ev2 = _mock_event(is_group=True, group_id='G1', user_id='PLAIN_USER',
+                      content='%中断', message_id='M2')
+    ev2.member_role = 'member'
+    await dispatcher.lgtbot_admin_interrupt(ev2, None)
+    assert sent == [('%中断', 'PLAIN_USER', 'G1')]
+    assert audits == []
+
+    # ③ 私信(无 member_role)→ 用本人 uid,带 mid 参数原样透传
+    sent.clear()
+    ev3 = _mock_event(is_direct=True, user_id='DM_USER',
+                      content='%中断 42', message_id='M3')
+    ev3.member_role = ''
+    await dispatcher.lgtbot_admin_interrupt(ev3, None)
+    assert sent == [('%中断 42', 'DM_USER')]
+
+    # ④ 群管理但未配置引擎管理员 → 明确提示,不派发
+    sent.clear()
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ())
+    ev4 = _mock_event(is_group=True, group_id='G1', user_id='ADMIN_USER',
+                      content='%中断', message_id='M4')
+    ev4.member_role = 'owner'
+    ev4.reply = AsyncMock()
+    await dispatcher.lgtbot_admin_interrupt(ev4, None)
+    assert sent == []                                        # 不派发
+    assert '未配置' in ev4.reply.await_args.args[0]           # 明确告知配置缺失
+
+
+async def test_admin_interrupt_super_admin_not_proxied_no_audit(patched_downstream, monkeypatch):
+    """超级管理员自己发 %中断 —— 即便他同时是群主 / 群管理,也**不算代为中断**:
+    用本人 uid 派发、不写审计(审计只为"权限下放给群管"留追责线索)。"""
+    from plugins.LGTBot_ElainaBot.mod import audit, boot, config as _config
+    _state.started = True
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ('SUPER_UID', 'OTHER_ADMIN'))
+    sent, audits = [], []
+    monkeypatch.setattr(boot.LGTBot_ElainaBot, 'on_public_message',
+                        lambda *a: sent.append(a))
+    monkeypatch.setattr(audit, 'record', lambda *a, **k: audits.append(a))
+    monkeypatch.setattr(dispatcher.threading, 'Thread',
+                        lambda target, args, daemon=True: type(
+                            'T', (), {'start': lambda s: target(*args)})())
+
+    for role in ('owner', 'admin', 'member'):
+        sent.clear(); audits.clear()
+        ev = _mock_event(is_group=True, group_id='G1', user_id='SUPER_UID',
+                         content='%中断', message_id='M1')
+        ev.member_role = role
+        await dispatcher.lgtbot_admin_interrupt(ev, None)
+        # 用本人 uid(不借用 ADMIN_UIDS[0]),且无审计
+        assert sent == [('%中断', 'SUPER_UID', 'G1')], f'role={role}'
+        assert audits == [], f'role={role} 不应写审计'
+
+
+async def test_admin_interrupt_audit_distinguishes_no_game(patched_downstream, monkeypatch):
+    """代理中断的审计详情区分三态:有名字 / 未知游戏(有对局无名) / 无游戏。"""
+    from plugins.LGTBot_ElainaBot.mod import audit, boot, config as _config
+    _state.started = True
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ('SUPER_UID',))
+    audits = []
+    monkeypatch.setattr(boot.LGTBot_ElainaBot, 'on_public_message', lambda *a: None)
+    monkeypatch.setattr(audit, 'record',
+                        lambda *a, **k: audits.append(a[2] if len(a) > 2 else ''))
+    monkeypatch.setattr(dispatcher.threading, 'Thread',
+                        lambda target, args, daemon=True: type(
+                            'T', (), {'start': lambda s: target(*args)})())
+
+    async def _interrupt(gid):
+        ev = _mock_event(is_group=True, group_id=gid, user_id='ADMIN_USER',
+                         content='%中断', message_id='M1')
+        ev.member_role = 'admin'
+        await dispatcher.lgtbot_admin_interrupt(ev, None)
+        return audits[-1]
+
+    # ① 群里没有任何对局 → 无游戏(回归:以前一律写「未知游戏」,会误导)
+    assert '无游戏' in await _interrupt('G_EMPTY')
+    # ② 有对局但游戏名未知 → 未知游戏
+    _state.active_matches['g:G_UNK'] = {'target_id': 'G_UNK', 'is_uid': False,
+                                        'game': '', 'since': 0}
+    assert '未知游戏' in await _interrupt('G_UNK')
+    # ③ 有名字(等待房间 / 已开局)→ 游戏名
+    _state.current_game['g:G_NAMED'] = '五子棋'
+    assert '五子棋' in await _interrupt('G_NAMED')
+
+
+def test_deny_super_admin_cmd_matrix(monkeypatch):
+    """_deny_super_admin_cmd:仅拦「群管理 + 非超级管理员 + 非 %中断」。"""
+    from plugins.LGTBot_ElainaBot.mod import config as _config
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ('SUPER_UID',))
+
+    def _ev(role, is_group=True):
+        e = _mock_event(is_group=is_group, is_direct=not is_group,
+                        group_id='G1' if is_group else '', user_id='U1')
+        e.member_role = role
+        return e
+
+    deny = dispatcher._deny_super_admin_cmd
+    # 群管 + 其他管理指令 → 拦
+    assert deny(_ev('admin'), '%清除战绩 123 理由', 'U1')
+    assert deny(_ev('owner'), '%荣誉', 'U1')
+    # 群管 + %中断(已授权)→ 不拦
+    assert not deny(_ev('admin'), '%中断', 'U1')
+    assert not deny(_ev('admin'), '%中断 42', 'U1')
+    # 普通成员 → 不拦(交引擎回原文案)
+    assert not deny(_ev('member'), '%清除战绩 123 理由', 'U1')
+    assert not deny(_ev(''), '%荣誉', 'U1')
+    # 群管但本人就是超级管理员 → 不拦(引擎真执行)
+    assert not deny(_ev('admin'), '%荣誉', 'SUPER_UID')
+    # 私信(无群管概念)→ 不拦
+    assert not deny(_ev('', is_group=False), '%荣誉', 'U1')
+    # 非 % 指令 → 与本闸无关
+    assert not deny(_ev('admin'), '/新游戏 五子棋', 'U1')
+
+
+async def test_dispatch_denies_group_admin_super_cmd(patched_downstream, monkeypatch):
+    """catch-all 里群管发 %清除战绩 → 回插件自定义文案,**不派发**给引擎。"""
+    from plugins.LGTBot_ElainaBot.mod import config as _config
+    _state.started = True
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ('SUPER_UID',))
+
+    ev = _mock_event(is_group=True, group_id='G1', user_id='ADMIN_USER',
+                     content='%清除战绩 123 恶意刷分', message_id='M1')
+    ev.member_role = 'admin'
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_dispatch(ev, None)
+
+    reply = ev.reply.await_args.args[0]
+    # 排版对齐引擎群聊回执:<@uid> + 换行 + [错误] 开头(bot_core.cc PublicReplyMsgSender)
+    assert reply.startswith('<@ADMIN_USER>\n[错误] ')
+    assert '超级管理员' in reply
+    assert '%中断' in reply          # 明确告知群管唯一可用的管理指令
+    patched_downstream['thread_start'].assert_not_called()   # 未派发给引擎
+
+
+async def test_dispatch_plain_user_super_cmd_goes_to_engine(patched_downstream, monkeypatch):
+    """普通成员发 % 指令 → 照常派发给引擎(由引擎回它自己的错误文案)。"""
+    from plugins.LGTBot_ElainaBot.mod import config as _config
+    _state.started = True
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ('SUPER_UID',))
+
+    ev = _mock_event(is_group=True, group_id='G1', user_id='PLAIN_USER',
+                     content='%清除战绩 123 恶意刷分', message_id='M2')
+    ev.member_role = 'member'
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_dispatch(ev, None)
+
+    ev.reply.assert_not_awaited()                            # 插件不自造回复
+    patched_downstream['thread_start'].assert_called()       # 交给引擎
+
+
+def test_admin_interrupt_pattern_scope():
+    """%中断 被登记为专属指令(catch-all 不再重复派发);玩家投票的 /中断 与
+    其他管理指令(%清除战绩)**不**被抢占。"""
+    assert dispatcher._is_exclusive_command('%中断')
+    assert dispatcher._is_exclusive_command('%中断 42')
+    assert not dispatcher._is_exclusive_command('/中断')
+    assert not dispatcher._is_exclusive_command('中断')
+    assert not dispatcher._is_exclusive_command('%清除战绩 123 理由')
+
+
 async def test_planned_restart_notice_carries_support_buttons(patched_downstream, monkeypatch):
     """计划重启维护提示底部挂「官方群聊 / 问题反馈」link 按钮(execv 前安全可点)。"""
     from plugins.LGTBot_ElainaBot.mod import buttons

@@ -116,10 +116,11 @@ _P_RESTART  = r'^重启$'
 _P_PLANNED  = r'^/?计划重启$'
 _P_STATS    = r'^/?数据统计$'
 _P_MATCHLIST = r'^/?赛事列表$'
+_P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
-    _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST,
+    _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST, _P_ADMIN_INTERRUPT,
 ))
 
 
@@ -165,6 +166,49 @@ def _is_exclusive_command(text: str) -> bool:
         return False
     alt = text[1:] if text.startswith('/') else '/' + text
     return any(p.search(text) or p.search(alt) for p in _EXCLUSIVE_RES)
+
+
+# ──────── 群管理员执行「非 %中断」管理指令时的明确拒绝 ─────────────────────
+# 群管拥有 %中断 的代理权(见 lgtbot_admin_interrupt),但**没有**引擎的超级管理员权限。
+# 若其他 % 指令仍回引擎原文案「您未持有管理员权限」,与"我明明能中断"自相矛盾。
+# 这里由插件回一条措辞区分两级权限的文案(引擎那条不带「超级」二字,便于分辨到底是谁拒绝的)。
+#
+# 只拦**群管理员**:普通成员没有任何管理能力,引擎原文案本就准确,不加插件干预
+# (行为与本特性上线前完全一致);已配置的超级管理员当然要放行给引擎真执行。
+_ADMIN_CMD_SIGN = '%'
+# 文案对齐引擎的群聊回执格式:PublicReplyMsgSender(bot_core.cc:139-145)先发
+# ``At(uid) + "\n"`` 再接正文,渲染出来就是「<@openid>\n[错误] …」。这里照抄同款
+# 结构(@ + 换行 + [错误] 开头),再补一行说明群管到底能用什么 —— 用户看到的
+# 是与引擎一致的排版,但措辞点明是「超级」管理员权限缺失。
+_SUPER_ADMIN_DENIED = ('[错误] 您未持有超级管理员权限\n'
+                       '群主 / 群管理员仅可使用「%中断」强制中断本群卡死的对局')
+
+
+def _super_admin_denied_text(uid: str) -> str:
+    """拒绝文案(群聊里带 ``<@uid>`` 前缀,同引擎回执排版)。"""
+    return f'<@{uid}>\n{_SUPER_ADMIN_DENIED}' if uid else _SUPER_ADMIN_DENIED
+# 已授权给群管的唯一管理指令,拒绝闸需放行(与 lgtbot_admin_interrupt 同一 pattern)
+_P_ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
+# 视为「拥有群管理权限」的 QQ member_role 取值(框架 parsers/base.py 从 author 解析;
+# 群主 owner 与管理员 admin 都算,普通成员 member / 空串不算)。
+_GROUP_ADMIN_ROLES = frozenset({'owner', 'admin'})
+
+
+def _deny_super_admin_cmd(event, content: str, uid: str) -> bool:
+    """是否应由插件拒绝这条 ``%`` 管理指令(群管理员 + 非超级管理员)。
+
+    ``%中断`` 由专属 handler 抢占,正常不会走到本函数;仍显式排除以防
+    handler 链语义变化时误拦这条已授权的指令。
+    """
+    if not content.startswith(_ADMIN_CMD_SIGN):
+        return False
+    if _P_ADMIN_INTERRUPT_RE.match(content):
+        return False
+    role = getattr(event, 'member_role', '') or ''
+    if not (event.is_group and role in _GROUP_ADMIN_ROLES):
+        return False
+    from . import config as _config
+    return uid not in _config.ADMIN_UIDS
 
 
 # ──────── 屏蔽指令表(内置 + config.yaml: blocked_commands) ────────────────
@@ -626,6 +670,16 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         log.info(f'🚫 [屏蔽指令] 命中屏蔽指令表，跳过引擎派发: {content[:30]!r}')
         return
 
+    # 超级管理员权限闸:群管理员执行**非 %中断** 的管理指令 → 插件明确拒绝,
+    # 不派发给引擎(见 _deny_super_admin_cmd 的取舍说明)。
+    if _deny_super_admin_cmd(event, content, uid):
+        log.info(f'🔒 [超管拒绝] 群管 {uid} 无超级管理员权限: {content[:30]!r}')
+        denied = _super_admin_denied_text(uid)
+        page_logs.log_incoming(uid, gid if event.is_group else '', content)
+        page_logs.log_outgoing(gid or uid, not (event.is_group and gid), denied)
+        await event.reply(denied)
+        return
+
     # 「计划重启」维护闸:仅拦新建房间,回维护提示,不派发给引擎。
     # 放在 refresh_ref 之前 —— 该消息不进配额表,提示走消息自己的被动额度。
     # 底部挂官方群 / 问题反馈 link 按钮 —— 即将 execv 重启的场景下 link 按钮。
@@ -772,6 +826,15 @@ async def lgtbot_interaction_dispatch(event, match):
 
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
+
+    # 超级管理员权限闸(与 lgtbot_dispatch 的闸对称)—— 按钮 data 也可能是 % 指令。
+    if _deny_super_admin_cmd(event, content, uid):
+        log.info(f'🔒 [超管拒绝] 群管 {uid} 无超级管理员权限(按钮): {content[:30]!r}')
+        denied = _super_admin_denied_text(uid)
+        page_logs.log_incoming(uid, gid if event.is_group else '', content)
+        page_logs.log_outgoing(gid or uid, not (event.is_group and gid), denied)
+        await event.reply(denied)
+        return
 
     # 「计划重启」维护闸 —— 欢迎菜单的游戏快捷按钮(data 为 /新游戏 X)也从这里进引擎,与 lgtbot_dispatch 的闸对称。
     if state.is_planned_restart() and _NEW_GAME_RE.match(content):
@@ -953,6 +1016,107 @@ async def lgtbot_match_list(event, match):
             ).start()
     except Exception as e:
         log.warning(f'派发赛事列表失败: {e}')
+
+
+@handler(_P_ADMIN_INTERRUPT,
+         name='LGTBot 管理中断',
+         desc='群管理员可强制中断本群卡死的对局 (仅中断，不含其他管理权限)',
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE},
+         priority=100,
+         block=True)
+async def lgtbot_admin_interrupt(event, match):
+    """抢占引擎管理指令「%中断」,给**群管理员**开放且仅开放这一条管理能力。
+
+    背景:引擎权限是单极的 —— ``bot_core.cc::HandleRequest`` 见 '%' 开头就查 `HasAdmin(uid)``,
+    过了便放行整个 ``admin_cmds``(含 %清除战绩 / %荣誉 等破坏性指令)。
+    把群管写进引擎 admins 会连带交出这些权限,故改在插件层做**受限代理**:
+
+      · 群聊 + 请求者是群主 / 群管理(``event.member_role``)→ 把发给引擎的
+        uid 换成**已配置的引擎管理员**(``config.ADMIN_UIDS[0]``),引擎因此
+        放行 %中断;审计记录真实操作者。
+      · 其他情况(普通群员 / 私信)→ **原样用请求者自己的 uid** 派发,由引擎
+        自行裁决:本身在 admins 里(主人)照常执行,否则引擎回「未持有管理员权限」。
+        插件不自造拒绝文案,语义与引擎保持一致。
+
+    其他管理指令(%清除战绩 等)没有专属 handler,会走 catch-all 用请求者本人
+    uid 进引擎 → 群管无权、被引擎拒绝,这正是期望行为。
+
+    ``priority=100`` + ``block=True`` 抢在 catch-all(-100)之前;pattern 也登记
+    进 ``_EXCLUSIVE_RES``,即便框架链语义变化 catch-all 也不会重复派发。
+    """
+    if helpers.is_foreign_event(event):
+        return
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    if not state.started:
+        await event.reply('⏳ LGTBot 引擎尚未就绪，请稍后再试')
+        return
+
+    uid = event.user_id or ''
+    gid = event.group_id or event.channel_id or ''
+    role = getattr(event, 'member_role', '') or ''
+    is_group_admin = bool(event.is_group and gid and role in _GROUP_ADMIN_ROLES)
+
+    # 代理身份:群管理 → 用已配置的引擎管理员 uid 发给引擎;否则用本人 uid
+    send_uid = uid
+    proxied = False
+    if is_group_admin:
+        from . import config as _config
+        engine_admins = _config.ADMIN_UIDS
+        if engine_admins and uid not in engine_admins:
+            send_uid = engine_admins[0]
+            proxied = True
+        elif not engine_admins:
+            # 群管有资格,但没有可借用的引擎管理员身份 —— 属配置缺失,明确告知
+            log.warning('%中断:群管理请求代理中断,但 config.yaml 的 admin_uids 为空')
+            await event.reply('⚠️ 未配置 LGTBot 管理员，无法代为中断')
+            return
+
+    # 本 handler block=True 抢在 catch-all 之前,catch-all 的 refresh_ref 不会执行,
+    # 必须自己登记本次事件的引用 —— 否则引擎的回执没有可用的被动配额(同赛事列表)。
+    appid_str = event.appid or ''
+    ref_type, ref_value = ('event_id', event.event_id) if event.is_interaction \
+        else ('msg_id', event.message_id)
+    if ref_value:
+        if event.is_group and gid:
+            quota.refresh_ref(helpers.target_key(gid, False), ref_type, ref_value, appid_str)
+        elif event.is_direct and uid:
+            quota.refresh_ref(helpers.target_key(uid, True), ref_type, ref_value, appid_str)
+
+    cmd = (event.content or '').strip() or '%中断'
+    page_logs.log_incoming(uid, gid if event.is_group else '', cmd)
+    if proxied:
+        # 审计里的游戏名分三种情形,别把「没有对局」写成「未知游戏」——
+        # 事后追溯时要能分辨这次代理中断到底作用在哪局上:
+        #   · 有名字(等待房间 / 已开局)      → 游戏名
+        #   · 有对局但名字未知(单机局兜底失效)→ 未知游戏
+        #   · 群里根本没有对局(引擎会回「该房间未进行游戏」)→ 无游戏
+        key = helpers.target_key(gid, False)
+        rec = state.active_matches.get(key) or {}
+        game = state.current_game.get(key, '') or rec.get('game', '')
+        if not game:
+            game = '未知游戏' if rec else '无游戏'
+        audit.record('match', '群管中断对局',
+                     f'群 {gid} / 操作者 {uid} / 游戏 {game}', src=audit.SRC_CMD)
+        log.info(f'🎮 [管理中断] 群管 {uid} 代理中断 群 {gid} 的对局({game})')
+    try:
+        if event.is_group and gid:
+            threading.Thread(
+                target=boot.LGTBot_ElainaBot.on_public_message,
+                args=(cmd, send_uid, gid),
+                daemon=True,
+            ).start()
+        elif event.is_direct and uid:
+            threading.Thread(
+                target=boot.LGTBot_ElainaBot.on_private_message,
+                args=(cmd, send_uid),
+                daemon=True,
+            ).start()
+    except Exception as e:
+        log.warning(f'派发管理中断失败: {e}')
 
 
 @handler(_P_PLANNED,

@@ -55,6 +55,7 @@ CATEGORIES = {
     'config':  ('⚙️', '配置变更'),
     'restart': ('🔁', '重启'),
     'bind':    ('🔗', '机器人绑定'),
+    'match':   ('🎮', '对局干预'),
 }
 
 # 单 asyncio loop 下各入口天然串行;锁防未来从引擎工作线程记录(对齐 page_logs 的 threading.Lock 先例),成本可忽略。

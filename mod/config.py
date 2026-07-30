@@ -81,12 +81,19 @@ def _get_ctx():
         return None
 
 
+# 解析后的引擎管理员 openid 列表(与传给 LGTBot_ElainaBot.start 的 admins 串同源)。
+# 由 load_plugin_config 每次 @on_load 覆写;dispatcher 的「%中断」代理需要用其中
+# 一个身份替换请求者 uid(引擎 HasAdmin 只认这个集合),故在此暴露给同包模块。
+ADMIN_UIDS: tuple[str, ...] = ()
+
+
 def load_plugin_config() -> str:
     """加载 / 创建 data/config.yaml，返回 LGTBot 引擎需要的逗号分隔 admin 字符串
 
     - 不存在则创建带注释的默认模板（此时 Web UI 才能看到该配置文件）
     - 存在但缺字段则自动补齐
     - admin_uids 字段非法时降级为空（不阻断启动）
+    - 同时把解析结果写入模块级 ``ADMIN_UIDS``(供 dispatcher 的 %中断 代理用)
     """
     ctx = _get_ctx()
     try:
@@ -100,13 +107,16 @@ def load_plugin_config() -> str:
         log.warning(f'加载配置异常，使用默认值: {e}')
         cfg = dict(DEFAULT_CONFIG)
 
+    global ADMIN_UIDS
     uids = cfg.get('admin_uids', [])
     if not isinstance(uids, list):
         log.warning('config.yaml 中 admin_uids 应为列表，已忽略')
         uids = []
-    admins_str = ','.join(str(u).strip() for u in uids if str(u).strip())
+    clean_uids = tuple(str(u).strip() for u in uids if str(u).strip())
+    ADMIN_UIDS = clean_uids
+    admins_str = ','.join(clean_uids)
     if admins_str:
-        log.info(f'LGTBot 管理员配置：{len(uids)} 人')
+        log.info(f'LGTBot 管理员配置：{len(clean_uids)} 人')
 
     # 把运行时可调字段套用到 quota 模块（每次 @on_load 都重新读取，
     # 改完 config.yaml 在 Web UI reload 插件即生效，无需重启进程）
