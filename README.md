@@ -200,6 +200,7 @@ plugins/LGTBot_ElainaBot/
 │
 └── data/                    🗂 运行时数据（自动创建）
     ├── config.yaml          插件配置（Web UI 可在线编辑）
+    ├── match_runner_cwd.sh  自动生成：游戏子进程启动 wrapper（保证赛况图能渲染）
     ├── user_cache.db        *旧版昵称缓存遗留文件（已完全停用，可删除）*
     ├── build/               引擎编译状态 + 日志（WebUI「引擎编译」标签使用）
     │   ├── state.json       当前 / 上次编译的 PID + 命令 + 时间

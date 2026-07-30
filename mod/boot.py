@@ -10,6 +10,11 @@ import 副作用顺序敏感，需要在所有依赖 LGTBot_ElainaBot C++ 扩展
   3. 设置 RTLD_GLOBAL 标志，使 libbot_core.so 静态依赖的 glog/gflags 等符号
      对后续 dlopen 的 libgame.so 可见（否则报 undefined symbol: ...LogMessage...）
   4. import 完成后立即恢复 CWD 和 dlopen flags，避免影响主框架其他相对路径
+
+注意第 2 步的 chdir **只保证主进程**那份 `k_markdown2image_path` 正确。游戏跑在
+运行时才 fork 的 `match_game_runner` 子进程里，那时 CWD 已恢复，子进程自己那份
+常量会指向框架根 —— 故另用 `_make_runner_wrapper()` 生成的 wrapper 启动 runner
+（`cd build && exec runner`），详见该函数 docstring。
 """
 
 from __future__ import annotations
@@ -134,10 +139,52 @@ if _chdir_ok:
 #     只对本 Python 进程生效,不传播给 spawn 出的 runner 子进程)
 # (config_runner 无环境变量入口,由桥接层 Start() 传 config_runner_path_ 覆盖。)
 # 本地编译路径正确时设这些是幂等的(值本就指向 build/),无副作用。
+def _make_runner_wrapper(runner_exe: str) -> str:
+    """生成「先 chdir 到 BUILD_DIR 再 exec runner」的 wrapper 脚本,返回其路径。
+
+    引擎渲染 markdown 用的 ``k_markdown2image_path`` 是 ``bot_core/image.h`` 里的 **inline 全局常量**,
+    在「谁加载它、谁当时的 cwd」那一刻就固化为 ``current_path()/markdown2image``。本模块只在 import 期间
+    chdir 到 BUILD_DIR(所以**主进程**那份常量是对的),import 结束即恢复主框架 cwd;而游戏跑在**运行时**才
+    fork+execvp 的 ``match_game_runner`` 子进程里(``bot_core/subprocess.cc`` 不设 cwd、``game_runner_main.cc``
+    也不 chdir),它继承的是恢复后的框架根 → 子进程那份常量指向 ``<框架根>/markdown2image``(不存在)。
+
+    wrapper 用 ``exec`` 顶替自身进程,**pid 不变** —— bot_core 要 waitpid / SignalStop 这个 pid,
+    语义与直接 exec runner 完全一致。引擎侧入口是 ``bot_core/match.cc::ResolveRunnerExe``。
+    """
+    # 放 data/ 而非 build/:预编译包切换会整体覆盖 build/,wrapper 会被冲掉
+    path = os.path.join(DATA_DIR, 'match_runner_cwd.sh')
+    body = (
+        '#!/bin/sh\n'
+        '# 由 mod/boot.py 自动生成,请勿手工编辑(每次插件加载都会重写)。\n'
+        '# 作用:把 cwd 切到编译产物目录,让游戏子进程能找到 markdown2image。\n'
+        f'cd "{BUILD_DIR}" || exit 1\n'
+        f'exec "{runner_exe}" "$@"\n'
+    )
+    # 内容不变时不重写,避免每次热重载都动 mtime
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            if f.read() == body:
+                os.chmod(path, 0o755)
+                return path
+    except OSError:
+        pass
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(body)
+    os.chmod(path, 0o755)
+    return path
+
+
 if _chdir_ok:
     _match_runner = os.path.join(BUILD_DIR, 'match_game_runner')
     if os.path.isfile(_match_runner):
+        # 默认指向 runner 本身;wrapper 生成成功则改指 wrapper(修正子进程 cwd)
         os.environ['LGTBOT_MATCH_RUNNER'] = _match_runner
+        if os.name == 'posix':
+            try:
+                os.environ['LGTBOT_MATCH_RUNNER'] = _make_runner_wrapper(_match_runner)
+            except OSError as _e:
+                # 失败不致命:退回直接 exec runner,只是留档赛况图仍存不下来
+                log.warning(f'生成 match_runner wrapper 失败,赛况图留档可能失效: {_e}')
     _ld = os.environ.get('LD_LIBRARY_PATH', '')
     if BUILD_DIR not in _ld.split(os.pathsep):
         os.environ['LD_LIBRARY_PATH'] = BUILD_DIR + (os.pathsep + _ld if _ld else '')
