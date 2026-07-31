@@ -36,6 +36,7 @@ _ACCENT = (91, 110, 232)        # --accent  #5b6ee8
 _ORANGE = (224, 134, 0)         # --img     #e08600
 _GREEN = (22, 163, 74)          # 涨(对局变多是积极信号)
 _RED = (220, 53, 69)            # 跌 / 面板 crash 红 #dc3545
+_WARN = (230, 162, 60)          # 警告黄(同面板计划重启按钮高亮 #e6a23c)
 _TAG_BG = (238, 240, 247)       # --tag-bg  #eef0f7
 _RANK_COLORS = ((255, 172, 20), (160, 174, 192), (219, 154, 108))  # 金银铜
 
@@ -169,6 +170,12 @@ def _icon(d, kind: str, ix: int, iy: int, fg) -> None:
         d.line([(ix + 11, iy + 17), (ix + 26, iy + 29), (ix + 41, iy + 17)],
                fill=_tint(fg), width=3)
         return
+    if kind == 'warn':      # 感叹号三角(无全量权限警告)
+        d.polygon([(ix + 26, iy + 10), (ix + 44, iy + 42), (ix + 8, iy + 42)], fill=fg)
+        d.rounded_rectangle((ix + 24, iy + 20, ix + 28, iy + 33), radius=2,
+                            fill=_tint(fg))
+        d.ellipse((ix + 24, iy + 35, ix + 28, iy + 39), fill=_tint(fg))
+        return
     if kind == 'die':
         d.rounded_rectangle((ix + 12, iy + 12, ix + 40, iy + 40), radius=7, fill=fg)
         for px, py in ((19, 19), (33, 33), (19, 33), (33, 19), (26, 26)):
@@ -278,7 +285,19 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, diff)
 
     # ── 主动消息额度(通栏一行:用量 / 上限 + 进度条;用满转红)──
-    if show_pq:
+    # 非全量群走**黄色警告**变体:该群没有主动推送权限,额度数字没有意义,
+    # 直接给授权指引(与文本输出同一判定 dispatcher._push_quota_view)。
+    if show_pq and pq.get('no_permission'):
+        cx = pad + 28
+        cy = ty0 + 2 * (tile_h + tile_gap)
+        full_w = inner_w - 28 * 2
+        _tile(d, (cx, cy, cx + full_w, cy + tile_h))
+        d.rounded_rectangle((cx, cy, cx + 5, cy + tile_h), radius=2, fill=_WARN)
+        _icon(d, 'warn', cx + 24, cy + (tile_h - 52) // 2, _WARN)
+        _bold_text(d, (cx + 96, cy + 30), '本群未开启全量消息权限', _font(28), _WARN)
+        d.text((cx + 96, cy + 76), '无法推送主动消息 —— 请 @机器人 发送「全量申请」完成授权',
+               font=_font(23), fill=_TEXT_MUTED)
+    elif show_pq:
         cx = pad + 28
         cy = ty0 + 2 * (tile_h + tile_gap)
         full_w = inner_w - 28 * 2

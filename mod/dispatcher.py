@@ -156,15 +156,20 @@ def _push_quota_view(target_id: str, is_uid: bool) -> dict:
 
     额度是 **per 群 / per 用户** 的(QQ 官方接口限制),所以群里查的是本群、
     私信里查的是该用户自己的私信额度。返回
-    ``{shown, is_group, used, limit, remaining, exhausted}``;``limit=0``
-    表示未设上限(仅展示用量),``shown=False`` 表示无有效目标(不展示该行)。
+    ``{shown, is_group, used, limit, remaining, exhausted, no_permission}``:
+      · ``limit=0``        未设上限(仅展示用量)
+      · ``shown=False``    无有效目标(不展示该行)
+      · ``no_permission``  **非全量群** —— 该群压根没有主动消息推送权限,额度
+        数字对它没有意义,改为黄色警告提示群主发「全量申请」授权。
+        私信不适用(私信能否直推由 sandbox_dm_users 决定,不是群权限)。
     """
     if not target_id:
-        return {'shown': False, 'is_group': not is_uid, 'used': 0,
-                'limit': 0, 'remaining': 0, 'exhausted': False}
+        return {'shown': False, 'is_group': not is_uid, 'used': 0, 'limit': 0,
+                'remaining': 0, 'exhausted': False, 'no_permission': False}
     from . import callbacks as _callbacks      # 函数内导入,避免模块级互引
     limit = int(_callbacks.ACTIVE_PUSH_DAILY_LIMIT or 0)
     used = metrics.active_push_used(target_id, is_uid)
+    no_perm = (not is_uid) and not helpers.is_full_volume_group(target_id)
     return {
         'shown': True,
         'is_group': not is_uid,
@@ -172,6 +177,7 @@ def _push_quota_view(target_id: str, is_uid: bool) -> dict:
         'limit': limit,
         'remaining': max(0, limit - used) if limit else 0,
         'exhausted': bool(limit and used >= limit),
+        'no_permission': no_perm,
     }
 
 
@@ -607,12 +613,17 @@ async def lgtbot_data_stats(event, match):
         lines.append(f'📅 近10日对局: {total10} 局')
     pq = g.get('push_quota') or {}
     if pq.get('shown'):
-        scope = '本群' if pq['is_group'] else '你的私信'
-        if pq['limit']:
-            lines.append(f'📮 {scope}今日主动消息: {pq["used"]}/{pq["limit"]} 条'
-                         + ('（已用满，改用刷新按钮）' if pq['exhausted'] else ''))
+        if pq.get('no_permission'):
+            # 非全量群:额度数字无意义,给黄色警告 + 授权指引
+            lines.append('⚠️ 本群未开启全量消息权限，无法推送主动消息')
+            lines.append('   请 @机器人 发送「全量申请」完成授权')
         else:
-            lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条（未设上限）')
+            scope = '本群' if pq['is_group'] else '你的私信'
+            if pq['limit']:
+                lines.append(f'📮 {scope}今日主动消息: {pq["used"]}/{pq["limit"]} 条'
+                             + ('（已用满，改用刷新按钮）' if pq['exhausted'] else ''))
+            else:
+                lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条（未设上限）')
     await event.reply('\n'.join(lines))
 
 

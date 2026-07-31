@@ -574,6 +574,7 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
                                  'trend_10d': []})
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
     monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 1000 if u else 12)
+    _state.full_volume_groups.add('G1')        # 全量群才谈额度(否则走警告分支)
 
     ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
     ev.reply = AsyncMock()
@@ -587,6 +588,38 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
     txt2 = ev2.reply.await_args.args[0]
     assert '你的私信今日主动消息: 1000/1000 条' in txt2
     assert '已用满' in txt2                        # 用满时给出说明
+
+
+def test_push_quota_view_no_permission_for_non_full_group():
+    """非全量群:no_permission=True(该群无主动推送权限,额度数字无意义);
+    全量群与私信都不是警告态。"""
+    _state.full_volume_groups.discard('GNOPERM')
+    _state.full_volume_groups.add('GFULLOK')
+    v = dispatcher._push_quota_view('GNOPERM', False)
+    assert v['shown'] and v['no_permission'] is True
+    assert dispatcher._push_quota_view('GFULLOK', False)['no_permission'] is False
+    # 私信不适用群权限判定(能否直推由 sandbox_dm_users 决定)
+    assert dispatcher._push_quota_view('U1', True)['no_permission'] is False
+
+
+async def test_stats_command_warns_when_group_lacks_full_volume(monkeypatch):
+    """非全量群执行「数据统计」→ 黄色警告 + 「全量申请」授权指引,不显示额度数字。"""
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 0,
+                                 'today_players': 0, 'today_groups': 0,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    _state.full_volume_groups.discard('GNF')
+    ev = _mock_event(is_group=True, group_id='GNF', user_id='U1', content='数据统计')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    txt = ev.reply.await_args.args[0]
+    assert '⚠️' in txt and '未开启全量消息权限' in txt
+    assert '全量申请' in txt
+    assert '今日主动消息:' not in txt          # 额度数字不再展示
 
 
 def test_match_list_is_exclusive_command():
