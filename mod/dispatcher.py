@@ -151,6 +151,30 @@ def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
         return
     state.pending_new_game_name[key] = m.group(1)
 
+def _push_quota_view(target_id: str, is_uid: bool) -> dict:
+    """当前会话目标今日主动消息额度用量,供「数据统计」展示。
+
+    额度是 **per 群 / per 用户** 的(QQ 官方接口限制),所以群里查的是本群、
+    私信里查的是该用户自己的私信额度。返回
+    ``{shown, is_group, used, limit, remaining, exhausted}``;``limit=0``
+    表示未设上限(仅展示用量),``shown=False`` 表示无有效目标(不展示该行)。
+    """
+    if not target_id:
+        return {'shown': False, 'is_group': not is_uid, 'used': 0,
+                'limit': 0, 'remaining': 0, 'exhausted': False}
+    from . import callbacks as _callbacks      # 函数内导入,避免模块级互引
+    limit = int(_callbacks.ACTIVE_PUSH_DAILY_LIMIT or 0)
+    used = metrics.active_push_used(target_id, is_uid)
+    return {
+        'shown': True,
+        'is_group': not is_uid,
+        'used': used,
+        'limit': limit,
+        'remaining': max(0, limit - used) if limit else 0,
+        'exhausted': bool(limit and used >= limit),
+    }
+
+
 def _planned_restart_notice() -> str:
     """构造「计划重启」维护提示 —— 每次现拼,带上当前进行中对局数与维护原因。
 
@@ -530,6 +554,13 @@ async def lgtbot_data_stats(event, match):
         await event.reply('❌ 数据统计暂不可用，请稍后再试')
         return
 
+    # 本会话(群 / 私信)的今日主动消息额度用量 —— 群里看本群、私信看本人。
+    # 额度是 per-target 的,所以按当前会话目标取,不是全局汇总。
+    _uid = event.user_id or ''
+    _gid = event.group_id or event.channel_id or ''
+    _is_group = bool(event.is_group and _gid)
+    g['push_quota'] = _push_quota_view(_gid if _is_group else _uid, not _is_group)
+
     # ── 图片通道 ──────────────────────────────────────────────────────────
     if uploader.SELECTED_BACKEND:
         sub = f'截至 {time.strftime("%H:%M")}'
@@ -574,6 +605,14 @@ async def lgtbot_data_stats(event, match):
     if trend:
         total10 = sum(t['count'] for t in trend)
         lines.append(f'📅 近10日对局: {total10} 局')
+    pq = g.get('push_quota') or {}
+    if pq.get('shown'):
+        scope = '本群' if pq['is_group'] else '你的私信'
+        if pq['limit']:
+            lines.append(f'📮 {scope}今日主动消息: {pq["used"]}/{pq["limit"]} 条'
+                         + ('（已用满，改用刷新按钮）' if pq['exhausted'] else ''))
+        else:
+            lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条（未设上限）')
     await event.reply('\n'.join(lines))
 
 

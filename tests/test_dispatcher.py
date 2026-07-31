@@ -536,6 +536,59 @@ async def test_planned_restart_command_accepts_reason(monkeypatch):
         st.set_planned_restart(False)
 
 
+def test_push_quota_view_group_and_dm():
+    """额度视图:群里看本群、私信看本人;上限 0 = 未设上限;达到上限标 exhausted。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics
+    real_used = metrics.active_push_used
+    orig_limit = callbacks.ACTIVE_PUSH_DAILY_LIMIT
+    metrics.active_push_used = lambda t, u: {('G1', False): 999,
+                                             ('U1', True): 1000}.get((t, u), 0)
+    try:
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = 1000
+        g = dispatcher._push_quota_view('G1', False)
+        assert g['shown'] and g['is_group'] and g['used'] == 999
+        assert g['limit'] == 1000 and g['remaining'] == 1 and not g['exhausted']
+        u = dispatcher._push_quota_view('U1', True)
+        assert u['shown'] and not u['is_group'] and u['used'] == 1000
+        assert u['remaining'] == 0 and u['exhausted']
+        # 无目标 → 不展示
+        assert dispatcher._push_quota_view('', False)['shown'] is False
+        # 上限 0 → 只报用量,不算用满
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = 0
+        z = dispatcher._push_quota_view('U1', True)
+        assert z['limit'] == 0 and not z['exhausted']
+    finally:
+        metrics.active_push_used = real_used
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = orig_limit
+
+
+async def test_stats_command_text_shows_push_quota(monkeypatch):
+    """「数据统计」文本输出带本会话额度行:群里显示「本群」、私信显示「你的私信」。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 1,
+                                 'today_players': 1, 'today_groups': 1,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 1000 if u else 12)
+
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    txt = ev.reply.await_args.args[0]
+    assert '本群今日主动消息: 12/1000 条' in txt and '已用满' not in txt
+
+    ev2 = _mock_event(is_direct=True, user_id='U1', content='数据统计')
+    ev2.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev2, None)
+    txt2 = ev2.reply.await_args.args[0]
+    assert '你的私信今日主动消息: 1000/1000 条' in txt2
+    assert '已用满' in txt2                        # 用满时给出说明
+
+
 def test_match_list_is_exclusive_command():
     """「赛事列表」已登记进专属指令表 → catch-all 不再派发给引擎(否则普通玩家
     仍能通过 catch-all 拿到全部公开 + 私密赛事)。带 / 与不带 / 两种输入都要挡。"""

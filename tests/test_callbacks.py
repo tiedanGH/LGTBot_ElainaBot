@@ -169,6 +169,61 @@ def _exhaust_ref(key):
         quota.try_consume_ref(key)
 
 
+async def test_active_push_daily_limit_falls_back_to_refresh(monkeypatch):
+    """全量群今日主动消息用满 → 失去直推资格,退回「阻塞等刷新」机制;
+    额度未满时照常直推。跨天由日分桶自动重置(used 归 0),无需额外逻辑。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: None)
+    monkeypatch.setattr(callbacks.metrics, 'record_active_push', lambda *a: None)
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    waited = []
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_wait_timeout',
+                        lambda: waited.append(1))
+    # 普通群配额满会阻塞等刷新 → mock 成立即返回 None(等待超时)
+    monkeypatch.setattr(callbacks.quota, 'wait_and_consume',
+                        AsyncMock(return_value=None))
+    state.full_volume_groups.add('GLIM')
+    key = callbacks.helpers.target_key('GLIM', False)
+
+    # ① 额度未满(已用 999 < 1000)→ 直推,不进等待分支
+    monkeypatch.setattr(callbacks.metrics, 'active_push_used', lambda t, u: 999)
+    _exhaust_ref(key)
+    await callbacks._send_text_quota_managed('GLIM', False, 'hi', None)
+    sender.send_to_group.assert_awaited_once()
+    assert waited == []                       # 没走等待路径
+
+    # ② 额度用满(1000/1000)→ 退回等待刷新;超时后**不强发**(QQ 必拒)
+    sender.send_to_group.reset_mock()
+    monkeypatch.setattr(callbacks.metrics, 'active_push_used', lambda t, u: 1000)
+    _exhaust_ref(key)
+    await callbacks._send_text_quota_managed('GLIM', False, 'hi2', None)
+    assert waited == [1]                      # 进了等待分支且超时
+    sender.send_to_group.assert_not_called()  # 额度已满,不白烧一次调用
+
+
+def test_active_push_allowed_gate():
+    """_active_push_allowed:上限 0 = 不限制;未满 True;达到 / 超过上限 False。"""
+    orig = callbacks.ACTIVE_PUSH_DAILY_LIMIT
+    used_val = {'n': 0}
+    real_used = callbacks.metrics.active_push_used
+    callbacks.metrics.active_push_used = lambda t, u: used_val['n']
+    try:
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = 0          # 不限制
+        used_val['n'] = 10 ** 9
+        assert callbacks._active_push_allowed('G', False) is True
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = 1000
+        used_val['n'] = 999
+        assert callbacks._active_push_allowed('G', False) is True
+        used_val['n'] = 1000                           # 达到上限即禁止
+        assert callbacks._active_push_allowed('G', False) is False
+        used_val['n'] = 1001
+        assert callbacks._active_push_allowed('G', False) is False
+    finally:
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = orig
+        callbacks.metrics.active_push_used = real_used
+
+
 async def test_quota_exhausted_not_counted_for_full_volume_group(monkeypatch):
     """全量群配额耗尽后可无缝转主动消息、无影响 → 不计入配额压力。"""
     sender = _fake_sender()

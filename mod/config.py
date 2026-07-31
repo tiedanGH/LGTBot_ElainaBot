@@ -7,6 +7,7 @@
   · admin_uids: list[str]            LGTBot 内部管理员 openid 列表
   · image_hosting: str               markdown 图片内嵌使用的单个图床名（留空 = 禁用）
   · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
+  · active_push_daily_limit: int     单个群 / 用户每日主动消息条数上限（0 = 不限）
   · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
   · crash_notify_group: str          严重问题通知群 openid（崩溃时向此群主动推报告）
   · blocked_commands: list[str]      追加屏蔽指令（与 dispatcher 内置屏蔽表共同生效，命中的消息不转发给引擎）
@@ -33,6 +34,7 @@ DEFAULT_CONFIG = {
     'admin_uids': [],
     'image_hosting': '',
     'refresh_wait_timeout': 15.0,
+    'active_push_daily_limit': 1000,
     'image_upload_dedup_ttl': 60.0,
     'crash_notify_group': '',
     'blocked_commands': [],
@@ -44,6 +46,7 @@ CONFIG_COMMENTS = {
     'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
     'image_hosting': '游戏图片走 markdown 内嵌时使用的图床（单选提升效率，可选值以主框架 image_hosting 模块为准：cos / bilibili / chatglm / xingye / nature / qq_file；填 any 则自动依次尝试全部可用图床）。上传失败回退 msg_type=7',
     'refresh_wait_timeout': '被动消息配额（5 条）耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
+    'active_push_daily_limit': '单个群 / 用户每日主动消息条数上限（QQ 官方接口限制，默认 1000）。用满后该群 / 用户当日退回「刷新按钮」被动机制，次日 0 点自动恢复；设 0 = 不限制',
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
     'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
     'blocked_commands': '屏蔽指令列表：命中的消息不再转发给引擎，用于化解与其他插件的指令冲突',
@@ -131,7 +134,7 @@ def _apply_runtime_tunables(cfg: dict):
     下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
     ``load_plugin_config`` 处理,不在此函数内):
       bind_bot_appid → image_hosting → refresh_wait_timeout →
-      image_upload_dedup_ttl → crash_notify_group → blocked_commands →
+      active_push_daily_limit → image_upload_dedup_ttl → crash_notify_group → blocked_commands →
       sandbox_dm_users → menu_game_buttons
     """
     from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
@@ -198,6 +201,23 @@ def _apply_runtime_tunables(cfg: dict):
         elif quota.REFRESH_WAIT_TIMEOUT != timeout_f:
             log.info(f'refresh_wait_timeout: {quota.REFRESH_WAIT_TIMEOUT}s → {timeout_f}s')
             quota.REFRESH_WAIT_TIMEOUT = timeout_f
+
+    # ── active_push_daily_limit ───────────────────────────────────────────
+    # 单群 / 单用户每日主动消息上限(QQ 官方接口限制)。用满后该目标当日退回「刷新按钮」被动机制
+    # (callbacks._active_push_allowed),次日 0 点随日分桶自动重置。0 = 不限制;非法值忽略并保留现值。
+    limit = cfg.get('active_push_daily_limit', 1000)
+    try:
+        limit_i = int(limit)
+    except (TypeError, ValueError):
+        log.warning(f'active_push_daily_limit 应为整数，已忽略 (got {limit!r})')
+    else:
+        if limit_i < 0:
+            log.warning(f'active_push_daily_limit 不能为负数，已忽略 (got {limit_i})')
+        elif _callbacks.ACTIVE_PUSH_DAILY_LIMIT != limit_i:
+            log.info(f'active_push_daily_limit: '
+                     f'{_callbacks.ACTIVE_PUSH_DAILY_LIMIT} → {limit_i}'
+                     + ('（不限制）' if limit_i == 0 else ''))
+            _callbacks.ACTIVE_PUSH_DAILY_LIMIT = limit_i
 
     # ── image_upload_dedup_ttl ────────────────────────────────────────────
     # 同份图片重复上传去重 TTL。0 = 关闭去重(每次都重新上传,仍保留 filename

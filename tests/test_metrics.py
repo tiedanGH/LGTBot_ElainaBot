@@ -90,6 +90,33 @@ def test_active_push_today_by_kind_and_targets():
     assert ap['dm_total'] == 1 and ap['dm_targets_n'] == 1
 
 
+def test_active_push_used_per_target():
+    """per 群 / per 用户 用量:群与私信各自独立,未记录的目标为 0。"""
+    metrics.record_active_push('G1', is_uid=False)
+    metrics.record_active_push('G1', is_uid=False)
+    metrics.record_active_push('G2', is_uid=False)
+    metrics.record_active_push('G1', is_uid=True)     # 同名但私信侧,独立计数
+    assert metrics.active_push_used('G1', False) == 2
+    assert metrics.active_push_used('G2', False) == 1
+    assert metrics.active_push_used('G1', True) == 1
+    assert metrics.active_push_used('NOPE', False) == 0
+    assert metrics.active_push_used('', False) == 0
+
+
+def test_active_push_used_resets_across_day():
+    """跨天:桶 date 不是今天 → 用量归 0(限额因此次日 0 点自动恢复,
+    进行中的对局跨天也无需特殊处理 —— 每条消息独立判定,不缓存资格)。"""
+    import json as _json
+    metrics.record_active_push('GDAY', is_uid=False)
+    assert metrics.active_push_used('GDAY', False) == 1
+    with open(metrics.METRICS_PATH, encoding='utf-8') as f:
+        d = _json.load(f)
+    d['active_push']['date'] = '2000-01-01'          # 模拟跨天
+    with open(metrics.METRICS_PATH, 'w', encoding='utf-8') as f:
+        _json.dump(d, f)
+    assert metrics.active_push_used('GDAY', False) == 0
+
+
 def test_active_push_resets_across_day(monkeypatch):
     """桶 date 不是今天时整桶重建(跨天自动清零)。"""
     import json as _json

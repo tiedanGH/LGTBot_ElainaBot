@@ -89,6 +89,22 @@ SANDBOX_DM_USERS: frozenset = frozenset()
 DM_PUSH_ALL: bool = False
 
 
+# 单群 / 单用户每日主动消息上限(QQ 官方接口限制)。由 config.py 的 ``active_push_daily_limit`` 覆盖;0 = 不限制。
+#
+# 用满后**当日**该目标失去「主动直推资格」→ 发送路径退回被动的刷新按钮机制 (第 4/5 条挂「🔄 刷新会话」、配额满时阻塞等待续命 ≤refresh_wait_timeout),
+# 与非全量群的行为完全一致。计数走 metrics 的日分桶,**次日 0 点自然重置**, 无需定时任务:跨天后第一条消息读到的桶 date 已不是今天 → 用量归 0 → 资格自动恢复。
+# 进行中的对局跨天也因此无需任何特殊处理 —— 每条消息都是独立判定,不缓存资格,不存在"开局时算过一次就一直沿用"的问题。
+ACTIVE_PUSH_DAILY_LIMIT: int = 1000
+
+
+def _active_push_allowed(target_id: str, is_uid: bool) -> bool:
+    """该目标今日主动消息额度是否还有剩余(未配额度 / 上限 0 = 恒 True)。"""
+    limit = ACTIVE_PUSH_DAILY_LIMIT
+    if limit <= 0:
+        return True
+    return metrics.active_push_used(target_id, is_uid) < limit
+
+
 def _is_sandbox_dm(target_id: str, is_uid: bool) -> bool:
     """私信目标是否具备「配额耗尽后主动直推」资格(all 模式 = 所有人)。"""
     return is_uid and (DM_PUSH_ALL or target_id in SANDBOX_DM_USERS)
@@ -1113,7 +1129,8 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     is_full = (not is_uid) and helpers.is_full_volume_group(target_id)
     # 主动直推资格(全量群 / 沙箱私信):配额满后可直接主动消息、不挂刷新按钮。
     # 注意"资格"不代表跳过被动配额 —— 前 5 次照常 try_consume_ref 走 msg_id。
-    is_active_push = is_full or is_sandbox_dm
+    # 今日主动消息额度用满的目标**失去该资格**,退回刷新按钮机制(见 _active_push_allowed;跨天自动恢复)。
+    is_active_push = (is_full or is_sandbox_dm) and _active_push_allowed(target_id, is_uid)
 
     consumed = quota.try_consume_ref(key)
     if consumed is None:
@@ -1141,8 +1158,14 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
             consumed = await quota.wait_and_consume(key, quota.REFRESH_WAIT_TIMEOUT)
             elapsed = time.monotonic() - wait_start
             if consumed is None:
-                # 等待超时 → 改走主动消息(无 msg_id/event_id)。
-                # bot 若在该群/用户上有主动 quota 还能落地,语义更干净。
+                # 等待超时 → 改走主动消息(无 msg_id/event_id)。bot 若在该群/用户上有主动 quota 还能落地,语义更干净。
+                # 但今日主动额度已用满时**不再强发**:QQ 必拒,发了只是白烧一次调用并让日志误报成功 —— 直接丢弃,等用户点刷新或次日重置。
+                if not _active_push_allowed(target_id, is_uid):
+                    metrics.record_quota_wait_timeout()
+                    log.warning(f'🚫 [主动额度已满] {key} 经 {elapsed:.1f}s 无刷新，'
+                                f'且今日主动消息已达上限 {ACTIVE_PUSH_DAILY_LIMIT}，'
+                                f'丢弃: {msg_preview!r}')
+                    return
                 metrics.record_quota_wait_timeout()
                 log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送主动消息')
             else:
@@ -1269,7 +1292,8 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
     # (逻辑同 _send_text_quota_managed,详见那里的注释)
     is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
     is_full = (not is_uid) and helpers.is_full_volume_group(target_id)
-    is_active_push = is_full or is_sandbox_dm
+    # 今日主动消息额度用满 → 失去直推资格,退回刷新按钮机制(同文本路径)
+    is_active_push = (is_full or is_sandbox_dm) and _active_push_allowed(target_id, is_uid)
 
     consumed = quota.try_consume_ref(key)
     if consumed is None:
@@ -1293,6 +1317,12 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
             if consumed is None:
                 # 等待超时 → 改走主动消息(理由同 _send_text_quota_managed:
                 # 过期 msg_id 强发必拒,主动消息至少留一条出路)。
+                # 今日主动额度已满则不强发(QQ 必拒),丢弃等刷新 / 次日重置。
+                if not _active_push_allowed(target_id, is_uid):
+                    metrics.record_quota_wait_timeout()
+                    log.warning(f'🚫 [主动额度已满] {key} 经 {elapsed:.1f}s 无刷新，'
+                                f'且今日主动消息已达上限 {ACTIVE_PUSH_DAILY_LIMIT}，丢弃图片')
+                    return
                 metrics.record_quota_wait_timeout()
                 log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送图片主动消息')
             else:

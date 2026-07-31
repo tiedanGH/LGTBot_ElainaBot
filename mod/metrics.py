@@ -210,6 +210,30 @@ def active_push_today() -> dict:
         return {'group_total': 0, 'group_targets_n': 0, 'dm_total': 0, 'dm_targets_n': 0}
 
 
+def active_push_used(target_id: str, is_uid: bool) -> int:
+    """某个群 / 用户**今日**已用的主动消息条数(桶过期 / 缺失 / 异常一律 0)。
+
+    与 ``record_active_push`` 同一份日分桶数据,桶内 date 不是今天即视为 0 ——
+    跨天自动重置,无需定时任务。发送路径的限额判定(callbacks 的
+    ``_active_push_allowed``)与「数据统计」的额度展示都读这里。
+    """
+    if not target_id:
+        return 0
+    today = datetime.now().strftime('%Y-%m-%d')
+    try:
+        with _lock:
+            ap = _load_raw().get('active_push')
+        if not isinstance(ap, dict) or ap.get('date') != today:
+            return 0
+        targets = ap.get('dm_targets' if is_uid else 'group_targets')
+        if not isinstance(targets, dict):
+            return 0
+        return int(targets.get(str(target_id)) or 0)
+    except Exception as e:
+        log.warning(f'[metrics] 主动消息用量读取失败: {e}')
+        return 0
+
+
 def record_quota_wait_timeout() -> None:
     """刷新等待超时:等新引用 15s 未果,走强发 / 降级路径。"""
     def _m(d: dict) -> None:

@@ -164,6 +164,11 @@ def _delta_pill(d, x, y, diff, h=38) -> int:
 def _icon(d, kind: str, ix: int, iy: int, fg) -> None:
     """52×52 圆角图标块(fg 实色图形 + 18% 透明底,同面板徽章配色法)。"""
     d.rounded_rectangle((ix, iy, ix + 52, iy + 52), radius=14, fill=_tint(fg))
+    if kind == 'mail':      # 信封(主动消息额度)
+        d.rounded_rectangle((ix + 11, iy + 16, ix + 41, iy + 38), radius=4, fill=fg)
+        d.line([(ix + 11, iy + 17), (ix + 26, iy + 29), (ix + 41, iy + 17)],
+               fill=_tint(fg), width=3)
+        return
     if kind == 'die':
         d.rounded_rectangle((ix + 12, iy + 12, ix + 40, iy + 40), radius=7, fill=fg)
         for px, py in ((19, 19), (33, 33), (19, 33), (33, 19), (26, 26)):
@@ -210,9 +215,14 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     top_players = (g.get('top_players_today') or [])[:RANK_LIMIT]
     list_rows = max(len(top_games), len(top_players), 1)
 
+    # 主动消息额度(dispatcher 按当前会话目标注入;无则不画该行)
+    pq = g.get('push_quota') or {}
+    show_pq = bool(pq.get('shown'))
+
     head_h = 118                                            # 顶栏
     tile_h, tile_gap = 138, 18                              # 指标小卡
-    overview_h = 76 + tile_h * 2 + tile_gap                 # 标题区 + 2 行小卡
+    # 标题区 + 2 行小卡(+ 额度通栏卡一行)
+    overview_h = 76 + tile_h * 2 + tile_gap + ((tile_h + tile_gap) if show_pq else 0)
     trend_h = 268 if trend else 0
     rank_h = 88 + list_rows * 74 + 14                       # 标题 + 行 ×N
     footer_h = 56
@@ -266,6 +276,42 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             diff = int(val) - int(y_val)
             pw = _delta_pill(d, -1000, -1000, diff)         # 预算宽度
             _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, diff)
+
+    # ── 主动消息额度(通栏一行:用量 / 上限 + 进度条;用满转红)──
+    if show_pq:
+        cx = pad + 28
+        cy = ty0 + 2 * (tile_h + tile_gap)
+        full_w = inner_w - 28 * 2
+        _tile(d, (cx, cy, cx + full_w, cy + tile_h))
+        limit = int(pq.get('limit') or 0)
+        used = int(pq.get('used') or 0)
+        exhausted = bool(pq.get('exhausted'))
+        fg = _RED if exhausted else _ACCENT
+        _icon(d, 'mail', cx + 24, cy + (tile_h - 52) // 2, fg)
+        scope = '本群' if pq.get('is_group') else '本私信'
+        d.text((cx + 96, cy + 24), f'{scope}今日主动消息额度',
+               font=_font(24), fill=_TEXT_MUTED)
+        val_txt = f'{_fmt(used)} / {_fmt(limit)}' if limit else f'{_fmt(used)}（未设上限）'
+        _bold_text(d, (cx + 96, cy + 54), val_txt, _font(36), fg)
+        if exhausted:
+            tip = '已用满 · 改用刷新按钮，次日 0 点恢复'
+            tf = _font(22)
+            d.rounded_rectangle(
+                (cx + full_w - 24 - _text_w(d, tip, tf) - 26, cy + 24,
+                 cx + full_w - 24, cy + 62), radius=19, fill=_tint(_RED))
+            d.text((cx + full_w - 24 - _text_w(d, tip, tf) - 13, cy + 32),
+                   tip, font=tf, fill=_RED)
+        if limit:
+            # 进度条:用量占比(用满为满格红)。y 要与上方数值留出间距
+            bar_x, bar_y = cx + 96, cy + tile_h - 26
+            bar_w = full_w - 96 - 24
+            d.rounded_rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + 12),
+                                radius=6, fill=_TAG_BG)
+            ratio = min(1.0, used / limit) if limit else 0.0
+            if ratio > 0:
+                d.rounded_rectangle(
+                    (bar_x, bar_y, bar_x + max(10, int(bar_w * ratio)), bar_y + 12),
+                    radius=6, fill=fg)
     y += overview_h + gap
 
     # ── 近 10 日对局趋势(当日 accent 高亮在最右,历史柱 35% 淡色)──
