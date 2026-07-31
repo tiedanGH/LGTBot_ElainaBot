@@ -305,21 +305,29 @@ def _render(g: dict, sub_title: str) -> bytes | None:
         limit = int(pq.get('limit') or 0)
         used = int(pq.get('used') or 0)
         exhausted = bool(pq.get('exhausted'))
-        fg = _RED if exhausted else _ACCENT
-        _icon(d, 'mail', cx + 24, cy + (tile_h - 52) // 2, fg)
+        near = bool(pq.get('near_limit'))
+        # 三态:正常 accent / 即将用尽(≥85%)警告黄 / 已用满红
+        fg = _RED if exhausted else (_WARN if near else _ACCENT)
+        if exhausted or near:
+            d.rounded_rectangle((cx, cy, cx + 5, cy + tile_h), radius=2, fill=fg)
+        _icon(d, 'warn' if near else 'mail', cx + 24, cy + (tile_h - 52) // 2, fg)
         scope = '本群' if pq.get('is_group') else '本私信'
         d.text((cx + 96, cy + 24), f'{scope}今日主动消息额度',
                font=_font(24), fill=_TEXT_MUTED)
         val_txt = f'{_fmt(used)} / {_fmt(limit)}' if limit else f'{_fmt(used)}（未设上限）'
         _bold_text(d, (cx + 96, cy + 54), val_txt, _font(36), fg)
+        tip = ''
         if exhausted:
             tip = '已用满 · 改用刷新按钮，次日 0 点恢复'
+        elif near:
+            tip = f'即将用尽 · 剩余 {_fmt(pq.get("remaining") or 0)} 条'
+        if tip:
             tf = _font(22)
             d.rounded_rectangle(
                 (cx + full_w - 24 - _text_w(d, tip, tf) - 26, cy + 24,
-                 cx + full_w - 24, cy + 62), radius=19, fill=_tint(_RED))
+                 cx + full_w - 24, cy + 62), radius=19, fill=_tint(fg))
             d.text((cx + full_w - 24 - _text_w(d, tip, tf) - 13, cy + 32),
-                   tip, font=tf, fill=_RED)
+                   tip, font=tf, fill=fg)
         if limit:
             # 进度条:用量占比(用满为满格红)。y 要与上方数值留出间距
             bar_x, bar_y = cx + 96, cy + tile_h - 26

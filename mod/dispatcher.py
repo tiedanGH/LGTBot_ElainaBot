@@ -151,32 +151,46 @@ def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
         return
     state.pending_new_game_name[key] = m.group(1)
 
+# 主动消息额度「即将用尽」告警阈值 —— 用量达上限的该比例即转黄色警告。
+PUSH_QUOTA_WARN_RATIO = 0.85
+
+
 def _push_quota_view(target_id: str, is_uid: bool) -> dict:
     """当前会话目标今日主动消息额度用量,供「数据统计」展示。
 
     额度是 **per 群 / per 用户** 的(QQ 官方接口限制),所以群里查的是本群、
     私信里查的是该用户自己的私信额度。返回
-    ``{shown, is_group, used, limit, remaining, exhausted, no_permission}``:
-      · ``limit=0``        未设上限(仅展示用量)
+    ``{shown, is_group, used, limit, remaining, ratio, near_limit,
+    exhausted, no_permission}``:
+      · ``limit=0``        未设上限(仅展示用量,不告警)
       · ``shown=False``    无有效目标(不展示该行)
+      · ``near_limit``     用量已达 ``PUSH_QUOTA_WARN_RATIO``(85%)但未用满 ——
+        黄色警告,提醒即将触顶
+      · ``exhausted``      已用满 —— 红色,已退回刷新按钮机制
       · ``no_permission``  **非全量群** —— 该群压根没有主动消息推送权限,额度
         数字对它没有意义,改为黄色警告提示群主发「全量申请」授权。
         私信不适用(私信能否直推由 sandbox_dm_users 决定,不是群权限)。
     """
     if not target_id:
         return {'shown': False, 'is_group': not is_uid, 'used': 0, 'limit': 0,
-                'remaining': 0, 'exhausted': False, 'no_permission': False}
+                'remaining': 0, 'ratio': 0.0, 'near_limit': False,
+                'exhausted': False, 'no_permission': False}
     from . import callbacks as _callbacks      # 函数内导入,避免模块级互引
     limit = int(_callbacks.ACTIVE_PUSH_DAILY_LIMIT or 0)
     used = metrics.active_push_used(target_id, is_uid)
     no_perm = (not is_uid) and not helpers.is_full_volume_group(target_id)
+    ratio = (used / limit) if limit else 0.0
+    exhausted = bool(limit and used >= limit)
     return {
         'shown': True,
         'is_group': not is_uid,
         'used': used,
         'limit': limit,
         'remaining': max(0, limit - used) if limit else 0,
-        'exhausted': bool(limit and used >= limit),
+        'ratio': ratio,
+        'near_limit': bool(limit and not exhausted
+                           and ratio >= PUSH_QUOTA_WARN_RATIO),
+        'exhausted': exhausted,
         'no_permission': no_perm,
     }
 
@@ -620,8 +634,15 @@ async def lgtbot_data_stats(event, match):
         else:
             scope = '本群' if pq['is_group'] else '你的私信'
             if pq['limit']:
-                lines.append(f'📮 {scope}今日主动消息: {pq["used"]}/{pq["limit"]} 条'
-                             + ('（已用满，改用刷新按钮）' if pq['exhausted'] else ''))
+                if pq['exhausted']:
+                    icon, tail = '⚠️', '（已用满，改用刷新按钮，次日 0 点恢复）'
+                elif pq.get('near_limit'):
+                    icon = '⚠️'
+                    tail = f'（即将用尽，剩余 {pq["remaining"]} 条）'
+                else:
+                    icon, tail = '📮', ''
+                lines.append(f'{icon} {scope}今日主动消息: '
+                             f'{pq["used"]}/{pq["limit"]} 条{tail}')
             else:
                 lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条（未设上限）')
     await event.reply('\n'.join(lines))

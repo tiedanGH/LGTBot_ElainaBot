@@ -590,6 +590,56 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
     assert '已用满' in txt2                        # 用满时给出说明
 
 
+def test_push_quota_view_near_limit_threshold():
+    """额度用量达 85% 阈值 → near_limit(黄色警告);未到不告警;用满只标
+    exhausted(红)不再标 near_limit,避免两种状态同时成立。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics
+    real_used = metrics.active_push_used
+    orig_limit = callbacks.ACTIVE_PUSH_DAILY_LIMIT
+    used_val = {'n': 0}
+    metrics.active_push_used = lambda t, u: used_val['n']
+    _state.full_volume_groups.add('GW')
+    try:
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = 1000
+        used_val['n'] = 849                      # 84.9% → 未到阈值
+        v = dispatcher._push_quota_view('GW', False)
+        assert not v['near_limit'] and not v['exhausted']
+        used_val['n'] = 850                      # 恰好 85% → 告警
+        v = dispatcher._push_quota_view('GW', False)
+        assert v['near_limit'] and not v['exhausted'] and v['remaining'] == 150
+        used_val['n'] = 1000                     # 用满 → 只红,不再黄
+        v = dispatcher._push_quota_view('GW', False)
+        assert v['exhausted'] and not v['near_limit']
+        # 未设上限(0)不告警
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = 0
+        used_val['n'] = 10 ** 6
+        v = dispatcher._push_quota_view('GW', False)
+        assert not v['near_limit'] and not v['exhausted']
+    finally:
+        metrics.active_push_used = real_used
+        callbacks.ACTIVE_PUSH_DAILY_LIMIT = orig_limit
+
+
+async def test_stats_command_text_warns_near_limit(monkeypatch):
+    """接近上限时文本行转 ⚠️ 并给出剩余条数。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 0,
+                                 'today_players': 0, 'today_groups': 0,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 900)
+    _state.full_volume_groups.add('GWARN')
+    ev = _mock_event(is_group=True, group_id='GWARN', user_id='U1', content='数据统计')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    txt = ev.reply.await_args.args[0]
+    assert '⚠️' in txt and '900/1000' in txt and '即将用尽，剩余 100 条' in txt
+
+
 def test_push_quota_view_no_permission_for_non_full_group():
     """非全量群:no_permission=True(该群无主动推送权限,额度数字无意义);
     全量群与私信都不是警告态。"""
