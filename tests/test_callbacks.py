@@ -265,6 +265,24 @@ def test_match_event_multiplayer_prefers_current_game_over_pending():
     assert 'g:mp1' not in state.pending_new_game_name
 
 
+def test_game_started_attaches_game_help_button():
+    """开局广播(game_started)挂「🎮 游戏帮助」—— data='帮助'(不带斜杠,引擎在
+    match 上下文解释为当前游戏帮助)、type=1 callback、style=4,与未知游戏指令
+    引导里那颗同款。"""
+    state.pending_buttons.clear()
+    callbacks.cb_match_event('gs1', False, 'game_started', '')
+    btns = _flat_buttons('g:gs1')
+    assert len(btns) == 1
+    b = btns[0]
+    assert b['data'] == '帮助' and b['type'] == 1 and b['style'] == 4
+    assert 'enter' not in b                                  # 本插件按钮约定
+    # 与「未知游戏指令」里的游戏帮助按钮完全一致(同款视觉 / 行为)
+    from plugins.LGTBot_ElainaBot.mod import buttons
+    same = buttons.build_unknown_game_buttons()[0][0]
+    assert (b['text'], b['data'], b['type'], b['style']) == \
+           (same['text'], same['data'], same['type'], same['style'])
+
+
 def test_mid_quit_clears_dm_match_but_not_group():
     """mid_quit(玩家中途强退广播):私信对局全员 LEFT 后的解散广播私发不达,
     这条就是终止信号 → 清 active_matches + current_game;群聊对局仍在进行 →
@@ -273,10 +291,13 @@ def test_mid_quit_clears_dm_match_but_not_group():
     state.current_game['u:dm1'] = '单机游戏'
     callbacks.cb_match_event('dm1', True, 'game_started', '')
     assert 'u:dm1' in state.active_matches
+    # 开局广播会挂「游戏帮助」按钮并被该条广播的 cb_send_text_message pop 掉;
+    # 这里手动清掉模拟那次发送,好让下面的断言只检验 mid_quit 自身不挂按钮。
+    state.pending_buttons.pop('u:dm1', None)
     callbacks.cb_match_event('dm1', True, 'mid_quit', '')
     assert 'u:dm1' not in state.active_matches
     assert 'u:dm1' not in state.current_game
-    assert 'u:dm1' not in state.pending_buttons          # 不挂按钮
+    assert 'u:dm1' not in state.pending_buttons          # mid_quit 自身不挂按钮
     # 群聊局:一人中途退出,对局继续 → 状态保留
     state.current_game['g:grp9'] = '狼人杀'
     callbacks.cb_match_event('grp9', False, 'game_started', '')

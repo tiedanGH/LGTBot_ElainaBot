@@ -106,6 +106,18 @@ def build_unknown_game_buttons() -> list[list[dict]]:
     ]]
 
 
+def build_game_help_buttons() -> list[list[dict]]:
+    """单按钮一行:「🎮 游戏帮助」。
+
+    挂在引擎「游戏开始，您可以使用「帮助」命令…」这条开局广播上
+    (``ClassifyMatchEvent`` 的 ``game_started`` 分支)—— 广播本身就在教玩家发
+    「帮助」,给一颗按钮省掉手输。
+    """
+    return [[
+        {'text': '🎮 游戏帮助', 'data': '帮助', 'type': 1, 'style': 4},
+    ]]
+
+
 def build_game_list_buttons() -> list[list[dict]]:
     """单按钮一行:「🎲 游戏列表」——与欢迎菜单同款。
     用于 `/新游戏 X` / `/规则 X` / `/设置 X` 等误输游戏名时,引导用户查正确名字。

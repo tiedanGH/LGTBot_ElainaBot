@@ -879,8 +879,9 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
       ``game_over_unrecorded``  同上,但结算带「游戏结果不记录」(单机 / 非正式局 /
                          未连接数据库) —— 本局没进战绩,不挂「查看战绩」;
                          若游戏名也未知则整组不挂。
-      ``game_started``   引擎 Match::GameStart 成功后的 BoardcastAtAll —— 不动
-                         按钮,只做进行中对局跟踪(active_matches)。「消息回复
+      ``game_started``   引擎 Match::GameStart 成功后的 BoardcastAtAll —— 挂
+                         「🎮 游戏帮助」(广播本身在教玩家发「帮助」),并做
+                         进行中对局跟踪(active_matches)。「消息回复
                          限制」教学已前移到 ``new_game`` 建房时标记:开局消息发
                          得晚,配额可能已耗尽把提示吞掉;建房公告是命令的第 1 条
                          回复,教学紧随其后必达。同时若建房游戏带「开局私信」,
@@ -974,9 +975,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         state.pending_buttons[key] = buttons.build_game_list_buttons()
     elif kind == 'about':
         state.pending_buttons[key] = buttons.build_about_buttons()
-    # 'announce' / 'terminate' / 'game_started' 不挂按钮
-    # (「消息回复限制」教学已随 new_game 建房时标记,不再挂到 game_started ——
-    #  开局时配额可能已耗尽把提示吞掉)
+    elif kind == 'game_started':
+        state.pending_buttons[key] = buttons.build_game_help_buttons()
 
 
 def cb_get_user_name(uid: str) -> str:
