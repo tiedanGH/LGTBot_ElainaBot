@@ -1,7 +1,8 @@
 /* ──── 主模板提供的全局 ──── */
 const PAGE_KEY = '__PAGE_KEY__';
 const RESTART_KEY = '__RESTART_KEY__';
-const PLANNED_RESTART_KEY = '__PLANNED_RESTART_KEY__';
+/* 计划重启走真路由(要带 ?reason= 维护原因;隐藏 action 的 provider 不接参数) */
+const PLANNED_RESTART_ROUTE = '/api/ext/lgtbot/planned-restart';
 /* 服务端渲染时注入的「计划重启」当前状态(1=维护模式开启) */
 const PLANNED_RESTART_ON = '__PLANNED_ON__' === '1';
 const REFRESH_MS = 3000;
@@ -84,15 +85,26 @@ function applyPlannedRestartUI(on) {
 document.getElementById('planned-restart-btn').addEventListener('click', async () => {
   const btn = document.getElementById('planned-restart-btn');
   const isOn = btn.classList.contains('active');
-  const ok = await dashConfirm(
-    isOn
-      ? '确认取消计划重启？\n\n将立即恢复玩家创建新游戏。'
-      : '确认启用计划重启？\n\n启用后玩家无法创建新游戏（进行中的对局与已创建的房间不受影响），用于在重启前逐渐清空对局；真正重启后自动恢复。',
-    {level: isOn ? 'info' : 'warn'}
-  );
-  if (!ok) return;
+  let reason = '';
+  if (isOn) {
+    const ok = await dashConfirm('确认取消计划重启？\n\n将立即恢复玩家创建新游戏。',
+                                 {level: 'info'});
+    if (!ok) return;
+  } else {
+    /* 开启时用 prompt 收集维护原因(可留空)—— 原因会显示在玩家创建新游戏时
+       收到的维护提示里。取消 prompt(返回 null)= 放弃开启。 */
+    const input = await dashPrompt(
+      '启用计划重启？\n\n启用后玩家无法创建新游戏（进行中的对局与已创建的房间不受影响），用于在重启前逐渐清空对局；真正重启后自动恢复。\n\n可填写维护原因（将展示给玩家）：',
+      {defaultValue: '', okText: '启用', level: 'warn'}
+    );
+    if (input === null) return;
+    reason = (input || '').trim();
+  }
   try {
-    const r = await fetch(apiUrl(PLANNED_RESTART_KEY), { cache: 'no-store' });
+    /* TOKEN_QS 可能为空 → 分隔符要动态判断(同 dashboard.js 的 BIND_BOT_ROUTE) */
+    const url = PLANNED_RESTART_ROUTE + TOKEN_QS +
+      (reason ? (TOKEN_QS ? '&' : '?') + 'reason=' + encodeURIComponent(reason) : '');
+    const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const text = await r.text();
     const doc = new DOMParser().parseFromString(text, 'text/html');

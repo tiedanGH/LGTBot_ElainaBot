@@ -113,7 +113,7 @@ _P_NOTICE   = r'^/?更新公告$'
 _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启$'
-_P_PLANNED  = r'^/?计划重启$'
+_P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
 _P_STATS    = r'^/?数据统计$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
@@ -151,13 +151,26 @@ def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
         return
     state.pending_new_game_name[key] = m.group(1)
 
-_PLANNED_RESTART_NOTICE = (
-    '## 🚧 维护提醒\n'
-    '\n'
-    '机器人**即将重启更新**，已暂停创建新游戏，进行中的对局与已创建的房间不受影响。\n'
-    '\n'
-    '> 请稍后再试，感谢您的理解 🌹'
-)
+def _planned_restart_notice() -> str:
+    """构造「计划重启」维护提示 —— 每次现拼,带上当前进行中对局数与维护原因。
+
+    · 进行中对局数取自 ``state.active_matches``,为 0 时提示「可随时重启」,让玩家知道等待即将结束。
+    · 维护原因由管理员在开启维护模式时填写(指令 ``/计划重启 <原因>`` 或面板输入框),
+      未填写则不显示该段。原因是管理员可控文本,仍按 markdown 语境转义,防止奇怪字符把整条消息排版搞乱。
+    """
+    parts = [
+        '## 🚧 维护提醒',
+        '',
+        '机器人**即将重启更新**，已暂停创建新游戏，进行中的对局与已创建的房间不受影响。',
+    ]
+    reason = state.planned_restart_reason()
+    if reason:
+        parts += ['', f'📌 维护原因：{helpers.sanitize_md_name(reason)}']
+    remaining = len(state.active_matches)
+    parts += ['', (f'🎮 剩余对局：**{remaining}** 局'
+                   if remaining else '🎮 当前已无进行中的对局，**随时可能重启**')]
+    parts += ['', '> 请稍后再试，感谢您的理解 🌹']
+    return '\n'.join(parts)
 
 
 def _is_exclusive_command(text: str) -> bool:
@@ -686,7 +699,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     if state.is_planned_restart() and _NEW_GAME_RE.match(content):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
-        await event.reply(_PLANNED_RESTART_NOTICE, buttons=buttons.build_support_buttons())
+        await event.reply(_planned_restart_notice(), buttons=buttons.build_support_buttons())
         return
 
     # 昵称写回:框架自身按「首见即定」记录 users.name,这里补"最新化" ——
@@ -840,7 +853,7 @@ async def lgtbot_interaction_dispatch(event, match):
     if state.is_planned_restart() and _NEW_GAME_RE.match(content):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
-        await event.reply(_PLANNED_RESTART_NOTICE, buttons=buttons.build_support_buttons())
+        await event.reply(_planned_restart_notice(), buttons=buttons.build_support_buttons())
         return
 
     # 昵称写回(与 lgtbot_dispatch 对称)。按钮活跃本身由框架记录 ——
@@ -949,13 +962,24 @@ def schedule_exec_after(delay: float = 0.5, on_failure=None) -> None:
 # `owner_only=True` 框架内置:非主人触发时直接回 owner_only 模板,不进函数体。
 # WebUI 重启按钮也走同一对 helper —— 见 webui/main.py::_render_restart。
 
-def toggle_planned_restart() -> tuple[bool, str]:
-    """翻转「计划重启」维护模式,返回 (新状态, 提示文案)。命令 / WebUI 共用。"""
+def toggle_planned_restart(reason: str = '') -> tuple[bool, str]:
+    """翻转「计划重启」维护模式,返回 (新状态, 提示文案)。命令 / WebUI 共用。
+
+    ``reason`` 为管理员填写的维护原因,仅在**开启**时记录并展示给玩家
+    (见 ``_planned_restart_notice``);关闭时由 ``state.set_planned_restart``
+    一并清掉。回执里带上剩余进行中对局数,方便管理员判断还要等多久。
+    """
     now_on = not state.is_planned_restart()
-    state.set_planned_restart(now_on)
+    reason = (reason or '').strip()
+    state.set_planned_restart(now_on, reason)
     if now_on:
-        log.warning('🚧 [计划重启] 维护模式已启用：禁用新游戏创建')
-        return True, '🚧 计划重启已启用：已禁用新游戏创建。'
+        remaining = len(state.active_matches)
+        log.warning(f'🚧 [计划重启] 维护模式已启用：禁用新游戏创建'
+                    f'（剩余对局 {remaining}）' + (f'，原因：{reason}' if reason else ''))
+        msg = f'🚧 计划重启已启用：已禁用新游戏创建（剩余进行中对局 {remaining} 局）。'
+        if reason:
+            msg += f'\n📌 维护原因：{reason}'
+        return True, msg
     log.warning('✅ [计划重启] 维护模式已取消：恢复新游戏创建')
     return False, '✅ 计划重启已取消：已恢复新游戏创建。'
 
@@ -1121,7 +1145,7 @@ async def lgtbot_admin_interrupt(event, match):
 
 @handler(_P_PLANNED,
          name='计划重启',
-         desc='切换维护模式:暂停创建新游戏',
+         desc='切换维护模式:暂停创建新游戏 (可带维护原因:计划重启 <原因>)',
          owner_only=True,
          event_types=_LGT_MSG_EVENTS,
          priority=100,
@@ -1131,12 +1155,17 @@ async def lgtbot_planned_restart(event, match):
 
     与真「重启」互补:先启用本模式挡住新房间,等进行中的对局自然结束,
     再发「重启」平滑换进程(重启后本模式自动恢复关闭)。
+
+    「计划重启 <原因>」可带维护原因,原因会展示在玩家创建新游戏时收到的
+    维护提示里(关闭维护模式时自动清空,故关闭指令不必带原因)。
     """
     if helpers.is_foreign_event(event):
         return
-    _on, msg = toggle_planned_restart()
+    reason = (match.group(1) or '').strip() if match and match.lastindex else ''
+    _on, msg = toggle_planned_restart(reason)
     audit.record('restart', '计划重启模式',
-                 '已开启维护模式' if _on else '已取消维护模式', src=audit.SRC_CMD)
+                 (f'已开启维护模式' + (f'（原因：{reason}）' if reason else ''))
+                 if _on else '已取消维护模式', src=audit.SRC_CMD)
     await event.reply(msg)
 
 

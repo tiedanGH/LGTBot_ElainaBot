@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -482,8 +483,57 @@ async def test_planned_restart_notice_carries_support_buttons(patched_downstream
     await dispatcher.lgtbot_dispatch(event, None)
 
     event.reply.assert_awaited_once()
-    assert event.reply.await_args.args[0] == dispatcher._PLANNED_RESTART_NOTICE
+    assert event.reply.await_args.args[0] == dispatcher._planned_restart_notice()
     assert event.reply.await_args.kwargs['buttons'] == buttons.build_support_buttons()
+
+
+def test_planned_restart_notice_shows_reason_and_remaining():
+    """维护提示带「剩余进行中对局数」与管理员填写的「维护原因」;
+    原因经 markdown 转义;无对局时改说「随时可能重启」;关闭维护模式清掉原因。"""
+    from plugins.LGTBot_ElainaBot.mod import state as st
+    st.active_matches.clear()
+    st.set_planned_restart(False)
+    try:
+        # 无对局 + 无原因
+        st.set_planned_restart(True)
+        txt = dispatcher._planned_restart_notice()
+        assert '当前已无进行中的对局' in txt and '维护原因' not in txt
+        # 有对局 + 有原因(带 markdown 特殊字符 → 转义后不破坏排版)
+        st.active_matches['g:1'] = {'target_id': '1', 'is_uid': False, 'game': 'X', 'since': 0}
+        st.active_matches['g:2'] = {'target_id': '2', 'is_uid': False, 'game': 'Y', 'since': 0}
+        st.set_planned_restart(True, '数据库迁移 *紧急*')
+        txt = dispatcher._planned_restart_notice()
+        assert '剩余进行中的对局：**2** 局' in txt
+        assert '📌 维护原因：' in txt and r'\*紧急\*' in txt
+        # 关闭 → 原因清空(下次开启不复用旧原因)
+        st.set_planned_restart(False)
+        assert st.planned_restart_reason() == ''
+    finally:
+        st.active_matches.clear()
+        st.set_planned_restart(False)
+
+
+async def test_planned_restart_command_accepts_reason(monkeypatch):
+    """「计划重启 <原因>」记录原因并在回执里回显;不带原因时同旧行为。"""
+    from plugins.LGTBot_ElainaBot.mod import state as st
+    st.active_matches.clear()
+    st.set_planned_restart(False)
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    try:
+        ev = _mock_event(is_group=True, group_id='G1', user_id='U1',
+                         content='计划重启 例行维护')
+        ev.reply = AsyncMock()
+        m = re.match(dispatcher._P_PLANNED, '计划重启 例行维护')
+        await dispatcher.lgtbot_planned_restart(ev, m)
+        assert st.is_planned_restart() and st.planned_restart_reason() == '例行维护'
+        assert '例行维护' in ev.reply.await_args.args[0]
+        # 再次触发(关闭)→ 原因清空
+        ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='计划重启')
+        ev2.reply = AsyncMock()
+        await dispatcher.lgtbot_planned_restart(ev2, re.match(dispatcher._P_PLANNED, '计划重启'))
+        assert not st.is_planned_restart() and st.planned_restart_reason() == ''
+    finally:
+        st.set_planned_restart(False)
 
 
 def test_match_list_is_exclusive_command():

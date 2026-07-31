@@ -78,5 +78,13 @@ def is_planned_restart() -> bool:
     return bool(_p.get('planned_restart'))
 
 
-def set_planned_restart(on: bool) -> None:
+def set_planned_restart(on: bool, reason: str = '') -> None:
+    """开 / 关维护模式。``reason`` 为管理员填写的原因(仅开启时有意义,
+    会展示在玩家收到的维护提示里);关闭时一并清掉,避免下次开启复用旧原因。"""
     _p['planned_restart'] = bool(on)
+    _p['planned_restart_reason'] = (reason or '').strip() if on else ''
+
+
+def planned_restart_reason() -> str:
+    """当前维护原因('' = 未填写);跨热重载持久,同 planned_restart 标志。"""
+    return str(_p.get('planned_restart_reason') or '')
