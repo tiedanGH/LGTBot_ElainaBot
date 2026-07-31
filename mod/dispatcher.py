@@ -1126,6 +1126,10 @@ async def lgtbot_admin_interrupt(event, match):
         audit.record('match', '群管中断对局',
                      f'群 {gid} / 操作者 {uid} / 游戏 {game}', src=audit.SRC_CMD)
         log.info(f'🎮 [管理中断] 群管 {uid} 代理中断 群 {gid} 的对局({game})')
+        # 登记一次性 @ 改写,把下一条回执的 mention 换回真正执行指令的群管
+        # (见 callbacks.register_mention_rewrite:限本群 + 5s + 用完即弃)。
+        from . import callbacks as _callbacks      # 函数内导入,避免模块级互引
+        _callbacks.register_mention_rewrite(key, send_uid, uid)
     try:
         if event.is_group and gid:
             threading.Thread(

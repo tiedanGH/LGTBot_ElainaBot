@@ -265,6 +265,43 @@ def test_match_event_multiplayer_prefers_current_game_over_pending():
     assert 'g:mp1' not in state.pending_new_game_name
 
 
+def test_mention_rewrite_for_proxied_admin_interrupt():
+    """%中断 群管代理:引擎回执里的 @引擎管理员 被改写回 @真实操作者。
+
+    一次性(命中即注销,不影响后续消息)+ 限 target + 5s 过期,避免误伤真的
+    要 @ 该管理员的消息。"""
+    key = 'g:GX'
+    callbacks._mention_rewrites.clear()
+    try:
+        callbacks.register_mention_rewrite(key, 'ENGINE_ADMIN', 'GROUP_ADMIN')
+        # 命中:mention 被替换,其余内容不动
+        out = callbacks._apply_mention_rewrite(key, '<@ENGINE_ADMIN>\n中断成功')
+        assert out == '<@GROUP_ADMIN>\n中断成功'
+        # 已注销:同样的后续消息不再被改写(引擎管理员本人若在该群玩游戏不受影响)
+        assert callbacks._apply_mention_rewrite(key, '<@ENGINE_ADMIN> 轮到你了') == \
+            '<@ENGINE_ADMIN> 轮到你了'
+        # 不含目标 mention 的消息不消耗登记(等真正的回执或自然过期)
+        callbacks.register_mention_rewrite(key, 'ENGINE_ADMIN', 'GROUP_ADMIN')
+        assert callbacks._apply_mention_rewrite(key, '别人的消息') == '别人的消息'
+        assert key in callbacks._mention_rewrites
+        # 过期后不再改写
+        f, t, _exp = callbacks._mention_rewrites[key]
+        callbacks._mention_rewrites[key] = (f, t, 0.0)
+        assert callbacks._apply_mention_rewrite(key, '<@ENGINE_ADMIN> x') == \
+            '<@ENGINE_ADMIN> x'
+        # 其他 target 不受影响
+        callbacks.register_mention_rewrite('g:OTHER', 'ENGINE_ADMIN', 'GROUP_ADMIN')
+        assert callbacks._apply_mention_rewrite(key, '<@ENGINE_ADMIN> y') == \
+            '<@ENGINE_ADMIN> y'
+        # 自我改写 / 空参数不登记
+        callbacks._mention_rewrites.clear()
+        callbacks.register_mention_rewrite(key, 'SAME', 'SAME')
+        callbacks.register_mention_rewrite(key, '', 'X')
+        assert not callbacks._mention_rewrites
+    finally:
+        callbacks._mention_rewrites.clear()
+
+
 def test_game_started_attaches_game_help_button():
     """开局广播(game_started)挂「🎮 游戏帮助」—— data='帮助'(不带斜杠,引擎在
     match 上下文解释为当前游戏帮助)、type=1 callback、style=4,与未知游戏指令

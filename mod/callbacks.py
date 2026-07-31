@@ -1004,6 +1004,43 @@ def cb_get_user_avatar_url(uid: str) -> str:
 
 # ──────── 文本发送 ────────────────────────────────────────────────────────
 
+# ──────── 代理身份回执的 @ 改写(%中断 群管代理用)─────────────────────────
+# dispatcher 的 %中断 受限代理会把发给引擎的 uid 换成已配置的引擎管理员,于是引擎回执里的
+# ``At(uid)`` 变成 <@引擎管理员> —— 群里看到的是"@某个陌生人 中断成功",而不是真正点了指令的那位群管。
+#
+# 这里给发送路径挂一个**一次性、限时、限 target** 的 mention 改写:dispatcher 代理派发前登记
+# (target_key → 引擎管理员uid → 真实操作者uid),引擎的下一条 回执命中即改写并立即注销。
+# 做成"一次性 + 5s 过期"是为了不误伤后续任何真的要 @ 该管理员的消息(例如该管理员本人正在这个群里玩游戏)。
+_MENTION_REWRITE_TTL_S = 5.0
+# key → (from_uid, to_uid, expires_at)
+_mention_rewrites: dict[str, tuple[str, str, float]] = {}
+
+
+def register_mention_rewrite(key: str, from_uid: str, to_uid: str) -> None:
+    """登记一次性 @ 改写(供 dispatcher 的代理指令调用)。"""
+    if not (key and from_uid and to_uid) or from_uid == to_uid:
+        return
+    _mention_rewrites[key] = (from_uid, to_uid,
+                              time.monotonic() + _MENTION_REWRITE_TTL_S)
+
+
+def _apply_mention_rewrite(key: str, msg: str) -> str:
+    """若本 key 有未过期的改写登记且 msg 里确实含该 mention,替换并注销。"""
+    ent = _mention_rewrites.get(key)
+    if ent is None:
+        return msg
+    from_uid, to_uid, expires = ent
+    if time.monotonic() > expires:
+        _mention_rewrites.pop(key, None)
+        return msg
+    token = f'<@{from_uid}>'
+    if token not in msg:
+        return msg                      # 不是目标回执,留给下一条(直到过期)
+    _mention_rewrites.pop(key, None)     # 一次性:命中即注销
+    log.debug(f'[%中断] 回执 @ 改写: {from_uid} → {to_uid}')
+    return msg.replace(token, f'<@{to_uid}>')
+
+
 def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """C++ → Python：发送文本消息（fire-and-forget,不阻塞 C++ 调用线程）
 
@@ -1024,6 +1061,8 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """
     key = helpers.target_key(target_id, is_uid)
     extra_buttons = state.pending_buttons.pop(key, None)
+    # 代理指令(%中断)的回执把 @引擎管理员 改回 @真实操作者;无登记时原样返回
+    msg = _apply_mention_rewrite(key, msg)
     # 日志是纯文本展示语境:引擎文本里源头转义的昵称(\#foo)还原后再记录,
     # 实际发送仍用带转义的 msg(markdown 语境)
     page_logs.log_outgoing(target_id, is_uid, helpers.strip_md_escapes(msg))

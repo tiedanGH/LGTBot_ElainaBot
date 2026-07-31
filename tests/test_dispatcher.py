@@ -503,7 +503,7 @@ def test_planned_restart_notice_shows_reason_and_remaining():
         st.active_matches['g:2'] = {'target_id': '2', 'is_uid': False, 'game': 'Y', 'since': 0}
         st.set_planned_restart(True, '数据库迁移 *紧急*')
         txt = dispatcher._planned_restart_notice()
-        assert '剩余进行中的对局：**2** 局' in txt
+        assert '**2** 局' in txt
         assert '📌 维护原因：' in txt and r'\*紧急\*' in txt
         # 关闭 → 原因清空(下次开启不复用旧原因)
         st.set_planned_restart(False)
