@@ -32,7 +32,7 @@ function auditFmtTime(ts) {
          String(d.getSeconds()).padStart(2, '0');
 }
 
-/* 相对时间,同 backup tab 的规则(该函数非全局,这里各 tab 自带一份) */
+/* 相对时间,同 backup tab 的规则(该函数非全局,这里各 tab 自带一份)。 */
 function auditFmtRelative(ts) {
   if (!ts) return '—';
   const diff = Math.floor(Date.now() / 1000) - ts;
@@ -45,7 +45,9 @@ function auditFmtRelative(ts) {
                String(d.getMinutes()).padStart(2, '0');
   if (d.toDateString() === today.toDateString()) return `今天 ${hhmm}`;
   if (d.toDateString() === yesterday.toDateString()) return `昨天 ${hhmm}`;
-  return auditFmtTime(ts);
+  return d.getFullYear() + '-' +
+         String(d.getMonth() + 1).padStart(2, '0') + '-' +
+         String(d.getDate()).padStart(2, '0') + ' ' + hhmm;
 }
 
 /* cat 短码 → {emoji, label};未知短码回退 ❓ + 原文 */

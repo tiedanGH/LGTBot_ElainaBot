@@ -58,13 +58,15 @@
 .audit-table {
   width: 100%; border-collapse: collapse; font-size: 13px;
   min-width: 640px;     /* 列再窄就触发水平滚动而不是挤压(来源列不隐藏) */
+  table-layout: fixed;
 }
 .audit-table thead {
   background: var(--panel-2);
   border-bottom: 1px solid var(--border);
 }
+/* 表头文案在各自单元格内居中 */
 .audit-table th {
-  text-align: left; padding: 10px 12px;
+  text-align: center; padding: 10px 12px;
   font-size: 12px; font-weight: 600; color: var(--text-muted);
   white-space: nowrap;
 }
@@ -75,21 +77,22 @@
 .audit-table tbody tr:last-child td { border-bottom: none; }
 .audit-table tbody tr:hover { background: var(--hover); }
 
-.audit-col-time   { width: 12%; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.audit-col-cat    { width: 12%; white-space: nowrap; }
-.audit-col-action { width: 22%; }
-.audit-col-detail { width: 38%; }
-.audit-col-src    { width: 8%;  white-space: nowrap; }
-.audit-col-result { width: 8%;  white-space: nowrap; }
+/* 定宽列:数字按各自最长文案量出来,再留一点余量。详情列不给宽度。 */
+.audit-col-time   { width: 120px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.audit-col-cat    { width: 108px; font-size: 12px; white-space: nowrap; }
+.audit-col-action { width: 196px; }
+.audit-col-src    { width: 68px;  white-space: nowrap; }
+.audit-col-result { width: 76px;  white-space: nowrap; }
 
-/* 详情单元:单行省略 + title 全文;点击切换展开(pre-wrap 显示完整多行) */
+/* 详情单元:单行省略 + title 全文;点击切换展开(pre-wrap 显示完整多行)。
+   不设 max-width —— 宽度由 td 决定,面板越宽能直读的详情越长。 */
 .audit-detail-text {
-  display: block; max-width: 360px;
+  display: block;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   cursor: pointer;
 }
 .audit-detail-text.expanded {
-  max-width: none; white-space: pre-wrap; word-break: break-all;
+  white-space: pre-wrap; word-break: break-all;
 }
 
 /* 来源 / 结果徽标 —— 复用 main.css 的 dash-badge / dash-msg-* 主题色,仅缩小尺寸适配表格行高 */
@@ -114,7 +117,11 @@
   .audit-status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .audit-status-card { padding: 10px 12px; }
   .audit-status-value { font-size: 15px; }
-  .audit-table { min-width: 560px; }
+  .audit-table { min-width: 600px; }
   .audit-table th, .audit-table td { padding: 7px 8px; font-size: 12px; }
-  .audit-detail-text { max-width: 180px; }
+  .audit-col-time   { width: 112px; }
+  .audit-col-cat    { width: 100px; }
+  .audit-col-action { width: 140px; }
+  .audit-col-src    { width: 60px; }
+  .audit-col-result { width: 68px; }
 }
