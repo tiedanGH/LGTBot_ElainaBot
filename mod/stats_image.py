@@ -312,9 +312,9 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             d.rounded_rectangle((cx, cy, cx + 5, cy + tile_h), radius=2, fill=fg)
         _icon(d, 'warn' if near else 'mail', cx + 24, cy + (tile_h - 52) // 2, fg)
         scope = '本群' if pq.get('is_group') else '本私信'
-        d.text((cx + 96, cy + 24), f'{scope}今日主动消息额度',
+        d.text((cx + 96, cy + 24), f'{scope}今日主动消息',
                font=_font(24), fill=_TEXT_MUTED)
-        val_txt = f'{_fmt(used)} / {_fmt(limit)}' if limit else f'{_fmt(used)}（未设上限）'
+        val_txt = f'{_fmt(used)} / {_fmt(limit)}' if limit else f'{_fmt(used)}'
         _bold_text(d, (cx + 96, cy + 54), val_txt, _font(36), fg)
         tip = ''
         if exhausted:

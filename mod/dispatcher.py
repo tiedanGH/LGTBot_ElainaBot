@@ -644,7 +644,7 @@ async def lgtbot_data_stats(event, match):
                 lines.append(f'{icon} {scope}今日主动消息: '
                              f'{pq["used"]}/{pq["limit"]} 条{tail}')
             else:
-                lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条（未设上限）')
+                lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条')
     await event.reply('\n'.join(lines))
 
 
