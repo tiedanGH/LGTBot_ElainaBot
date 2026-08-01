@@ -10,8 +10,10 @@
 
 发送流程（跑在 asyncio loop,per-target Lock 串行）：
   · _serialized_text_send            Lock → _send_text_quota_managed → 消费教学标记
-  · _serialized_image_send           Lock → _send_image_quota_managed → 消费教学标记
+  · _serialized_mixed_send           Lock → _send_mixed_message → 消费教学标记
   · _send_text_quota_managed         配额管理 + 自动追加刷新按钮
+  · _send_mixed_message              图文混排:全图上传成功 → 单条 markdown 按原
+                                     排版内联;否则退回逐图媒体通道
   · _send_image_quota_managed        配额管理 + 上传 + media 字段（支持 event_id）
 
 设计要点：cb_send_text/image_message 不再阻塞 C++ 调用线程 —— lgtbot 的 read
@@ -24,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import os
+import re
 import sys
 import time
 
@@ -793,7 +796,7 @@ def _schedule_refresh_tip(target_id: str, is_uid: bool) -> None:
 def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
     """若本 key 之前在 cb_match_event(kind='new_game')里被打了标记,这里弹掉并发出。
 
-    由 ``_serialized_text_send`` / ``_serialized_image_send`` 在 per-target Lock
+    由 ``_serialized_text_send`` / ``_serialized_mixed_send`` 在 per-target Lock
     持有期间、``_send_text/image_quota_managed`` 已 await 完毕之后调用。
     教学提示走 ``_schedule_refresh_tip`` 投到 asyncio loop,内部再次抢同一把
     Lock —— 当前 send task 释放锁后,教学提示 task 自然排到下一位,QQ 端先
@@ -857,7 +860,7 @@ def _schedule_dm_warning(target_id: str, is_uid: bool) -> None:
 def _consume_pending_dm_warn(key: str, target_id: str, is_uid: bool) -> None:
     """若 cb_match_event 标了私信限制 key,这里弹掉并发出提示。
 
-    由 ``_serialized_text_send`` / ``_serialized_image_send`` 在开局公告
+    由 ``_serialized_text_send`` / ``_serialized_mixed_send`` 在开局公告
     发送完毕后调用 —— 与 ``_consume_pending_tip`` 并列。
     """
     if key not in _pending_dm_warn_keys:
@@ -1211,12 +1214,65 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
 
 # ──────── 图片发送 ────────────────────────────────────────────────────────
 
-def cb_send_image_message(target_id: str, is_uid: bool, image_path: str, content: str = ''):
-    """C++ → Python：发送图片（fire-and-forget,理由同 ``cb_send_text_message``）
+# ──────── 图文混排(还原引擎排版) ─────────────────────────────────────────
+# 桥接层在排版串里用 \x01IMG<i>\x01 占位符标出每张图片在原文里的**位置**(见 LGTBot_ElainaBot.cc::HandleMessages)。
+# 引擎给玩家看的文案不含控制字符,不存在与正文冲突的可能。有了位置信息,「图片在文字之前」「文字—图片—文字」
+# 这类排版才能原样送到 QQ,而不是一律压成「文字在前、图片在后」。
+_IMG_PLACEHOLDER_RE = re.compile('\x01IMG(\\d+)\x01')
 
-    LGTBot 通过 popen 异步调用 markdown2image 生成图片，存在小概率回调到达
-    时文件还未落盘，这里短暂轮询等待最多 2s。文件读完后投到 asyncio loop 串行
-    发送,本函数立即返回让 C++ read thread 释放 Match.mutex_。
+
+def _split_layout(content: str, n_images: int) -> list[tuple[str, object]]:
+    """把带占位符的排版串拆成有序段:``('text', str)`` / ``('image', idx)``。
+
+    占位符一个都没有时(旧桥接层 / 纯 caption 调用)退化为「文字在前,图片依次在后」
+    与 2.7 及以前的行为一致。占位符没覆盖到的图片补在末尾,保证任何情况下都不丢图。
+    """
+    content = content or ''
+    segs: list[tuple[str, object]] = []
+    seen: set[int] = set()
+    pos = 0
+    for m in _IMG_PLACEHOLDER_RE.finditer(content):
+        idx = int(m.group(1))
+        if m.start() > pos:
+            segs.append(('text', content[pos:m.start()]))
+        pos = m.end()
+        if 0 <= idx < n_images and idx not in seen:
+            seen.add(idx)
+            segs.append(('image', idx))
+    if pos < len(content):
+        segs.append(('text', content[pos:]))
+    segs.extend(('image', i) for i in range(n_images) if i not in seen)
+    return segs
+
+
+def _layout_plain_text(segs) -> str:
+    """排版段里的纯文字部分(日志展示 / 媒体兜底的 caption 用)。"""
+    return ''.join(v for kind, v in segs if kind == 'text')
+
+
+def _build_layout_markdown(segs, urls: dict, sizes: dict) -> str:
+    """按段序拼 markdown:文字原样保留,图片转 ``![image #Wpx #Hpx](url)``。
+
+    段间统一用空行分隔 —— QQ markdown 里图片要独占段落才按块渲染。文字段自身
+    首尾的换行先剥掉,避免相邻段之间出现连续空行。
+    """
+    parts = []
+    for kind, val in segs:
+        if kind == 'text':
+            text = val.strip('\n')
+            if text.strip():
+                parts.append(text)
+        else:
+            width, height = sizes[val]
+            parts.append(f'![image #{width}px #{height}px]({urls[val]})')
+    return '\n\n'.join(parts)
+
+
+def _read_rendered_image(image_path: str) -> bytes | None:
+    """读一张引擎渲染出来的图片;文件未落盘 / 读失败返回 None。
+
+    LGTBot 通过 popen 异步调用 markdown2image 生成图片,存在小概率回调到达时
+    文件还没落盘,这里短暂轮询等待最多 2s。
     """
     if not os.path.isfile(image_path):
         deadline = time.time() + 2.0
@@ -1228,24 +1284,47 @@ def cb_send_image_message(target_id: str, is_uid: bool, image_path: str, content
             log.warning(f'markdown2image 二进制缺失: {mk_bin} —— 请重新执行 build.sh')
         else:
             log.warning(f'图片渲染失败 (markdown2image 调用未生成文件): {image_path}')
-        return
-
+        return None
     try:
         with open(image_path, 'rb') as f:
-            data = f.read()
+            return f.read()
     except Exception as e:
         log.warning(f'读取图片失败: {e}')
+        return None
+
+
+def cb_send_image_message(target_id: str, is_uid: bool, image_paths, content: str = ''):
+    """C++ → Python：发送图文消息（fire-and-forget,理由同 ``cb_send_text_message``）
+
+    ``image_paths`` 是本次 flush 的**全部**图片路径(当前桥接层传 list;未重新编译的旧桥接层逐张传 str,按单图处理)。
+    ``content`` 是带 ``\\x01IMG<i>\\x01`` 占位符的排版串,占位符标出每张图在原文里的位置。
+
+    图片读完后投到 asyncio loop 串行发送,本函数立即返回让 C++ read thread 释放 Match.mutex_。
+    读不出来的图片直接从排版里剔除(其余照发);一张都没读到但有文字时退化成纯文本消息,不让文案跟着图片一起丢。
+    """
+    paths = [image_paths] if isinstance(image_paths, str) else [str(p) for p in image_paths]
+    images = {}      # 原始索引 → (data, filename);读失败的索引缺席
+    for i, path in enumerate(paths):
+        data = _read_rendered_image(path)
+        if data is not None:
+            images[i] = (data, os.path.basename(path) or 'lgtbot.png')
+
+    segs = [s for s in _split_layout(content, len(paths))
+            if s[0] != 'image' or s[1] in images]
+    plain = _layout_plain_text(segs)
+    if not images and not plain.strip():
         return
 
-    raw_content = content or ''
+    # 本条要附的按钮(cb_match_event 先写进 pending_buttons)跟着走
+    # markdown 通道能挂按钮,媒体兜底不能,兜底时 _send_mixed_message 会把它还回去。
+    key = helpers.target_key(target_id, is_uid)
+    extra_buttons = state.pending_buttons.pop(key, None)
+
     # 日志展示用 humanize + 去转义版（纯文本更可读），实际发送时再按通道决定
     page_logs.log_outgoing(
         target_id, is_uid,
-        helpers.strip_md_escapes(helpers.humanize_mentions(raw_content)), image=True,
+        helpers.strip_md_escapes(helpers.humanize_mentions(plain)), image=bool(images),
     )
-
-    filename = os.path.basename(image_path) or 'lgtbot.png'
-    key = helpers.target_key(target_id, is_uid)
 
     loop = state.event_loop
     if loop is None or loop.is_closed():
@@ -1253,29 +1332,68 @@ def cb_send_image_message(target_id: str, is_uid: bool, image_path: str, content
         return
     try:
         asyncio.run_coroutine_threadsafe(
-            _serialized_image_send(key, target_id, is_uid, data, raw_content, filename),
+            _serialized_mixed_send(key, target_id, is_uid, segs, images, plain, extra_buttons),
             loop)
     except Exception as e:
         log.warning(f'调度图片发送失败: {e}')
 
 
-async def _serialized_image_send(key: str, target_id: str, is_uid: bool,
-                                 data: bytes, raw_content: str, filename: str) -> None:
-    """串行化的图片发送 —— 与 ``_serialized_text_send`` 共享 per-target Lock。
+async def _serialized_mixed_send(key: str, target_id: str, is_uid: bool,
+                                 segs, images: dict, plain: str, extra_buttons) -> None:
+    """串行化的图文发送 —— 与 ``_serialized_text_send`` 共享 per-target Lock。
 
-    多图场景:lgtbot 把每张图一条 cb_send_image_message 投过来,第 1 张带
-    ``raw_content`` (合并后的 caption),其余 raw_content 为空。``game_started``
-    教学标记只在「胜利!」之类文本里出现,因此只有 raw_content 非空时才尝试
-    ``_consume_pending_tip``;空 raw_content 看不到 key 也是 no-op。
+    ``game_started`` 教学标记只在「胜利!」之类文本里出现,因此只有本条带文字时
+    才尝试 ``_consume_pending_tip``;纯图片消息看不到 key 也是 no-op。
     """
     async with _get_send_lock(key):
-        await _send_image_quota_managed(target_id, is_uid, data, raw_content, filename)
-        if raw_content:
+        await _send_mixed_message(target_id, is_uid, segs, images, plain, extra_buttons)
+        if plain:
             _consume_pending_tip(key, target_id, is_uid)
             _consume_pending_dm_warn(key, target_id, is_uid)
 
 
-async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filename):
+async def _send_mixed_message(target_id: str, is_uid: bool, segs, images: dict,
+                              plain: str, extra_buttons) -> None:
+    """图文混排发送。
+
+    通道 A(全部图片上传成功):拼一条 markdown,文字与图片**按引擎原顺序**内联,
+    整个 flush 只发一条消息 —— 多图也不再拆条,顺带省下配额。走 ``_send_text_quota_managed``:
+    markdown 与文本在框架侧是同一种 msg_type,配额 / 主动直推 / 刷新按钮逻辑完全复用。
+
+    通道 B(任一图片上传失败):退回媒体消息(msg_type=7)。它一条只能带一个媒体、
+    content 也不解析 markdown,排版无法还原 —— 压平成 2.7 的行为(首图带全部文字,其余图单发)。
+    按钮挂不上媒体消息,还给 pending_buttons 让下一条文本带。
+    """
+    idxs = [i for kind, i in segs if kind == 'image']
+    user_id_for_cos = target_id if is_uid else ''
+    urls: dict = {}
+    if idxs:
+        results = await asyncio.gather(*[
+            uploader.upload_image(images[i][0], images[i][1], user_id=user_id_for_cos,
+                                  target_id=target_id, target_is_uid=is_uid)
+            for i in idxs
+        ])
+        urls = dict(zip(idxs, results))
+
+    if all(urls.get(i) for i in idxs):
+        sizes = {i: uploader.get_image_size(images[i][0]) for i in idxs}
+        await _send_text_quota_managed(target_id, is_uid,
+                                       _build_layout_markdown(segs, urls, sizes),
+                                       extra_buttons)
+        return
+
+    if extra_buttons:
+        state.pending_buttons.setdefault(helpers.target_key(target_id, is_uid), extra_buttons)
+    for n, i in enumerate(idxs):
+        data, filename = images[i]
+        # pre_url 把已知结果透传下去:成功的图不再重传,失败的('')直接走媒体
+        await _send_image_quota_managed(target_id, is_uid, data,
+                                        plain if n == 0 else '', filename,
+                                        pre_url=urls.get(i) or '')
+
+
+async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filename,
+                                    *, pre_url: str | None = None):
     """图片发送核心：配额管理 + 优先图床+markdown，失败回退 media
 
     发送通道二选一：
@@ -1286,6 +1404,9 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
 
     主动直推(全量群 / 沙箱私信)时不等刷新按钮,直接主动消息(``ref_type=''``
     透传到下游)。私信无有效 msg_id 时直接丢弃(同 _send_text_quota_managed)。
+
+    ``pre_url`` 是上游(``_send_mixed_message`` 的媒体兜底分支)已经拿到的上传结果:
+    非空 = 直接用该 URL,``''`` = 已知上传失败、跳过重传直接走媒体,``None``(默认)= 本函数自己上传。
     """
     key = helpers.target_key(target_id, is_uid)
     # 直推私信 / 全量群:前 5 次仍走 msg_id 被动回复,仅配额耗尽后主动直推
@@ -1348,8 +1469,9 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
     # ── 通道 A：尝试图床 → markdown 内嵌 ─────────────────────────────────
     # target 一并透传:qq_file 图床用当前消息目标作上传作用域(其余图床忽略)
     user_id_for_cos = target_id if is_uid else ''
-    image_url = await uploader.upload_image(data, filename, user_id=user_id_for_cos,
-                                            target_id=target_id, target_is_uid=is_uid)
+    image_url = pre_url if pre_url is not None else await uploader.upload_image(
+        data, filename, user_id=user_id_for_cos,
+        target_id=target_id, target_is_uid=is_uid)
     if image_url:
         if await _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
                                       raw_content, image_url, data, count,

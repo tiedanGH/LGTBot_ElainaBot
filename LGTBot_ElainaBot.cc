@@ -814,34 +814,47 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
  * HandleMessages — 将引擎消息列表合并为最少的对外发送
  *
  * 合并策略（避免 "@xxx 文本" 和 "图片" 拆成两条）：
- *   1. 单次 Flush 内的所有 TEXT/MENTION 段落累积为一段 content
- *   2. 所有 IMAGE 段落收集到列表
+ *   1. 单次 Flush 内的所有 TEXT/MENTION 段落累积为一段排版串 layout
+ *   2. IMAGE 段落的**路径**收集到列表，同时在 layout 里原位留下占位符
+ *      \x01IMG<i>\x01 —— 引擎给玩家看的文案不含控制字符，不会与正文冲突
  *   3. 无图片：发一条文本
- *      有图片：第 1 张图片带 content 一起发，其余图片单独发（QQ 媒体消息每条
- *               仅能附带一个媒体，多图情况无法压缩为单条，但 @文本 不会再
- *               重复出现，符合"@+图片同一条"的最常见用例）
+ *      有图片：一次性把「图片路径表 + 排版串」交给 Python，由它按占位符还原
+ *              引擎原本的排版（图片在文字前 / 文字—图片—文字 都能原样呈现），
+ *              并把多图合并成单条 markdown（见 mod/callbacks.py）
+ *
+ * plain（去掉占位符的纯文本）只喂给 ClassifyMatchEvent —— 事件分类是按关键词
+ * find 的，占位符只出现在图片边界不会切断关键词，但保持输入干净更省心。
  *
  * QQ Markdown mention 格式：<@openid>
  */
 void HandleMessages(void* handler, const char* const id, const int is_uid,
                     const LGTBot_Message* messages, const size_t size)
 {
-    std::string content;
+    std::string layout;   // 带图片占位符,发给 Python 还原排版
+    std::string plain;    // 无占位符,仅用于事件分类
     std::vector<std::string> images;
     images.reserve(4);
+
+    const auto put_text = [&layout, &plain](const char* const s) {
+        layout.append(s);
+        plain.append(s);
+    };
 
     for (size_t i = 0; i < size; ++i) {
         const auto& msg = messages[i];
         switch (msg.type_) {
         case LGTBOT_MSG_TEXT:
-            content.append(msg.str_);
+            put_text(msg.str_);
             break;
         case LGTBOT_MSG_USER_MENTION:
-            content.append("<@");
-            content.append(msg.str_);
-            content.append(">");
+            put_text("<@");
+            put_text(msg.str_);
+            put_text(">");
             break;
         case LGTBOT_MSG_IMAGE:
+            layout.append("\x01" "IMG");
+            layout.append(std::to_string(images.size()));
+            layout.append("\x01");
             images.emplace_back(msg.str_);
             break;
         default:
@@ -856,7 +869,7 @@ void HandleMessages(void* handler, const char* const id, const int is_uid,
         // ClassifyMatchEvent 返回 nullptr 时不调 Python(无需操作)。
         if (g_match_event != nullptr) {
             std::string game_name;
-            const char* kind = ClassifyMatchEvent(content, game_name);
+            const char* kind = ClassifyMatchEvent(plain, game_name);
             if (kind != nullptr) {
                 try {
                     boost::python::call<void>(g_match_event, id, is_uid, kind, game_name);
@@ -867,15 +880,15 @@ void HandleMessages(void* handler, const char* const id, const int is_uid,
         }
 
         if (images.empty()) {
-            if (!content.empty()) {
-                boost::python::call<void>(g_send_text_message, id, is_uid, content);
+            if (!plain.empty()) {
+                boost::python::call<void>(g_send_text_message, id, is_uid, plain);
             }
         } else {
-            // 第 1 张图片附带 content（合并成一条消息），其余图片仅图片
-            for (size_t i = 0; i < images.size(); ++i) {
-                const std::string& cap = (i == 0) ? content : std::string();
-                boost::python::call<void>(g_send_image_message, id, is_uid, images[i], cap);
+            boost::python::list paths;
+            for (const auto& path : images) {
+                paths.append(path);
             }
+            boost::python::call<void>(g_send_image_message, id, is_uid, paths, layout);
         }
     } catch (...) {
         std::cerr << "[LGTBot_ElainaBot] HandleMessages dispatch failed" << std::endl;

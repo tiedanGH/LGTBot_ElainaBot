@@ -483,3 +483,120 @@ async def test_collateral_notice_dm_uses_send_to_user(monkeypatch):
     await callbacks._send_collateral_notice('USER_X', True)
     sender.send_to_user.assert_awaited_once()
     sender.send_to_group.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 图文混排:排版还原(桥接层占位符 \x01IMG<i>\x01)
+# ─────────────────────────────────────────────────────────────────────────
+
+_PNG_1x1 = (b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'
+            + (1).to_bytes(4, 'big') + (1).to_bytes(4, 'big'))
+
+
+def _img(i: int) -> str:
+    return f'\x01IMG{i}\x01'
+
+
+def test_split_layout_keeps_engine_order():
+    """占位符在文字前 → 图片段排在文字段前面(引擎的「图片换行文字」排版)。"""
+    segs = callbacks._split_layout(f'{_img(0)}\n对局结束', 1)
+    assert segs == [('image', 0), ('text', '\n对局结束')]
+
+
+def test_split_layout_supports_text_image_text():
+    segs = callbacks._split_layout(f'开局\n{_img(0)}\n轮到你了', 1)
+    assert segs == [('text', '开局\n'), ('image', 0), ('text', '\n轮到你了')]
+
+
+def test_split_layout_without_placeholder_falls_back_to_text_first():
+    """旧桥接层(无占位符)→ 文字在前、图片依次在后,与 2.7 行为一致。"""
+    assert callbacks._split_layout('说明文字', 2) == [
+        ('text', '说明文字'), ('image', 0), ('image', 1)]
+
+
+def test_split_layout_appends_images_missing_from_layout():
+    """占位符没提到的图片补在末尾 —— 任何情况下不丢图。"""
+    segs = callbacks._split_layout(f'{_img(1)}尾巴', 3)
+    assert segs == [('image', 1), ('text', '尾巴'), ('image', 0), ('image', 2)]
+
+
+def test_build_layout_markdown_interleaves():
+    segs = [('text', '\n第一段\n'), ('image', 0), ('text', '\n第二段')]
+    md = callbacks._build_layout_markdown(segs, {0: 'http://x/a.png'}, {0: (100, 50)})
+    assert md == '第一段\n\n![image #100px #50px](http://x/a.png)\n\n第二段'
+
+
+async def test_mixed_send_single_markdown_in_engine_order(monkeypatch):
+    """全部上传成功 → 一条 markdown,图片位置照引擎排版(图在文字之前)。"""
+    sender = _fake_sender()
+    _patch_send_env(monkeypatch, sender, push_all=False)
+    monkeypatch.setattr(callbacks.uploader, 'upload_image',
+                        AsyncMock(return_value='http://bed/a.png'))
+    state.full_volume_groups.add('GMIX')
+    try:
+        segs = [('image', 0), ('text', '\n游戏结束')]
+        await callbacks._send_mixed_message('GMIX', False, segs,
+                                            {0: (_PNG_1x1, 'a.png')}, '\n游戏结束', None)
+    finally:
+        state.full_volume_groups.discard('GMIX')
+
+    sender.send_to_group.assert_awaited_once()
+    md = sender.send_to_group.call_args[0][1]
+    assert md.index('![image') < md.index('游戏结束')
+
+
+async def test_mixed_send_merges_multiple_images_into_one_message(monkeypatch):
+    """多图不再拆条:一条 markdown 内联全部图片(顺带省配额)。"""
+    sender = _fake_sender()
+    _patch_send_env(monkeypatch, sender, push_all=False)
+    urls = iter(['http://bed/1.png', 'http://bed/2.png'])
+    monkeypatch.setattr(callbacks.uploader, 'upload_image',
+                        AsyncMock(side_effect=lambda *a, **k: next(urls)))
+    state.full_volume_groups.add('GMULTI')
+    try:
+        segs = [('image', 0), ('text', '中间'), ('image', 1)]
+        await callbacks._send_mixed_message(
+            'GMULTI', False, segs,
+            {0: (_PNG_1x1, '1.png'), 1: (_PNG_1x1, '2.png')}, '中间', None)
+    finally:
+        state.full_volume_groups.discard('GMULTI')
+
+    sender.send_to_group.assert_awaited_once()
+    md = sender.send_to_group.call_args[0][1]
+    assert md.index('1.png') < md.index('中间') < md.index('2.png')
+
+
+async def test_mixed_send_falls_back_to_media_and_returns_buttons(monkeypatch):
+    """图床失败 → 媒体兜底(排版压平),按钮还给 pending_buttons 等下条文本。"""
+    monkeypatch.setattr(callbacks.uploader, 'upload_image', AsyncMock(return_value=None))
+    calls = []
+
+    async def _fake_media(target_id, is_uid, data, raw_content, filename, *, pre_url=None):
+        calls.append((raw_content, pre_url))
+
+    monkeypatch.setattr(callbacks, '_send_image_quota_managed', _fake_media)
+    btns = [[{'label': 'x', 'data': '/x'}]]
+    state.pending_buttons.pop('g:GFALL', None)
+    try:
+        segs = [('image', 0), ('text', '文案')]
+        await callbacks._send_mixed_message('GFALL', False, segs,
+                                            {0: (_PNG_1x1, 'a.png')}, '文案', btns)
+        # 首图带全部文字;pre_url='' 表示已知上传失败,不再重传
+        assert calls == [('文案', '')]
+        assert state.pending_buttons.get('g:GFALL') == btns
+    finally:
+        state.pending_buttons.pop('g:GFALL', None)
+
+
+async def test_mixed_send_text_only_when_no_image_readable(monkeypatch):
+    """图片一张都没读出来 → 退化成纯文本,文案不跟着丢。"""
+    sender = _fake_sender()
+    _patch_send_env(monkeypatch, sender, push_all=False)
+    state.full_volume_groups.add('GTXT')
+    try:
+        await callbacks._send_mixed_message('GTXT', False, [('text', '只剩文字')],
+                                            {}, '只剩文字', None)
+    finally:
+        state.full_volume_groups.discard('GTXT')
+    sender.send_to_group.assert_awaited_once()
+    assert sender.send_to_group.call_args[0][1] == '只剩文字'
