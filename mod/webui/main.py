@@ -46,7 +46,7 @@ from aiohttp import web
 from core.plugin import web_pages
 from .. import audit, metrics
 from .. import state as _plugin_state
-from . import page_crash
+from . import build_api, page_crash
 from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
                page_logs, page_metrics, page_prebuilt, page_users)
 
@@ -81,6 +81,7 @@ _BUILD_KILL_KEY    = '__lgtbot_dash_build_kill'
 _BUILD_CLEAN_KEY   = '__lgtbot_dash_build_clean'
 _BUILD_REMOVE_KEY  = '__lgtbot_dash_build_remove'
 _BUILD_LOG_KEY     = '__lgtbot_dash_build_log'
+_BUILD_API_TOKEN_KEY = '__lgtbot_build_api_token'
 
 # 数据备份标签的 action 端点(JS 侧 BACKUP_KEYS 与此一一对应)
 _BACKUP_CREATE_KEY  = '__lgtbot_backup_create'
@@ -117,6 +118,9 @@ _PREBUILT_DOWNLOAD_ROUTE    = '/api/ext/lgtbot/prebuilt/download'
 _PREBUILT_TESTMIRRORS_ROUTE = '/api/ext/lgtbot/prebuilt/test-mirrors'
 _PREBUILT_MIRROR_ROUTE      = '/api/ext/lgtbot/prebuilt/mirror'
 _PREBUILT_UPLOAD_ROUTE      = '/api/ext/lgtbot/prebuilt/upload'   # 手动上传包(multipart)
+# 编译 API(供框架内其他插件调用):auth=False 免面板登录,handler 自验独立 token
+_BUILD_API_COMPILE_ROUTE    = '/api/ext/lgtbot/build/compile'
+_BUILD_API_TERMINATE_ROUTE  = '/api/ext/lgtbot/build/terminate'
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
@@ -145,6 +149,7 @@ _HIDDEN_KEYS = frozenset({
     _BUILD_CLEAN_KEY,
     _BUILD_REMOVE_KEY,
     _BUILD_LOG_KEY,
+    _BUILD_API_TOKEN_KEY,
     _BACKUP_CREATE_KEY,
     _BACKUP_LIST_KEY,
     _AUDIT_LIST_KEY,
@@ -407,6 +412,7 @@ def register():
     _register_hidden_action(_BUILD_CLEAN_KEY,   page_build.render_build_clean)
     _register_hidden_action(_BUILD_REMOVE_KEY,  page_build.render_build_remove)
     _register_hidden_action(_BUILD_LOG_KEY,     page_build.render_build_log)
+    _register_hidden_action(_BUILD_API_TOKEN_KEY, build_api.render_api_token)
 
     # 数据备份 action 端点
     # · create / list:无参,沿用 _register_hidden_action 的 fragment 协议
@@ -445,6 +451,9 @@ def register():
     web_pages.register_route('POST', _PREBUILT_TESTMIRRORS_ROUTE, page_prebuilt.test_mirrors_handler, auth=True)
     web_pages.register_route('POST', _PREBUILT_MIRROR_ROUTE, page_prebuilt.mirror_select_handler, auth=True)
     web_pages.register_route('POST', _PREBUILT_UPLOAD_ROUTE, page_prebuilt.upload_handler, auth=True)
+    # 编译 API:auth=False 跳过面板登录校验 —— handler 内部验独立 token(data/build/api_token),供框架内其他插件程序化调用
+    web_pages.register_route('POST', _BUILD_API_COMPILE_ROUTE, build_api.compile_handler, auth=False)
+    web_pages.register_route('POST', _BUILD_API_TERMINATE_ROUTE, build_api.terminate_handler, auth=False)
 
     _ensure_get_pages_filters_hidden()
 
@@ -470,5 +479,7 @@ def unregister():
     web_pages.unregister_route('POST', _PREBUILT_TESTMIRRORS_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_MIRROR_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_UPLOAD_ROUTE)
+    web_pages.unregister_route('POST', _BUILD_API_COMPILE_ROUTE)
+    web_pages.unregister_route('POST', _BUILD_API_TERMINATE_ROUTE)
     # get_pages 的 wrap 不主动 unwrap:其它插件可能后续也加了包装,贸然恢复会断链。
     # 留着的副作用仅是过滤一组已不存在的 key,无害。

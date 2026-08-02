@@ -25,6 +25,7 @@ const BUILD_KEYS = {
   clean:  '__lgtbot_dash_build_clean',
   remove: '__lgtbot_dash_build_remove',
   log:    '__lgtbot_dash_build_log',
+  apiToken: '__lgtbot_build_api_token',
 };
 
 /* 自定义目标名白名单(同后端):字母/数字/下划线/连字符,1-63 字符,
@@ -372,6 +373,43 @@ async function buildKill() {
   }
 }
 
+/* ──── 复制编译 API Token ──── */
+async function buildCopyApiToken() {
+  try {
+    const data = await buildCallAction(BUILD_KEYS.apiToken);
+    if (!data.success || !data.token) {
+      await dashAlert('❌ 获取 token 失败', {level: 'danger'});
+      return;
+    }
+    /* clipboard API 需要 https/localhost 安全上下文;HTTP 局域网面板走 textarea + execCommand 兜底 */
+    let copied = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(data.token); copied = true; } catch (e) {}
+    }
+    if (!copied) {
+      const ta = document.createElement('textarea');
+      ta.value = data.token;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { copied = document.execCommand('copy'); } catch (e) {}
+      ta.remove();
+    }
+    const masked = data.token.slice(0, 8) + '…' + data.token.slice(-4);
+    const ep = data.endpoints || {};
+    await dashAlert(
+      (copied ? '✅ API Token 已复制到剪贴板\n\n' : '⚠️ 复制失败，请手动记录：\n' + data.token + '\n\n') +
+      'Token：' + masked + '\n存储文件：' + (data.path || '') +
+      '\n\n编译端点：POST ' + (ep.compile || '') +
+      '\n中断端点：POST ' + (ep.terminate || '') +
+      '\n认证方式：Authorization: Bearer <token>',
+      {level: 'info'}
+    );
+  } catch (e) {
+    await dashAlert('❌ 请求失败：' + e.message, {level: 'danger'});
+  }
+}
+
 /* ──── 清理重编(--clean) ──── */
 function buildClean() {
   buildLaunch(
@@ -420,6 +458,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('build-bridge').addEventListener('click', buildBridge);
   document.getElementById('build-list').addEventListener('click', buildList);
   document.getElementById('build-custom').addEventListener('click', buildCustom);
+  document.getElementById('build-api-token').addEventListener('click', buildCopyApiToken);
   document.getElementById('build-kill-btn').addEventListener('click', buildKill);
   document.getElementById('build-clean').addEventListener('click', buildClean);
   document.getElementById('build-remove').addEventListener('click', buildRemove);

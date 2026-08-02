@@ -44,6 +44,7 @@ AUDIT_PATH = os.path.join(AUDIT_DIR, 'audit.json')
 SRC_PANEL = '面板'
 SRC_CMD = '指令'
 SRC_AUTO = '自动'
+SRC_API = 'API'      # 编译 API 等对其他插件开放的 HTTP 接口触发
 
 # cat 短码 → (emoji, 中文标签)。单一真相源:后端只存短码,page_audit 把
 # 此映射随 payload 下发,前端据此渲染类别徽标与筛选按钮。

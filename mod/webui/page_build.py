@@ -260,7 +260,8 @@ def _wrap_for_subprocess() -> list:
     return ['bash', '-c', _BUILD_WRAPPER]
 
 
-def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
+def _start_build(argv: list, display: str, kind: str = 'build',
+                 src: str = audit.SRC_PANEL) -> dict:
     """启动一个编译子进程。
 
     Args:
@@ -270,6 +271,7 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
       display:UI 上显示的任务名，例如 ``'增量编译桥接层'``。
       kind:``'build'`` 编译类(显示成功/失败)或 ``'meta'`` 非编译类
            (列目标 / 删 build/,只显示「已完成」)。
+      src:审计「来源」——面板按钮默认 SRC_PANEL,编译 API 传 SRC_API。
 
     成功返回 ``{success: True, message, pid}``,失败 ``{success: False, message}``。
     """
@@ -350,11 +352,11 @@ def _start_build(argv: list, display: str, kind: str = 'build') -> dict:
 
     log.info(f'[build] 已启动：{display} (PID {proc.pid}， kind={kind})')
     # 只记「已启动」—— 编译结果由 build 状态页(state.json + 日志)负责展示
-    audit.record('build', display, f'已启动 (PID {proc.pid})')
+    audit.record('build', display, f'已启动 (PID {proc.pid})', src=src)
     return {'success': True, 'message': f'已启动：{display}', 'pid': proc.pid}
 
 
-def _kill_build() -> dict:
+def _kill_build(src: str = audit.SRC_PANEL) -> dict:
     """对当前 build 进程发 SIGTERM(2s 不响应升级 SIGKILL)。"""
     state = get_build_state()
     if not state['running']:
@@ -363,13 +365,13 @@ def _kill_build() -> dict:
     try:
         pgid = os.getpgid(int(pid))
     except (ProcessLookupError, PermissionError, OSError) as e:
-        audit.record('build', '终止编译', f'获取进程组失败: {e}', ok=False)
+        audit.record('build', '终止编译', f'获取进程组失败: {e}', ok=False, src=src)
         return {'success': False, 'message': f'获取进程组失败：{e}'}
 
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError) as e:
-        audit.record('build', '终止编译', f'SIGTERM 失败: {e}', ok=False)
+        audit.record('build', '终止编译', f'SIGTERM 失败: {e}', ok=False, src=src)
         return {'success': False, 'message': f'SIGTERM 失败：{e}'}
 
     # 最多等 2s 让进程优雅退出;否则 SIGKILL
@@ -401,7 +403,7 @@ def _kill_build() -> dict:
     except Exception:
         pass
 
-    audit.record('build', '终止编译', f'PID {pid}')
+    audit.record('build', '终止编译', f'PID {pid}', src=src)
     return {'success': True, 'message': f'已终止编译进程 (PID {pid})'}
 
 
