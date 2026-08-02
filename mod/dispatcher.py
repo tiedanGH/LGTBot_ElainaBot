@@ -393,7 +393,7 @@ _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 # 首次访问时写入的默认 Q&A
 _DEFAULT_TROUBLESHOOTING = (
     'Q：为什么 bot 只回了几条就停了？\n'
-    'A：QQ 协议限制 —— 普通群里 bot 对同一条消息最多回 5 条，且仅 5 分钟内有效；私信场景同理。\n'
+    'A：QQ 协议限制 —— 普通群里 bot 对同一条消息最多回 5 条，仅 5 分钟内有效；私信为 4 条 / 60 分钟。\n'
     '   ▸ 群主可@bot发送「全量申请」，并根据提示开通全量权限，bot 在全量群可推送主动消息，不受限制\n'
     '   ▸ 私信场景请添加机器人为好友，并保持机器人「权限设置」中的主动消息权限开启，即可正常接收主动私信\n'
     '\n'
@@ -778,7 +778,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     if uid:
         userinfo.note_username(uid, getattr(event, 'username', '') or '')
 
-    # 用户消息 → 用 msg_id 刷新被动引用配额（5 条新额度）
+    # 用户消息 → 用 msg_id 刷新被动引用配额（新一轮额度,群 5 条 / 私信 4 条）
     #
     # ⚠️ 两条分支**必须互斥**:msg_id 带场景,群消息产生的 msg_id 拿去发该用户私信会触发 QQ 端 `请求参数 msg_id 无效或越权`。
     # 使用 ``elif event.is_direct``,``u:<uid>`` 只会接收真正私信场景的 msg_id。
@@ -831,20 +831,20 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 #
 #   1. 「🔄 刷新会话」按钮(data == quota.RELAY_BUTTON_DATA = '__lgt_relay__')
 #      —— 专门用于续被动引用配额,不走 LGTBot 引擎。lgtbot_interaction_relay
-#      只 ack + 刷新 event_id 配额,客户端看一个短暂 toast,5 条被动额度立即续上。
+#      只 ack + 刷新 event_id 配额,客户端看一个短暂 toast,新一轮被动额度立即续上。
 #
 #   2. 其他所有 data(欢迎菜单的「数字蜂巢/天赋云巢/...」、规则按钮、上下文按钮
 #      等)—— 等同于用户主动发送 data 这段文字。lgtbot_interaction_dispatch
 #      ack 后把 content 走 on_public_message / on_private_message 派进 C++ 引擎,
 #      与 lgtbot_dispatch 的消息派发路径镜像,差异仅在配额用 event_id 续而非
-#      msg_id(INTERACTION 没有 msg_id,但 event_id 是独立的新 5 条额度)。
+#      msg_id(INTERACTION 没有 msg_id,但 event_id 是独立的一轮新额度)。
 #
 # 两个 handler 用互斥 regex 划分职责:relay 严格匹配 RELAY_BUTTON_DATA,
 # dispatch 用负向先行 (?!) 排掉这个 sentinel。
 
 @handler(rf'^{re.escape(quota.RELAY_BUTTON_DATA)}$',
          name='LGTBot 刷新按钮回调',
-         desc='「🔄 刷新会话」按钮点击 → ack + 用新 event_id 续 5 条被动回复额度',
+         desc='「🔄 刷新会话」按钮点击 → ack + 用新 event_id 续一轮被动回复额度',
          priority=-200,
          event_types={INTERACTION_CREATE})
 async def lgtbot_interaction_relay(event, match):
@@ -880,7 +880,7 @@ async def lgtbot_interaction_dispatch(event, match):
     起线程派给 C++),差异仅:
       · 必须先 ack_interaction —— 否则客户端 3s 后弹"请求超时"
       · 配额刷新键用 event.event_id('event_id' 类型),而不是 msg_id
-        (INTERACTION 没 msg_id,但 event_id 同样能撑起 5 条被动回复额度)
+        (INTERACTION 没 msg_id,但 event_id 同样能撑起一轮被动回复额度)
     """
     if helpers.is_foreign_event(event):
         return

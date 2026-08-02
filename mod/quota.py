@@ -1,17 +1,21 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""被动消息引用配额管理（绕过 QQ 单 msg_id 5 条限制）
+"""被动消息引用配额管理（绕过 QQ 单条消息被动回复条数限制）
 
-QQ 协议事实：
-  · 每个 msg_id（用户消息触发）可被引用 5 次（msg_seq=1..5），5 分钟后过期
-  · 每个 event_id（INTERACTION 等）独立计 5 次配额
+QQ 协议事实（官方文档「被动消息」表,按场景区分）：
+  · 群聊:每个 msg_id 可被回复 **5** 次（msg_seq=1..5），**5 分钟**后过期
+  · 单聊:每个 msg_id 可被回复 **4** 次，**60 分钟**后过期
+  · 每个 event_id（INTERACTION 等）独立计一轮配额（按所在场景取上限）
   · 在消息上挂 callback 按钮，用户点击 → 新 INTERACTION_CREATE → 新 event_id
-    → 又获得 5 条新配额，从而绕过单引用 5 条的硬限制
+    → 又获得一轮新配额，从而绕过单引用条数的硬限制
 
 本模块策略：
-  · 第 4 条及以后的文本消息自动追加「🔄 刷新」按钮（type=1 callback）
+  · 倒数第 2 条起自动追加「🔄 刷新」按钮（type=1 callback;群 4/5 条,单聊 3/4 条）
   · 用户点击 → ACK + 立即刷新引用 + 唤醒可能在等待的发送协程
   · 发送时若配额满，最长等待 15s 等待新刷新事件再重试
+
+场景由 key 前缀判定（``helpers.target_key``:群 'g:' / 单聊 'u:'），配额与
+TTL 都经 ``ref_quota(key)`` / ``ref_ttl(key)`` 按场景取值。
 """
 
 from __future__ import annotations
@@ -25,11 +29,34 @@ from . import state, boot
 log = get_logger(PLUGIN, 'LGTBot')
 
 # ──────── 常量配置 ────────────────────────────────────────────────────────
-REF_TTL = 290.0                  # 引用 TTL（5min - 10s 余量）
-REF_QUOTA = 5                    # QQ 协议每引用 5 条
-REFRESH_BUTTON_THRESHOLD = 4     # 第 N 条起追加刷新按钮（含第 4 / 第 5 条）
+# 被动配额按场景区分(见模块 docstring)。TTL 各留余量:群 5min-10s;
+# 单聊 60min-60s(窗口长,预留也放大 —— QQ 从消息发出计时,我们从收到计时)。
+REF_QUOTA_GROUP = 5
+REF_QUOTA_DM = 4
+REF_TTL_GROUP = 290.0
+REF_TTL_DM = 3540.0
 REFRESH_WAIT_TIMEOUT = 15.0      # 配额耗尽时等待刷新的最长秒数（可在 config.yaml 覆盖）
 RELAY_BUTTON_DATA = '__lgt_relay__'
+
+
+def is_dm_key(key: str) -> bool:
+    """key 是否单聊场景('u:<uid>';其余按群聊规则)。"""
+    return str(key).startswith('u:')
+
+
+def ref_quota(key: str) -> int:
+    """该 key 场景下每条消息可被动回复的条数(群 5 / 单聊 4)。"""
+    return REF_QUOTA_DM if is_dm_key(key) else REF_QUOTA_GROUP
+
+
+def ref_ttl(key: str) -> float:
+    """该 key 场景下引用的有效期秒数(群 ~5min / 单聊 ~60min)。"""
+    return REF_TTL_DM if is_dm_key(key) else REF_TTL_GROUP
+
+
+def refresh_threshold(key: str) -> int:
+    """第 N 条起追加刷新按钮 = 倒数第 2 条(群 4/5 条,单聊 3/4 条)。"""
+    return ref_quota(key) - 1
 
 # ──────── 内部状态 ────────────────────────────────────────────────────────
 # key = 'g:<gid>' / 'u:<uid>'
@@ -61,7 +88,7 @@ def refresh_ref(key: str, ref_type: str, ref_value: str, appid: str = ''):
             'ref_type': ref_type,
             'ref_value': ref_value,
             'count': 0,
-            'expires_at': time.time() + REF_TTL,
+            'expires_at': time.time() + ref_ttl(key),
             'appid': appid,
         }
 
@@ -92,7 +119,7 @@ def try_consume_ref(key: str):
         if time.time() > ref['expires_at']:
             _active_ref.pop(key, None)
             return None
-        if ref['count'] >= REF_QUOTA:
+        if ref['count'] >= ref_quota(key):
             return None
         ref['count'] += 1
         return (ref['ref_type'], ref['ref_value'], ref['count'], ref.get('appid', ''))
@@ -160,8 +187,7 @@ def build_refresh_button(is_last: bool = False) -> list:
     """返回单按钮一行的'刷新'回调按钮（type=1，纯 callback，不回填、不发消息）
 
     Args:
-        is_last: 是否是配额内最后一条（count == REF_QUOTA）。True 时按钮文字
-                 改为「最终刷新」配 ⚠️ 高亮，提示玩家"再不点就没机会发了"
+        is_last: 是否是配额内最后一条（count == ref_quota(key)）。True 时按钮文字改为「最终刷新」配 ⚠️ 高亮，提示玩家"再不点就没机会发了"
     """
     text = '⚠️ 最终刷新' if is_last else '🔄 刷新会话'
     style = 1 if is_last else 0   # 最终按钮用主色提高视觉权重

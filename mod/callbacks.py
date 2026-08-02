@@ -94,7 +94,7 @@ DM_PUSH_ALL: bool = False
 
 # 单群 / 单用户每日主动消息上限(QQ 官方接口限制)。由 config.py 的 ``active_push_daily_limit`` 覆盖;0 = 不限制。
 #
-# 用满后**当日**该目标失去「主动直推资格」→ 发送路径退回被动的刷新按钮机制 (第 4/5 条挂「🔄 刷新会话」、配额满时阻塞等待续命 ≤refresh_wait_timeout),
+# 用满后**当日**该目标失去「主动直推资格」→ 发送路径退回被动的刷新按钮机制 (倒数第 2 条起挂「🔄 刷新会话」、配额满时阻塞等待续命 ≤refresh_wait_timeout),
 # 与非全量群的行为完全一致。计数走 metrics 的日分桶,**次日 0 点自然重置**, 无需定时任务:跨天后第一条消息读到的桶 date 已不是今天 → 用量归 0 → 资格自动恢复。
 # 进行中的对局跨天也因此无需任何特殊处理 —— 每条消息都是独立判定,不缓存资格,不存在"开局时算过一次就一直沿用"的问题。
 ACTIVE_PUSH_DAILY_LIMIT: int = 1000
@@ -659,8 +659,8 @@ async def _alert_crash_loop_tripped(count: int) -> None:
 #      → 调度教学提示 task,后者再次抢同一把 Lock 排到建房公告后面 → 顺序得证。
 #
 # 为什么挂 new_game 而不是 game_started(旧实现):
-# 建房广播是对 /新游戏 命令 msg_id 的**第 1 条**回复,教学提示紧随其后为第 2 条,必然在 5 条配额内送达;
-# 而游戏开始的消息发得晚(开局刷屏高峰),常常已超 5 条把提示吞掉。单机局无 new_game 广播 → 不再发教学。
+# 建房广播是对 /新游戏 命令 msg_id 的**第 1 条**回复,教学提示紧随其后为第 2 条,必然在被动配额内送达;
+# 而游戏开始的消息发得晚(开局刷屏高峰),常常已超配额把提示吞掉。单机局无 new_game 广播 → 不再发教学。
 _pending_tip_keys: set[str] = set()
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -731,9 +731,15 @@ def _get_send_lock(key: str) -> asyncio.Lock:
         _send_locks[key] = lock
     return lock
 
-_REFRESH_TIP_BASE = (
+# 教学文案按场景给出真实限制(官方「被动消息」表:群 5 条/5 分钟,单聊 4 条/60 分钟)
+_REFRESH_TIP_BASE_GROUP = (
     '## ⚠️ 消息回复限制\n'
     '机器人每条消息**最多回复5次**，且**5分钟**后失效。\n'
+    '🔄 ***请及时点击刷新按钮***，否则将**影响机器人发消息和游戏进程**。'
+)
+_REFRESH_TIP_BASE_DM = (
+    '## ⚠️ 私信回复限制\n'
+    '机器人每条消息**最多回复4次**，且**60分钟**后失效。\n'
     '🔄 ***请及时点击刷新按钮***，否则将**影响机器人发消息和游戏进程**。'
 )
 
@@ -755,17 +761,17 @@ async def _send_refresh_tip(target_id: str, is_uid: bool) -> None:
     教学提示永远在「开局公告」之后到达 QQ。
 
     分支:
-      · 私信(``is_uid=True``):仅 BASE 段,无附加按钮 —— 私聊没有「群号」
-        概念,「全量申请」段会显得突兀。
-      · 群聊(``is_uid=False``):BASE + GROUP_TAIL 段,底部挂一行「全量申请」
-        type=2 按钮(回填到输入框,用户自行补群号再发);实际命令由另一个
-        插件实现,本插件只提供 UI 入口。
+      · 私信(``is_uid=True``):DM 版 BASE(4 条/60 分钟),无附加按钮 ——
+        私聊没有「群号」概念,「全量申请」段会显得突兀。
+      · 群聊(``is_uid=False``):群版 BASE(5 条/5 分钟)+ GROUP_TAIL 段,底部
+        挂一行「全量申请」type=2 按钮(回填到输入框,用户自行补群号再发);
+        实际命令由另一个插件实现,本插件只提供 UI 入口。
     """
     if is_uid:
-        msg = _REFRESH_TIP_BASE
+        msg = _REFRESH_TIP_BASE_DM
         extra = None
     else:
-        msg = _REFRESH_TIP_BASE + _REFRESH_TIP_GROUP_TAIL
+        msg = _REFRESH_TIP_BASE_GROUP + _REFRESH_TIP_GROUP_TAIL
         extra = buttons.build_full_volume_apply_button()
     key = helpers.target_key(target_id, is_uid)
     try:
@@ -802,7 +808,7 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
     Lock —— 当前 send task 释放锁后,教学提示 task 自然排到下一位,QQ 端先
     看到「游戏开始」再看到「消息回复限制」教学。
 
-    全量群里 bot 不被 5 条/msg_id 限制,refresh 按钮永远不会出现 —— 这条
+    全量群里 bot 不被被动回复条数限制,refresh 按钮永远不会出现 —— 这条
     教学的整段文案(在讲怎么点刷新按钮)会变成误导。所以只清掉标记,不发送。
     沙箱私信用户同理:配额满后直接主动直推,不依赖刷新按钮,教学同样会误导。
     """
@@ -1118,7 +1124,7 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
 
     全量群分支:配额耗尽时不再阻塞等刷新按钮,直接走主动消息(``kwargs={}``);
     且整个生命周期不追加 ``build_refresh_button``,因为全量群里 bot 不被
-    5 条/msg_id 限制,这个教学按钮没有意义。
+    被动回复条数限制,这个教学按钮没有意义。
     """
     key = helpers.target_key(target_id, is_uid)
     msg_preview = (msg or '')[:30].replace('\n', ' ')
@@ -1137,7 +1143,7 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
 
     consumed = quota.try_consume_ref(key)
     if consumed is None:
-        # 指标:「真耗尽」= TTL 内引用的 5 条真用完(has_valid_ref True);
+        # 指标:「真耗尽」= TTL 内引用的被动条数真用完(has_valid_ref True);
         # 无引用 / 已过期的场景(无事件上下文的推送、私信丢弃)不算配额压力。
         # 且仅统计**无主动直推资格**的目标:全量群 / 沙箱私信配额满后可无缝转主动消息、消息照常送达,没有实际影响,不计入配额压力。
         had_valid_ref = quota.has_valid_ref(key)
@@ -1148,15 +1154,16 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
             tag = '私信直推' if is_sandbox_dm else '全量直推'
             log.info(f'⚡ [{tag}] {key} 配额已满，走主动消息: {msg_preview!r}')
         elif is_uid and not had_valid_ref:
-            # 普通私信 + 无有效 msg_id(从未私信过 / 已超 5 分钟过期):
+            # 普通私信 + 无有效 msg_id(从未私信过 / 已超 60 分钟过期):
             # 正式环境主动私信必拒 → 直接丢弃,只留一行 audit 日志。
             log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃: {msg_preview!r}')
             return
         else:
-            # 群聊配额满 / 普通私信配额满(5 分钟内仍有引用) → 阻塞等待刷新,
+            # 群聊配额满 / 普通私信配额满(TTL 内仍有引用) → 阻塞等待刷新,
             # 不预先尝试发送(直接发也会被 QQ 拒)。
             wait_start = time.monotonic()
-            log.info(f'⏳ [配额已满] {key} 已用 {quota.REF_QUOTA}/{quota.REF_QUOTA}，'
+            q = quota.ref_quota(key)
+            log.info(f'⏳ [配额已满] {key} 已用 {q}/{q}，'
                      f'阻塞等待刷新按钮 ≤{quota.REFRESH_WAIT_TIMEOUT:.0f}s | 待发: {msg_preview!r}')
             consumed = await quota.wait_and_consume(key, quota.REFRESH_WAIT_TIMEOUT)
             elapsed = time.monotonic() - wait_start
@@ -1192,14 +1199,14 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     if consumed is None:
         metrics.record_active_push(target_id, is_uid)
 
-    # 第 4 条起追加刷新按钮;第 5 条（达到上限）用「⚠️ 最终刷新」加强提示。
-    # 主动直推(全量群 / 沙箱私信)从不追加(bot 不被 5 条/msg_id 限制)。
+    # 倒数第 2 条起追加刷新按钮(群 4/5 条,私信 3/4 条);最后一条用「⚠️ 最终刷新」。
+    # 主动直推(全量群 / 沙箱私信)从不追加(不受被动回复条数限制)。
     btns = list(extra_buttons) if extra_buttons else []
-    if not is_active_push and count >= quota.REFRESH_BUTTON_THRESHOLD:
-        is_last = (count >= quota.REF_QUOTA)
+    if not is_active_push and count >= quota.refresh_threshold(key):
+        is_last = (count >= quota.ref_quota(key))
         btns.append(quota.build_refresh_button(is_last=is_last))
         tag = '⚠️' if is_last else '🔄'
-        log.info(f'📊 [配额追踪] {key} 已用 {count}/{quota.REF_QUOTA} → {tag}')
+        log.info(f'📊 [配额追踪] {key} 已用 {count}/{quota.ref_quota(key)} → {tag}')
     btns_arg = btns if btns else None
 
     try:
@@ -1426,12 +1433,13 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
             tag = '私信直推' if is_sandbox_dm else '全量直推'
             log.info(f'⚡ [{tag}] {key} 配额已满，图片走主动消息')
         elif is_uid and not had_valid_ref:
-            # 普通私信无有效 msg_id(从未私信过 / 已超 5 分钟):直接丢弃
+            # 普通私信无有效 msg_id(从未私信过 / 已超 60 分钟):直接丢弃
             log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃图片')
             return
         else:
             wait_start = time.monotonic()
-            log.info(f'⏳ [配额已满] {key} 已用 {quota.REF_QUOTA}/{quota.REF_QUOTA}，'
+            q = quota.ref_quota(key)
+            log.info(f'⏳ [配额已满] {key} 已用 {q}/{q}，'
                      f'阻塞等待刷新按钮 ≤{quota.REFRESH_WAIT_TIMEOUT:.0f}s | 待发: [图片]')
             consumed = await quota.wait_and_consume(key, quota.REFRESH_WAIT_TIMEOUT)
             elapsed = time.monotonic() - wait_start
@@ -1499,10 +1507,12 @@ async def _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
     parts.append(f'![image #{width}px #{height}px]({image_url})')
     md = '\n\n'.join(parts)
 
-    # markdown 通道支持挂按钮（不像 msg_type=7);全量群从不挂刷新按钮
+    # markdown 通道支持挂按钮（不像 msg_type=7);全量群从不挂刷新按钮。
+    # 阈值按场景取(群 4/5 条,私信 3/4 条),同 _send_text_quota_managed。
     btns: list = []
-    if not is_full and count >= quota.REFRESH_BUTTON_THRESHOLD:
-        is_last = (count >= quota.REF_QUOTA)
+    key = helpers.target_key(target_id, is_uid)
+    if not is_full and count >= quota.refresh_threshold(key):
+        is_last = (count >= quota.ref_quota(key))
         btns.append(quota.build_refresh_button(is_last=is_last))
     btns_arg = btns if btns else None
 

@@ -59,16 +59,16 @@ def test_try_consume_ref_expired_returns_none_and_reaps():
 
 
 def test_try_consume_ref_quota_exhausted_returns_none():
-    """配额满 (count >= REF_QUOTA) 时返回 None,但 ref 仍在字典里"""
+    """配额满 (count >= ref_quota) 时返回 None,但 ref 仍在字典里"""
     quota.refresh_ref('g:gy', 'msg_id', 'msg_y')
-    # 消费 REF_QUOTA 次,此时 count == REF_QUOTA
-    for _ in range(quota.REF_QUOTA):
+    # 消费 ref_quota 次,此时 count == ref_quota('g:gy') == 5
+    for _ in range(quota.ref_quota('g:gy')):
         assert quota.try_consume_ref('g:gy') is not None
 
-    # 第 REF_QUOTA+1 次:配额耗尽 → None,但 ref 还在字典(关键,跟过期分支区分)
+    # 再来一次:配额耗尽 → None,但 ref 还在字典(关键,跟过期分支区分)
     assert quota.try_consume_ref('g:gy') is None
     assert 'g:gy' in quota._active_ref
-    assert quota._active_ref['g:gy']['count'] == quota.REF_QUOTA
+    assert quota._active_ref['g:gy']['count'] == quota.ref_quota('g:gy')
 
 
 def test_has_valid_ref_distinguishes_full_vs_missing():
@@ -83,8 +83,8 @@ def test_has_valid_ref_distinguishes_full_vs_missing():
     quota.refresh_ref('u:alice', 'msg_id', 'msg_a')
     assert quota.has_valid_ref('u:alice') is True
 
-    # 场景 C:配额耗尽但 ref 在 TTL 内 → 仍然 True
-    for _ in range(quota.REF_QUOTA):
+    # 场景 C:配额耗尽但 ref 在 TTL 内 → 仍然 True(单聊配额 4 条)
+    for _ in range(quota.ref_quota('u:alice')):
         quota.try_consume_ref('u:alice')
     assert quota.try_consume_ref('u:alice') is None  # 确认配额已满
     assert quota.has_valid_ref('u:alice') is True    # ← 关键:仍 True
@@ -137,7 +137,7 @@ async def test_wait_and_consume_wakes_on_refresh():
     # 在协程里跑,直接拿 running loop 注入
     _state.event_loop = asyncio.get_running_loop()
     quota.refresh_ref('g:gw', 'msg_id', 'old', appid='a1')
-    for _ in range(quota.REF_QUOTA):
+    for _ in range(quota.ref_quota('g:gw')):
         quota.try_consume_ref('g:gw')
 
     async def _refresher():
@@ -188,7 +188,7 @@ async def test_multiple_waiters_all_woken():
     asyncio.create_task(_refresher())
 
     results = await asyncio.gather(*tasks)
-    # 全部应该苏醒(返回非 None)。注意:同一 ref 配额有 REF_QUOTA=5,3 个 waiter
+    # 全部应该苏醒(返回非 None)。注意:同一 ref 配额有群聊 5 条,3 个 waiter
     # 抢同一份配额,前 5 个 ok,第 6+ 个会因 try_consume_ref 配额满返 None。
     # 这里只 3 个,都能抢到。
     assert all(r is not None for r in results), \
@@ -196,3 +196,46 @@ async def test_multiple_waiters_all_woken():
     # 三个抢到的 count 应该是 1,2,3 的某种排列(并发顺序不定)
     counts = sorted(r[2] for r in results)
     assert counts == [1, 2, 3]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 场景区分:单聊 4 条 / 60 分钟,群聊 5 条 / 5 分钟(官方「被动消息」表)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_scene_constants_group_vs_dm():
+    assert quota.ref_quota('g:g1') == 5
+    assert quota.ref_quota('u:u1') == 4
+    assert quota.ref_ttl('g:g1') == pytest.approx(290.0)
+    assert quota.ref_ttl('u:u1') == pytest.approx(3540.0)
+    # 刷新按钮阈值 = 倒数第 2 条:群 4/5,单聊 3/4
+    assert quota.refresh_threshold('g:g1') == 4
+    assert quota.refresh_threshold('u:u1') == 3
+
+
+def test_dm_quota_is_four():
+    """单聊第 5 次消费必须失败 —— 官方限制每条消息只能被动回复 4 次。"""
+    quota.refresh_ref('u:dm4', 'msg_id', 'm')
+    counts = []
+    for _ in range(4):
+        consumed = quota.try_consume_ref('u:dm4')
+        assert consumed is not None
+        counts.append(consumed[2])
+    assert counts == [1, 2, 3, 4]
+    assert quota.try_consume_ref('u:dm4') is None      # 第 5 次:超出单聊配额
+    assert quota.has_valid_ref('u:dm4') is True        # ref 未过期,值得等刷新
+
+
+def test_dm_ttl_survives_past_group_ttl():
+    """单聊引用在群聊 TTL(290s)过后仍然有效 —— 60 分钟窗口。"""
+    quota.refresh_ref('u:long', 'msg_id', 'm')
+    quota.refresh_ref('g:short', 'msg_id', 'm')
+    dm_exp = quota._active_ref['u:long']['expires_at']
+    g_exp = quota._active_ref['g:short']['expires_at']
+    # 两者由同一时刻刷新,单聊应比群聊晚过期约 54 分钟
+    assert dm_exp - g_exp == pytest.approx(quota.REF_TTL_DM - quota.REF_TTL_GROUP, abs=1.0)
+
+    # 模拟 10 分钟后:群聊已过期,单聊仍可消费
+    quota._active_ref['g:short']['expires_at'] = time.time() - 1
+    assert quota.try_consume_ref('g:short') is None
+    assert quota.try_consume_ref('u:long') is not None

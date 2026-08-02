@@ -162,10 +162,10 @@ async def test_dm_whitelist_member_pushed_others_dropped(monkeypatch):
 
 
 def _exhaust_ref(key):
-    """建一个 TTL 内引用并把 5 条被动额度用尽 → 之后 try_consume 返回 None、
-    has_valid_ref 仍为 True(即「真耗尽」而非「无上下文」)。"""
+    """建一个 TTL 内引用并把被动额度用尽(按场景 4 或 5 条)→ 之后 try_consume
+    返回 None、has_valid_ref 仍为 True(即「真耗尽」而非「无上下文」)。"""
     quota.refresh_ref(key, 'msg_id', 'M1', 'APP')
-    for _ in range(quota.REF_QUOTA):
+    for _ in range(quota.ref_quota(key)):
         quota.try_consume_ref(key)
 
 
