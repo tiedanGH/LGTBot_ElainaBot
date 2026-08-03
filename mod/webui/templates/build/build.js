@@ -2,7 +2,7 @@
  * 主要职责:
  *   · 状态条:轮询 build action 拉最新 state + log,渲染 badge / 当前命令 /
  *     已运行时间;running 时显示「终止编译」按钮
- *   · 9 个 action 按钮(7 个启动 + 1 个终止 + 1 个删 build/)。所有按钮都
+ *   · 10 个 action 按钮(8 个启动 + 1 个终止 + 1 个删 build/)。所有按钮都
  *     先 confirm 显示完整命令再发起请求
  *   · 自定义目标:前端 prompt + 严格白名单(同后端 _validate_target_name),
  *     合法后通过 framework /api/config-file/save 写参数文件,再调编译端点
@@ -21,6 +21,7 @@ const BUILD_KEYS = {
   bridge: '__lgtbot_dash_build_bridge',
   list:   '__lgtbot_dash_build_list',
   custom: '__lgtbot_dash_build_custom',
+  newTarget: '__lgtbot_dash_build_newtarget',
   kill:   '__lgtbot_dash_build_kill',
   clean:  '__lgtbot_dash_build_clean',
   remove: '__lgtbot_dash_build_remove',
@@ -281,8 +282,10 @@ function buildList() {
   );
 }
 
-/* ──── 编译指定目标 ──── */
-async function buildCustom() {
+/* ──── 目标名输入 → 校验 → 写参数文件 → 调端点 ────
+   「🎯 编译指定目标」与「✨ 编译新游戏目标」共用:两者只差端点 key、命令
+   展示与 confirm 文案(makeConfirm(target, cmd) 由调用方给)。 */
+async function buildTargetFlow(key, cmdOf, makeConfirm) {
   /* 1. prompt 拿 target —— defaultValue 用上次编译的 target 名 */
   const raw = await dashPrompt(
     '请输入要编译的目标名称 (参考「📋 列出可编译目标」结果)：\n\n' +
@@ -304,12 +307,7 @@ async function buildCustom() {
   }
 
   /* 3. 二次 confirm 显示完整命令 */
-  const cmd = 'bash build.sh -i -t ' + target;
-  const ok = await dashConfirm(
-    '🎯 确认编译目标「' + target + '」？\n\n命令：' + cmd +
-    '\n\n如果该 target 在 CMake 中不存在，bash 会报错"No rule to make target"。',
-    {level: 'warn'}
-  );
+  const ok = await dashConfirm(makeConfirm(target, cmdOf(target)), {level: 'warn'});
   if (!ok) return;
 
   /* 4. 写参数文件 —— framework /api/config-file/save 接受 plugins/ 下绝对路径 */
@@ -341,7 +339,7 @@ async function buildCustom() {
 
   /* 5. 调编译端点 */
   try {
-    const data = await buildCallAction(BUILD_KEYS.custom);
+    const data = await buildCallAction(key);
     if (!data.success) {
       await dashAlert('❌ ' + (data.message || '启动失败'), {level: 'danger'});
       return;
@@ -350,6 +348,30 @@ async function buildCustom() {
   } catch (e) {
     await dashAlert('❌ 请求失败：' + e.message, {level: 'danger'});
   }
+}
+
+/* ──── 编译指定目标(增量,-i) ──── */
+function buildCustom() {
+  return buildTargetFlow(
+    BUILD_KEYS.custom,
+    t => 'bash build.sh -i -t ' + t,
+    (t, cmd) =>
+      '🎯 确认编译目标「' + t + '」？\n\n命令：' + cmd +
+      '\n\n如果该 target 在 CMake 中不存在，bash 会报错"No rule to make target"。'
+  );
+}
+
+/* ──── 编译新游戏目标(cmake 重配置 + make,不带 -i) ──── */
+function buildNewTarget() {
+  return buildTargetFlow(
+    BUILD_KEYS.newTarget,
+    t => 'bash build.sh -t ' + t,
+    (t, cmd) =>
+      '✨ 确认编译新游戏目标「' + t + '」？\n\n命令：' + cmd +
+      '\n\n将重新运行 CMake 配置以发现新增目标，再单独构建它 —— 用于刚放进\n' +
+      'lgtbot/games/ 的新游戏（增量编译的缓存里没有它）。\n' +
+      '比增量编译多一个配置阶段，通常 1-3 分钟。'
+  );
 }
 
 /* ──── 终止编译 ──── */
@@ -458,6 +480,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('build-bridge').addEventListener('click', buildBridge);
   document.getElementById('build-list').addEventListener('click', buildList);
   document.getElementById('build-custom').addEventListener('click', buildCustom);
+  document.getElementById('build-newtarget').addEventListener('click', buildNewTarget);
   document.getElementById('build-api-token').addEventListener('click', buildCopyApiToken);
   document.getElementById('build-kill-btn').addEventListener('click', buildKill);
   document.getElementById('build-clean').addEventListener('click', buildClean);

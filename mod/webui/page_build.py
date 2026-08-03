@@ -632,6 +632,41 @@ def render_build_custom() -> str:
         f'增量编译目标 {target}'))
 
 
+def render_build_new_target() -> str:
+    """✨ 编译新游戏目标 —— bash build.sh -t <target>(不带 -i)。
+
+    与「编译指定目标」的差异:**重跑 CMake 配置**再构建。新增的游戏目录不在
+    build/ 的 CMake 缓存里,增量模式(-i 跳过配置)会报 "No rule to make
+    target";必须走 configure 让 CMake 发现新 target。参数文件与目标校验
+    完全复用 custom 的通道(同一个 PARAMS_PATH,JS 侧共用输入流程)。
+    """
+    ok, msg = _require_build_sh()
+    if not ok:
+        return _fragment({'success': False, 'message': msg})
+    # configure 会自建 build/,但只含单个 target 的构建树跑不起引擎 ——
+    # 从未完整编译过的环境应先走「完整编译」,与 API 端 409 语义一致
+    if not os.path.isdir(os.path.join(boot.PLUGIN_DIR, 'build')):
+        return _fragment({'success': False,
+                          'message': 'build/ 目录不存在，请先「完整编译」再单独编译新游戏'})
+    try:
+        with open(PARAMS_PATH, 'r', encoding='utf-8') as f:
+            params = json.load(f)
+    except FileNotFoundError:
+        return _fragment({'success': False, 'message': '目标参数文件不存在，请重新点击「编译新游戏目标」'})
+    except Exception as e:
+        return _fragment({'success': False, 'message': f'读取目标参数失败：{e}'})
+    target = (params.get('target') or '').strip()
+    if not _validate_target_name(target):
+        return _fragment({
+            'success': False,
+            'message': f'目标名称非法：{target!r} (只允许字母数字下划线连字符，'
+                       f'长度 1-63，必须以字母或下划线开头)',
+        })
+    return _fragment(_start_build(
+        ['bash', 'build.sh', '-t', target],
+        f'编译新游戏目标 {target}'))
+
+
 def render_build_kill() -> str:
     """🛑 终止当前编译进程"""
     return _fragment(_kill_build())

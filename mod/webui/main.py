@@ -77,6 +77,7 @@ _BUILD_INCR_KEY    = '__lgtbot_dash_build_incr'
 _BUILD_BRIDGE_KEY  = '__lgtbot_dash_build_bridge'
 _BUILD_LIST_KEY    = '__lgtbot_dash_build_list'
 _BUILD_CUSTOM_KEY  = '__lgtbot_dash_build_custom'
+_BUILD_NEWTARGET_KEY = '__lgtbot_dash_build_newtarget'
 _BUILD_KILL_KEY    = '__lgtbot_dash_build_kill'
 _BUILD_CLEAN_KEY   = '__lgtbot_dash_build_clean'
 _BUILD_REMOVE_KEY  = '__lgtbot_dash_build_remove'
@@ -145,6 +146,7 @@ _HIDDEN_KEYS = frozenset({
     _BUILD_BRIDGE_KEY,
     _BUILD_LIST_KEY,
     _BUILD_CUSTOM_KEY,
+    _BUILD_NEWTARGET_KEY,
     _BUILD_KILL_KEY,
     _BUILD_CLEAN_KEY,
     _BUILD_REMOVE_KEY,
@@ -363,8 +365,8 @@ def register():
       · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
         —— Dashboard 赛况缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_reload_config`` —— Dashboard「插件配置」热重载 yaml 到运行时
-      · ``__lgtbot_dash_build_full / incr / bridge / list / custom / kill /
-         clean / remove / log`` —— 引擎编译标签的 9 个动作 + 轮询端点
+      · ``__lgtbot_dash_build_full / incr / bridge / list / custom / newtarget /
+         kill / clean / remove / log`` —— 引擎编译标签的 10 个动作 + 轮询端点
       · ``__lgtbot_backup_create / list`` —— 数据备份标签的创建 / 列表端点
       · ``__lgtbot_audit_list`` —— 操作审计标签的列表刷新(只读)
       · ``__lgtbot_metrics_refresh`` —— 指标面板的统一刷新(只读)
@@ -408,6 +410,7 @@ def register():
     _register_hidden_action(_BUILD_BRIDGE_KEY,  page_build.render_build_bridge)
     _register_hidden_action(_BUILD_LIST_KEY,    page_build.render_build_list)
     _register_hidden_action(_BUILD_CUSTOM_KEY,  page_build.render_build_custom)
+    _register_hidden_action(_BUILD_NEWTARGET_KEY, page_build.render_build_new_target)
     _register_hidden_action(_BUILD_KILL_KEY,    page_build.render_build_kill)
     _register_hidden_action(_BUILD_CLEAN_KEY,   page_build.render_build_clean)
     _register_hidden_action(_BUILD_REMOVE_KEY,  page_build.render_build_remove)

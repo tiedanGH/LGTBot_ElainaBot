@@ -176,6 +176,42 @@ async def test_compile_success_returns_elapsed_and_matches(tmp_path, monkeypatch
     assert started['src'] == 'API'
 
 
+async def test_compile_new_param_reruns_cmake_configure(tmp_path, monkeypatch):
+    """new=true → 不带 -i(cmake 重新配置发现新目标);缺省 / false 仍走增量。"""
+    api = _api()
+    monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
+    token = api.get_or_create_api_token()
+    _local_mode(monkeypatch, api)
+    _touch_build_env(api)
+    monkeypatch.setattr(api, '_POLL_INTERVAL', 0.0)
+    started = []
+
+    def fake_start(argv, display, kind='build', src=''):
+        started.append((argv, display))
+        return {'success': True, 'pid': 7}
+
+    monkeypatch.setattr(api.page_build, '_start_build', fake_start)
+
+    def states():
+        yield {'running': False}                                     # 启动前检查
+        yield {'running': False, 'returncode': 0, 'elapsed_sec': 90}  # 完成
+    it = states()
+    monkeypatch.setattr(api.page_build, 'get_build_state', lambda: next(it))
+    resp = await api.compile_handler(
+        _FakeReq(token=token, body={'target': 'newgame', 'new': True}))
+    assert resp.status == 200
+    assert started[-1] == (['bash', 'build.sh', '-t', 'newgame'],
+                           '编译新游戏目标 newgame')      # 无 -i
+
+    it = states()
+    monkeypatch.setattr(api.page_build, 'get_build_state', lambda: next(it))
+    resp = await api.compile_handler(
+        _FakeReq(token=token, body={'target': 'oldgame', 'new': False}))
+    assert resp.status == 200
+    assert started[-1] == (['bash', 'build.sh', '-i', '-t', 'oldgame'],
+                           '增量编译目标 oldgame')        # 有 -i
+
+
 async def test_compile_failure_returns_500_with_log_tail(tmp_path, monkeypatch):
     api = _api()
     monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))

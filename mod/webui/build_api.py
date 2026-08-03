@@ -6,9 +6,13 @@
 API 触发的编译同样落 state.json + build.log,面板打开就能看到实时日志;反之面板起的编译也会让 API 返回 409。
 
 端点(webui/main.py 以 ``auth=False`` 注册,面板登录态不适用,靠自有 token):
-  · ``POST /api/ext/lgtbot/build/compile``    {"target": "<name>"} 增量编译单个
-    目标(桥接层传 ``LGTBot_ElainaBot``)。**同步等待**编译结束再响应 ——
-    完整 / 增量全量编译动辄十几分钟,HTTP 语义下必超时,故 API 只开放单目标。
+  · ``POST /api/ext/lgtbot/build/compile``    {"target": "<name>", "new": bool}
+    编译单个目标(桥接层传 ``LGTBot_ElainaBot``)。``new`` 缺省 false 走 -i
+    增量;true 表示**新增的目标**(如刚放进 lgtbot/games/ 的新游戏)—— 它不在
+    build/ 的 CMake 缓存里,增量必报 "No rule to make target",改走
+    cmake 重新配置 + make target(build.sh 不带 -i),耗时多出配置阶段。
+    **同步等待**编译结束再响应 —— 完整 / 增量全量编译动辄十几分钟,HTTP
+    语义下必超时,故 API 只开放单目标。
   · ``POST /api/ext/lgtbot/build/terminate``  强制中断当前编译(含面板起的)。
 
 认证:``Authorization: Bearer <token>`` 或 ``X-API-Token: <token>``。
@@ -148,7 +152,11 @@ def _active_match_count() -> int:
 # ─────────────────────────────────────────────────────────────────────────
 
 async def compile_handler(request: 'web.Request') -> 'web.Response':
-    """``POST /api/ext/lgtbot/build/compile``  body: ``{"target": "<name>"}``。
+    """``POST /api/ext/lgtbot/build/compile``  body: ``{"target": "<name>", "new": bool}``。
+
+    ``new=true`` 时不带 ``-i``:build.sh 走完整流程(依赖自检 + CMake 重新
+    配置)再 make 该 target —— 新增游戏目录只有重跑 configure 才进 CMake
+    缓存。缺省 / false 走增量(秒级~分钟级)。
 
     同步语义:等编译子进程退出后才响应,成功带用时与进行中对局数
     (调用方据此判断能否安全触发重启 —— 有对局在跑时引擎拒绝释放,新 .so 不会被加载)。
@@ -165,6 +173,7 @@ async def compile_handler(request: 'web.Request') -> 'web.Response':
     except Exception:
         body = None
     target = str((body or {}).get('target') or '').strip()
+    is_new = bool((body or {}).get('new'))
     if not target:
         return _err(400, '缺少 target 参数(桥接层请传 LGTBot_ElainaBot)')
     if not page_build._validate_target_name(target):
@@ -176,9 +185,14 @@ async def compile_handler(request: 'web.Request') -> 'web.Response':
     if page_build.get_build_state()['running']:
         return _err(409, '已有编译在进行中，请稍后重试或调用 terminate 中断')
 
-    started = page_build._start_build(
-        ['bash', 'build.sh', '-i', '-t', target],
-        f'增量编译目标 {target}', src=audit.SRC_API)
+    # new=true:目标是新增的(不在 CMake 缓存),必须重跑 configure —— 不能带 -i
+    if is_new:
+        argv = ['bash', 'build.sh', '-t', target]
+        display = f'编译新游戏目标 {target}'
+    else:
+        argv = ['bash', 'build.sh', '-i', '-t', target]
+        display = f'增量编译目标 {target}'
+    started = page_build._start_build(argv, display, src=audit.SRC_API)
     if not started.get('success'):
         return _err(500, started.get('message') or '编译启动失败')
 
