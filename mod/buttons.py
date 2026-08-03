@@ -18,6 +18,74 @@ from __future__ import annotations
 import random
 
 
+# ──────── 按钮构造函数 ──────────────────────────────────────────────────────
+
+def btn(text: str, data: str = '', *, type: int = 2, style: int = 0,
+        link: str = '') -> dict:
+    """构造单个按钮 dict(本插件唯一按钮入口,统一不带 ``enter``,见模块 docstring)。
+
+    Args:
+        text:   按钮文案(可含 emoji)
+        data:   点击行为数据 —— ``type=2`` 回填输入框 / ``type=1`` 纯 callback
+        type:   QQ 按钮 action type,默认 2(回填);``link`` 非空时忽略
+        style:  视觉样式 0-4(框架 render_data.style)
+        link:   非空则生成链接按钮(仅 ``{'text','link'}``,QQ 侧按 type=0
+                跳转处理,不带 style)
+    """
+    if link:
+        return {'text': text, 'link': link}
+    return {'text': text, 'data': data, 'type': type, 'style': style}
+
+
+# ──────── 外部链接常量 ──────────────────────────────────────────────────────
+
+_OFFICIAL_GROUP_LINK = (
+    'https://qun.qq.com/universal-share/share?ac=1'
+    '&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK'
+    '&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9'
+    '&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw'
+    '&svctype=4&tempid=h5_group_info'
+)
+# 问题反馈问卷链接 —— 默认指向腾讯文档表单,方便统一收集反馈
+_QUESTIONNAIRE_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
+_NAV_HOME_LINK = 'https://tiedan.site/'
+_REPO_ADAPTER_LINK = 'https://github.com/tiedanGH/LGTBot_ElainaBot'
+_REPO_LGTBOT_LINK = 'https://github.com/Slontia/lgtbot'
+
+
+# ──────── 静态按钮常量 ──────────────────────────────────────────────────────
+# 房间动作(挂在建房 / 加入退出广播上)
+BTN_JOIN            = btn('🟢 加入', '/加入', style=1)
+BTN_LEAVE           = btn('🔴 退出', '/退出', style=3)
+# 引导与查询(type=2 回填版,用于解散引导 / 误输游戏名 / 结算)
+BTN_GAME_LIST       = btn('🎲 游戏列表', '/游戏列表', style=4)
+BTN_CREATE_ROOM     = btn('🎮 创建房间', '/新游戏', style=1)
+BTN_RECORD          = btn('📊 查看战绩', '/战绩', style=1)
+# 帮助类。「配置/游戏帮助」发不带斜杠的「帮助」;「元指令帮助」发 `/帮助`。
+BTN_META_HELP       = btn('❓ 元指令帮助', '/帮助', style=1)
+BTN_CONFIG_HELP     = btn('⚙️ 配置帮助', '帮助', type=1, style=4)
+BTN_GAME_HELP       = btn('🎮 游戏帮助', '帮助', type=1, style=4)
+# 「全量申请」入口(type=2 回填,用户自行补群号;实际命令由另一插件实现)
+BTN_FULL_VOLUME_APPLY = btn('全量消息授权', '全量申请', style=4)
+# 欢迎菜单固定区(type=1 callback 版帮助 / 列表 —— 菜单上点击即触发不回填)
+BTN_MENU_HELP       = btn('📖 查看帮助', '/帮助', type=1, style=4)
+BTN_MENU_GAME_LIST  = btn('🎲 游戏列表', '/游戏列表', type=1, style=4)
+BTN_MORE_FEATURES   = btn('🧩 更多功能', '更多功能', type=1, style=1)
+# 「更多功能」子菜单
+BTN_ANNOUNCEMENT    = btn('📢 更新公告', '更新公告', type=1, style=4)
+BTN_DATA_STATS      = btn('📈 数据统计', '数据统计', type=1, style=4)
+BTN_TROUBLESHOOT    = btn('❓ 疑难解答', '疑难解答', type=1, style=0)
+BTN_ABOUT           = btn('ℹ️ 关于框架', '/关于', style=1)
+# 链接按钮(点击跳外部 URL,不依赖 bot 进程存活)
+BTN_OFFICIAL_GROUP  = btn('💬 官方群聊', link=_OFFICIAL_GROUP_LINK)
+BTN_FEEDBACK        = btn('🛠️ 问题反馈', link=_QUESTIONNAIRE_LINK)
+BTN_NAV_HOME        = btn('🌠 导航网站主页', link=_NAV_HOME_LINK)
+BTN_REPO_ADAPTER    = btn('适配层 仓库', link=_REPO_ADAPTER_LINK)
+BTN_REPO_LGTBOT     = btn('LGTBot 仓库', link=_REPO_LGTBOT_LINK)
+
+
+# ──────── 组装函数(挂载点见各 docstring) ────────────────────────────────────
+
 # 玩家在 LGTBot 房间里常用动作（C++ 桥接层 ClassifyMatchEvent 决定挂在哪条上）
 def build_game_action_buttons(game_name: str | None = None,
                               include_rule: bool = False,
@@ -34,13 +102,10 @@ def build_game_action_buttons(game_name: str | None = None,
     """
     rows: list[list[dict]] = []
     if include_join_leave:
-        rows.append([
-            {'text': '🟢 加入', 'data': '/加入', 'type': 2, 'style': 1},
-            {'text': '🔴 退出', 'data': '/退出', 'type': 2, 'style': 3},
-        ])
+        rows.append([BTN_JOIN, BTN_LEAVE])
     if include_rule and game_name:
         rows.append([
-            {'text': f'📖 《{game_name}》规则', 'data': f'/规则 {game_name}', 'type': 1, 'style': 4},
+            btn(f'📖 《{game_name}》规则', f'/规则 {game_name}', type=1, style=4),
         ])
     return rows
 
@@ -53,10 +118,7 @@ def build_dissolve_buttons() -> list[list[dict]]:
     分支）。/新游戏 时引擎前置发出的「游戏已解散，谢谢大家参与」(Terminate)
     不附,因为紧跟着会有真正的新建房间消息覆盖。
     """
-    return [[
-        {'text': '🎲 游戏列表', 'data': '/游戏列表', 'type': 2, 'style': 4},
-        {'text': '🎮 创建房间', 'data': '/新游戏',  'type': 2, 'style': 1},
-    ]]
+    return [[BTN_GAME_LIST, BTN_CREATE_ROOM]]
 
 
 def build_game_over_buttons(game_name: str | None = None,
@@ -72,38 +134,27 @@ def build_game_over_buttons(game_name: str | None = None,
     """
     row: list[dict] = []
     if include_record:
-        row.append({'text': '📊 查看战绩', 'data': '/战绩', 'type': 2, 'style': 1})
+        row.append(BTN_RECORD)
     if game_name:
-        row.append({'text': '🔄 重开一局', 'data': f'/新游戏 {game_name}', 'type': 2, 'style': 4})
+        row.append(btn('🔄 重开一局', f'/新游戏 {game_name}', style=4))
     return [row] if row else []
 
 
 # ──────── 未知指令引导(LGTBot_ElainaBot.cc::ClassifyMatchEvent 的 unknown_* 分支)──
-# 「元指令帮助」按钮发 `/帮助`(带斜杠,bot_core 元指令路径处理);
-# 「配置/游戏帮助」按钮发 `帮助`(不带斜杠,在 match 上下文里被分别解释为
-# 等待房间的配置帮助 / 进行中游戏的游戏帮助)。
 
 def build_unknown_meta_buttons() -> list[list[dict]]:
     """场景 1:用户没参与游戏 / 已加入但不在本群 —— 只给元指令帮助。"""
-    return [[
-        {'text': '❓ 元指令帮助', 'data': '/帮助', 'type': 2, 'style': 1},
-    ]]
+    return [[BTN_META_HELP]]
 
 
 def build_unknown_config_buttons() -> list[list[dict]]:
     """场景 2:已在等待中的房间但用了未知的游戏配置 —— 配置帮助 + 元指令帮助。"""
-    return [[
-        {'text': '⚙️ 配置帮助', 'data': '帮助',  'type': 1, 'style': 4},
-        {'text': '❓ 元指令帮助', 'data': '/帮助', 'type': 2, 'style': 1},
-    ]]
+    return [[BTN_CONFIG_HELP, BTN_META_HELP]]
 
 
 def build_unknown_game_buttons() -> list[list[dict]]:
     """场景 3:游戏进行中,但用了未知的游戏指令 —— 游戏帮助 + 元指令帮助。"""
-    return [[
-        {'text': '🎮 游戏帮助', 'data': '帮助',  'type': 1, 'style': 4},
-        {'text': '❓ 元指令帮助', 'data': '/帮助', 'type': 2, 'style': 1},
-    ]]
+    return [[BTN_GAME_HELP, BTN_META_HELP]]
 
 
 def build_game_help_buttons() -> list[list[dict]]:
@@ -113,18 +164,14 @@ def build_game_help_buttons() -> list[list[dict]]:
     (``ClassifyMatchEvent`` 的 ``game_started`` 分支)—— 广播本身就在教玩家发
     「帮助」,给一颗按钮省掉手输。
     """
-    return [[
-        {'text': '🎮 游戏帮助', 'data': '帮助', 'type': 1, 'style': 4},
-    ]]
+    return [[BTN_GAME_HELP]]
 
 
 def build_game_list_buttons() -> list[list[dict]]:
     """单按钮一行:「🎲 游戏列表」——与欢迎菜单同款。
     用于 `/新游戏 X` / `/规则 X` / `/设置 X` 等误输游戏名时,引导用户查正确名字。
     """
-    return [[
-        {'text': '🎲 游戏列表', 'data': '/游戏列表', 'type': 2, 'style': 4},
-    ]]
+    return [[BTN_GAME_LIST]]
 
 
 def build_full_volume_apply_button() -> list[list[dict]]:
@@ -135,19 +182,42 @@ def build_full_volume_apply_button() -> list[list[dict]]:
     再手动补群号即可。``type=2`` 不带 ``enter``,符合本插件按钮约定。
     实际处理「全量申请」命令的是另一个插件,本插件只提供 UI 入口。
     """
-    return [[
-        {'text': '全量消息授权', 'data': '全量申请', 'type': 2, 'style': 4},
-    ]]
+    return [[BTN_FULL_VOLUME_APPLY]]
 
 
 def build_about_buttons() -> list[list[dict]]:
     """/关于 回执底部附:左 适配层仓库,右 LGT-Bot 上游仓库。两个都是链接按钮
     (type=0,QQ 协议下点击直接跳转,无 style)。
     """
-    return [[
-        {'text': '适配层 仓库',  'link': 'https://github.com/tiedanGH/LGTBot_ElainaBot'},
-        {'text': 'LGTBot 仓库', 'link': 'https://github.com/Slontia/lgtbot'},
-    ]]
+    return [[BTN_REPO_ADAPTER, BTN_REPO_LGTBOT]]
+
+
+def build_support_buttons() -> list[list[dict]]:
+    """官方群聊 + 问题反馈按钮组 —— 求助 / 反馈类消息底部统一引导。
+
+    都是 link 按钮(默认 ``type=0``),点击直接跳转外部 URL,**不依赖 bot 进程
+    存活**;因此在崩溃道歉等"进程即将 execv 重启"的场景下也安全可挂(callback
+    按钮 type=1/2 在 execv 后无法 ack,但 link 按钮跟客户端打开浏览器一样不受
+    影响)。
+
+    当前调用方:
+      · dispatcher.lgtbot_troubleshooting —— 疑难解答 Q&A 末尾
+      · dispatcher 两个 catch-all 的「计划重启」维护提示 —— 即将 execv 重启
+      · callbacks._try_send_crash_apology —— 引擎崩溃道歉末尾
+    """
+    return [[BTN_OFFICIAL_GROUP, BTN_FEEDBACK]]
+
+
+def build_more_features_buttons() -> list[list[dict]]:
+    """「🧩 更多功能」子菜单 —— dispatcher 的 ``lgtbot_more_features`` handler
+    在用户点击「更多功能」按钮 / 直接发送「更多功能」文本时回复。"""
+    return [
+        [BTN_ANNOUNCEMENT, BTN_DATA_STATS],
+        [BTN_TROUBLESHOOT, BTN_FEEDBACK],
+        [BTN_ABOUT],
+        [BTN_NAV_HOME],
+    ]
+
 
 # ──────── 欢迎菜单按钮组 ────────────────────────────────────────────────────
 # 「游戏快捷开局」部分按 ``MENU_GAMES`` 渲染,这个列表由 ``data/config.yaml``
@@ -165,14 +235,6 @@ DEFAULT_MENU_GAMES: list[str] = [
 MENU_GAMES: list[str] = list(DEFAULT_MENU_GAMES)
 # 每行最多几个游戏按钮;QQ 客户端单行最多 5 个,3 排版上最舒服。
 MENU_GAMES_PER_ROW: int = 3
-
-_OFFICIAL_GROUP_LINK = (
-    'https://qun.qq.com/universal-share/share?ac=1'
-    '&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK'
-    '&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9'
-    '&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw'
-    '&svctype=4&tempid=h5_group_info'
-)
 
 
 def _build_robot_invite_link(uin: str, appid: str) -> str:
@@ -205,13 +267,9 @@ def build_dm_warning_buttons() -> list[list[dict]]:
     点击后 QQ 客户端打开 bot 分享页(同欢迎菜单「邀我进群」用同一个
     ``_build_robot_invite_link``),用户可选「添加为好友」或「邀请到群」。
     uin / appid 自动从 BotManager 抓任一活跃 bot 凭据 —— callbacks 触发点是
-    C++ 工作线程,拿不到具体的 event.appid。
-
-    省略 ``type`` 字段 → 默认 0(link 跳转);本插件按钮约定不带 ``enter``。
+    C++ 工作线程,拿不到具体的 event.appid。链接随绑定 bot 变化,不能做常量。
     """
-    return [[
-        {'text': '💫 添加好友', 'link': _auto_robot_invite_link()},
-    ]]
+    return [[btn('💫 添加好友', link=_auto_robot_invite_link())]]
 
 
 def build_menu_buttons(appid: str = '') -> list[list[dict]]:
@@ -241,77 +299,16 @@ def build_menu_buttons(appid: str = '') -> list[list[dict]]:
     game_rows: list[list[dict]] = []
     for i in range(0, len(display_games), MENU_GAMES_PER_ROW):
         chunk = display_games[i:i + MENU_GAMES_PER_ROW]
-        game_rows.append([
-            {'text': name, 'data': f'/新游戏 {name}',
-             'type': 2, 'style': 0}
-            for name in chunk
-        ])
+        game_rows.append([btn(name, f'/新游戏 {name}') for name in chunk])
     return [
-        [
-            {'text': '📖 查看帮助', 'data': '/帮助',    'type': 1, 'style': 4},
-            {'text': '🎲 游戏列表', 'data': '/游戏列表', 'type': 1, 'style': 4},
-        ],
-        [
-            {'text': '🎮 创建房间', 'data': '/新游戏',  'type': 2, 'style': 1},
-            {'text': '🧩 更多功能', 'data': '更多功能', 'type': 1, 'style': 1},
-        ],
+        [BTN_MENU_HELP, BTN_MENU_GAME_LIST],
+        [BTN_CREATE_ROOM, BTN_MORE_FEATURES],
         # 游戏快捷开局按钮 (可配置 —— data/config.yaml 的 menu_game_buttons)
         *game_rows,
         # 底部链接按钮
-        [
-            {'text': '💬 官方群聊', 'link': _OFFICIAL_GROUP_LINK},
-            {'text': '🚀 邀我进群', 'link': invite_link},
-        ],
+        [BTN_OFFICIAL_GROUP, btn('🚀 邀我进群', link=invite_link)],
     ]
 
-
-# ──────── 「🧩 更多功能」子菜单 ─────────────────────────────────────────────
-# 由 dispatcher 的 ``lgtbot_more_features`` handler 在用户点击「更多功能」按钮
-# / 直接发送「更多功能」文本时回复。
-
-# 问题反馈问卷链接 —— 默认指向腾讯文档表单,方便统一收集反馈
-_QUESTIONNAIRE_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
-_NAV_HOME_LINK = 'https://tiedan.site/'
-
-
-def build_support_buttons() -> list[list[dict]]:
-    """官方群聊 + 问题反馈按钮组 —— 求助 / 反馈类消息底部统一引导。
-
-    复用欢迎菜单底部同款的 ``_OFFICIAL_GROUP_LINK`` / ``_QUESTIONNAIRE_LINK``,
-    都是 link 按钮(默认 ``type=0``),点击直接跳转外部 URL,**不依赖 bot 进程
-    存活**;因此在崩溃道歉等"进程即将 execv 重启"的场景下也安全可挂(callback
-    按钮 type=1/2 在 execv 后无法 ack,但 link 按钮跟客户端打开浏览器一样不受
-    影响)。
-
-    当前调用方:
-      · dispatcher.lgtbot_troubleshooting —— 疑难解答 Q&A 末尾
-      · dispatcher 两个 catch-all 的「计划重启」维护提示 —— 即将 execv 重启
-      · callbacks._try_send_crash_apology —— 引擎崩溃道歉末尾
-    """
-    return [[
-        {'text': '💬 官方群聊', 'link': _OFFICIAL_GROUP_LINK},
-        {'text': '🛠️ 问题反馈', 'link': _QUESTIONNAIRE_LINK},
-    ]]
-
-
-def build_more_features_buttons() -> list[list[dict]]:
-    """「更多功能」子菜单"""
-    return [
-        [
-            {'text': '📢 更新公告', 'data': '更新公告', 'type': 1, 'style': 4},
-            {'text': '📈 数据统计', 'data': '数据统计', 'type': 1, 'style': 4},
-        ],
-        [
-            {'text': '❓ 疑难解答', 'data': '疑难解答', 'type': 1, 'style': 0},
-            {'text': '🛠️ 问题反馈', 'link': _QUESTIONNAIRE_LINK},
-        ],
-        [
-            {'text': 'ℹ️ 关于框架',  'data': '/关于', 'type': 2, 'style': 1},
-        ],
-        [
-            {'text': '🌠 导航网站主页', 'link': _NAV_HOME_LINK},
-        ],
-    ]
 
 # 单独 @ bot（content 为空）时回复的欢迎语
 MENU_TEXT_HEADER = (
