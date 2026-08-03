@@ -133,6 +133,8 @@ function metricsRenderGame(game, activePush) {
                   g.yesterday_matches_same_span, '当日 00:00 起已结束的对局');
   metricsDeltaSub('metrics-today-players-sub', g.today_players,
                   g.yesterday_players_same_span, '今日参与游戏的玩家');
+  metricsDeltaSub('metrics-today-groups-sub', g.today_groups,
+                  g.yesterday_groups_same_span, '今日进行游戏的群聊');
 
   /* 今日主动消息:大数字 = 总条数,小字 = 平均每群 / 每人(2 位小数) */
   const ap = activePush || {};
