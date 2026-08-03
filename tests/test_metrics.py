@@ -305,7 +305,52 @@ def test_yesterday_same_span_counts_only_matching_window():
     g = metrics.query_game_stats()
     assert g['yesterday_matches_same_span'] == 2
     assert g['yesterday_players_same_span'] == 2      # U1 / U2
+    assert g['yesterday_groups_same_span'] == 1       # 都在 G1
     assert g['today_matches'] == 1                    # 今日口径不受影响
+
+
+def test_prev10_matches_counts_previous_block_only():
+    """prev10_matches = [今天-19 天, 今天-9 天) 整天窗口:近 10 日(0-9 天前)
+    不计,20 天前也不计。"""
+    _make_db([
+        ('五子棋', 0, 'G1', ['U1']),        # 近10日内
+        ('五子棋', 9, 'G1', ['U1']),        # 近10日内(边界:9 天前属于本期)
+        ('五子棋', 10, 'G1', ['U2']),       # 上一个10日(边界:10 天前属上期)
+        ('五子棋', 19, 'G1', ['U3']),       # 上一个10日(最远边界)
+        ('五子棋', 20, 'G1', ['U4']),       # 更早,不计
+    ])
+    g = metrics.query_game_stats()
+    assert g['prev10_matches'] == 2
+    assert sum(t['count'] for t in g['trend_10d']) == 2      # 本期(0/9 天前)
+
+
+def test_query_game_stats_for_date_day_and_trailing10():
+    """历史日期查询:当日三项口径 + 截至该日近10日 + 双榜 LIMIT 10。"""
+    d5 = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
+    mk = lambda days, hh: (datetime.now() - timedelta(days=days)).strftime(f'%Y-%m-%d {hh}:00:00')
+    _make_db([
+        ('五子棋', mk(5, '10'), 'G1', ['U1', 'U2']),   # 目标日
+        ('大富翁', mk(5, '20'), 'G2', ['U1']),          # 目标日(晚间也算全天)
+        ('五子棋', mk(6, '12'), 'G1', ['U3']),          # 前一天:进 trailing10,不进当日
+        ('五子棋', mk(14, '12'), 'G1', ['U4']),         # date-9(=14 天前):窗口首日,计入
+        ('五子棋', mk(15, '12'), 'G1', ['U5']),         # date-10:trailing10 外
+        ('五子棋', 0, 'G9', ['U9']),                    # 今天:任何口径都不含
+    ])
+    day = metrics.query_game_stats_for_date(d5)
+    assert day['available'] is True
+    assert day['day_matches'] == 2
+    assert day['day_players'] == 2                      # U1/U2 去重
+    assert day['day_groups'] == 2                       # G1/G2
+    assert day['trailing10_matches'] == 4               # 目标日 2 + 前一天 1 + 窗口首日 1
+    # 目标日两款游戏各 1 局,并列时 SQLite 排序不稳定 → 集合断言
+    assert {t['game_name'] for t in day['top_games_day']} == {'五子棋', '大富翁'}
+    assert day['top_players_day'][0]['count'] == 2      # U1 两局居首
+
+
+def test_query_game_stats_for_date_bad_input_and_missing_db():
+    _make_db([('五子棋', 0, 'G1', ['U1'])])
+    bad = metrics.query_game_stats_for_date('not-a-date')
+    assert bad['available'] is False and bad['errors']
 
 
 def test_top_players_nickname_and_mask(monkeypatch):

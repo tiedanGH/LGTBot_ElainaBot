@@ -590,6 +590,76 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
     assert '已用满' in txt2                        # 用满时给出说明
 
 
+async def test_stats_date_command_views_history(monkeypatch):
+    """数据统计MMDD:历史日走 query_game_stats_for_date,无涨跌 / 无主动消息,
+    近10日为截至该日口径;该日无对局与非法日期分别报错。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import metrics, uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
+    seen = {}
+
+    def fake_for_date(ds):
+        seen['date'] = ds
+        return {'available': True, 'date': ds, 'day_matches': 12,
+                'day_players': 5, 'day_groups': 3, 'trailing10_matches': 88,
+                'top_games_day': [{'game_name': '决胜五子', 'count': 4}],
+                'top_players_day': [{'display': '铁蛋', 'count': 3}]}
+
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date', fake_for_date)
+    m = _re.match(dispatcher._P_STATS, '数据统计0102')
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0102')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, m)
+    txt = ev.reply.await_args.args[0]
+    year = __import__('datetime').date.today().year
+    assert seen['date'] == f'{year}-01-02'
+    assert f'({year}-01-02)' in txt and '当日对局: 12 局' in txt
+    assert '近10日对局(截至该日): 88 局' in txt
+    assert '↑' not in txt and '↓' not in txt          # 无涨跌
+    assert '主动消息' not in txt                        # 无额度行
+
+    # 该日无对局 → 报错
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
+                        lambda ds: {'available': True, 'day_matches': 0})
+    ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0103')
+    ev2.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev2, _re.match(dispatcher._P_STATS, '数据统计0103'))
+    assert '无统计数据' in ev2.reply.await_args.args[0]
+
+    # 非法日期 → 报错
+    ev3 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0231')
+    ev3.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev3, _re.match(dispatcher._P_STATS, '数据统计0231'))
+    assert '日期无效' in ev3.reply.await_args.args[0]
+
+
+async def test_stats_date_command_today_falls_back_to_normal(monkeypatch):
+    """输入今天的 MMDD → 等价无参数:走今日视图(带涨跌),不调历史查询。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
+    _state.full_volume_groups.add('G1')
+    called = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
+                        lambda ds: called.append(ds))
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 3,
+                                 'today_players': 2, 'today_groups': 1,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    mmdd = __import__('datetime').date.today().strftime('%m%d')
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1',
+                     content=f'数据统计{mmdd}')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, f'数据统计{mmdd}'))
+    assert called == []                                # 未走历史分支
+    assert '今日对局' in ev.reply.await_args.args[0]
+
+
 async def test_stats_command_text_shows_same_span_delta(monkeypatch):
     """今日对局 / 活跃玩家带「较昨日同时段」增减后缀;缺对比数据不显示。"""
     from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader

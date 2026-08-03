@@ -58,6 +58,31 @@ def test_render_without_trend_and_ranks_still_renders():
     assert png and png[:8] == b'\x89PNG\r\n\x1a\n'
 
 
+def test_render_date_mode_layout():
+    """历史日期模式:无趋势 section,rank_limit=10 → 10 行榜单。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    g = {
+        'available': True, 'date_mode': True, 'rank_limit': 10,
+        'today_matches': 12, 'today_players': 5, 'today_groups': 3,
+        'trailing10_matches': 88,
+        'top_games_today': [{'game_name': f'g{i}', 'count': 11 - i}
+                            for i in range(1, 12)],           # 11 条 → 截 10
+        'top_players_today': [{'display': f'p{i}', 'count': 11 - i}
+                              for i in range(1, 12)],
+        'trend_10d': [],
+    }
+    png = stats_image.render_stats_image(g, sub_title='2026-08-02')
+    assert png and png[:8] == b'\x89PNG\r\n\x1a\n'
+    _w, h_date = uploader.get_image_size(png)
+
+    normal = stats_image.render_stats_image(_sample_stats(), sub_title='x')
+    _w2, h_normal = uploader.get_image_size(normal)
+    # 日期模式无趋势但榜单 10 行,两种布局高度必不同——分支生效的低成本验证
+    assert h_date != h_normal
+
+
 def test_render_swallows_exceptions(monkeypatch):
     """渲染内部异常 → None(调用方回退文本),不抛。"""
     monkeypatch.setattr(stats_image, '_render',

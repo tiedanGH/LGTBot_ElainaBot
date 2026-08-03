@@ -13,6 +13,7 @@ import sys
 import time
 import asyncio
 import threading
+from datetime import date as _date
 
 from core.plugin.decorators import handler
 from core.base.logger import get_logger, PLUGIN
@@ -114,7 +115,7 @@ _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启$'
 _P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
-_P_STATS    = r'^/?数据统计$'
+_P_STATS    = r'^/?数据统计\s*(\d{4})?$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 
@@ -543,14 +544,90 @@ async def lgtbot_update_notice(event, match):
     await event.reply(md)
 
 
+async def _reply_date_stats(event, target_day) -> None:
+    """「数据统计MMDD」历史日期视图。
+
+    与今日视图的差异(用户需求即口径):无涨跌标识、无主动消息行、无趋势图;
+    「近10日对局」为**截至该日**的近 10 日;双榜 TOP10(今日视图 5)。
+    该日没有任何已完成对局 → 直接报错提示。图片失败照常回退文本(榜单文本仍 TOP3 控制消息长度)。
+    """
+    ds = target_day.strftime('%Y-%m-%d')
+    day = metrics.query_game_stats_for_date(ds)
+    if not day.get('available'):
+        await event.reply('❌ 数据统计暂不可用，请稍后再试')
+        return
+    if not day.get('day_matches'):
+        await event.reply(f'❌ {ds} 无统计数据（该日期没有已完成的对局）')
+        return
+
+    # 映射成 stats_image 的通用形状:date_mode 下不含 push_quota / trend /
+    # yesterday_*,榜单换该日口径,rank_limit 放宽到 10
+    g = {
+        'available': True,
+        'date_mode': True,
+        'rank_limit': 10,
+        'today_matches': day.get('day_matches'),
+        'today_players': day.get('day_players'),
+        'today_groups': day.get('day_groups'),
+        'trailing10_matches': day.get('trailing10_matches'),
+        'top_games_today': day.get('top_games_day') or [],
+        'top_players_today': day.get('top_players_day') or [],
+        'trend_10d': [],
+    }
+
+    uid = event.user_id or ''
+    gid = event.group_id or event.channel_id or ''
+    is_group = bool(event.is_group and gid)
+    if uploader.SELECTED_BACKEND:
+        loop = asyncio.get_running_loop()
+        img = await loop.run_in_executor(
+            None, stats_image.render_stats_image, g, ds)
+        if img:
+            url = await uploader.upload_image(
+                img, 'lgtbot_stats.png',
+                target_id=(gid if is_group else uid),
+                target_is_uid=not is_group)
+            if url:
+                w, h = uploader.get_image_size(img)
+                await event.reply(f'<@{uid}>![数据统计 #{w}px #{h}px]({url})')
+                return
+
+    def _n(v):
+        return '—' if v is None else v
+
+    lines = [
+        f'<@{uid}>',
+        f'📈 LGT-Bot 数据统计 ({ds})',
+        f'🎮 当日对局: {_n(day.get("day_matches"))} 局',
+        f'👤 活跃玩家: {_n(day.get("day_players"))} 人',
+        f'👥 活跃群聊: {_n(day.get("day_groups"))} 个',
+        f'📅 近10日对局(截至该日): {_n(day.get("trailing10_matches"))} 局',
+    ]
+    top_games = (day.get('top_games_day') or [])[:3]
+    if top_games:
+        lines.append('🔥 当日游戏榜:')
+        lines += [f'  {i}、{t["game_name"]} ({t["count"]}局)'
+                  for i, t in enumerate(top_games, 1)]
+    top_players = (day.get('top_players_day') or [])[:3]
+    if top_players:
+        lines.append('👑 玩家参与榜:')
+        lines += [f'  {i}、{p["display"]} ({p["count"]}局)'
+                  for i, p in enumerate(top_players, 1)]
+    await event.reply('\n'.join(lines))
+
+
 @handler(_P_STATS,
          name='数据统计',
-         desc='全员可用:今日对局 / 今日游戏榜 / 玩家参与榜 / 近10日趋势',
+         desc='今日对局 / 今日游戏榜 / 玩家参与榜 / 近10日趋势，可查询历史统计',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_data_stats(event, match):
     """收到「数据统计」(文本或按钮)→ 输出 lgtbot.db 游戏数据摘要(dau 风格)。
+
+    「数据统计MMDD」(如 数据统计0802,默认今年)查看指定历史日期:
+    无涨跌标识、无主动消息、无趋势图,「近10日对局」为截至该日的近 10 日,
+    双榜 TOP10;该日无对局直接报错。输入今天的日期等价于无参数(仍带涨跌)。
 
     配置了图床(image_hosting 非空)时优先走**图片通道**(参照主框架 dau 指令):
     stats_image 渲染统计卡片(线程池,不阻塞事件循环)→ uploader 上传 →
@@ -569,6 +646,23 @@ async def lgtbot_data_stats(event, match):
             await event.ack_interaction(code=0)
         except Exception:
             pass
+
+    # ── 历史日期分支(数据统计MMDD)────────────────────────────────────────
+    mmdd = ''
+    try:
+        mmdd = (match.group(1) or '') if match else ''
+    except (AttributeError, IndexError):
+        mmdd = ''
+    if mmdd:
+        try:
+            target_day = _date(_date.today().year, int(mmdd[:2]), int(mmdd[2:]))
+        except ValueError:
+            await event.reply(f'❌ 日期无效：{mmdd}（格式 MMDD，如 数据统计0802 查看 8月2日）')
+            return
+        if target_day != _date.today():                  # 输今天 → 走默认今日视图
+            await _reply_date_stats(event, target_day)
+            return
+
     g = metrics.query_game_stats()
     if not g.get('available'):
         await event.reply('❌ 数据统计暂不可用，请稍后再试')
@@ -622,7 +716,8 @@ async def lgtbot_data_stats(event, match):
         f'{_delta(g.get("today_matches"), g.get("yesterday_matches_same_span"))}',
         f'👤 活跃玩家: {_n(g.get("today_players"))} 人'
         f'{_delta(g.get("today_players"), g.get("yesterday_players_same_span"))}',
-        f'👥 活跃群聊: {_n(g.get("today_groups"))} 个',
+        f'👥 活跃群聊: {_n(g.get("today_groups"))} 个'
+        f'{_delta(g.get("today_groups"), g.get("yesterday_groups_same_span"))}',
     ]
     top_today = (g.get('top_games_today') or [])[:3]
     if top_today:
@@ -636,8 +731,10 @@ async def lgtbot_data_stats(event, match):
                   for i, p in enumerate(top_players, 1)]
     trend = g.get('trend_10d') or []
     if trend:
+        # 近10日的涨跌对比「上一个 10 日」整期(prev10_matches,不做时段对齐)
         total10 = sum(t['count'] for t in trend)
-        lines.append(f'📅 近10日对局: {total10} 局')
+        lines.append(f'📅 近10日对局: {total10} 局'
+                     f'{_delta(total10, g.get("prev10_matches"))}')
     pq = g.get('push_quota') or {}
     if pq.get('shown'):
         if pq.get('no_permission'):

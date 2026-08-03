@@ -5,10 +5,14 @@
 样式对齐本插件 Web 面板的浅色主题(webui templates/main/main.css 的
 light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左侧色条标题),
 内容为 lgtbot 游戏数据:
-  · 数据总览 2×2:今日对局 / 今日活跃玩家(带昨日涨跌胶囊,数据来自
-    trend_10d)/ 今日活跃群聊 / 近 10 日对局
+  · 数据总览 2×2:第一行 今日活跃玩家 / 今日活跃群聊(涨跌胶囊对比昨日
+    同时段),第二行 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期)
   · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条
+
+历史日期模式(``g['date_mode']`` 真,「数据统计MMDD」指令):无涨跌胶囊、
+无主动消息行、无趋势图;「近10日对局」为截至该日的近 10 日;双榜 TOP10
+(``g['rank_limit']``);卡片文案去「今日」改「当日」。
 
 PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)
 回退纯文本输出 —— 渲染是增强,不是依赖。
@@ -217,9 +221,11 @@ def _render(g: dict, sub_title: str) -> bytes | None:
         return None
 
     width, pad, gap = 1000, 36, 22
+    date_mode = bool(g.get('date_mode'))
+    rank_limit = int(g.get('rank_limit') or RANK_LIMIT)
     trend = list(g.get('trend_10d') or [])                  # 新→旧
-    top_games = (g.get('top_games_today') or [])[:RANK_LIMIT]
-    top_players = (g.get('top_players_today') or [])[:RANK_LIMIT]
+    top_games = (g.get('top_games_today') or [])[:rank_limit]
+    top_players = (g.get('top_players_today') or [])[:rank_limit]
     list_rows = max(len(top_games), len(top_players), 1)
 
     # 主动消息额度(dispatcher 按当前会话目标注入;无则不画该行)
@@ -228,8 +234,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
 
     head_h = 118                                            # 顶栏
     tile_h, tile_gap = 138, 18                              # 指标小卡
-    # 标题区 + 2 行小卡(+ 额度通栏卡一行)
-    overview_h = 76 + tile_h * 2 + tile_gap + ((tile_h + tile_gap) if show_pq else 0)
+    overview_h = 76 + tile_h * 2 + tile_gap + 2 + ((tile_h + tile_gap) if show_pq else 0)
     trend_h = 268 if trend else 0
     rank_h = 88 + list_rows * 74 + 14                       # 标题 + 行 ×N
     footer_h = 56
@@ -261,16 +266,27 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     # ── 数据总览:2×2 指标小卡(值用 accent,同 .metrics-status-value)──
     _section(d, (pad, y, width - pad, y + overview_h))
     _sec_title(d, pad + 28, y + 24, '数据总览')
-    # 涨跌胶囊对比「昨日同时段」(昨日 0 点 → 24h 前,窗口与今日等长;见 metrics._YDAY_*)
-    y_matches = g.get('yesterday_matches_same_span')
-    y_players = g.get('yesterday_players_same_span')
-    total10 = sum(t['count'] for t in trend) if trend else None
-    cards = [
-        ('今日对局', g.get('today_matches'), y_matches, 'die', _ACCENT),
-        ('今日活跃玩家', g.get('today_players'), y_players, 'person', _GREEN),
-        ('今日活跃群聊', g.get('today_groups'), None, 'group', _ORANGE),
-        ('近10日对局', total10, None, 'calendar', (232, 121, 249)),
-    ]
+    if date_mode:
+        # 历史日期:无涨跌;近10日 = 截至该日的近 10 日(metrics 传入)
+        cards = [
+            ('活跃玩家', g.get('today_players'), None, 'person', _GREEN),
+            ('活跃群聊', g.get('today_groups'), None, 'group', _ORANGE),
+            ('当日对局', g.get('today_matches'), None, 'die', _ACCENT),
+            ('近10日对局', g.get('trailing10_matches'), None, 'calendar', (232, 121, 249)),
+        ]
+    else:
+        # 涨跌胶囊:前三卡对比「昨日同时段」(窗口与今日等长,见 metrics._YDAY_*);
+        # 近10日对局对比「上一个 10 日」整期(metrics.prev10_matches,不做时段对齐)
+        total10 = sum(t['count'] for t in trend) if trend else None
+        cards = [
+            ('今日活跃玩家', g.get('today_players'),
+             g.get('yesterday_players_same_span'), 'person', _GREEN),
+            ('今日活跃群聊', g.get('today_groups'),
+             g.get('yesterday_groups_same_span'), 'group', _ORANGE),
+            ('今日对局', g.get('today_matches'),
+             g.get('yesterday_matches_same_span'), 'die', _ACCENT),
+            ('近10日对局', total10, g.get('prev10_matches'), 'calendar', (232, 121, 249)),
+        ]
     tile_w = (inner_w - 28 * 2 - tile_gap) // 2
     ty0 = y + 68
     for i, (label, val, y_val, icon, fg) in enumerate(cards):
@@ -370,9 +386,10 @@ def _render(g: dict, sub_title: str) -> bytes | None:
                    day, font=df, fill=_TEXT_FAINT)
         y += trend_h + gap
 
-    # ── 排行榜 TOP5:今日游戏榜(accent)/ 玩家参与榜(橙)──
+    # ── 排行榜:今日游戏榜(accent)/ 玩家参与榜(橙);历史日期为当日双榜 ──
     half_w = (inner_w - gap) // 2
-    ranks = (('今日游戏榜', top_games, 'game_name', _ACCENT),
+    games_label = '当日游戏榜' if date_mode else '今日游戏榜'
+    ranks = ((games_label, top_games, 'game_name', _ACCENT),
              ('玩家参与榜', top_players, 'display', _ORANGE))
     for i, (label, items, key, fg) in enumerate(ranks):
         cx = pad + i * (half_w + gap)

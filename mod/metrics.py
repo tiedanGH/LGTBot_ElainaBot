@@ -290,7 +290,7 @@ _SCALAR_SQL = {
     'today_groups':             ('SELECT COUNT(DISTINCT group_id) FROM match '
                                  f"WHERE finish_time >= {_TODAY} "
                                  "AND group_id IS NOT NULL AND group_id != ''"),
-    # 昨日同时段对局 / 活跃玩家(窗口定义见 _YDAY_* 注释)
+    # 昨日同时段对局 / 活跃玩家 / 活跃群聊(窗口定义见 _YDAY_* 注释)
     'yesterday_matches_same_span':  ('SELECT COUNT(*) FROM match '
                                      f'WHERE finish_time >= {_YDAY_START} '
                                      f'AND finish_time < {_YDAY_SAME}'),
@@ -298,6 +298,15 @@ _SCALAR_SQL = {
                                      'JOIN match m ON m.match_id = uwm.match_id '
                                      f'WHERE m.finish_time >= {_YDAY_START} '
                                      f'AND m.finish_time < {_YDAY_SAME}'),
+    'yesterday_groups_same_span':   ('SELECT COUNT(DISTINCT group_id) FROM match '
+                                     f'WHERE finish_time >= {_YDAY_START} '
+                                     f'AND finish_time < {_YDAY_SAME} '
+                                     "AND group_id IS NOT NULL AND group_id != ''"),
+    # 上一个 10 日的对局总数([今天-19 天, 今天-9 天) 整天窗口)——「近10日对局」的涨跌对比基准。
+    # 跨度按整天算,不做时段对齐:近 10 日含今天(未过完),对比结果在一天内单调爬升,语义是"这一轮 10 天目前跑到哪了"。
+    'prev10_matches':               ('SELECT COUNT(*) FROM match '
+                                     "WHERE finish_time >= datetime('now','localtime','start of day','-19 days') "
+                                     "AND finish_time < datetime('now','localtime','start of day','-9 days')"),
 }
 
 # 「本周」= 近 7 天(含今天),与今日口径同为本地 00:00 边界
@@ -402,6 +411,101 @@ def query_game_stats() -> dict:
                           'count': matches_by_date.get(ds, 0),
                           'players': players_by_date.get(ds, 0)})
         out['trend_10d'] = trend
+    except Exception as e:
+        out['errors'].append(f'打开 lgtbot.db 失败:{e}')
+        out['available'] = False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return out
+
+
+def query_game_stats_for_date(date_str: str) -> dict:
+    """某个**历史日期**的游戏统计(只读,供「数据统计MMDD」指令)。
+
+    ``date_str`` 形如 ``'2026-08-02'``。窗口全部整天:
+      · day_*             该日 [00:00, 次日 00:00) 的对局 / 去重玩家 / 活跃群聊
+      · trailing10_matches 截至该日的近 10 日对局([date-9 天, 次日 00:00))
+      · top_games_day / top_players_day  该日双榜,LIMIT 10(历史回看给全量,
+        今日视图是 5;昵称解析与脱敏同 query_game_stats)
+
+    历史日期查询,不含涨跌对比(调用方也不展示)。失败语义同
+    ``query_game_stats``:available=False / 单项 None + errors。
+    """
+    out: dict = {
+        'available': False,
+        'errors': [],
+        'date': date_str,
+        'day_matches': None,
+        'day_players': None,
+        'day_groups': None,
+        'trailing10_matches': None,
+        'top_games_day': [],
+        'top_players_day': [],
+    }
+    if not os.path.isfile(boot.DB_PATH):
+        out['errors'].append(f'lgtbot.db 不存在:{boot.DB_PATH}')
+        return out
+    try:
+        day = datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        out['errors'].append(f'日期格式非法:{date_str!r}')
+        return out
+    fmt = '%Y-%m-%d %H:%M:%S'
+    day_start = day.strftime(fmt)
+    day_end = (day + timedelta(days=1)).strftime(fmt)
+    t10_start = (day - timedelta(days=9)).strftime(fmt)
+
+    conn = None
+    try:
+        conn = sqlite3.connect(f'file:{boot.DB_PATH}?mode=ro', uri=True, timeout=2.0)
+        out['available'] = True
+
+        def _rows(sql: str, args: tuple, tag: str) -> list:
+            try:
+                return conn.execute(sql, args).fetchall()
+            except sqlite3.OperationalError as e:
+                out['errors'].append(f'{tag}:{e}')
+                return []
+
+        def _scalar(sql: str, args: tuple, tag: str):
+            rows = _rows(sql, args, tag)
+            return int(rows[0][0]) if rows else None
+
+        out['day_matches'] = _scalar(
+            'SELECT COUNT(*) FROM match WHERE finish_time >= ? AND finish_time < ?',
+            (day_start, day_end), 'day_matches')
+        out['day_players'] = _scalar(
+            'SELECT COUNT(DISTINCT uwm.user_id) FROM user_with_match uwm '
+            'JOIN match m ON m.match_id = uwm.match_id '
+            'WHERE m.finish_time >= ? AND m.finish_time < ?',
+            (day_start, day_end), 'day_players')
+        out['day_groups'] = _scalar(
+            'SELECT COUNT(DISTINCT group_id) FROM match '
+            "WHERE finish_time >= ? AND finish_time < ? "
+            "AND group_id IS NOT NULL AND group_id != ''",
+            (day_start, day_end), 'day_groups')
+        out['trailing10_matches'] = _scalar(
+            'SELECT COUNT(*) FROM match WHERE finish_time >= ? AND finish_time < ?',
+            (t10_start, day_end), 'trailing10_matches')
+
+        out['top_games_day'] = [
+            {'game_name': str(gname), 'count': int(c)} for gname, c in _rows(
+                'SELECT game_name, COUNT(*) c FROM match '
+                'WHERE finish_time >= ? AND finish_time < ? '
+                'GROUP BY game_name ORDER BY c DESC LIMIT 10',
+                (day_start, day_end), 'top_games_day')]
+        out['top_players_day'] = [
+            {'display': userinfo.get_name(str(uid)) or mask_id(str(uid)),
+             'count': int(c)} for uid, c in _rows(
+                'SELECT uwm.user_id, COUNT(*) c FROM user_with_match uwm '
+                'JOIN match m ON m.match_id = uwm.match_id '
+                'WHERE m.finish_time >= ? AND m.finish_time < ? '
+                'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10',
+                (day_start, day_end), 'top_players_day')]
     except Exception as e:
         out['errors'].append(f'打开 lgtbot.db 失败:{e}')
         out['available'] = False
