@@ -625,13 +625,15 @@ async def test_stats_date_command_views_history(monkeypatch):
     ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0103')
     ev2.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev2, _re.match(dispatcher._P_STATS, '数据统计0103'))
-    assert '无统计数据' in ev2.reply.await_args.args[0]
+    txt2 = ev2.reply.await_args.args[0]
+    assert txt2.startswith('<@U1>\n') and '无统计数据' in txt2
 
     # 非法日期 → 报错
     ev3 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0231')
     ev3.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev3, _re.match(dispatcher._P_STATS, '数据统计0231'))
-    assert '日期无效' in ev3.reply.await_args.args[0]
+    txt3 = ev3.reply.await_args.args[0]
+    assert txt3.startswith('<@U1>\n') and '日期无效' in txt3
 
 
 async def test_stats_date_command_today_falls_back_to_normal(monkeypatch):

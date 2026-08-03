@@ -554,10 +554,10 @@ async def _reply_date_stats(event, target_day) -> None:
     ds = target_day.strftime('%Y-%m-%d')
     day = metrics.query_game_stats_for_date(ds)
     if not day.get('available'):
-        await event.reply('❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
         return
     if not day.get('day_matches'):
-        await event.reply(f'❌ {ds} 无统计数据（该日期没有已完成的对局）')
+        await event.reply(f'<@{event.user_id}>\n❌ {ds} 无统计数据（该日期没有已完成的对局）')
         return
 
     # 映射成 stats_image 的通用形状:date_mode 下不含 push_quota / trend /
@@ -657,7 +657,7 @@ async def lgtbot_data_stats(event, match):
         try:
             target_day = _date(_date.today().year, int(mmdd[:2]), int(mmdd[2:]))
         except ValueError:
-            await event.reply(f'❌ 日期无效：{mmdd}（格式 MMDD，如 数据统计0802 查看 8月2日）')
+            await event.reply(f'<@{event.user_id}>\n❌ 日期无效：{mmdd}（格式 MMDD，如 数据统计0802 查看 8月2日）')
             return
         if target_day != _date.today():                  # 输今天 → 走默认今日视图
             await _reply_date_stats(event, target_day)
@@ -665,7 +665,7 @@ async def lgtbot_data_stats(event, match):
 
     g = metrics.query_game_stats()
     if not g.get('available'):
-        await event.reply('❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
         return
 
     # 本会话(群 / 私信)的今日主动消息额度用量 —— 群里看本群、私信看本人。
