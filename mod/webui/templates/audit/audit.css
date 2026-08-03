@@ -57,8 +57,7 @@
 }
 .audit-table {
   width: 100%; border-collapse: collapse; font-size: 13px;
-  min-width: 640px;     /* 列再窄就触发水平滚动而不是挤压(来源列不隐藏) */
-  table-layout: fixed;
+  min-width: 640px;     /* 列再窄就触发水平滚动而不是挤压 */
 }
 .audit-table thead {
   background: var(--panel-2);
@@ -77,15 +76,19 @@
 .audit-table tbody tr:last-child td { border-bottom: none; }
 .audit-table tbody tr:hover { background: var(--hover); }
 
-/* 定宽列:数字按各自最长文案量出来,再留一点余量。详情列不给宽度。 */
-.audit-col-time   { width: 120px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.audit-col-cat    { width: 108px; font-size: 12px; white-space: nowrap; }
-.audit-col-action { width: 196px; }
-.audit-col-src    { width: 68px;  white-space: nowrap; }
-.audit-col-result { width: 76px;  white-space: nowrap; }
+/* 窄列:auto 布局下 width:1px 即 shrink-to-fit(收缩到内容宽),
+   nowrap 保证永不换行 —— 内容多宽列就多宽,无需预估最长文案 */
+.audit-col-time   { width: 1px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.audit-col-cat    { width: 1px; font-size: 12px; white-space: nowrap; }
+.audit-col-action { width: 1px; white-space: nowrap; }
+.audit-col-src    { width: 1px; white-space: nowrap; }
+.audit-col-result { width: 1px; white-space: nowrap; }
+/* 详情列:width:100% 吃掉全部剩余;max-width:0 是 auto 布局下让内部 ellipsis 生效的关键
+   没有它 td 会被长内容撑开,把整个表格挤出容器 */
+.audit-col-detail { width: 100%; max-width: 0; }
 
 /* 详情单元:单行省略 + title 全文;点击切换展开(pre-wrap 显示完整多行)。
-   不设 max-width —— 宽度由 td 决定,面板越宽能直读的详情越长。 */
+   宽度由 td(剩余空间)决定,面板越宽能直读的详情越长。 */
 .audit-detail-text {
   display: block;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -119,9 +122,4 @@
   .audit-status-value { font-size: 15px; }
   .audit-table { min-width: 600px; }
   .audit-table th, .audit-table td { padding: 7px 8px; font-size: 12px; }
-  .audit-col-time   { width: 112px; }
-  .audit-col-cat    { width: 100px; }
-  .audit-col-action { width: 140px; }
-  .audit-col-src    { width: 60px; }
-  .audit-col-result { width: 68px; }
 }
