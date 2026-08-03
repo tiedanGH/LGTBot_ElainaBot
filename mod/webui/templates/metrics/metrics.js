@@ -136,6 +136,26 @@ function metricsRenderGame(game, activePush) {
   metricsDeltaSub('metrics-today-groups-sub', g.today_groups,
                   g.yesterday_groups_same_span, '今日进行游戏的群聊');
 
+  /* 「近 10 日私信用户」卡的 sub 行借位展示:
+     近 10 日对局总数 + 对比上一个 10 日整期的涨跌(与数据统计图片卡同口径:trend 求和 vs prev10_matches)。
+     任一缺数据回退原说明文案。卡片主数值(私信用户数)不动。 */
+  const dm10Sub = document.getElementById('metrics-stat-dm10-sub');
+  if (dm10Sub) {
+    dm10Sub.classList.remove('metrics-delta-up', 'metrics-delta-down');
+    const trend10 = Array.isArray(g.trend_10d) ? g.trend_10d : [];
+    const total10 = trend10.length
+      ? trend10.reduce((a, t) => a + (t.count || 0), 0) : null;
+    if (total10 == null || g.prev10_matches == null) {
+      dm10Sub.textContent = '私信过机器人的活跃用户数';
+    } else {
+      const diff = total10 - g.prev10_matches;
+      let tag = '持平';
+      if (diff > 0) { tag = '↑ ' + diff; dm10Sub.classList.add('metrics-delta-up'); }
+      else if (diff < 0) { tag = '↓ ' + Math.abs(diff); dm10Sub.classList.add('metrics-delta-down'); }
+      dm10Sub.textContent = '近 10 日对局 ' + total10 + ' · 较上个区间 ' + tag;
+    }
+  }
+
   /* 今日主动消息:大数字 = 总条数,小字 = 平均每群 / 每人(2 位小数) */
   const ap = activePush || {};
   const avg = (total, n) => (n > 0 ? (total / n).toFixed(2) : '0.00');
