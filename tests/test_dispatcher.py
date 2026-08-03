@@ -590,6 +590,41 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
     assert '已用满' in txt2                        # 用满时给出说明
 
 
+async def test_stats_command_text_shows_same_span_delta(monkeypatch):
+    """今日对局 / 活跃玩家带「较昨日同时段」增减后缀;缺对比数据不显示。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
+    _state.full_volume_groups.add('G1')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 23,
+                                 'today_players': 8, 'today_groups': 1,
+                                 'yesterday_matches_same_span': 18,
+                                 'yesterday_players_same_span': 11,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    txt = ev.reply.await_args.args[0]
+    assert '今日对局: 23 局（↑5）' in txt
+    assert '活跃玩家: 8 人（↓3）' in txt
+
+    # 旧库 / 查询失败 → 无对比数据,后缀整体消失
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 23,
+                                 'today_players': 8, 'today_groups': 1,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
+    ev2.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev2, None)
+    txt2 = ev2.reply.await_args.args[0]
+    assert '今日对局: 23 局' in txt2 and '（↑' not in txt2 and '（↓' not in txt2
+
+
 def test_push_quota_view_near_limit_threshold():
     """额度用量达 85% 阈值 → near_limit(黄色警告);未到不告警;用满只标
     exhausted(红)不再标 near_limit,避免两种状态同时成立。"""

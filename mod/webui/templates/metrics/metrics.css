@@ -33,6 +33,9 @@
 .metrics-status-sub {
   font-size: 11px; color: var(--text-faint);
 }
+/* 「较昨日同时段」涨跌着色(JS metricsDeltaSub 切换;涨绿 / 跌红,平保持灰) */
+.metrics-status-sub.metrics-delta-up { color: var(--in); }
+.metrics-status-sub.metrics-delta-down { color: #dc3545; }
 
 .metrics-action-msg { font-size: 12px; display: block; margin-top: 8px; }
 .metrics-action-msg:empty { display: none; }

@@ -269,6 +269,12 @@ def mask_id(s: str, n: int = 3) -> str:
 
 _TODAY = "datetime('now','localtime','start of day')"
 
+# 「昨日同时段」窗口:昨日 00:00 → 恰好 24 小时前(昨日的同一时刻)。
+# 与「今日 00:00 → 现在」严格等长,供今日对局 / 活跃玩家的**增减标识**对比
+# 若跟昨日全天比,今天没过完的时段永远显示假跌,毫无参考意义。
+_YDAY_START = "datetime('now','localtime','start of day','-1 day')"
+_YDAY_SAME = "datetime('now','localtime','-1 day')"
+
 # 标量查询:key → SQL(前 4 个是原仪表盘「数据统计」区的基础 COUNT,随
 # 指标面板特性一并搬到这里,同一只读连接一次查完)
 _SCALAR_SQL = {
@@ -284,6 +290,14 @@ _SCALAR_SQL = {
     'today_groups':             ('SELECT COUNT(DISTINCT group_id) FROM match '
                                  f"WHERE finish_time >= {_TODAY} "
                                  "AND group_id IS NOT NULL AND group_id != ''"),
+    # 昨日同时段对局 / 活跃玩家(窗口定义见 _YDAY_* 注释)
+    'yesterday_matches_same_span':  ('SELECT COUNT(*) FROM match '
+                                     f'WHERE finish_time >= {_YDAY_START} '
+                                     f'AND finish_time < {_YDAY_SAME}'),
+    'yesterday_players_same_span':  ('SELECT COUNT(DISTINCT uwm.user_id) FROM user_with_match uwm '
+                                     'JOIN match m ON m.match_id = uwm.match_id '
+                                     f'WHERE m.finish_time >= {_YDAY_START} '
+                                     f'AND m.finish_time < {_YDAY_SAME}'),
 }
 
 # 「本周」= 近 7 天(含今天),与今日口径同为本地 00:00 边界

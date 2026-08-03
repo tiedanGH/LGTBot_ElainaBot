@@ -232,16 +232,19 @@ def _ts(days_ago: int = 0) -> str:
 
 
 def _make_db(matches: list) -> None:
-    """matches: [(game, days_ago, group_id, players[])] → 建库插数。"""
+    """matches: [(game, days_ago | 'YYYY-MM-DD HH:MM:SS', group_id, players[])]
+    → 建库插数。第二项传 int 走 _ts(当天中午);传 str 作为 finish_time 原样落库
+    (「昨日同时段」窗口测试要用精确到时分秒的时间戳)。"""
     conn = sqlite3.connect(boot.DB_PATH)
     try:
         for sql in _SCHEMA:
             conn.execute(sql)
-        for i, (game, days_ago, group_id, players) in enumerate(matches, start=1):
+        for i, (game, when, group_id, players) in enumerate(matches, start=1):
+            ts = when if isinstance(when, str) else _ts(when)
             conn.execute(
                 'INSERT INTO match(match_id, game_name, finish_time, group_id,'
                 ' host_user_id, user_count, multiple) VALUES (?,?,?,?,?,?,1)',
-                (i, game, _ts(days_ago), group_id, players[0] if players else 'U0',
+                (i, game, ts, group_id, players[0] if players else 'U0',
                  len(players)))
             for p in players:
                 conn.execute(
@@ -278,6 +281,31 @@ def test_game_stats_today_filter_and_rankings():
            [('五子棋', 2), ('大富翁', 1)]
     # 今日玩家参与榜:U1 3 局居首
     assert g['top_players_today'][0]['count'] == 3
+
+
+def test_yesterday_same_span_counts_only_matching_window():
+    """「昨日同时段」= 昨日 00:00 → 恰 24h 前:窗口内计入,昨日**晚于**同时段
+    的对局不计(否则白天时段跟昨日全天比永远假跌)。玩家数按窗口内去重。"""
+    now = datetime.now()
+    yday_same = now - timedelta(days=1)                       # 昨日同一时刻
+    yday_start = yday_same.replace(hour=0, minute=0, second=0, microsecond=0)
+    if (yday_same - yday_start).total_seconds() < 2:
+        pytest.skip('恰在午夜,同时段窗口为空')
+    fmt = '%Y-%m-%d %H:%M:%S'
+    inside = (yday_start + (yday_same - yday_start) / 2).strftime(fmt)
+    today_start = yday_start + timedelta(days=1)
+    after_span = (yday_same + (today_start - yday_same) / 2).strftime(fmt)
+
+    _make_db([
+        ('五子棋', 0, 'G1', ['U1']),                 # 今天(不进昨日窗口)
+        ('五子棋', inside, 'G1', ['U1', 'U2']),      # 昨日·同时段内 → 计入
+        ('大富翁', inside, 'G1', ['U2']),            # 同上(U2 去重)
+        ('五子棋', after_span, 'G1', ['U3']),        # 昨日·晚于同时段 → 不计
+    ])
+    g = metrics.query_game_stats()
+    assert g['yesterday_matches_same_span'] == 2
+    assert g['yesterday_players_same_span'] == 2      # U1 / U2
+    assert g['today_matches'] == 1                    # 今日口径不受影响
 
 
 def test_top_players_nickname_and_mask(monkeypatch):

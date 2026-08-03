@@ -261,8 +261,9 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     # ── 数据总览:2×2 指标小卡(值用 accent,同 .metrics-status-value)──
     _section(d, (pad, y, width - pad, y + overview_h))
     _sec_title(d, pad + 28, y + 24, '数据总览')
-    y_matches = trend[1]['count'] if len(trend) >= 2 else None
-    y_players = trend[1]['players'] if len(trend) >= 2 else None
+    # 涨跌胶囊对比「昨日同时段」(昨日 0 点 → 24h 前,窗口与今日等长;见 metrics._YDAY_*)
+    y_matches = g.get('yesterday_matches_same_span')
+    y_players = g.get('yesterday_players_same_span')
     total10 = sum(t['count'] for t in trend) if trend else None
     cards = [
         ('今日对局', g.get('today_matches'), y_matches, 'die', _ACCENT),

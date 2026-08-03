@@ -105,11 +105,34 @@ function metricsRankRows(list, nameKey) {
   ).join('');
 }
 
+/* 「较昨日同时段」涨跌副标题(模仿 dau 面板的增减标识):有对比数据时替换
+   卡片 sub 行并着色,缺数据(旧库 / 查询失败)保留原说明文案。 */
+function metricsDeltaSub(id, cur, yday, fallback) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('metrics-delta-up', 'metrics-delta-down');
+  if (cur == null || yday == null) { el.textContent = fallback; return; }
+  const diff = cur - yday;
+  if (diff > 0) {
+    el.textContent = '较昨日同时段 ↑ ' + diff;
+    el.classList.add('metrics-delta-up');
+  } else if (diff < 0) {
+    el.textContent = '较昨日同时段 ↓ ' + Math.abs(diff);
+    el.classList.add('metrics-delta-down');
+  } else {
+    el.textContent = '较昨日同时段持平';
+  }
+}
+
 function metricsRenderGame(game, activePush) {
   const g = game || {};
   document.getElementById('metrics-today-matches').textContent = metricsFmtNum(g.today_matches);
   document.getElementById('metrics-today-players').textContent = metricsFmtNum(g.today_players);
   document.getElementById('metrics-today-groups').textContent = metricsFmtNum(g.today_groups);
+  metricsDeltaSub('metrics-today-matches-sub', g.today_matches,
+                  g.yesterday_matches_same_span, '当日 00:00 起已结束的对局');
+  metricsDeltaSub('metrics-today-players-sub', g.today_players,
+                  g.yesterday_players_same_span, '今日参与游戏的玩家');
 
   /* 今日主动消息:大数字 = 总条数,小字 = 平均每群 / 每人(2 位小数) */
   const ap = activePush || {};

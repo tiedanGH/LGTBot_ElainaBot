@@ -604,11 +604,24 @@ async def lgtbot_data_stats(event, match):
     def _n(v):
         return '—' if v is None else v
 
+    def _delta(cur, yday):
+        """较昨日同时段的增减后缀(同图片卡的涨跌胶囊;任一缺数据不显示)。"""
+        if cur is None or yday is None:
+            return ''
+        diff = int(cur) - int(yday)
+        if diff > 0:
+            return f'（↑{diff}）'
+        if diff < 0:
+            return f'（↓{abs(diff)}）'
+        return '（持平）'
+
     lines = [
         f'<@{event.user_id}>',
         f'📈 LGT-Bot 数据统计 (截至{time.strftime("%H:%M")})',
-        f'🎮 今日对局: {_n(g.get("today_matches"))} 局',
-        f'👤 活跃玩家: {_n(g.get("today_players"))} 人',
+        f'🎮 今日对局: {_n(g.get("today_matches"))} 局'
+        f'{_delta(g.get("today_matches"), g.get("yesterday_matches_same_span"))}',
+        f'👤 活跃玩家: {_n(g.get("today_players"))} 人'
+        f'{_delta(g.get("today_players"), g.get("yesterday_players_same_span"))}',
         f'👥 活跃群聊: {_n(g.get("today_groups"))} 个',
     ]
     top_today = (g.get('top_games_today') or [])[:3]
