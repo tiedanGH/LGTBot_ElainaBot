@@ -86,24 +86,29 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
   const btn = document.getElementById('planned-restart-btn');
   const isOn = btn.classList.contains('active');
   let reason = '';
+  let auto = false;
   if (isOn) {
     const ok = await dashConfirm('确认取消计划重启？\n\n将立即恢复玩家创建新游戏。',
                                  {level: 'info'});
     if (!ok) return;
   } else {
-    /* 开启时用 prompt 收集维护原因(可留空)—— 原因会显示在玩家创建新游戏时
-       收到的维护提示里。取消 prompt(返回 null)= 放弃开启。 */
+    /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选(默认不勾,
+       勾选后全部对局结束将自动执行重启)。取消 prompt(返回 null)= 放弃开启。 */
     const input = await dashPrompt(
       '启用计划重启？\n\n启用后玩家无法创建新游戏（进行中的对局与已创建的房间不受影响），用于在重启前逐渐清空对局；真正重启后自动恢复。\n\n可填写维护原因（将展示给玩家）：',
-      {defaultValue: '', okText: '启用', level: 'warn'}
+      {defaultValue: '', okText: '启用', level: 'warn',
+       checkbox: '自动重启：全部对局结束后自动执行重启'}
     );
     if (input === null) return;
-    reason = (input || '').trim();
+    reason = (input.value || '').trim();
+    auto = !!input.checked;
   }
   try {
     /* TOKEN_QS 可能为空 → 分隔符要动态判断(同 dashboard.js 的 BIND_BOT_ROUTE) */
-    const url = PLANNED_RESTART_ROUTE + TOKEN_QS +
-      (reason ? (TOKEN_QS ? '&' : '?') + 'reason=' + encodeURIComponent(reason) : '');
+    let url = PLANNED_RESTART_ROUTE + TOKEN_QS;
+    let sep = TOKEN_QS ? '&' : '?';
+    if (reason) { url += sep + 'reason=' + encodeURIComponent(reason); sep = '&'; }
+    if (auto) { url += sep + 'auto=1'; }
     const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const text = await r.text();
@@ -159,18 +164,20 @@ document.getElementById('restart-btn').addEventListener('click', async () => {
  * ═══════════════════════════════════════════════════════════════════════ */
 let _dashModalResolve = null;
 let _dashModalKind = 'confirm';
+let _dashModalHasCheckbox = false;
 const _DASH_OK_TEXT = { confirm: '确定', alert: '我知道了', prompt: '确认' };
 
 function _dashOpenModal(opts) {
-  const { message, level, kind, defaultValue, okText, cancelText } = opts;
+  const { message, level, kind, defaultValue, okText, cancelText, checkbox } = opts;
   return new Promise(resolve => {
     /* 上一个 modal 还未结算就被新的覆盖时,旧 promise resolve 取消值,防止上层 await 永远 stuck */
     if (_dashModalResolve) {
-      _dashModalResolve(kind === 'prompt' ? null : false);
+      _dashModalResolve(_dashModalKind === 'prompt' ? null : false);
       _dashModalResolve = null;
     }
     _dashModalResolve = resolve;
     _dashModalKind = kind;
+    _dashModalHasCheckbox = !!checkbox;
 
     const backdrop = document.getElementById('dash-modal-backdrop');
     const modal    = document.getElementById('dash-modal');
@@ -178,6 +185,9 @@ function _dashOpenModal(opts) {
     const inputEl  = document.getElementById('dash-modal-input');
     const cancelBtn = document.getElementById('dash-modal-cancel');
     const okBtn     = document.getElementById('dash-modal-ok');
+    const cbRow    = document.getElementById('dash-modal-checkbox-row');
+    const cbEl     = document.getElementById('dash-modal-checkbox');
+    const cbLabel  = document.getElementById('dash-modal-checkbox-label');
 
     msgEl.textContent = message || '';
     modal.className = 'dash-modal level-' + (level || 'info');
@@ -188,6 +198,12 @@ function _dashOpenModal(opts) {
     } else {
       inputEl.style.display = 'none';
       inputEl.value = '';
+    }
+    /* 可选勾选项(如计划重启的「自动重启」):默认不勾选,每次打开都复位 */
+    if (cbRow) {
+      cbRow.style.display = checkbox ? '' : 'none';
+      if (cbEl) cbEl.checked = false;
+      if (cbLabel) cbLabel.textContent = checkbox || '';
     }
     /* alert 只要一个「我知道了」,不显示取消 */
     cancelBtn.style.display = (kind === 'alert') ? 'none' : '';
@@ -233,10 +249,11 @@ function dashAlert(message, opts) {
   });
 }
 function dashPrompt(message, opts) {
+  /* opts.checkbox 非空时弹窗底部多一个勾选项(默认不勾),返回值变为 {value, checked}|null。 */
   const o = opts || {};
   return _dashOpenModal({
     message, kind: 'prompt', level: o.level,
-    defaultValue: o.defaultValue,
+    defaultValue: o.defaultValue, checkbox: o.checkbox,
     okText: o.okText, cancelText: o.cancelText,
   });
 }
@@ -250,8 +267,14 @@ function _dashBindModalEvents() {
   const cancelBtn = document.getElementById('dash-modal-cancel');
 
   const doOk = () => {
-    if (_dashModalKind === 'prompt') _dashCloseModal(inputEl.value);
-    else _dashCloseModal(true);
+    if (_dashModalKind === 'prompt') {
+      const cbEl = document.getElementById('dash-modal-checkbox');
+      _dashCloseModal(_dashModalHasCheckbox
+        ? { value: inputEl.value, checked: !!(cbEl && cbEl.checked) }
+        : inputEl.value);
+    } else {
+      _dashCloseModal(true);
+    }
   };
   const doCancel = () => {
     _dashCloseModal(_dashModalKind === 'prompt' ? null : false);

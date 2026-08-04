@@ -259,31 +259,34 @@ def _render_restart() -> str:
     return f'<div id="msg">{html.escape(msg)}</div>'
 
 
-def _toggle_planned_restart_fragment(reason: str = '') -> str:
-    """切换「计划重启」维护模式,与命令 /计划重启 共用 dispatcher 的 toggle。
+def _toggle_planned_restart_fragment(reason: str = '', auto: bool = False) -> str:
+    """切换「计划重启」维护模式(与命令 /计划重启 同一核心 set_planned_mode)。
 
-    ``reason`` 为管理员在面板输入的维护原因(仅开启时生效,展示给玩家)。
-    返回 ``#msg``(提示文案)+ ``#state``(1/0 新状态),main.js 据此更新
-    顶栏按钮的文案与高亮。
+    ``reason`` 为管理员在面板输入的维护原因,``auto`` 为弹窗勾选的「自动重启」
+    (均仅开启时生效)。返回 ``#msg``(提示文案)+ ``#state``(1/0 新状态),
+    main.js 据此更新顶栏按钮的文案与高亮。
     """
     from .. import dispatcher
-    on, msg = dispatcher.toggle_planned_restart(reason)
+    on, msg = dispatcher.set_planned_mode(
+        not _plugin_state.is_planned_restart(), reason, auto)
     audit.record('restart', '计划重启模式',
-                 ('已开启维护模式' + (f'（原因：{reason}）' if reason else ''))
+                 ('已开启维护模式' + (f'（原因：{reason}）' if reason else '')
+                  + (' + 自动重启' if auto and on else ''))
                  if on else '已取消维护模式', src=audit.SRC_PANEL)
     return (f'<div id="msg">{html.escape(msg)}</div>'
             f'<div id="state">{1 if on else 0}</div>')
 
 
 async def planned_restart_handler(request: 'web.Request') -> 'web.Response':
-    """``GET /api/ext/lgtbot/planned-restart?reason=<可选原因>`` —— 切换维护模式。
+    """``GET /api/ext/lgtbot/planned-restart?reason=<原因>&auto=1`` —— 切换维护模式。
 
     走 ``register_route`` 而非隐藏 action:后者的 provider 不接参数,拿不到
     ``?reason=``(同换绑 bot / 崩溃转储等带参端点的选择)。响应仍是
     ``#msg`` + ``#state`` 片段,main.js 解析方式不变。
     """
     reason = (request.query.get('reason') or '').strip()[:200]   # 截断防超长文案
-    return web.Response(text=_toggle_planned_restart_fragment(reason),
+    auto = (request.query.get('auto') or '') in ('1', 'true')
+    return web.Response(text=_toggle_planned_restart_fragment(reason, auto),
                         content_type='text/html')
 
 

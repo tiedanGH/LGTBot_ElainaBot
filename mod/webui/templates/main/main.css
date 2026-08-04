@@ -321,6 +321,16 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   outline: none; border-color: var(--accent);
   background: var(--panel);
 }
+/* prompt 弹窗的可选勾选项(如计划重启的「自动重启」) */
+.dash-modal-checkbox {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px; font-size: 12.5px; color: var(--text-muted);
+  cursor: pointer; user-select: none;
+}
+.dash-modal-checkbox input {
+  accent-color: var(--accent);
+  width: 15px; height: 15px; cursor: pointer;
+}
 .dash-modal-actions {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 12px 20px;

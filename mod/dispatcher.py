@@ -1413,13 +1413,22 @@ async def lgtbot_planned_restart(event, match):
 
     「计划重启 <原因>」可带维护原因,原因会展示在玩家创建新游戏时收到的
     维护提示里(关闭维护模式时自动清空,故关闭指令不必带原因)。
+    「计划重启 自动 <原因>」首词恰为「自动」时启用**自动重启**:全部对局
+    结束后自动执行重启(默认手动;原因含"自动"字样但不独立成词不受影响)。
     """
     if helpers.is_foreign_event(event):
         return
-    reason = (match.group(1) or '').strip() if match and match.lastindex else ''
-    _on, msg = toggle_planned_restart(reason)
+    raw = (match.group(1) or '').strip() if match and match.lastindex else ''
+    auto = False
+    reason = raw
+    parts = raw.split(None, 1)
+    if parts and parts[0] == '自动':
+        auto = True
+        reason = parts[1].strip() if len(parts) > 1 else ''
+    _on, msg = set_planned_mode(not state.is_planned_restart(), reason, auto)
     audit.record('restart', '计划重启模式',
-                 (f'已开启维护模式' + (f'（原因：{reason}）' if reason else ''))
+                 ('已开启维护模式' + (f'（原因：{reason}）' if reason else '')
+                  + (' + 自动重启' if auto and _on else ''))
                  if _on else '已取消维护模式', src=audit.SRC_CMD)
     await event.reply(msg)
 

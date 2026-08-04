@@ -204,3 +204,41 @@ async def test_auto_watcher_exits_when_mode_disabled(monkeypatch):
     await asyncio.sleep(0.03)
     state.set_planned_restart(False)               # 关闭模式
     await asyncio.wait_for(task, timeout=2.0)      # 正常退出
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 指令「计划重启 [自动] [原因]」的 auto 解析
+# ─────────────────────────────────────────────────────────────────────────
+
+def _planned_match(text):
+    import re
+    return re.match(dispatcher._P_PLANNED, text)
+
+
+async def _run_planned_cmd(monkeypatch, text):
+    from unittest.mock import AsyncMock, MagicMock
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: None)
+    monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher', lambda: None)
+    ev = MagicMock()
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_planned_restart(ev, _planned_match(text))
+    return ev.reply.await_args.args[0]
+
+
+async def test_planned_command_auto_keyword(monkeypatch):
+    """「计划重启 自动 <原因>」首词恰为「自动」→ auto=True + 原因剥离。"""
+    msg = await _run_planned_cmd(monkeypatch, '计划重启 自动 升级引擎')
+    assert state.is_planned_restart() and state.is_planned_restart_auto()
+    assert state.planned_restart_reason() == '升级引擎'
+    assert '自动重启已开启' in msg
+    await _run_planned_cmd(monkeypatch, '计划重启')          # 再触发 = 关闭
+    assert not state.is_planned_restart()
+
+
+async def test_planned_command_auto_not_a_word(monkeypatch):
+    """「自动」未独立成词(如原因叫"自动升级")→ 不触发 auto,整串作原因。"""
+    msg = await _run_planned_cmd(monkeypatch, '计划重启 自动升级')
+    assert state.is_planned_restart() and not state.is_planned_restart_auto()
+    assert state.planned_restart_reason() == '自动升级'
+    assert '自动重启已开启' not in msg
