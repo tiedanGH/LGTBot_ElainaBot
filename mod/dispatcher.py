@@ -1186,6 +1186,10 @@ def toggle_planned_restart(reason: str = '') -> tuple[bool, str]:
 # task 引用挂持久 dict:热重载重复调用 _ensure 不会二次起 task(旧 task 读同一份持久 flag,行为一致);模式关闭 / execv 后 task 自然终结。
 _AUTO_WATCH_KEY = 'planned_auto_watcher'
 _AUTO_WATCH_INTERVAL = 5.0
+# 对局清空后的静默期:结算消息(终局赛况文本 / 图片)由 cb_send_* fire-and-forget 投递,还要排 per-target 发送队列 + 图床上传,
+# 对局从 active_matches 移除的那一刻它们往往尚未送达 QQ —— 立即 execv 会把这些 pending 发送连同终局赛况一起丢掉。
+# 持续空满该秒数才真正重启;期间已建房间开出新局则计时清零重来。
+_AUTO_RESTART_GRACE = 30.0
 
 
 def ensure_auto_restart_watcher_on_load() -> None:
@@ -1213,25 +1217,36 @@ def _ensure_auto_restart_watcher() -> None:
 
 
 async def _auto_restart_watcher() -> None:
-    """「自动重启」轮询:planned + auto 开启期间每 5s 检查进行中对局,清空即重启。
+    """「自动重启」轮询:planned + auto 开启期间每 5s 检查进行中对局。
 
+    对局清空后**不立即**重启,先进入 ``_AUTO_RESTART_GRACE`` 秒静默期 ——
+    终局赛况等结算消息此刻多半还在异步发送链路上(见常量注释),等它们送达后才 execv;静默期内出现新对局(已建房间开局)则计时清零。
     触发时走与手动重启完全相同的 ``check_and_prepare_restart`` 原子预检
-    (release 内部还会二次确认引擎侧无对局,轮询窗口里新开的局会让它拒绝,下一轮再试),
-    成功后计审计(SRC_AUTO)+ 重启指标,再调度 os.execv。
+    (release 内部还会二次确认引擎侧无对局),成功后计审计(SRC_AUTO)+重启指标,再调度 os.execv;预检被拒(race)回到等待重来。
     """
+    empty_since = None
     while state.is_planned_restart() and state.is_planned_restart_auto():
-        if not state.active_matches:
-            ok, _msg = check_and_prepare_restart()
-            if ok:
-                reason = state.planned_restart_reason()
-                audit.record('restart', '自动重启',
-                             '对局已全部结束，计划重启自动执行'
-                             + (f'（原因：{reason}）' if reason else ''),
-                             src=audit.SRC_AUTO)
-                metrics.record_restart()
-                log.warning('🤖 [自动重启] 对局已全部结束，执行计划重启')
-                schedule_exec_after(0.5)
-                return
+        if state.active_matches:
+            empty_since = None
+        else:
+            now = time.monotonic()
+            if empty_since is None:
+                empty_since = now
+                log.info(f'🤖 [自动重启] 对局已全部结束,进入 '
+                         f'{_AUTO_RESTART_GRACE:.0f}s 静默期(等待结算消息送达)')
+            elif now - empty_since >= _AUTO_RESTART_GRACE:
+                ok, _msg = check_and_prepare_restart()
+                if ok:
+                    reason = state.planned_restart_reason()
+                    audit.record('restart', '自动重启',
+                                 f'对局已全部结束，静默 {_AUTO_RESTART_GRACE:.0f}s 后自动执行计划重启'
+                                 + (f'（原因：{reason}）' if reason else ''),
+                                 src=audit.SRC_AUTO)
+                    metrics.record_restart()
+                    log.warning('🤖 [自动重启] 静默期结束，执行计划重启')
+                    schedule_exec_after(0.5)
+                    return
+                empty_since = None          # 预检被拒(race 新开局)→ 重新计时
         await asyncio.sleep(_AUTO_WATCH_INTERVAL)
 
 

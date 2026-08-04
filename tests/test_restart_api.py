@@ -167,8 +167,9 @@ async def test_planned_manual_mode_does_not_start_watcher(tmp_path, monkeypatch)
 # 自动重启 watcher
 # ─────────────────────────────────────────────────────────────────────────
 
-async def test_auto_watcher_restarts_when_matches_clear(monkeypatch):
-    """有对局 → 等待;对局清空 → 原子预检 + 审计(自动)+ 指标 + 调度 execv。"""
+async def test_auto_watcher_restarts_after_grace(monkeypatch):
+    """有对局 → 等待;清空 → 先静默期(结算消息还在发送链路上),满期才
+    原子预检 + 审计(自动)+ 指标 + 调度 execv。"""
     state.set_planned_restart(True, '夜间升级', auto=True)
     state.active_matches['m1'] = {'target_id': 'g1', 'is_uid': False}
     calls, audits = [], []
@@ -181,15 +182,18 @@ async def test_auto_watcher_restarts_when_matches_clear(monkeypatch):
     monkeypatch.setattr(dispatcher.audit, 'record',
                         lambda *a, **k: audits.append((a, k)))
     monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_GRACE', 0.08)
 
     task = asyncio.get_running_loop().create_task(dispatcher._auto_restart_watcher())
     await asyncio.sleep(0.05)
     assert 'exec' not in calls                     # 对局还在,不触发
     state.active_matches.clear()
+    await asyncio.sleep(0.04)
+    assert 'exec' not in calls                     # 已清空但仍在静默期内
     await asyncio.wait_for(task, timeout=2.0)
     assert calls[-2:] == ['metric', 'exec'] and 'check' in calls
     a, kw = audits[0]
-    assert a[1] == '自动重启' and '夜间升级' in a[2]
+    assert a[1] == '自动重启' and '夜间升级' in a[2] and '静默' in a[2]
     assert kw.get('src') == '自动'
 
 
@@ -242,3 +246,20 @@ async def test_planned_command_auto_not_a_word(monkeypatch):
     assert state.is_planned_restart() and not state.is_planned_restart_auto()
     assert state.planned_restart_reason() == '自动升级'
     assert '自动重启已开启' not in msg
+
+
+async def test_auto_watcher_grace_resets_on_new_match(monkeypatch):
+    """静默期内已建房间开出新局 → 计时清零,不会带着旧计时重启。"""
+    state.set_planned_restart(True, '', auto=True)
+    state.active_matches.clear()
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after',
+                        lambda d=0.5: pytest.fail('静默期被打断后不应触发重启'))
+    monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_GRACE', 0.06)
+
+    task = asyncio.get_running_loop().create_task(dispatcher._auto_restart_watcher())
+    await asyncio.sleep(0.03)                      # 静默期进行中
+    state.active_matches['m2'] = {'target_id': 'g2', 'is_uid': False}   # 新局出现
+    await asyncio.sleep(0.08)                      # 若未重置早就超过 0.06s 了
+    state.set_planned_restart(False)               # 收尾:关模式让 task 退出
+    await asyncio.wait_for(task, timeout=2.0)
