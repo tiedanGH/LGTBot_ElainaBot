@@ -776,11 +776,20 @@ _STARTUP_CHECK_MIN_INTERVAL = 600.0
 
 
 def _get_update_hint() -> dict:
-    """从持久缓存取启动自检结果,供 get_data 渲染新版本标记。"""
+    """从持久缓存取启动自检的 remote_version,是否有新版用**当前运行版本现算**。
+
+    不能直接信缓存里的 ``has_update``:「更新桥接层」git pull 成功后插件热重载,运行中的 ``__plugin_meta__.version`` 已经是新版,
+    但缓存是 pull 前判定的、600s 防抖又让自检不再重跑 —— 直接读缓存会让「新版本」标识在更新完成后错误残留。
+    现算(缓存 remote vs 实时 local)让标识随运行版本自动消失,且不多打一次 GitHub API。
+    """
     cached = boot._get_persistent().get(_STARTUP_CHECK_KEY) or {}
     bridge = cached.get('bridge') or {}
-    if bridge.get('success') and bridge.get('has_update'):
-        return {'has_update': True, 'remote_version': bridge.get('remote_version', '')}
+    remote = bridge.get('remote_version', '') or ''
+    if not (bridge.get('success') and remote):
+        return {'has_update': False, 'remote_version': ''}
+    local_now = _get_plugin_meta().get('version', '') or ''
+    if _semver_gt(remote, local_now):
+        return {'has_update': True, 'remote_version': remote}
     return {'has_update': False, 'remote_version': ''}
 
 
