@@ -46,7 +46,7 @@ from aiohttp import web
 from core.plugin import web_pages
 from .. import audit, metrics
 from .. import state as _plugin_state
-from . import build_api, page_crash
+from . import build_api, page_crash, restart_api
 from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
                page_logs, page_metrics, page_prebuilt, page_users)
 
@@ -122,6 +122,9 @@ _PREBUILT_UPLOAD_ROUTE      = '/api/ext/lgtbot/prebuilt/upload'   # 手动上传
 # 编译 API(供框架内其他插件调用):auth=False 免面板登录,handler 自验独立 token
 _BUILD_API_COMPILE_ROUTE    = '/api/ext/lgtbot/build/compile'
 _BUILD_API_TERMINATE_ROUTE  = '/api/ext/lgtbot/build/terminate'
+# 重启 / 计划重启 API(同一枚 token;POST 与面板 GET /planned-restart 同路径不同方法)
+_RESTART_API_ROUTE          = '/api/ext/lgtbot/restart'
+_PLANNED_API_ROUTE          = '/api/ext/lgtbot/planned-restart'
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
@@ -457,6 +460,9 @@ def register():
     # 编译 API:auth=False 跳过面板登录校验 —— handler 内部验独立 token(data/build/api_token),供框架内其他插件程序化调用
     web_pages.register_route('POST', _BUILD_API_COMPILE_ROUTE, build_api.compile_handler, auth=False)
     web_pages.register_route('POST', _BUILD_API_TERMINATE_ROUTE, build_api.terminate_handler, auth=False)
+    # 重启 / 计划重启 API(同 token 体系;计划重启支持 enable/auto/reason 请求体)
+    web_pages.register_route('POST', _RESTART_API_ROUTE, restart_api.restart_handler, auth=False)
+    web_pages.register_route('POST', _PLANNED_API_ROUTE, restart_api.planned_restart_handler, auth=False)
 
     _ensure_get_pages_filters_hidden()
 
@@ -484,5 +490,7 @@ def unregister():
     web_pages.unregister_route('POST', _PREBUILT_UPLOAD_ROUTE)
     web_pages.unregister_route('POST', _BUILD_API_COMPILE_ROUTE)
     web_pages.unregister_route('POST', _BUILD_API_TERMINATE_ROUTE)
+    web_pages.unregister_route('POST', _RESTART_API_ROUTE)
+    web_pages.unregister_route('POST', _PLANNED_API_ROUTE)
     # get_pages 的 wrap 不主动 unwrap:其它插件可能后续也加了包装,贸然恢复会断链。
     # 留着的副作用仅是过滤一组已不存在的 key,无害。

@@ -97,6 +97,12 @@ async def _setup():
     # 捕获主事件循环 —— C++ 工作线程通过 run_coroutine_threadsafe 调度到此循环
     _state.event_loop = asyncio.get_running_loop()
 
+    # 计划重启的「自动重启」watcher:热重载后若模式仍开启且旧 task 已死,补拉起
+    try:
+        dispatcher.ensure_auto_restart_watcher_on_load()
+    except Exception as e:
+        log.warning(f'恢复自动重启 watcher 失败: {e}')
+
     # 上一轮 C++ 异常 (std::terminate) 路径若留下了 pending_apology_* marker,
     # 现在干净进程已经就绪,调度异步补发道歉 + 通知群推送（5s 延后,避开 boot 抖动）。
     # 无 marker 时函数 no-op,失败不阻断后续引擎启动。

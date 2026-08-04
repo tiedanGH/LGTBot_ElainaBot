@@ -78,11 +78,19 @@ def is_planned_restart() -> bool:
     return bool(_p.get('planned_restart'))
 
 
-def set_planned_restart(on: bool, reason: str = '') -> None:
+def set_planned_restart(on: bool, reason: str = '', auto: bool = False) -> None:
     """开 / 关维护模式。``reason`` 为管理员填写的原因(仅开启时有意义,
-    会展示在玩家收到的维护提示里);关闭时一并清掉,避免下次开启复用旧原因。"""
+    会展示在玩家收到的维护提示里);``auto`` 为「自动重启」子开关 —— 开启后
+    由 dispatcher 的 watcher 轮询,全部对局结束即自动执行重启(默认手动)。
+    关闭时两者一并清掉,避免下次开启复用旧值。"""
     _p['planned_restart'] = bool(on)
     _p['planned_restart_reason'] = (reason or '').strip() if on else ''
+    _p['planned_restart_auto'] = bool(auto) if on else False
+
+
+def is_planned_restart_auto() -> bool:
+    """「计划重启」的自动重启子开关(仅在维护模式开启期间有意义)。"""
+    return bool(_p.get('planned_restart_auto'))
 
 
 def planned_restart_reason() -> str:

@@ -1146,26 +1146,93 @@ def schedule_exec_after(delay: float = 0.5, on_failure=None) -> None:
 # `owner_only=True` 框架内置:非主人触发时直接回 owner_only 模板,不进函数体。
 # WebUI 重启按钮也走同一对 helper —— 见 webui/main.py::_render_restart。
 
-def toggle_planned_restart(reason: str = '') -> tuple[bool, str]:
-    """翻转「计划重启」维护模式,返回 (新状态, 提示文案)。命令 / WebUI 共用。
+def set_planned_mode(enable: bool, reason: str = '', auto: bool = False) -> tuple[bool, str]:
+    """显式开 / 关「计划重启」维护模式,返回 (新状态, 提示文案)。
 
-    ``reason`` 为管理员填写的维护原因,仅在**开启**时记录并展示给玩家
-    (见 ``_planned_restart_notice``);关闭时由 ``state.set_planned_restart``
-    一并清掉。回执里带上剩余进行中对局数,方便管理员判断还要等多久。
+    ``reason`` 为维护原因,仅在开启时记录并展示给玩家(见
+    ``_planned_restart_notice``);``auto=True`` 同时启用**自动重启**:watcher
+    轮询进行中对局,全部结束后自动执行重启(默认手动 —— 管理员自己点重启)。
+    关闭时 reason / auto 一并清掉。回执带剩余进行中对局数。
     """
-    now_on = not state.is_planned_restart()
     reason = (reason or '').strip()
-    state.set_planned_restart(now_on, reason)
-    if now_on:
+    auto = bool(auto and enable)
+    state.set_planned_restart(enable, reason, auto)
+    if enable:
         remaining = len(state.active_matches)
         log.warning(f'🚧 [计划重启] 维护模式已启用：禁用新游戏创建'
-                    f'（剩余对局 {remaining}）' + (f'，原因：{reason}' if reason else ''))
+                    f'（剩余对局 {remaining}，自动重启 {"开" if auto else "关"}）'
+                    + (f'，原因：{reason}' if reason else ''))
         msg = f'🚧 计划重启已启用：已禁用新游戏创建（剩余进行中对局 {remaining} 局）。'
         if reason:
             msg += f'\n📌 维护原因：{reason}'
+        if auto:
+            msg += '\n🤖 自动重启已开启：全部对局结束后将自动执行重启。'
+            _ensure_auto_restart_watcher()
         return True, msg
     log.warning('✅ [计划重启] 维护模式已取消：恢复新游戏创建')
     return False, '✅ 计划重启已取消：已恢复新游戏创建。'
+
+
+def toggle_planned_restart(reason: str = '') -> tuple[bool, str]:
+    """翻转「计划重启」维护模式(命令 / WebUI 入口,恒为手动重启模式)。"""
+    return set_planned_mode(not state.is_planned_restart(), reason)
+
+
+# ──────── 计划重启·自动重启 watcher ──────────────────────────────────────
+# 轮询而非挂 cb_match_event 的对局结束分支 —— 引擎复用时 C++ 持有的是**旧 callbacks 模块**的回调
+# (CLAUDE.md §5,发送失败统计踩过的同一课),挂在新模块的事件钩子不在旧回调执行路径上;
+# 轮询读的 state.active_matches 是跨模块共享的持久 dict,对新旧代码一律成立。
+#
+# task 引用挂持久 dict:热重载重复调用 _ensure 不会二次起 task(旧 task 读同一份持久 flag,行为一致);模式关闭 / execv 后 task 自然终结。
+_AUTO_WATCH_KEY = 'planned_auto_watcher'
+_AUTO_WATCH_INTERVAL = 5.0
+
+
+def ensure_auto_restart_watcher_on_load() -> None:
+    """@on_load 恢复入口:热重载后 planned + auto 仍开启且 watcher 已死时补拉起。
+
+    正常情况下旧 watcher task(引用旧模块代码,读同一份持久 state)跨热重载
+    继续服务,_ensure 幂等直接返回;仅在旧 task 因异常终止时真正重建。
+    """
+    if state.is_planned_restart() and state.is_planned_restart_auto():
+        _ensure_auto_restart_watcher()
+
+
+def _ensure_auto_restart_watcher() -> None:
+    """幂等启动自动重启 watcher(无运行中 loop 时静默跳过,由下次开启补起)。"""
+    p = boot._get_persistent()
+    t = p.get(_AUTO_WATCH_KEY)
+    if t is not None and not t.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        log.warning('[计划重启] 无运行中 asyncio loop,自动重启 watcher 未启动')
+        return
+    p[_AUTO_WATCH_KEY] = loop.create_task(_auto_restart_watcher())
+
+
+async def _auto_restart_watcher() -> None:
+    """「自动重启」轮询:planned + auto 开启期间每 5s 检查进行中对局,清空即重启。
+
+    触发时走与手动重启完全相同的 ``check_and_prepare_restart`` 原子预检
+    (release 内部还会二次确认引擎侧无对局,轮询窗口里新开的局会让它拒绝,下一轮再试),
+    成功后计审计(SRC_AUTO)+ 重启指标,再调度 os.execv。
+    """
+    while state.is_planned_restart() and state.is_planned_restart_auto():
+        if not state.active_matches:
+            ok, _msg = check_and_prepare_restart()
+            if ok:
+                reason = state.planned_restart_reason()
+                audit.record('restart', '自动重启',
+                             '对局已全部结束，计划重启自动执行'
+                             + (f'（原因：{reason}）' if reason else ''),
+                             src=audit.SRC_AUTO)
+                metrics.record_restart()
+                log.warning('🤖 [自动重启] 对局已全部结束，执行计划重启')
+                schedule_exec_after(0.5)
+                return
+        await asyncio.sleep(_AUTO_WATCH_INTERVAL)
 
 
 @handler(_P_MATCHLIST,
