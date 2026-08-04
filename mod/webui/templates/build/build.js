@@ -421,9 +421,11 @@ async function buildCopyApiToken() {
     const ep = data.endpoints || {};
     await dashAlert(
       (copied ? '✅ API Token 已复制到剪贴板\n\n' : '⚠️ 复制失败，请手动记录：\n' + data.token + '\n\n') +
-      'Token：' + masked + '\n存储文件：' + (data.path || '') +
+      'Token：' + masked +
       '\n\n编译端点：POST ' + (ep.compile || '') +
-      '\n中断端点：POST ' + (ep.terminate || '') +
+      '\n中断编译：POST ' + (ep.terminate || '') +
+      '\n立即重启：POST ' + (ep.restart || '') +
+      '\n计划重启：POST ' + (ep.planned || '') + '（{"enable", "auto", "reason"}）' +
       '\n认证方式：Authorization: Bearer <token>',
       {level: 'info'}
     );

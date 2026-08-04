@@ -241,13 +241,21 @@ async def terminate_handler(request: 'web.Request') -> 'web.Response':
 # ─────────────────────────────────────────────────────────────────────────
 
 def render_api_token() -> str:
-    """fragment: token + 端点说明,供「🔑 复制 API Token」按钮取值。"""
+    """fragment: token + 端点说明,供「🔑 复制 API Token」按钮取值。
+
+    端点列表涵盖同一枚 token 认证的全部 API(编译 + 重启 / 计划重启,
+    后两者见 restart_api);token 存储位置不再下发 —— 弹窗只关心怎么调用。
+    """
     import html as _html
     payload = {
         'success': True,
         'token': get_or_create_api_token(),
-        'path': os.path.abspath(TOKEN_PATH),
-        'endpoints': {'compile': _ROUTE_COMPILE, 'terminate': _ROUTE_TERMINATE},
+        'endpoints': {
+            'compile': _ROUTE_COMPILE,
+            'terminate': _ROUTE_TERMINATE,
+            'restart': '/api/ext/lgtbot/restart',
+            'planned': '/api/ext/lgtbot/planned-restart',
+        },
     }
     body = json.dumps(payload, ensure_ascii=False)
     return f'<pre id="result">{_html.escape(body)}</pre>'
