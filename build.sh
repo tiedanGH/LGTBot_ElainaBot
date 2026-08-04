@@ -305,9 +305,19 @@ fi
 # ── 实际编译 ─────────────────────────────────────────────────────────────
 # 多 target 时一次 cmake --build 调用里挂多个 --target,CMake ≥3.15 支持;
 # 留空 TARGETS 时不传 --target,走默认 all。
+#
+# 游戏目标要额外带上资源复制:lgtbot/games/CMakeLists.txt 里 icon.png 与 resource/ 的复制
+# 是 make_output_dir_<GAME> / resource_dir_<GAME> 两个 **仅挂 ALL** 的 custom target,
+# 与游戏库 <GAME> 之间没有依赖边(rule_binary 才有 add_dependencies)
+# 单目标构建的依赖图里没有它们,只有完整编译会执行。这里在调用侧把伴生 target 显式加进构建列表。
+# 判定游戏与上游同款:games/<t>/mygame.cc 存在(CMakeLists.txt:31)。
 target_args=()
 for t in "${TARGETS[@]}"; do
     target_args+=(--target "$t")
+    if [[ -f "lgtbot/games/$t/mygame.cc" ]]; then
+        target_args+=(--target "make_output_dir_$t" --target "resource_dir_$t")
+        echo "[i] 游戏目标 $t:附加资源复制 (icon.png + resource/)"
+    fi
 done
 
 echo "── 编译 (-j $JOBS) ────"
