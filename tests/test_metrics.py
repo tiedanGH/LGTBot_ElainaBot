@@ -154,7 +154,9 @@ def test_snapshot_without_file_returns_all_zero():
     assert snap == {'upload_total': 0, 'upload_fail': 0, 'crash_total': 0,
                     'crash_by_sig': {}, 'last_crash_ts': 0, 'last_crash_sig': '',
                     'restart_total': 0, 'last_restart_ts': 0,
-                    'quota_exhausted': 0, 'quota_wait_timeout': 0}
+                    'quota_exhausted': 0, 'quota_wait_timeout': 0,
+                    'send_fail_total': 0, 'send_fail_all': 0,
+                    'send_fail_by_code': {}}
 
 
 def test_corrupt_file_renamed_and_recovers():
@@ -281,6 +283,22 @@ def test_game_stats_today_filter_and_rankings():
            [('五子棋', 2), ('大富翁', 1)]
     # 今日玩家参与榜:U1 3 局居首
     assert g['top_players_today'][0]['count'] == 3
+
+
+def test_record_send_failure_counts_and_ignores_expected_code():
+    """发送失败双口径:total 排除 40034105(配额超时预期失败),all 全部计入;
+    by_code 记全部分布,code 缺失归入 unknown。"""
+    metrics.record_send_failure(40034102)
+    metrics.record_send_failure(40034102)
+    metrics.record_send_failure(22009)
+    metrics.record_send_failure(None)
+    metrics.record_send_failure(40034105)        # 预期失败 → 不进 total
+    metrics.record_send_failure('40034105')      # 字符串形态同样识别
+    snap = metrics.snapshot()
+    assert snap['send_fail_total'] == 4
+    assert snap['send_fail_all'] == 6
+    assert snap['send_fail_by_code'] == {'40034102': 2, '22009': 1,
+                                         'unknown': 1, '40034105': 2}
 
 
 def test_yesterday_same_span_counts_only_matching_window():

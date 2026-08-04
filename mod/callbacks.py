@@ -302,11 +302,13 @@ async def _send_collateral_notice(target_id: str, is_uid: bool) -> None:
         page_logs.log_outgoing(target_id, is_uid, _CRASH_COLLATERAL_MD)
         with log_attribution.mark_outbound():
             if is_uid:
-                await sender.send_to_user(target_id, _CRASH_COLLATERAL_MD,
-                                          buttons=buttons.build_support_buttons(), **kwargs)
+                _note_send_result(await sender.send_to_user(
+                    target_id, _CRASH_COLLATERAL_MD,
+                    buttons=buttons.build_support_buttons(), **kwargs))
             else:
-                await sender.send_to_group(target_id, _CRASH_COLLATERAL_MD,
-                                           buttons=buttons.build_support_buttons(), **kwargs)
+                _note_send_result(await sender.send_to_group(
+                    target_id, _CRASH_COLLATERAL_MD,
+                    buttons=buttons.build_support_buttons(), **kwargs))
     except Exception as e:
         log.warning(f'对局中断通知发送失败 ({target_id}): {e}')
 
@@ -370,7 +372,7 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
     page_logs.log_outgoing(notify_group, False, md)
     try:
         with log_attribution.mark_outbound():
-            await sender.send_to_group(notify_group, md)
+            _note_send_result(await sender.send_to_group(notify_group, md))
     except Exception as e:
         log.warning(f'崩溃通知群推送失败 ({notify_group}): {e}')
 
@@ -641,7 +643,7 @@ async def _alert_crash_loop_tripped(count: int) -> None:
     page_logs.log_outgoing(notify_group, False, md)
     try:
         with log_attribution.mark_outbound():
-            await sender.send_to_group(notify_group, md)
+            _note_send_result(await sender.send_to_group(notify_group, md))
     except Exception as e:
         log.warning(f'崩溃熔断告警推送失败 ({notify_group}): {e}')
 
@@ -721,6 +723,29 @@ _DM_WARNING_TEXT_ALL = (
 # 返回,read thread 在 OnPost 里持锁只剩几十 µs。 per-target asyncio.Lock 保证发到
 # 同一 target 的消息按 cb 调用顺序送达 QQ(asyncio FIFO + Lock 串行)。
 _send_locks: dict[str, asyncio.Lock] = {}
+
+
+def _note_send_result(ret) -> None:
+    """从 ``send_to_*`` 的返回值 ``(ok, data, payload)`` 提取失败并计入指标。
+
+    框架发送失败**不抛异常**(``_send_push`` 把 QQ 的拒绝作为 ``ok=False`` +
+    错误体返回),之前所有调用点都丢弃了返回值,失败只在框架错误中心可见。
+    现在被动引用回复与主动直推(同一条 ``_send_push`` 链路)的拒绝都计入
+    ``metrics.record_send_failure``(40034105 等预期失败的排除在 metrics 侧)。
+    永不抛;非标准返回(测试 mock / 框架变动)静默忽略。
+    """
+    try:
+        ok, data = ret[0], ret[1]
+        if ok is True:
+            return
+        if ok is not False:          # mock / 未知形状,不猜
+            return
+        code = None
+        if isinstance(data, dict):
+            code = data.get('code') or data.get('err_code')
+        metrics.record_send_failure(code)
+    except Exception:
+        pass
 
 
 def _get_send_lock(key: str) -> asyncio.Lock:
@@ -1212,9 +1237,11 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     try:
         with log_attribution.mark_outbound():
             if is_uid:
-                await sender.send_to_user(target_id, msg, buttons=btns_arg, **kwargs)
+                _note_send_result(await sender.send_to_user(
+                    target_id, msg, buttons=btns_arg, **kwargs))
             else:
-                await sender.send_to_group(target_id, msg, buttons=btns_arg, **kwargs)
+                _note_send_result(await sender.send_to_group(
+                    target_id, msg, buttons=btns_arg, **kwargs))
     except Exception as e:
         log.warning(f'发送文本失败 ({target_id}): {e}')
 
@@ -1520,9 +1547,11 @@ async def _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
     try:
         with log_attribution.mark_outbound():
             if is_uid:
-                await sender.send_to_user(target_id, md, buttons=btns_arg, **kwargs)
+                _note_send_result(await sender.send_to_user(
+                    target_id, md, buttons=btns_arg, **kwargs))
             else:
-                await sender.send_to_group(target_id, md, buttons=btns_arg, **kwargs)
+                _note_send_result(await sender.send_to_group(
+                    target_id, md, buttons=btns_arg, **kwargs))
         return True
     except Exception as e:
         log.warning(f'markdown 图片发送失败 ({target_id}): {e}, 回退到媒体消息')
@@ -1557,8 +1586,10 @@ async def _send_media_fallback(sender, target_id, is_uid, ref_type, ref_value,
     try:
         with log_attribution.mark_outbound():
             if is_uid:
-                await sender.send_to_user(target_id, rendered_content, media=media_dict, **kwargs)
+                _note_send_result(await sender.send_to_user(
+                    target_id, rendered_content, media=media_dict, **kwargs))
             else:
-                await sender.send_to_group(target_id, rendered_content, media=media_dict, **kwargs)
+                _note_send_result(await sender.send_to_group(
+                    target_id, rendered_content, media=media_dict, **kwargs))
     except Exception as e:
         log.warning(f'发送图片失败 ({target_id}): {e}')

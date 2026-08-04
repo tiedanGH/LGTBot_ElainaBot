@@ -75,6 +75,14 @@ function metricsRenderRuntime(rt) {
   document.getElementById('metrics-quota-sub').textContent =
     '配额耗尽 ' + (r.quota_exhausted || 0) + ' 次';
 
+  /* 异常发送失败:大数字 = 非预期的 API 拒绝(排除 40034105 配额超时的无权限主动拒绝),
+  小字 = 全部失败次数(含预期拒绝)。按码分布只留存 metrics.json,不上 UI —— 码一多会把卡片挤破。 */
+  document.getElementById('metrics-send-fail').textContent =
+    (r.send_fail_total || 0) + ' 次';
+  const failAll = r.send_fail_all || 0;
+  document.getElementById('metrics-send-fail-sub').textContent =
+    failAll > 0 ? ('全部发送失败 ' + failAll + ' 次') : '暂无失败记录';
+
   /* 重启次数(面板 / 指令触发的主动重启):小字上次重启时间 */
   document.getElementById('metrics-restart-total').textContent =
     (r.restart_total || 0) + ' 次';

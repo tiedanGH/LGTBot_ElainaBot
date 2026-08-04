@@ -60,6 +60,9 @@ _DEFAULTS = {
     'last_restart_ts': 0,
     'quota_exhausted': 0,
     'quota_wait_timeout': 0,
+    'send_fail_total': 0,
+    'send_fail_all': 0,
+    'send_fail_by_code': {},
 }
 
 _lock = threading.Lock()
@@ -241,13 +244,52 @@ def record_quota_wait_timeout() -> None:
     _bump(_m)
 
 
+# 不计入主数值的返回码:40034105 = 被动配额超时强发时的「无主动消息权限」拒绝
+# 刷新等待超时兜底的**预期**失败,反映的是配额压力(已有独立计数),不算发送链路异常。
+# 这些码仍计入 ``send_fail_all`` 与 by_code 分布留证。
+SEND_FAIL_IGNORED_CODES = frozenset({40034105})
+
+
+def record_send_failure(code) -> None:
+    """一次出站消息被 QQ 接口拒绝(``send_to_*`` 返回 ``ok=False``)。
+
+    挂 callbacks 各出站调用点(``_note_send_result``):被动引用回复与主动
+    直推同一条 ``_send_push`` 链路,两类失败都计。双口径:
+
+      · ``send_fail_total``   非预期失败(面板大数字;排除 IGNORED_CODES)
+      · ``send_fail_all``     全部失败,含预期拒绝(面板小字)
+      · ``send_fail_by_code`` 全部失败按返回码分布(文件留证,面板不展开)
+
+    完整错误 message 在框架错误中心(``report_error_raw``)可查,这里不重复存。
+    """
+    ignored = False
+    try:
+        ignored = code is not None and int(code) in SEND_FAIL_IGNORED_CODES
+    except (TypeError, ValueError):
+        pass
+
+    def _m(d: dict) -> None:
+        d['send_fail_all'] = int(d.get('send_fail_all') or 0) + 1
+        if not ignored:
+            d['send_fail_total'] = int(d.get('send_fail_total') or 0) + 1
+        by = d.get('send_fail_by_code')
+        if not isinstance(by, dict):
+            by = {}
+        key = str(code) if code is not None else 'unknown'
+        by[key] = int(by.get(key) or 0) + 1
+        d['send_fail_by_code'] = by
+    _bump(_m)
+
+
 def snapshot() -> dict:
     """全部计数(缺 key 按零值兜底)。异常时返回全零 dict。"""
     try:
         with _lock:
             raw = _load_raw()
         out = dict(_DEFAULTS)
+        # 可变默认值(dict)换成新实例,避免把 _DEFAULTS 里的共享对象漏出去
         out['crash_by_sig'] = {}
+        out['send_fail_by_code'] = {}
         for k, default in _DEFAULTS.items():
             v = raw.get(k, default)
             out[k] = v if isinstance(v, type(default)) else default

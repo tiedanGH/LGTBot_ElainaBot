@@ -600,3 +600,35 @@ async def test_mixed_send_text_only_when_no_image_readable(monkeypatch):
         state.full_volume_groups.discard('GTXT')
     sender.send_to_group.assert_awaited_once()
     assert sender.send_to_group.call_args[0][1] == '只剩文字'
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 消息发送失败计数:send_to_* 返回 ok=False 时计入指标(经 _note_send_result)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+async def test_send_failure_recorded_from_return_value(monkeypatch):
+    """QQ 拒绝(ok=False + 错误体)→ record_send_failure(code);成功不计。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(
+        return_value=(False, {'message': 'no permission', 'code': 40034102}, {}))
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    seen = []
+    monkeypatch.setattr(callbacks.metrics, 'record_send_failure',
+                        lambda code: seen.append(code))
+    state.full_volume_groups.add('GFAIL')
+    try:
+        await callbacks._send_text_quota_managed('GFAIL', False, 'hi', None)
+    finally:
+        state.full_volume_groups.discard('GFAIL')
+    assert seen == [40034102]
+
+    # ok=True → 不计
+    seen.clear()
+    sender.send_to_group = AsyncMock(return_value=(True, {'id': 'M1'}, {}))
+    state.full_volume_groups.add('GOK')
+    try:
+        await callbacks._send_text_quota_managed('GOK', False, 'hi', None)
+    finally:
+        state.full_volume_groups.discard('GOK')
+    assert seen == []
