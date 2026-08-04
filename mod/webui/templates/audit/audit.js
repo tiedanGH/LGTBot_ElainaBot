@@ -56,11 +56,12 @@ function auditCatInfo(cat) {
   return info || { emoji: '❓', label: cat || '未知' };
 }
 
-/* 来源 → 徽标 class(复用 main.css 的 dash-badge 主题色):
-   面板 = 中性 / 指令 = 橙 / 自动 = 绿 —— 三色区分操作从哪里触发 */
+/* 来源 → 徽标 class(复用 dash-badge 主题色 + audit 自有 API 色):
+   面板 = 中性灰 / 指令 = 橙 / 自动 = 绿 / API = accent 蓝紫 —— 四色区分触发方 */
 function auditSrcBadgeClass(src) {
   if (src === '指令') return 'dash-badge dash-badge-warn';
   if (src === '自动') return 'dash-badge dash-badge-ok';
+  if (src === 'API') return 'dash-badge audit-badge-api';
   return 'dash-badge';
 }
 

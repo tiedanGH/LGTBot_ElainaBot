@@ -102,6 +102,12 @@
 .audit-table .dash-badge {
   font-size: 11px; padding: 2px 8px;
 }
+/* API 来源徽标 —— accent 蓝紫(同 dash-badge-ok/warn 的 18% 透明底配方) */
+.audit-table .audit-badge-api {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
 
 .audit-empty td {
   text-align: center; padding: 32px 16px;
