@@ -196,6 +196,17 @@ def _push_quota_view(target_id: str, is_uid: bool) -> dict:
     }
 
 
+def _should_block_new_game(content: str) -> bool:
+    """「计划重启」维护闸的判定:仅**手动模式**拦新建房间。
+
+    自动模式(is_planned_restart_auto)不拦 —— watcher 只在对局自然清空后
+    静默重启,期间玩家照常开新局,新局会让静默计时清零、重启顺延。
+    """
+    return (state.is_planned_restart()
+            and not state.is_planned_restart_auto()
+            and bool(_NEW_GAME_RE.match(content)))
+
+
 def _planned_restart_notice() -> str:
     """构造「计划重启」维护提示 —— 每次现拼,带上当前进行中对局数与维护原因。
 
@@ -880,7 +891,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     # 「计划重启」维护闸:仅拦新建房间,回维护提示,不派发给引擎。
     # 放在 refresh_ref 之前 —— 该消息不进配额表,提示走消息自己的被动额度。
     # 底部挂官方群 / 问题反馈 link 按钮 —— 即将 execv 重启的场景下 link 按钮。
-    if state.is_planned_restart() and _NEW_GAME_RE.match(content):
+    if _should_block_new_game(content):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
         await event.reply(_planned_restart_notice(), buttons=buttons.build_support_buttons())
@@ -1034,7 +1045,7 @@ async def lgtbot_interaction_dispatch(event, match):
         return
 
     # 「计划重启」维护闸 —— 欢迎菜单的游戏快捷按钮(data 为 /新游戏 X)也从这里进引擎,与 lgtbot_dispatch 的闸对称。
-    if state.is_planned_restart() and _NEW_GAME_RE.match(content):
+    if _should_block_new_game(content):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
         await event.reply(_planned_restart_notice(), buttons=buttons.build_support_buttons())
@@ -1151,7 +1162,9 @@ def set_planned_mode(enable: bool, reason: str = '', auto: bool = False) -> tupl
 
     ``reason`` 为维护原因,仅在开启时记录并展示给玩家(见
     ``_planned_restart_notice``);``auto=True`` 同时启用**自动重启**:watcher
-    轮询进行中对局,全部结束后自动执行重启(默认手动 —— 管理员自己点重启)。
+    轮询进行中对局,全部结束并静默 30s 后自动执行重启(默认手动 ——
+    管理员自己点重启)。两种模式对玩家的差别:手动模式拦下新建房间回维护
+    提示;**自动模式不限制新游戏创建**(新局只是让自动重启顺延)。
     关闭时 reason / auto 一并清掉。回执带剩余进行中对局数。
     """
     reason = (reason or '').strip()
@@ -1159,14 +1172,19 @@ def set_planned_mode(enable: bool, reason: str = '', auto: bool = False) -> tupl
     state.set_planned_restart(enable, reason, auto)
     if enable:
         remaining = len(state.active_matches)
-        log.warning(f'🚧 [计划重启] 维护模式已启用：禁用新游戏创建'
-                    f'（剩余对局 {remaining}，自动重启 {"开" if auto else "关"}）'
+        log.warning(f'🚧 [计划重启] 维护模式已启用'
+                    f'（剩余对局 {remaining}，自动重启 {"开" if auto else "关"}，'
+                    f'{"不限制" if auto else "禁用"}新游戏创建）'
                     + (f'，原因：{reason}' if reason else ''))
-        msg = f'🚧 计划重启已启用：已禁用新游戏创建（剩余进行中对局 {remaining} 局）。'
+        if auto:
+            msg = (f'🚧 计划重启已启用（自动模式）：不限制新游戏创建'
+                   f'（剩余进行中对局 {remaining} 局）。')
+        else:
+            msg = f'🚧 计划重启已启用：已禁用新游戏创建（剩余进行中对局 {remaining} 局）。'
         if reason:
             msg += f'\n📌 维护原因：{reason}'
         if auto:
-            msg += '\n🤖 自动重启已开启：全部对局结束后将自动执行重启。'
+            msg += '\n🤖 自动重启：在无人进行对局时自动执行重启。'
             _ensure_auto_restart_watcher()
         return True, msg
     log.warning('✅ [计划重启] 维护模式已取消：恢复新游戏创建')
@@ -1185,7 +1203,7 @@ def toggle_planned_restart(reason: str = '') -> tuple[bool, str]:
 #
 # task 引用挂持久 dict:热重载重复调用 _ensure 不会二次起 task(旧 task 读同一份持久 flag,行为一致);模式关闭 / execv 后 task 自然终结。
 _AUTO_WATCH_KEY = 'planned_auto_watcher'
-_AUTO_WATCH_INTERVAL = 5.0
+_AUTO_WATCH_INTERVAL = 20.0
 # 对局清空后的静默期:结算消息(终局赛况文本 / 图片)由 cb_send_* fire-and-forget 投递,还要排 per-target 发送队列 + 图床上传,
 # 对局从 active_matches 移除的那一刻它们往往尚未送达 QQ —— 立即 execv 会把这些 pending 发送连同终局赛况一起丢掉。
 # 持续空满该秒数才真正重启;期间已建房间开出新局则计时清零重来。
@@ -1217,7 +1235,7 @@ def _ensure_auto_restart_watcher() -> None:
 
 
 async def _auto_restart_watcher() -> None:
-    """「自动重启」轮询:planned + auto 开启期间每 5s 检查进行中对局。
+    """「自动重启」轮询:planned + auto 开启期间每 20s 检查进行中对局。
 
     对局清空后**不立即**重启,先进入 ``_AUTO_RESTART_GRACE`` 秒静默期 ——
     终局赛况等结算消息此刻多半还在异步发送链路上(见常量注释),等它们送达后才 execv;静默期内出现新对局(已建房间开局)则计时清零。
@@ -1428,8 +1446,9 @@ async def lgtbot_planned_restart(event, match):
 
     「计划重启 <原因>」可带维护原因,原因会展示在玩家创建新游戏时收到的
     维护提示里(关闭维护模式时自动清空,故关闭指令不必带原因)。
-    「计划重启 自动 <原因>」首词恰为「自动」时启用**自动重启**:全部对局
-    结束后自动执行重启(默认手动;原因含"自动"字样但不独立成词不受影响)。
+    「计划重启 自动 <原因>」首词恰为「自动」时启用**自动重启**:不限制新
+    游戏创建,全部对局结束并静默 30s 后自动执行重启(默认手动 —— 拦新建
+    房间;原因含"自动"字样但不独立成词不受影响)。
     """
     if helpers.is_foreign_event(event):
         return

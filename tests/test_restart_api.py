@@ -263,3 +263,15 @@ async def test_auto_watcher_grace_resets_on_new_match(monkeypatch):
     await asyncio.sleep(0.08)                      # 若未重置早就超过 0.06s 了
     state.set_planned_restart(False)               # 收尾:关模式让 task 退出
     await asyncio.wait_for(task, timeout=2.0)
+
+
+def test_should_block_new_game_only_in_manual_mode():
+    """维护闸:手动模式拦 /新游戏;自动模式放行;未开启不拦。"""
+    assert not dispatcher._should_block_new_game('/新游戏')      # 模式未开启
+    state.set_planned_restart(True, '', auto=False)
+    assert dispatcher._should_block_new_game('/新游戏')          # 手动:拦
+    assert dispatcher._should_block_new_game('/随机游戏')
+    assert not dispatcher._should_block_new_game('/加入')        # 非新建不拦
+    state.set_planned_restart(True, '', auto=True)
+    assert not dispatcher._should_block_new_game('/新游戏')      # 自动:放行
+    state.set_planned_restart(False)

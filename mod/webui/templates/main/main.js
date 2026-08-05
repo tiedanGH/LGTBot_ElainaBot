@@ -92,12 +92,12 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
                                  {level: 'info'});
     if (!ok) return;
   } else {
-    /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选(默认不勾,
-       勾选后全部对局结束将自动执行重启)。取消 prompt(返回 null)= 放弃开启。 */
+    /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选(默认不勾)。
+       手动模式拦新建房间;自动模式不限制,对局清空并静默 30s 后自动重启。 */
     const input = await dashPrompt(
-      '启用计划重启？\n\n启用后玩家无法创建新游戏（进行中的对局与已创建的房间不受影响），用于在重启前逐渐清空对局；真正重启后自动恢复。\n\n可填写维护原因（将展示给玩家）：',
+      '启用计划重启？\n\n手动模式（默认）：玩家无法创建新游戏（进行中的对局与已建房间不受影响），逐渐清空对局后手动重启。\n自动重启：不限制新游戏创建，全部对局结束并静默 30 秒后自动执行重启。\n\n可填写维护原因（将展示给玩家）：',
       {defaultValue: '', okText: '启用', level: 'warn',
-       checkbox: '自动重启：全部对局结束后自动执行重启'}
+       checkbox: '自动重启：全部对局结束后自动重启（不限制新游戏创建）'}
     );
     if (input === null) return;
     reason = (input.value || '').trim();
