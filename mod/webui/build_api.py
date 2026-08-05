@@ -229,6 +229,9 @@ async def terminate_handler(request: 'web.Request') -> 'web.Response':
     if not _check_auth(request):
         return _err(401, 'token 缺失或错误')
     if not page_build.get_build_state()['running']:
+        # 无编译可取消:409 且落一条失败审计(_kill_build 未被调用,它内部的审计只覆盖「有编译但 kill 失败」)。
+        audit.record('build', '终止编译', '当前没有编译在进行',
+                     ok=False, src=audit.SRC_API)
         return _err(409, '当前没有编译在进行')
     result = page_build._kill_build(src=audit.SRC_API)
     if not result.get('success'):

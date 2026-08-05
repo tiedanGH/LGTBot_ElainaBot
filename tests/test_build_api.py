@@ -269,12 +269,23 @@ async def test_terminate_requires_token(tmp_path, monkeypatch):
 
 
 async def test_terminate_conflict_when_idle(tmp_path, monkeypatch):
+    """无编译可取消:409 失败 + 落 API 失败审计,且不触碰面板编译状态。"""
     api = _api()
     monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
     token = api.get_or_create_api_token()
     monkeypatch.setattr(api.page_build, 'get_build_state', lambda: {'running': False})
+    kills = []
+    monkeypatch.setattr(api.page_build, '_kill_build',
+                        lambda src='': kills.append(1))
+    audits = []
+    monkeypatch.setattr(api.audit, 'record', lambda *a, **k: audits.append((a, k)))
     resp = await api.terminate_handler(_FakeReq(token=token))
     assert resp.status == 409
+    assert _body(resp)['success'] is False
+    assert kills == []                              # 未触碰 kill / 面板状态
+    a, kw = audits[0]
+    assert a[0] == 'build' and a[1] == '终止编译'
+    assert kw.get('ok') is False and kw.get('src') == 'API' 
 
 
 async def test_terminate_kills_running_build(tmp_path, monkeypatch):
