@@ -600,3 +600,18 @@ async def test_mixed_send_text_only_when_no_image_readable(monkeypatch):
         state.full_volume_groups.discard('GTXT')
     sender.send_to_group.assert_awaited_once()
     assert sender.send_to_group.call_args[0][1] == '只剩文字'
+
+
+def test_mention_rewrite_registry_lives_in_persistent_dict():
+    """@ 改写登记表必须挂持久 dict —— 登记方(新 dispatcher)与消费方(可能是
+    引擎复用时的旧 callbacks)只有经 boot._get_persistent() 才能看到同一份;
+    模块级 dict 会让改写永远不生效(线上回归:%中断 回执仍 @引擎管理员)。"""
+    from plugins.LGTBot_ElainaBot.mod import boot
+    shared = boot._get_persistent()['mention_rewrites']
+    assert callbacks._mention_rewrites is shared      # 同一对象,非拷贝
+
+    callbacks.register_mention_rewrite('g:GX', 'ADMIN_UID', 'OP_UID')
+    assert 'g:GX' in shared                           # 写入即对"另一模块"可见
+    out = callbacks._apply_mention_rewrite('g:GX', '<@ADMIN_UID> 中断成功')
+    assert out == '<@OP_UID> 中断成功'
+    assert 'g:GX' not in shared                       # 一次性:命中即注销

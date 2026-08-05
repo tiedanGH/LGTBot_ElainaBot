@@ -238,6 +238,7 @@ _PERSIST_DEFAULTS: dict = {
     'pending_new_game_name':   {},
     'full_volume_groups':      set(),
     'log_attribution_ctxvar':  None,
+    'mention_rewrites':        {},
 }
 
 

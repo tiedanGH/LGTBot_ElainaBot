@@ -59,6 +59,7 @@ _persistent: dict = {
     'active_matches': {},
     'pending_new_game_name': {},
     'full_volume_groups': set(),
+    'mention_rewrites': {},
 }
 
 
@@ -119,6 +120,7 @@ def _clean_runtime_state():
     _persistent['active_matches'].clear()
     _persistent['pending_new_game_name'].clear()
     _persistent['full_volume_groups'].clear()
+    _persistent['mention_rewrites'].clear()
 
     # 清 uploader 模块状态(若已被 import)
     try:

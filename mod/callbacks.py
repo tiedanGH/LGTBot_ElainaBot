@@ -1037,8 +1037,12 @@ def cb_get_user_avatar_url(uid: str) -> str:
 # (target_key → 引擎管理员uid → 真实操作者uid),引擎的下一条 回执命中即改写并立即注销。
 # 做成"一次性 + 5s 过期"是为了不误伤后续任何真的要 @ 该管理员的消息(例如该管理员本人正在这个群里玩游戏)。
 _MENTION_REWRITE_TTL_S = 5.0
-# key → (from_uid, to_uid, expires_at)
-_mention_rewrites: dict[str, tuple[str, str, float]] = {}
+# key → (from_uid, to_uid, expires_at)。
+# 挂持久 dict 而非模块级变量 —— 登记发生在**新** dispatcher(热重载后的模块),
+# 消费发生在 cb_send_text_message,而引擎复用时 C++ 持有的是**旧** callbacks 模块:
+# 两边若各持各的模块级 dict,登记永远不会被旧回调看到(线上实测回执仍 @引擎管理员 的根因)。
+# 持久 dict 新旧模块共享,与 pending_buttons 同理。
+_mention_rewrites: dict = boot._get_persistent()['mention_rewrites']
 
 
 def register_mention_rewrite(key: str, from_uid: str, to_uid: str) -> None:
