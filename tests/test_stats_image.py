@@ -66,7 +66,7 @@ def test_render_date_mode_layout():
     g = {
         'available': True, 'date_mode': True, 'rank_limit': 10,
         'today_matches': 12, 'today_players': 5, 'today_groups': 3,
-        'trailing10_matches': 88,
+        'attendances': 88,
         'top_games_today': [{'game_name': f'g{i}', 'count': 11 - i}
                             for i in range(1, 12)],           # 11 条 → 截 10
         'top_players_today': [{'display': f'p{i}', 'count': 11 - i}
@@ -93,7 +93,7 @@ def test_render_month_mode_layout():
         'available': True, 'date_mode': True, 'month_mode': True,
         'rank_limit': 10,
         'today_matches': 42, 'today_players': 9, 'today_groups': 4,
-        'month_attendances': 130,
+        'attendances': 130,
         'top_games_today': [{'game_name': f'g{i}', 'count': 11 - i}
                             for i in range(1, 11)],
         'top_players_today': [{'display': f'p{i}', 'count': 11 - i}

@@ -592,7 +592,7 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
 
 async def test_stats_date_command_views_history(monkeypatch):
     """数据统计MMDD:历史日走 query_game_stats_for_date,无涨跌 / 无主动消息,
-    近10日为截至该日口径;该日无对局与非法日期分别报错。"""
+    文本含「当日对局人次」;该日无对局与非法日期分别报错。"""
     import re as _re
     from plugins.LGTBot_ElainaBot.mod import metrics, uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
@@ -602,7 +602,7 @@ async def test_stats_date_command_views_history(monkeypatch):
     def fake_for_date(ds):
         seen['date'] = ds
         return {'available': True, 'date': ds, 'day_matches': 12,
-                'day_players': 5, 'day_groups': 3, 'trailing10_matches': 88,
+                'day_players': 5, 'day_groups': 3, 'day_attendances': 31,
                 'top_games_day': [{'game_name': '决胜五子', 'count': 4}],
                 'top_players_day': [{'display': '铁蛋', 'count': 3}]}
 
@@ -615,7 +615,7 @@ async def test_stats_date_command_views_history(monkeypatch):
     year = __import__('datetime').date.today().year
     assert seen['date'] == f'{year}-01-02'
     assert f'({year}-01-02)' in txt and '当日对局: 12 局' in txt
-    assert '近10日对局(截至该日): 88 局' in txt
+    assert '当日对局人次: 31 人次' in txt
     assert '↑' not in txt and '↓' not in txt          # 无涨跌
     assert '主动消息' not in txt                        # 无额度行
 

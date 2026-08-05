@@ -561,7 +561,8 @@ def query_game_stats_for_date(date_str: str) -> dict:
 
     ``date_str`` 形如 ``'2026-08-02'``。窗口全部整天:
       · day_*             该日 [00:00, 次日 00:00) 的对局 / 去重玩家 / 活跃群聊
-      · trailing10_matches 截至该日的近 10 日对局([date-9 天, 次日 00:00))
+      · day_attendances   该日**对局人次**(user_with_match 行数,不去重 ——
+        同一玩家打 3 局计 3;日视图卡片用它替代「近10日对局」,与月视图一致)
       · top_games_day / top_players_day  该日双榜,LIMIT 10(历史回看给全量,
         今日视图是 5;昵称解析与脱敏同 query_game_stats)
 
@@ -575,7 +576,7 @@ def query_game_stats_for_date(date_str: str) -> dict:
         'day_matches': None,
         'day_players': None,
         'day_groups': None,
-        'trailing10_matches': None,
+        'day_attendances': None,
         'top_games_day': [],
         'top_players_day': [],
     }
@@ -590,7 +591,6 @@ def query_game_stats_for_date(date_str: str) -> dict:
     fmt = '%Y-%m-%d %H:%M:%S'
     day_start = day.strftime(fmt)
     day_end = (day + timedelta(days=1)).strftime(fmt)
-    t10_start = (day - timedelta(days=9)).strftime(fmt)
 
     conn = None
     try:
@@ -621,9 +621,11 @@ def query_game_stats_for_date(date_str: str) -> dict:
             "WHERE finish_time >= ? AND finish_time < ? "
             "AND group_id IS NOT NULL AND group_id != ''",
             (day_start, day_end), 'day_groups')
-        out['trailing10_matches'] = _scalar(
-            'SELECT COUNT(*) FROM match WHERE finish_time >= ? AND finish_time < ?',
-            (t10_start, day_end), 'trailing10_matches')
+        out['day_attendances'] = _scalar(
+            'SELECT COUNT(*) FROM user_with_match uwm '
+            'JOIN match m ON m.match_id = uwm.match_id '
+            'WHERE m.finish_time >= ? AND m.finish_time < ?',
+            (day_start, day_end), 'day_attendances')
 
         out['top_games_day'] = [
             {'game_name': str(gname), 'count': int(c)} for gname, c in _rows(

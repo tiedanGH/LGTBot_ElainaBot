@@ -11,8 +11,10 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条
 
 历史日期模式(``g['date_mode']`` 真,「数据统计MMDD」指令):无涨跌胶囊、
-无主动消息行、无趋势图;「近10日对局」为截至该日的近 10 日;双榜 TOP10
-(``g['rank_limit']``);卡片文案去「今日」改「当日」。
+无主动消息行、无趋势图;第 4 卡换成「当日对局人次」(``g['attendances']``,
+user_with_match 计次不去重,票根图标);双榜 TOP10(``g['rank_limit']``);
+卡片文案去「今日」改「当日」。再叠 ``g['month_mode']``(「数据统计MM」
+指令)则布局同上,文案「当日」改「当月」。
 
 PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)
 回退纯文本输出 —— 渲染是增强,不是依赖。
@@ -274,22 +276,14 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     # ── 数据总览:2×2 指标小卡(值用 accent,同 .metrics-status-value)──
     _section(d, (pad, y, width - pad, y + overview_h))
     _sec_title(d, pad + 28, y + 24, '数据总览')
-    if g.get('month_mode'):
-        # 按月视图:第 4 卡为当月对局人次(user_with_match 计次,不去重),
-        # 图标随语义换成票根 —— 「近10日对局」的日历图标在月口径下没有意义
+    if date_mode:
+        # 历史日期 / 按月:无涨跌;第 4 卡为该期**对局人次**(user_with_match 计次,不去重)
+        period = '当月' if g.get('month_mode') else '当日'
         cards = [
             ('活跃玩家', g.get('today_players'), None, 'person', _GREEN),
             ('活跃群聊', g.get('today_groups'), None, 'group', _ORANGE),
-            ('当月对局', g.get('today_matches'), None, 'die', _ACCENT),
-            ('当月对局人次', g.get('month_attendances'), None, 'ticket', (232, 121, 249)),
-        ]
-    elif date_mode:
-        # 历史日期:无涨跌;近10日 = 截至该日的近 10 日(metrics 传入)
-        cards = [
-            ('活跃玩家', g.get('today_players'), None, 'person', _GREEN),
-            ('活跃群聊', g.get('today_groups'), None, 'group', _ORANGE),
-            ('当日对局', g.get('today_matches'), None, 'die', _ACCENT),
-            ('近10日对局', g.get('trailing10_matches'), None, 'calendar', (232, 121, 249)),
+            (f'{period}对局', g.get('today_matches'), None, 'die', _ACCENT),
+            (f'{period}对局人次', g.get('attendances'), None, 'ticket', (232, 121, 249)),
         ]
     else:
         # 涨跌胶囊:前三卡对比「昨日同时段」(窗口与今日等长,见 metrics._YDAY_*);

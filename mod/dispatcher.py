@@ -562,7 +562,7 @@ async def _reply_date_stats(event, target_day) -> None:
     """「数据统计MMDD」历史日期视图。
 
     与今日视图的差异(用户需求即口径):无涨跌标识、无主动消息行、无趋势图;
-    「近10日对局」为**截至该日**的近 10 日;双榜 TOP10(今日视图 5)。
+    第 4 卡为**当日对局人次**(user_with_match 行数;双榜 TOP10(今日视图 5)。
     该日没有任何已完成对局 → 直接报错提示。图片失败照常回退文本(榜单文本仍 TOP3 控制消息长度)。
     """
     ds = target_day.strftime('%Y-%m-%d')
@@ -583,7 +583,7 @@ async def _reply_date_stats(event, target_day) -> None:
         'today_matches': day.get('day_matches'),
         'today_players': day.get('day_players'),
         'today_groups': day.get('day_groups'),
-        'trailing10_matches': day.get('trailing10_matches'),
+        'attendances': day.get('day_attendances'),
         'top_games_today': day.get('top_games_day') or [],
         'top_players_today': day.get('top_players_day') or [],
         'trend_10d': [],
@@ -615,7 +615,7 @@ async def _reply_date_stats(event, target_day) -> None:
         f'🎮 当日对局: {_n(day.get("day_matches"))} 局',
         f'👤 活跃玩家: {_n(day.get("day_players"))} 人',
         f'👥 活跃群聊: {_n(day.get("day_groups"))} 个',
-        f'📅 近10日对局(截至该日): {_n(day.get("trailing10_matches"))} 局',
+        f'🎫 当日对局人次: {_n(day.get("day_attendances"))} 人次',
     ]
     top_games = (day.get('top_games_day') or [])[:3]
     if top_games:
@@ -644,8 +644,8 @@ async def _reply_month_stats(event, year: int, month: int) -> None:
         await event.reply(f'<@{event.user_id}>\n❌ {ym} 无统计数据（该月份没有已完成的对局）')
         return
 
-    # 映射成 stats_image 的通用形状:date_mode 复用「无涨跌 / 无额度 / 无趋势」
-    # 逻辑,month_mode 切换卡片文案与人次图标
+    # 映射成 stats_image 的通用形状:date_mode 复用「无涨跌 / 无额度 / 无趋势 / 人次卡」逻辑,
+    # month_mode 把卡片与榜单文案从「当日」切成「当月」
     g = {
         'available': True,
         'date_mode': True,
@@ -654,7 +654,7 @@ async def _reply_month_stats(event, year: int, month: int) -> None:
         'today_matches': mon.get('month_matches'),
         'today_players': mon.get('month_players'),
         'today_groups': mon.get('month_groups'),
-        'month_attendances': mon.get('month_attendances'),
+        'attendances': mon.get('month_attendances'),
         'top_games_today': mon.get('top_games_month') or [],
         'top_players_today': mon.get('top_players_month') or [],
         'trend_10d': [],
@@ -710,9 +710,10 @@ async def _reply_month_stats(event, year: int, month: int) -> None:
 async def lgtbot_data_stats(event, match):
     """收到「数据统计」(文本或按钮)→ 输出 lgtbot.db 游戏数据摘要(dau 风格)。
 
-    「数据统计MMDD」(如 数据统计0802,默认今年)查看指定历史日期:
-    无涨跌标识、无主动消息、无趋势图,「近10日对局」为截至该日的近 10 日,
-    双榜 TOP10;该日无对局直接报错。输入今天的日期等价于无参数(仍带涨跌)。
+    「数据统计MMDD」(如 数据统计0802,默认今年)查看指定历史日期,
+    「数据统计MM」(如 数据统计08)查看当年某自然月:均无涨跌标识、无主动
+    消息、无趋势图,第 4 卡为该期对局人次(不去重),双榜 TOP10;无对局直接
+    报错。输入今天的日期等价于无参数(仍带涨跌)。
 
     配置了图床(image_hosting 非空)时优先走**图片通道**(参照主框架 dau 指令):
     stats_image 渲染统计卡片(线程池,不阻塞事件循环)→ uploader 上传 →

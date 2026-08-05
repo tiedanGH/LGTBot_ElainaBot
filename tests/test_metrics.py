@@ -342,16 +342,14 @@ def test_prev10_matches_counts_previous_block_only():
     assert sum(t['count'] for t in g['trend_10d']) == 2      # 本期(0/9 天前)
 
 
-def test_query_game_stats_for_date_day_and_trailing10():
-    """历史日期查询:当日三项口径 + 截至该日近10日 + 双榜 LIMIT 10。"""
+def test_query_game_stats_for_date_day_and_attendances():
+    """历史日期查询:当日三项口径 + 当日对局人次(不去重)+ 双榜 LIMIT 10。"""
     d5 = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
     mk = lambda days, hh: (datetime.now() - timedelta(days=days)).strftime(f'%Y-%m-%d {hh}:00:00')
     _make_db([
         ('五子棋', mk(5, '10'), 'G1', ['U1', 'U2']),   # 目标日
         ('大富翁', mk(5, '20'), 'G2', ['U1']),          # 目标日(晚间也算全天)
-        ('五子棋', mk(6, '12'), 'G1', ['U3']),          # 前一天:进 trailing10,不进当日
-        ('五子棋', mk(14, '12'), 'G1', ['U4']),         # date-9(=14 天前):窗口首日,计入
-        ('五子棋', mk(15, '12'), 'G1', ['U5']),         # date-10:trailing10 外
+        ('五子棋', mk(6, '12'), 'G1', ['U3']),          # 前一天:任何当日口径不含
         ('五子棋', 0, 'G9', ['U9']),                    # 今天:任何口径都不含
     ])
     day = metrics.query_game_stats_for_date(d5)
@@ -359,7 +357,7 @@ def test_query_game_stats_for_date_day_and_trailing10():
     assert day['day_matches'] == 2
     assert day['day_players'] == 2                      # U1/U2 去重
     assert day['day_groups'] == 2                       # G1/G2
-    assert day['trailing10_matches'] == 4               # 目标日 2 + 前一天 1 + 窗口首日 1
+    assert day['day_attendances'] == 3                  # U1×2 + U2,不去重
     # 目标日两款游戏各 1 局,并列时 SQLite 排序不稳定 → 集合断言
     assert {t['game_name'] for t in day['top_games_day']} == {'五子棋', '大富翁'}
     assert day['top_players_day'][0]['count'] == 2      # U1 两局居首
