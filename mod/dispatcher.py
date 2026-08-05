@@ -1262,10 +1262,44 @@ async def _auto_restart_watcher() -> None:
                                  src=audit.SRC_AUTO)
                     metrics.record_restart()
                     log.warning('🤖 [自动重启] 静默期结束，执行计划重启')
+                    # 先把通知推到严重问题通知群(带维护原因;仅自动重启),await 保证 HTTP 往返在换进程之前完成。
+                    await _notify_auto_restart(reason)
                     schedule_exec_after(0.5)
                     return
                 empty_since = None          # 预检被拒(race 新开局)→ 重新计时
         await asyncio.sleep(_AUTO_WATCH_INTERVAL)
+
+
+async def _notify_auto_restart(reason: str) -> None:
+    """自动重启触发时向严重问题通知群推送一条说明(手动重启不推)。
+
+    复用崩溃通知的通道语义:``CRASH_NOTIFY_GROUP`` 配置的群 + 主动消息
+    (该群需全量权限,没权限会被 QQ 拒,仅 warning 不阻断重启)。
+    整体限时 5s —— 通知只是锦上添花,不能卡住已经释放引擎的重启流程。
+    """
+    from . import callbacks as _callbacks   # 延迟取,拿 config 覆盖后的最新值
+    notify_group = getattr(_callbacks, 'CRASH_NOTIFY_GROUP', '') or ''
+    if not notify_group:
+        return
+    sender = helpers.get_sender('')
+    if sender is None:
+        return
+    md = (
+        '## 🔁 LGT-Bot 自动重启\n'
+        '\n'
+        '> 当前无人正在进行游戏，计划重启（自动模式）已触发\n'
+        '\n'
+        + (f'📌 更新内容：\n{reason}\n\n' if reason else '')
+        + '进程即将重启，预计十秒内恢复服务 ✅'
+    )
+    try:
+        from .webui import page_logs
+        from . import log_attribution
+        page_logs.log_outgoing(notify_group, False, md)
+        with log_attribution.mark_outbound():
+            await asyncio.wait_for(sender.send_to_group(notify_group, md), timeout=5.0)
+    except Exception as e:
+        log.warning(f'自动重启通知推送失败 ({notify_group}): {e}')
 
 
 @handler(_P_MATCHLIST,

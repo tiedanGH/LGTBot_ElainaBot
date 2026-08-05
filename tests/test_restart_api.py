@@ -183,6 +183,11 @@ async def test_auto_watcher_restarts_after_grace(monkeypatch):
                         lambda *a, **k: audits.append((a, k)))
     monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
     monkeypatch.setattr(dispatcher, '_AUTO_RESTART_GRACE', 0.08)
+    notified = []
+
+    async def fake_notify(reason):
+        notified.append(reason)
+    monkeypatch.setattr(dispatcher, '_notify_auto_restart', fake_notify)
 
     task = asyncio.get_running_loop().create_task(dispatcher._auto_restart_watcher())
     await asyncio.sleep(0.05)
@@ -195,6 +200,7 @@ async def test_auto_watcher_restarts_after_grace(monkeypatch):
     a, kw = audits[0]
     assert a[1] == '自动重启' and '夜间升级' in a[2] and '静默' in a[2]
     assert kw.get('src') == '自动'
+    assert notified == ['夜间升级']                # 通知群推送(带维护原因)
 
 
 async def test_auto_watcher_exits_when_mode_disabled(monkeypatch):
@@ -235,7 +241,7 @@ async def test_planned_command_auto_keyword(monkeypatch):
     msg = await _run_planned_cmd(monkeypatch, '计划重启 自动 升级引擎')
     assert state.is_planned_restart() and state.is_planned_restart_auto()
     assert state.planned_restart_reason() == '升级引擎'
-    assert '自动重启已开启' in msg
+    assert '自动重启' in msg and '自动执行重启' in msg
     await _run_planned_cmd(monkeypatch, '计划重启')          # 再触发 = 关闭
     assert not state.is_planned_restart()
 
@@ -245,7 +251,7 @@ async def test_planned_command_auto_not_a_word(monkeypatch):
     msg = await _run_planned_cmd(monkeypatch, '计划重启 自动升级')
     assert state.is_planned_restart() and not state.is_planned_restart_auto()
     assert state.planned_restart_reason() == '自动升级'
-    assert '自动重启已开启' not in msg
+    assert '自动执行重启' not in msg
 
 
 async def test_auto_watcher_grace_resets_on_new_match(monkeypatch):
@@ -275,3 +281,29 @@ def test_should_block_new_game_only_in_manual_mode():
     state.set_planned_restart(True, '', auto=True)
     assert not dispatcher._should_block_new_game('/新游戏')      # 自动:放行
     state.set_planned_restart(False)
+
+
+async def test_notify_auto_restart_sends_markdown(monkeypatch):
+    """通知内容含「自动重启」标识与维护原因;未配置通知群 / 无 sender 时静默跳过。"""
+    from unittest.mock import AsyncMock, MagicMock
+    from plugins.LGTBot_ElainaBot.mod import callbacks, helpers
+    sender = MagicMock()
+    sender.send_to_group = AsyncMock(return_value=(True, {}, {}))
+    monkeypatch.setattr(helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks, 'CRASH_NOTIFY_GROUP', 'GNOTIFY')
+
+    await dispatcher._notify_auto_restart('夜间升级')
+    args = sender.send_to_group.await_args.args
+    assert args[0] == 'GNOTIFY'
+    assert '自动重启' in args[1] and '夜间升级' in args[1]
+
+    sender.send_to_group.reset_mock()
+    await dispatcher._notify_auto_restart('')      # 无原因 → 整个栏目不展示
+    md = sender.send_to_group.await_args.args[1]
+    assert '更新内容' not in md and '未填写' not in md
+    assert '自动重启' in md                        # 主体通知仍完整
+
+    sender.send_to_group.reset_mock()
+    monkeypatch.setattr(callbacks, 'CRASH_NOTIFY_GROUP', '')
+    await dispatcher._notify_auto_restart('x')     # 未配置通知群 → 不发送
+    sender.send_to_group.assert_not_called()

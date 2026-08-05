@@ -88,7 +88,7 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
   let reason = '';
   let auto = false;
   if (isOn) {
-    const ok = await dashConfirm('确认取消计划重启？\n\n将立即恢复玩家创建新游戏。',
+    const ok = await dashConfirm('确认取消计划重启？\n\n将取消维护模式，玩家可正常创建新游戏。',
                                  {level: 'info'});
     if (!ok) return;
   } else {
