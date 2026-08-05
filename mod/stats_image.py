@@ -180,6 +180,14 @@ def _icon(d, kind: str, ix: int, iy: int, fg) -> None:
                             fill=_tint(fg))
         d.ellipse((ix + 24, iy + 35, ix + 28, iy + 39), fill=_tint(fg))
         return
+    if kind == 'ticket':    # 票根(对局人次 —— 参与计次,不去重)
+        d.rounded_rectangle((ix + 9, iy + 15, ix + 43, iy + 37), radius=5, fill=fg)
+        # 两侧半圆缺口 + 中缝虚线,画出票券撕口的记号
+        d.ellipse((ix + 5, iy + 22, ix + 13, iy + 30), fill=_tint(fg))
+        d.ellipse((ix + 39, iy + 22, ix + 47, iy + 30), fill=_tint(fg))
+        for dy in (19, 25, 31):
+            d.rectangle((ix + 30, iy + dy, ix + 32, iy + dy + 2), fill=_tint(fg))
+        return
     if kind == 'die':
         d.rounded_rectangle((ix + 12, iy + 12, ix + 40, iy + 40), radius=7, fill=fg)
         for px, py in ((19, 19), (33, 33), (19, 33), (33, 19), (26, 26)):
@@ -266,7 +274,16 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     # ── 数据总览:2×2 指标小卡(值用 accent,同 .metrics-status-value)──
     _section(d, (pad, y, width - pad, y + overview_h))
     _sec_title(d, pad + 28, y + 24, '数据总览')
-    if date_mode:
+    if g.get('month_mode'):
+        # 按月视图:第 4 卡为当月对局人次(user_with_match 计次,不去重),
+        # 图标随语义换成票根 —— 「近10日对局」的日历图标在月口径下没有意义
+        cards = [
+            ('活跃玩家', g.get('today_players'), None, 'person', _GREEN),
+            ('活跃群聊', g.get('today_groups'), None, 'group', _ORANGE),
+            ('当月对局', g.get('today_matches'), None, 'die', _ACCENT),
+            ('当月对局人次', g.get('month_attendances'), None, 'ticket', (232, 121, 249)),
+        ]
+    elif date_mode:
         # 历史日期:无涨跌;近10日 = 截至该日的近 10 日(metrics 传入)
         cards = [
             ('活跃玩家', g.get('today_players'), None, 'person', _GREEN),
@@ -388,7 +405,10 @@ def _render(g: dict, sub_title: str) -> bytes | None:
 
     # ── 排行榜:今日游戏榜(accent)/ 玩家参与榜(橙);历史日期为当日双榜 ──
     half_w = (inner_w - gap) // 2
-    games_label = '当日游戏榜' if date_mode else '今日游戏榜'
+    if g.get('month_mode'):
+        games_label = '当月游戏榜'
+    else:
+        games_label = '当日游戏榜' if date_mode else '今日游戏榜'
     ranks = ((games_label, top_games, 'game_name', _ACCENT),
              ('玩家参与榜', top_players, 'display', _ORANGE))
     for i, (label, items, key, fg) in enumerate(ranks):

@@ -83,6 +83,27 @@ def test_render_date_mode_layout():
     assert h_date != h_normal
 
 
+def test_render_month_mode_layout():
+    """按月模式:走 date_mode 布局(无趋势/榜单 10 行),第 4 卡切换为
+    「当月对局人次」+ 票根图标 —— 渲染不崩即分支与新图标生效。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    g = {
+        'available': True, 'date_mode': True, 'month_mode': True,
+        'rank_limit': 10,
+        'today_matches': 42, 'today_players': 9, 'today_groups': 4,
+        'month_attendances': 130,
+        'top_games_today': [{'game_name': f'g{i}', 'count': 11 - i}
+                            for i in range(1, 11)],
+        'top_players_today': [{'display': f'p{i}', 'count': 11 - i}
+                              for i in range(1, 11)],
+        'trend_10d': [],
+    }
+    png = stats_image.render_stats_image(g, sub_title='2026-08 月度统计')
+    assert png and png[:8] == b'\x89PNG\r\n\x1a\n'
+
+
 def test_render_swallows_exceptions(monkeypatch):
     """渲染内部异常 → None(调用方回退文本),不抛。"""
     monkeypatch.setattr(stats_image, '_render',

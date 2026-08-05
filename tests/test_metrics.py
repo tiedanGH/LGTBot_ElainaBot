@@ -371,6 +371,37 @@ def test_query_game_stats_for_date_bad_input_and_missing_db():
     assert bad['available'] is False and bad['errors']
 
 
+def test_query_game_stats_for_month_window_and_attendances():
+    """月度查询:[当月1日, 次月1日) 全整天窗口;人次 = user_with_match 行数
+    **不去重**(U1 两局计 2),玩家数照旧去重;群聊 NULL 不计;双榜 LIMIT 10。"""
+    _make_db([
+        ('五子棋', '2026-03-05 12:00:00', 'G1', ['U1', 'U2']),   # 月内
+        ('大富翁', '2026-03-31 23:59:59', 'G2', ['U1']),          # 月内(末日边界)
+        ('五子棋', '2026-03-01 00:00:00', None, ['U3']),          # 月内首刻,私聊局
+        ('五子棋', '2026-02-28 23:59:59', 'G1', ['U4']),          # 上月 → 不计
+        ('五子棋', '2026-04-01 00:00:00', 'G1', ['U5']),          # 次月首刻 → 不计
+    ])
+    mon = metrics.query_game_stats_for_month(2026, 3)
+    assert mon['available'] is True
+    assert mon['month_matches'] == 3
+    assert mon['month_players'] == 3                  # U1/U2/U3 去重
+    assert mon['month_attendances'] == 4              # U1×2 + U2 + U3,不去重
+    assert mon['month_groups'] == 2                   # G1/G2,NULL 不计
+    assert [(t['game_name'], t['count']) for t in mon['top_games_month']] == \
+           [('五子棋', 2), ('大富翁', 1)]
+    assert mon['top_players_month'][0]['count'] == 2  # U1 两局居首
+
+
+def test_query_game_stats_for_month_december_wraps_year():
+    """12 月窗口上界跨年 → 次年 1 月 1 日 00:00(不含)。"""
+    _make_db([
+        ('五子棋', '2025-12-15 12:00:00', 'G1', ['U1']),
+        ('五子棋', '2026-01-01 00:00:00', 'G1', ['U2']),   # 次年首刻,不计
+    ])
+    mon = metrics.query_game_stats_for_month(2025, 12)
+    assert mon['month_matches'] == 1 and mon['month_players'] == 1
+
+
 def test_top_players_nickname_and_mask(monkeypatch):
     _make_db([('五子棋', 0, 'G1', ['user_openid_abcdefgh', 'U2']),
               ('五子棋', 0, 'G1', ['user_openid_abcdefgh']),

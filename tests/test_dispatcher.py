@@ -636,6 +636,55 @@ async def test_stats_date_command_views_history(monkeypatch):
     assert txt3.startswith('<@U1>\n') and '日期无效' in txt3
 
 
+async def test_stats_month_command_views_month(monkeypatch):
+    """数据统计MM:两位数字按月(默认今年)走 query_game_stats_for_month,
+    文本含「当月对局人次」;当月无对局与非法月份分别报错。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
+    seen = {}
+
+    def fake_for_month(y, m):
+        seen['ym'] = (y, m)
+        return {'available': True, 'month': f'{y:04d}-{m:02d}',
+                'month_matches': 42, 'month_players': 9, 'month_groups': 4,
+                'month_attendances': 130,
+                'top_games_month': [{'game_name': '决胜五子', 'count': 11}],
+                'top_players_month': [{'display': '铁蛋', 'count': 8}]}
+
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
+                        fake_for_month)
+    m = _re.match(dispatcher._P_STATS, '数据统计08')
+    assert m and m.group(1) == '08'
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计08')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, m)
+    txt = ev.reply.await_args.args[0]
+    year = __import__('datetime').date.today().year
+    assert seen['ym'] == (year, 8)
+    assert f'({year}-08)' in txt and '当月对局: 42 局' in txt
+    assert '当月对局人次: 130 人次' in txt
+    assert '↑' not in txt and '↓' not in txt          # 无涨跌
+    assert '主动消息' not in txt                        # 无额度行
+
+    # 当月无对局 → 报错
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
+                        lambda y, m: {'available': True, 'month_matches': 0})
+    ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计07')
+    ev2.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev2, _re.match(dispatcher._P_STATS, '数据统计07'))
+    txt2 = ev2.reply.await_args.args[0]
+    assert txt2.startswith('<@U1>\n') and '无统计数据' in txt2
+
+    # 非法月份 → 报错
+    ev3 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计13')
+    ev3.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev3, _re.match(dispatcher._P_STATS, '数据统计13'))
+    txt3 = ev3.reply.await_args.args[0]
+    assert txt3.startswith('<@U1>\n') and '月份无效' in txt3
+
+
 async def test_stats_date_command_today_falls_back_to_normal(monkeypatch):
     """输入今天的 MMDD → 等价无参数:走今日视图(带涨跌),不调历史查询。"""
     import re as _re

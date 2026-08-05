@@ -115,7 +115,7 @@ _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启$'
 _P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
-_P_STATS    = r'^/?数据统计\s*(\d{4})?$'
+_P_STATS    = r'^/?数据统计\s*(\d{4}|\d{2})?$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 
@@ -630,9 +630,80 @@ async def _reply_date_stats(event, target_day) -> None:
     await event.reply('\n'.join(lines))
 
 
+async def _reply_month_stats(event, year: int, month: int) -> None:
+    """「数据统计MM」按月视图。
+
+    口径同历史日期视图:无涨跌标识、无主动消息行、无趋势图,双榜 TOP10;当月没有任何已完成对局 → 直接报错提示。
+    """
+    ym = f'{year:04d}-{month:02d}'
+    mon = metrics.query_game_stats_for_month(year, month)
+    if not mon.get('available'):
+        await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
+        return
+    if not mon.get('month_matches'):
+        await event.reply(f'<@{event.user_id}>\n❌ {ym} 无统计数据（该月份没有已完成的对局）')
+        return
+
+    # 映射成 stats_image 的通用形状:date_mode 复用「无涨跌 / 无额度 / 无趋势」
+    # 逻辑,month_mode 切换卡片文案与人次图标
+    g = {
+        'available': True,
+        'date_mode': True,
+        'month_mode': True,
+        'rank_limit': 10,
+        'today_matches': mon.get('month_matches'),
+        'today_players': mon.get('month_players'),
+        'today_groups': mon.get('month_groups'),
+        'month_attendances': mon.get('month_attendances'),
+        'top_games_today': mon.get('top_games_month') or [],
+        'top_players_today': mon.get('top_players_month') or [],
+        'trend_10d': [],
+    }
+
+    uid = event.user_id or ''
+    gid = event.group_id or event.channel_id or ''
+    is_group = bool(event.is_group and gid)
+    if uploader.SELECTED_BACKEND:
+        loop = asyncio.get_running_loop()
+        img = await loop.run_in_executor(
+            None, stats_image.render_stats_image, g, f'{ym} 月度统计')
+        if img:
+            url = await uploader.upload_image(
+                img, 'lgtbot_stats.png',
+                target_id=(gid if is_group else uid),
+                target_is_uid=not is_group)
+            if url:
+                w, h = uploader.get_image_size(img)
+                await event.reply(f'<@{uid}>![数据统计 #{w}px #{h}px]({url})')
+                return
+
+    def _n(v):
+        return '—' if v is None else v
+
+    lines = [
+        f'<@{uid}>',
+        f'📈 LGT-Bot 数据统计 ({ym})',
+        f'🎮 当月对局: {_n(mon.get("month_matches"))} 局',
+        f'👤 活跃玩家: {_n(mon.get("month_players"))} 人',
+        f'👥 活跃群聊: {_n(mon.get("month_groups"))} 个',
+        f'🎫 当月对局人次: {_n(mon.get("month_attendances"))} 人次',
+    ]
+    top_games = (mon.get('top_games_month') or [])[:3]
+    if top_games:
+        lines.append('🔥 当月游戏榜:')
+        lines += [f'  {i}、{t["game_name"]} ({t["count"]}局)'
+                  for i, t in enumerate(top_games, 1)]
+    top_players = (mon.get('top_players_month') or [])[:3]
+    if top_players:
+        lines.append('👑 玩家参与榜:')
+        lines += [f'  {i}、{p["display"]} ({p["count"]}局)'
+                  for i, p in enumerate(top_players, 1)]
+    await event.reply('\n'.join(lines))
+
+
 @handler(_P_STATS,
          name='数据统计',
-         desc='今日对局 / 今日游戏榜 / 玩家参与榜 / 近10日趋势，可查询历史统计',
+         desc='今日对局 / 今日游戏榜 / 玩家参与榜 / 近10日趋势，可按日(MMDD)/按月(MM)查询历史统计',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
@@ -661,12 +732,19 @@ async def lgtbot_data_stats(event, match):
         except Exception:
             pass
 
-    # ── 历史日期分支(数据统计MMDD)────────────────────────────────────────
+    # ── 历史查询分支(数据统计MMDD 按日 / 数据统计MM 按月)─────────────────
     mmdd = ''
     try:
         mmdd = (match.group(1) or '') if match else ''
     except (AttributeError, IndexError):
         mmdd = ''
+    if len(mmdd) == 2:                                   # 两位 = 月份(默认今年)
+        month = int(mmdd)
+        if not 1 <= month <= 12:
+            await event.reply(f'<@{event.user_id}>\n❌ 月份无效：{mmdd}（格式 MM，如 数据统计08 查看 8月）')
+            return
+        await _reply_month_stats(event, _date.today().year, month)
+        return
     if mmdd:
         try:
             target_day = _date(_date.today().year, int(mmdd[:2]), int(mmdd[2:]))
