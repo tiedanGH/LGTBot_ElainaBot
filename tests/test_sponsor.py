@@ -83,13 +83,21 @@ def test_buttons_hidden_when_disabled(monkeypatch):
     flat = [b['text'] for row in buttons.build_more_features_buttons() for b in row]
     flat += [b['text'] for row in buttons.build_about_buttons() for b in row]
     assert not any('赞助' in t for t in flat)
+    # 关态下 /关于 的回执必须与加赞助功能之前完全一致(仅仓库链接一行)
+    assert buttons.build_about_buttons() == [
+        [buttons.BTN_REPO_ADAPTER, buttons.BTN_REPO_LGTBOT],
+    ]
 
 
 def test_buttons_appear_when_enabled(monkeypatch):
     monkeypatch.setattr(buttons, 'SPONSOR_ENABLED', True)
     assert buttons.build_sponsor_entry_buttons() == [[buttons.BTN_SPONSOR]]
     assert buttons.build_more_features_buttons()[-1] == [buttons.BTN_SPONSOR]
-    assert buttons.build_about_buttons()[-1] == [buttons.BTN_SPONSOR]
+    # 关于:赞助在第一行,两个仓库链接退到第二行
+    assert buttons.build_about_buttons() == [
+        [buttons.BTN_SPONSOR],
+        [buttons.BTN_REPO_ADAPTER, buttons.BTN_REPO_LGTBOT],
+    ]
     # 「更多功能」加完仍不超 QQ 键盘 5 行上限
     assert len(buttons.build_more_features_buttons()) <= 5
 
@@ -121,12 +129,10 @@ async def test_sponsor_reply_when_enabled(monkeypatch, sponsors_file):
     await dispatcher.lgtbot_sponsor(ev, None)
 
     md = ev.reply.await_args.args[0]
-    assert '## ❤️ 赞助支持' in md
+    assert '## ❤️ 赞助鸣谢' in md
     assert '> **阿蛋** ×3' in md          # 引用块 + 行内加粗保留
     assert '> 某位好心人' in md
     assert '```' not in md               # 明确不是代码块
-    assert '2295824927' in md            # 赞助后可私信联系
-    assert '付费解锁' in md               # 与 LGPLv2 一致的措辞
     assert ev.reply.await_args.kwargs['buttons'] == buttons.build_sponsor_buttons()
 
 

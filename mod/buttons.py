@@ -197,12 +197,13 @@ def build_about_buttons() -> list[list[dict]]:
     """/关于 回执底部附:左 适配层仓库,右 LGT-Bot 上游仓库。两个都是链接按钮
     (type=0,QQ 协议下点击直接跳转,无 style)。
 
-    ``SPONSOR_ENABLED`` 时在下方追加一行「赞助支持」—— 关于页是介绍项目本身的
-    地方,赞助引导在这里最不违和;开关关闭时这一行完全不出现。
+    ``SPONSOR_ENABLED`` 时「赞助支持」放**第一行**,两个仓库链接退到第二行 ——
+    关于页是介绍项目本身的地方,赞助引导在这里最不违和;开关关闭时这一行完全不出现。
     """
-    rows = [[BTN_REPO_ADAPTER, BTN_REPO_LGTBOT]]
+    rows: list[list[dict]] = []
     if SPONSOR_ENABLED:
         rows.append([BTN_SPONSOR])
+    rows.append([BTN_REPO_ADAPTER, BTN_REPO_LGTBOT])
     return rows
 
 
