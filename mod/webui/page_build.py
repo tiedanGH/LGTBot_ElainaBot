@@ -17,8 +17,10 @@
 进程模型:
   · 子进程用 ``subprocess.Popen(..., start_new_session=True)`` 独立 session,
     父进程(整个 ElainaBot 框架)退出 / 热重载都不会牵连编译进程。重新打开
-    Web UI 时，从 ``data/build/state.json`` 取 PID,``os.kill(pid, 0)`` 检查
-    是否还活着 —— 仍跑就接着展示日志，跑完就显示空闲。
+    Web UI 时，从 ``data/build/state.json`` 取 PID,``_is_alive`` 检查是否
+    还活着 —— 仍跑就接着展示日志，跑完就显示空闲。存活探测先
+    ``waitpid(WNOHANG)`` 收尸再退回 ``kill(0)``:Popen 对象没人保留,已退出
+    的子进程是僵尸,单靠 kill(0) 会一直误判"仍在编译"(见 ``_is_alive``)。
   · stdout / stderr 重定向到 ``data/build/build.log``;若系统装了 util-linux
     ``script`` 命令，用 ``script -qfec '<cmd>' /dev/null`` 包一层伪 tty,
     让 cmake / gcc / clang 输出彩色 ANSI escape 序列(直接重定向 stdout 时
@@ -139,12 +141,37 @@ def _write_state(d: dict) -> None:
         log.warning(f'写 build state 失败：{e}')
 
 
+# Windows 无 WNOHANG(也无 waitpid 任意 pid 语义)→ None 时跳过收尸直接 kill 探测
+_WNOHANG = getattr(os, 'WNOHANG', None)
+
+
 def _is_alive(pid) -> bool:
-    """``os.kill(pid, 0)`` 探测进程是否存活;0/None 直接 False。"""
-    if not pid:
-        return False
+    """进程存活探测,**附带收尸**;0/None/非法 直接 False。
+
+    不能只用 ``os.kill(pid, 0)``:``_start_build`` 不保留 Popen 对象(为了跨热重载 / 重启从 state.json 恢复),
+    没人 wait 的已退出子进程是**僵尸**,对 kill(0) 依然"存活"—— running 永远不翻转,直到进程里恰好有别的
+    subprocess 调用触发 Python 的 ``subprocess._cleanup()`` 顺手收尸(表现为"开着仪表盘就正常,无人值守的编译 API 就卡死")。
+
+    所以先 ``waitpid(pid, WNOHANG)``:是本进程子进程且已退出 → 当场收尸判死;
+    ``(0, 0)`` → 真在跑。``ChildProcessError``(execv / 进程重启后 state.json
+    里的旧 PID 已不是我们的孩子)与 Windows 回退 kill(0) 探测。
+    """
     try:
-        os.kill(int(pid), 0)
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:            # waitpid 的 0/-N 是「任意子进程/进程组」语义,必须挡掉
+        return False
+    if _WNOHANG is not None:
+        try:
+            wpid, _status = os.waitpid(pid, _WNOHANG)
+            return wpid == 0
+        except ChildProcessError:
+            pass            # 不是我们的子进程 → 走 kill(0) 探测
+        except (OverflowError, OSError):
+            pass
+    try:
+        os.kill(pid, 0)
         return True
     except (ProcessLookupError, OverflowError, ValueError):
         return False
