@@ -251,6 +251,19 @@ plugins/LGTBot_ElainaBot/
         └── images/          引擎临时渲染图片（可清理）
 ```
 
+## 赞助支持
+
+作者运营的公开 bot 的服务器、图床与域名开销均为自费。如果这个项目帮到了你，欢迎请作者喝杯咖啡：
+
+- ❤️ 赞助页面：https://tiedan.site/pages/support/
+- ⚡ 爱发电：https://afdian.com/a/tiedan-LGTBot/plan
+
+> 赞助支持的是**本适配层的开发与公开 bot 的运行开销**，与上游 LGTBot 引擎无关；赞助完全自愿，**不存在任何「付费解锁」内容**。
+
+**自行部署者请注意**：赞助功能由 `config.yaml` 的 `sponsor_enabled` 控制，**默认 `false`**。保持关闭时插件不会展示任何赞助入口，你的用户不会看到与本作者相关的收款引导。
+
+---
+
 ## 许可证
 
 本适配层与 LGTBot 引擎保持一致，使用 **LGPLv2** 协议。
@@ -263,3 +276,4 @@ plugins/LGTBot_ElainaBot/
 - 🟢 KOOK 版（本项目参考实现）：https://github.com/Slontia/lgtbot-khl
 - 🤖 ElainaBot_v2 主框架：[https://github.com/ElainaCore/ElainaBot_v2](https://github.com/ElainaCore/ElainaBot_v2)
 - 📖 部署指南：[DEPLOY.md](./DEPLOY.md)
+- ❤️ 赞助支持：https://tiedan.site/pages/support/

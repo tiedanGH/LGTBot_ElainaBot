@@ -13,6 +13,7 @@
   · blocked_commands: list[str]      追加屏蔽指令（与 dispatcher 内置屏蔽表共同生效，命中的消息不转发给引擎）
   · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（私信主动直推；["all"] = 全员直推模式）
   · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
+  · sponsor_enabled: bool            赞助功能总开关（默认 False = 完全隐藏赞助入口与「赞助支持」指令）
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ DEFAULT_CONFIG = {
     'blocked_commands': [],
     'sandbox_dm_users': [],
     'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
+    'sponsor_enabled': False,
 }
 CONFIG_COMMENTS = {
     'bind_bot_appid': '绑定机器人 appid（可在仪表盘配置）。留空 = 自动使用框架第一个 bot；绑定后仅处理该 bot 的消息，其他 bot 的事件静默忽略',
@@ -52,6 +54,7 @@ CONFIG_COMMENTS = {
     'blocked_commands': '屏蔽指令列表：命中的消息不再转发给引擎，用于化解与其他插件的指令冲突',
     'sandbox_dm_users': '沙箱用户 openid 列表，列表内用户私信走主动消息直推；填 ["all"]（仅此一项）= 全员直推模式',
     'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
+    'sponsor_enabled': '赞助功能总开关（默认 false）。开启后「更多功能」/「关于」/「更新公告」下会出现「赞助支持」按钮，并启用「赞助支持」指令；关闭时完全隐藏。第三方部署请保持 false',
 }
 
 
@@ -135,7 +138,7 @@ def _apply_runtime_tunables(cfg: dict):
     ``load_plugin_config`` 处理,不在此函数内):
       bind_bot_appid → image_hosting → refresh_wait_timeout →
       active_push_daily_limit → image_upload_dedup_ttl → crash_notify_group → blocked_commands →
-      sandbox_dm_users → menu_game_buttons
+      sandbox_dm_users → menu_game_buttons → sponsor_enabled
     """
     from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
     from . import dispatcher as _dispatcher
@@ -311,6 +314,23 @@ def _apply_runtime_tunables(cfg: dict):
     if _buttons.MENU_GAMES != games:
         log.info(f'menu_game_buttons: {len(_buttons.MENU_GAMES)} → {len(games)} 个游戏')
         _buttons.MENU_GAMES = games
+
+    # ── sponsor_enabled ───────────────────────────────────────────────────
+    # 赞助功能总开关,**默认关闭**(插件市场里的第三方部署看不到任何收款引导)。
+    # 关闭时:三个入口都不生成「赞助支持」按钮,「赞助支持」指令转发给引擎。
+    # 只接受真正的布尔值 —— yaml 里写 'true' / 1 这类近似值一律按非法忽略并保留现值。
+    raw_sponsor = cfg.get('sponsor_enabled', None)
+    if raw_sponsor is None:
+        sponsor_on = False
+    elif isinstance(raw_sponsor, bool):
+        sponsor_on = raw_sponsor
+    else:
+        log.warning(f'sponsor_enabled 应为布尔值 true / false，已忽略 (got {raw_sponsor!r})')
+        sponsor_on = _buttons.SPONSOR_ENABLED
+    if _buttons.SPONSOR_ENABLED != sponsor_on:
+        log.info(f'sponsor_enabled: {"关闭" if not sponsor_on else "开启"}'
+                 f'（原 {"开启" if _buttons.SPONSOR_ENABLED else "关闭"}）')
+        _buttons.SPONSOR_ENABLED = sponsor_on
 
 
 def persist_bind_bot_appid(appid: str) -> tuple[bool, str]:

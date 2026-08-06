@@ -118,10 +118,13 @@ _P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
 _P_STATS    = r'^/?数据统计\s*(\d{4}|\d{2})?$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
+_P_SPONSOR  = r'^/?赞助支持$'
 
+# 「赞助支持」也列入专属指令:赞助功能**关闭**时 handler 会自己转发给引擎。
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
     _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST, _P_ADMIN_INTERRUPT,
+    _P_SPONSOR,
 ))
 
 
@@ -402,6 +405,12 @@ _DEFAULT_UPDATE_NOTICE = '暂无更新公告'
 _IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
 
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
+
+# 赞助鸣谢名单 —— 与其他 txt 同一套「实时读盘 + 面板可编辑」机制。
+# 只在 buttons.SPONSOR_ENABLED 打开时才会被读到。
+_SPONSORS_PATH = os.path.join(boot.DATA_DIR, 'sponsors.txt')
+_DEFAULT_SPONSORS = '暂无赞助记录，你可以成为第一位 ❤️'
+
 # 首次访问时写入的默认 Q&A
 _DEFAULT_TROUBLESHOOTING = (
     'Q：为什么 bot 只回了几条就停了？\n'
@@ -464,6 +473,20 @@ def _read_important_update() -> str:
 def _read_troubleshooting() -> str:
     return _read_txt_with_default(
         _TROUBLESHOOTING_PATH, _DEFAULT_TROUBLESHOOTING, 'troubleshooting.txt')
+
+
+def _read_sponsors() -> str:
+    return _read_txt_with_default(
+        _SPONSORS_PATH, _DEFAULT_SPONSORS, 'sponsors.txt')
+
+
+def _as_quote(text: str) -> str:
+    """把多行文本转成 markdown 引用块(每行前缀 ``> ``)。
+
+    赞助鸣谢用引用而非代码块 —— 引用会保留 markdown 行内语法,管理员想给某个名字加粗 / 加 emoji 直接在 txt 里写即可。
+    空行也必须带 ``>``,否则 QQ 客户端会在空行处把引用截断成两块。
+    """
+    return '\n'.join(f'> {ln}' if ln else '>' for ln in text.split('\n'))
 
 
 @handler(_P_MENU,
@@ -555,7 +578,12 @@ async def lgtbot_update_notice(event, match):
         parts.append('')
     parts.append(f'```公告详情\n{notice}\n```')
     md = '\n'.join(parts)
-    await event.reply(md)
+    # 赞助功能开启时在公告下方挂一行「赞助支持」。
+    entry = buttons.build_sponsor_entry_buttons()
+    if entry:
+        await event.reply(md, buttons=entry)
+    else:
+        await event.reply(md)
 
 
 async def _reply_date_stats(event, target_day) -> None:
@@ -880,6 +908,56 @@ async def lgtbot_troubleshooting(event, match):
         f'```常见问题\n{content}\n```'
     )
     await event.reply(md, buttons=buttons.build_support_buttons())
+
+
+# ──────── 赞助支持(默认关闭) ────────────────────────
+
+_SPONSOR_NOTE = (
+    '如果您有游戏投稿、更新建议，欢迎联系铁蛋 🌹'
+)
+
+
+@handler(_P_SPONSOR,
+         name='赞助支持',
+         desc='读取 data/sponsors.txt 实时返回赞助鸣谢名单（需开启 sponsor_enabled）',
+         priority=50,
+         block=True,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_sponsor(event, match):
+    """收到「赞助支持」(文本或按钮)→ 回鸣谢名单 + 简短说明 + 两个链接按钮。
+
+    名单用**引用块**而非代码块渲染:引用保留 markdown 行内语法,管理员想给某个
+    名字加粗或加 emoji,直接在 ``sponsors.txt`` 里写就行。
+
+    ``buttons.SPONSOR_ENABLED`` 关闭时**完全隐藏本功能** —— 消息事件按
+    ``lgtbot_about`` 的套路原样转发给引擎(``_from_exclusive=True`` 跳过专属指令
+    闸),第三方部署方的用户只会看到引擎自己的响应,察觉不到插件里有赞助菜单。
+    """
+    if helpers.is_foreign_event(event):
+        return
+    if not buttons.SPONSOR_ENABLED:
+        # INTERACTION 只可能来自历史消息里的旧按钮(开关关闭后不再生成按钮),ack 掉即可 —— 引擎没有对应的元指令可转发。
+        if event.is_interaction:
+            try:
+                await event.ack_interaction(code=0)
+            except Exception:
+                pass
+            return
+        await lgtbot_dispatch(event, match, _from_exclusive=True)
+        return
+    if event.is_interaction:
+        try:
+            await event.ack_interaction(code=0)
+        except Exception:
+            pass
+    md = (
+        '## ❤️ 赞助鸣谢\n'
+        '\n'
+        f'{_as_quote(_read_sponsors())}\n'
+        '\n'
+        f'{_SPONSOR_NOTE}'
+    )
+    await event.reply(md, buttons=buttons.build_sponsor_buttons())
 
 
 # ──────── /关于 抢占(优于系统插件的同名指令) ───────────────────────────────
@@ -1366,10 +1444,11 @@ async def _notify_auto_restart(reason: str) -> None:
     md = (
         '## 🔁 LGT-Bot 自动重启\n'
         '\n'
-        '> 当前无人正在进行游戏，计划重启（自动模式）已触发\n'
+        '> 当前无人正在进行游戏'
+        '> 计划重启（自动模式）已触发\n'
         '\n'
-        + (f'📌 更新内容：\n{reason}\n\n' if reason else '')
-        + '进程即将重启，预计十秒内恢复服务 ✅'
+        + (f'📌 更新内容：\n- {reason}\n\n' if reason else '')
+        + '进程即将重启，预计十秒内恢复服务...'
     )
     try:
         from .webui import page_logs

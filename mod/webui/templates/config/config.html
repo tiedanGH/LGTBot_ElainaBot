@@ -92,6 +92,31 @@
     </div>
   </section>
 
+  <!-- SPONSOR_SECTION_START -->
+  <!-- ──── 赞助鸣谢 (sponsors.txt) ────
+       首尾这对 SPONSOR_SECTION_START / END 标记不能删,也不要在标记之外提到赞助:
+       page_config.render_tab_html() 在 sponsor_enabled 关闭时按标记整段切掉 -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">❤️ 赞助鸣谢</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">文件</span>
+        <span id="cfg-sponsors-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <p class="dash-pluginconf-desc">
+      bot 收到「赞助支持」指令时，按<b>引用块</b>展示本文件内容（保留 markdown 行内语法）。<b>每次调用都重新读盘，修改立即生效</b>。
+    </p>
+    <textarea id="cfg-sponsors-editor" class="dash-editor" spellcheck="false"
+              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div class="dash-editor-actions">
+      <button id="cfg-sponsors-save" class="dash-btn dash-btn-primary">💾 保存</button>
+      <button id="cfg-sponsors-revert" class="dash-btn">↩ 恢复</button>
+      <span id="cfg-sponsors-msg" class="dash-config-msg"></span>
+    </div>
+  </section>
+  <!-- SPONSOR_SECTION_END -->
+
   <!-- ──── 引擎配置 (lgtbot.json) ──── -->
   <section class="dash-section">
     <div class="dash-section-header">

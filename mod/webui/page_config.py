@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-「配置管理」标签 —— 五块编辑器集中管理本插件的所有用户可编辑文本/配置:
+「配置管理」标签 —— 六块编辑器集中管理本插件的所有用户可编辑文本/配置:
 
   1. 🔧 插件配置 (data/config.yaml)         + 「前往插件模块」link + 热重载按钮
   2. ⚠️ 重要更新 (data/important_update.txt) 置顶提示，空则不渲染区块
   3. 📢 更新公告 (data/update_notice.txt)    保存即时热加载(下次指令触发就生效)
   4. ❓ 疑难解答 (data/troubleshooting.txt)  同上
-  5. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
+  5. ❤️ 赞助鸣谢 (data/sponsors.txt)         同上；**仅 sponsor_enabled 开启时渲染**，关闭时整段区块与数据都不进页面
+  6. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
 
 保存全部走主框架 ``/api/config-file/save`` 端点(yaml/json/text format)——
 不在本插件自建 POST endpoint,复用主框架的注释保留 + 格式校验逻辑。
@@ -43,6 +44,52 @@ TAB_HTML = _load('config/config.html')
 TAB_CSS = _load('config/config.css')
 TAB_JS = _load('config/config.js')
 
+# 「❤️ 赞助鸣谢」在 html / js 模板里各由一对注释标记包住
+# sponsor_enabled 关闭时按标记把整段切掉。
+_SPONSOR_MARKS = {
+    'config.html': ('<!-- SPONSOR_SECTION_START -->', '<!-- SPONSOR_SECTION_END -->'),
+    'config.js': ('/* SPONSOR_JS_START', '/* SPONSOR_JS_END */'),
+}
+
+
+def _sponsor_on() -> bool:
+    """赞助功能总开关(config.yaml 的 sponsor_enabled,由 config.py 下发)。"""
+    from .. import buttons as _buttons
+    return bool(_buttons.SPONSOR_ENABLED)
+
+
+def _strip_sponsor(text: str, label: str) -> str:
+    """按 ``_SPONSOR_MARKS[label]`` 把赞助相关的整段从模板里切掉。
+
+    标记缺失(模板被改过)时原样返回并告警,不做半截切割 —— 切坏 HTML / JS 比
+    多显示一个区块严重得多。
+    """
+    start, end = _SPONSOR_MARKS[label]
+    i = text.find(start)
+    j = text.find(end)
+    if i < 0 or j <= i:
+        log.warning(f'{label} 缺少 SPONSOR 标记，赞助区块无法隐藏')
+        return text
+    return text[:i] + text[j + len(end):]
+
+
+def render_tab_html() -> str:
+    """返回本标签的 HTML;``sponsor_enabled`` 关闭时**不渲染**赞助鸣谢区块。
+
+    在服务端切掉整段而不是用 CSS ``display:none`` —— 关闭赞助功能的部署方连页面
+    源码里都不该出现赞助字样。前端无需特判:``cfgApplyData`` 遇到缺失的 dataKey
+    会 return,``DOMContentLoaded`` 的绑定循环对 null 元素也都有守卫。
+    """
+    return TAB_HTML if _sponsor_on() else _strip_sponsor(TAB_HTML, 'config.html')
+
+
+def render_tab_js() -> str:
+    """返回本标签的 JS;关闭时连 ``cfgEditors.sponsors`` 表项一起切掉。
+
+    只藏 HTML 是不够的 —— JS 里的 ``saveHint`` 文案同样会出现在页面源码里。
+    """
+    return TAB_JS if _sponsor_on() else _strip_sponsor(TAB_JS, 'config.js')
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # 文件路径常量 —— 跟其他模块(config.py / dispatcher.py)对齐
@@ -52,6 +99,7 @@ _CONFIG_YAML_PATH = os.path.join(boot.DATA_DIR, 'config.yaml')
 _IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
 _UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
+_SPONSORS_PATH = os.path.join(boot.DATA_DIR, 'sponsors.txt')
 
 # 跨重载共享:存上次热重载后 yaml 里的 admin_uids 逗号串。每次 reload 比较
 # 当前 yaml 内的 admin_uids 与该值,**仅在真的变化时**给前端返回那条
@@ -101,8 +149,9 @@ def _read_engine_config() -> tuple[str, str]:
 def get_data() -> str:
     """返回可嵌入 ``<script id="config-data">`` 的 JSON 字符串。
 
-    五块编辑器的 abs_path / content / read_error 一次性提供，前端 cfgApplyData
-    据此填充各个 textarea 与路径显示行。
+    各编辑器的 abs_path / content / read_error 一次性提供，前端 cfgApplyData
+    据此填充 textarea 与路径显示行。``sponsors`` 一项仅在 ``sponsor_enabled``
+    开启时出现 —— 关闭时该区块整段不渲染，见 ``render_tab_html``。
     """
     cfg_content, cfg_err = _read_file(_CONFIG_YAML_PATH)
     important_content, important_err = _read_file(_IMPORTANT_UPDATE_PATH)
@@ -137,6 +186,14 @@ def get_data() -> str:
             'read_error': engine_err,
         },
     }
+    # 赞助功能关闭时连数据都不下发(区块本身也已被 render_tab_html 切掉)。
+    if _sponsor_on():
+        sponsors_content, sponsors_err = _read_file(_SPONSORS_PATH)
+        payload['sponsors'] = {
+            'abs_path': os.path.abspath(_SPONSORS_PATH),
+            'content': sponsors_content,
+            'read_error': sponsors_err,
+        }
     data_json = json.dumps(payload, ensure_ascii=False, default=str)
     return data_json.replace('</script>', '<\\/script>')
 
@@ -168,6 +225,7 @@ def _snapshot_runtime_tunables() -> dict:
         'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
         'sandbox_dm_users': ['all'] if _callbacks.DM_PUSH_ALL else sorted(_callbacks.SANDBOX_DM_USERS),
         'menu_game_buttons': list(_buttons.MENU_GAMES),
+        'sponsor_enabled': bool(_buttons.SPONSOR_ENABLED),
     }
 
 
@@ -281,7 +339,7 @@ _INT_OK_STR_FIELDS = {'bind_bot_appid', 'crash_notify_group'}
 def _validate_config_yaml(text: str) -> tuple[list, list]:
     """校验 config.yaml 文本,返回 ``(errors, warnings)``;errors 非空则拒绝保存。
 
-    schema 从 ``config.DEFAULT_CONFIG`` 的字段类型动态推导(list / str / 数值),
+    schema 从 ``config.DEFAULT_CONFIG`` 的字段类型动态推导(bool / list / str / 数值),
     新增配置字段无需改这里。错误级(阻断):语法错误、根不是映射、字段类型不符、
     image_hosting 填了未知图床、refresh_wait_timeout 非正数。警告级(放行):
     字段值为空(yaml 裸 key 解析为 None,运行时按缺省处理)、未知字段。
@@ -308,7 +366,11 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
         if val is None:
             warnings.append(f'{key} 为空，运行时将按未配置处理')
             continue
-        if isinstance(default, list):
+        # bool 分支必须排在数值分支之前 —— Python 里 bool 是 int 的子类,顺序颠倒会让 sponsor_enabled 这类开关被当数值放行
+        if isinstance(default, bool):
+            if not isinstance(val, bool):
+                errors.append(f'{key} 应为布尔值 true / false，当前是 {type(val).__name__}')
+        elif isinstance(default, list):
             if not isinstance(val, list):
                 errors.append(f'{key} 应为列表，当前是 {type(val).__name__}')
             else:

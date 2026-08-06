@@ -44,6 +44,7 @@ def _reset_tunables(monkeypatch):
     monkeypatch.setattr(callbacks, 'DM_PUSH_ALL', False)
     monkeypatch.setattr(dispatcher, 'BLOCKED_COMMANDS', ())
     monkeypatch.setattr(buttons, 'MENU_GAMES', list(buttons.DEFAULT_MENU_GAMES))
+    monkeypatch.setattr(buttons, 'SPONSOR_ENABLED', False)
 
 
 def test_sandbox_whitelist_mode():

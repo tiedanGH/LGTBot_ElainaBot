@@ -39,18 +39,22 @@ def btn(text: str, data: str = '', *, type: int = 2, style: int = 0,
 
 # ──────── 外部链接常量 ──────────────────────────────────────────────────────
 
-_OFFICIAL_GROUP_LINK = (
-    'https://qun.qq.com/universal-share/share?ac=1'
-    '&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK'
-    '&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9'
-    '&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw'
-    '&svctype=4&tempid=h5_group_info'
-)
+_OFFICIAL_GROUP_LINK = 'https://qm.qq.com/q/R3GXMpMU2m'
 # 问题反馈问卷链接 —— 默认指向腾讯文档表单,方便统一收集反馈
 _QUESTIONNAIRE_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
 _NAV_HOME_LINK = 'https://tiedan.site/'
 _REPO_ADAPTER_LINK = 'https://github.com/tiedanGH/LGTBot_ElainaBot'
 _REPO_LGTBOT_LINK = 'https://github.com/Slontia/lgtbot'
+# 赞助支持:导航站的赞助页 + 爱发电直达
+_SPONSOR_PAGE_LINK = 'https://tiedan.site/pages/support/'
+_AFDIAN_LINK = 'https://afdian.com/a/tiedan-LGTBot/plan'
+
+
+# ──────── 赞助功能总开关 ────────────────────────────────────────────────────
+# 由 config.py::_apply_runtime_tunables 按 ``sponsor_enabled`` 覆写,**默认关闭**。
+# 关闭时本插件不展示任何赞助入口(下面三个 build_* 都不会带赞助按钮),「赞助支持」指令也直接转发给引擎
+# 插件市场里的第三方部署方看不到任何与本作者相关的收款引导。
+SPONSOR_ENABLED: bool = False
 
 
 # ──────── 静态按钮常量 ──────────────────────────────────────────────────────
@@ -76,12 +80,16 @@ BTN_ANNOUNCEMENT    = btn('📢 更新公告', '更新公告', type=1, style=4)
 BTN_DATA_STATS      = btn('📈 数据统计', '数据统计', type=1, style=4)
 BTN_TROUBLESHOOT    = btn('❓ 疑难解答', '疑难解答', type=1, style=0)
 BTN_ABOUT           = btn('ℹ️ 关于框架', '/关于', style=1)
+# 赞助入口(type=1 callback:点击直接触发「赞助支持」)
+BTN_SPONSOR         = btn('❤️ 赞助支持', '赞助支持', type=1, style=1)
 # 链接按钮(点击跳外部 URL,不依赖 bot 进程存活)
 BTN_OFFICIAL_GROUP  = btn('💬 官方群聊', link=_OFFICIAL_GROUP_LINK)
 BTN_FEEDBACK        = btn('🛠️ 问题反馈', link=_QUESTIONNAIRE_LINK)
 BTN_NAV_HOME        = btn('🌠 导航网站主页', link=_NAV_HOME_LINK)
 BTN_REPO_ADAPTER    = btn('适配层 仓库', link=_REPO_ADAPTER_LINK)
 BTN_REPO_LGTBOT     = btn('LGTBot 仓库', link=_REPO_LGTBOT_LINK)
+BTN_SPONSOR_PAGE    = btn('🍚 投喂入口', link=_SPONSOR_PAGE_LINK)
+BTN_AFDIAN          = btn('⚡ 爱发电', link=_AFDIAN_LINK)
 
 
 # ──────── 组装函数(挂载点见各 docstring) ────────────────────────────────────
@@ -188,8 +196,35 @@ def build_full_volume_apply_button() -> list[list[dict]]:
 def build_about_buttons() -> list[list[dict]]:
     """/关于 回执底部附:左 适配层仓库,右 LGT-Bot 上游仓库。两个都是链接按钮
     (type=0,QQ 协议下点击直接跳转,无 style)。
+
+    ``SPONSOR_ENABLED`` 时在下方追加一行「赞助支持」—— 关于页是介绍项目本身的
+    地方,赞助引导在这里最不违和;开关关闭时这一行完全不出现。
     """
-    return [[BTN_REPO_ADAPTER, BTN_REPO_LGTBOT]]
+    rows = [[BTN_REPO_ADAPTER, BTN_REPO_LGTBOT]]
+    if SPONSOR_ENABLED:
+        rows.append([BTN_SPONSOR])
+    return rows
+
+
+def build_sponsor_entry_buttons() -> list[list[dict]]:
+    """单独一行「赞助支持」入口;赞助功能关闭时返回空列表。
+
+    给本身没有按钮组的回执用(目前是「更新公告」)—— 调用方需自行处理空列表
+    (``event.reply`` 不传 buttons),不要把空列表当键盘传下去。
+    """
+    return [[BTN_SPONSOR]] if SPONSOR_ENABLED else []
+
+
+def build_sponsor_buttons() -> list[list[dict]]:
+    """「赞助支持」回执底部:赞助页面 + 爱发电,两个都是 link 按钮。
+
+    赞助页面(导航站 /pages/support/)上才有收款码 —— 收款码图片不进 QQ 消息
+    (markdown 图片需报备域名,且平台对收款码敏感),机器人侧一律只给链接。
+    """
+    return [
+        [BTN_SPONSOR_PAGE, BTN_AFDIAN],
+        [BTN_OFFICIAL_GROUP, BTN_FEEDBACK]
+    ]
 
 
 def build_support_buttons() -> list[list[dict]]:
@@ -210,13 +245,19 @@ def build_support_buttons() -> list[list[dict]]:
 
 def build_more_features_buttons() -> list[list[dict]]:
     """「🧩 更多功能」子菜单 —— dispatcher 的 ``lgtbot_more_features`` handler
-    在用户点击「更多功能」按钮 / 直接发送「更多功能」文本时回复。"""
-    return [
+    在用户点击「更多功能」按钮 / 直接发送「更多功能」文本时回复。
+
+    ``SPONSOR_ENABLED`` 时底部追加一行「赞助支持」(共 5 行,正好是 QQ 键盘上限)。
+    """
+    rows = [
         [BTN_ANNOUNCEMENT, BTN_DATA_STATS],
         [BTN_TROUBLESHOOT, BTN_FEEDBACK],
         [BTN_ABOUT],
         [BTN_NAV_HOME],
     ]
+    if SPONSOR_ENABLED:
+        rows.append([BTN_SPONSOR])
+    return rows
 
 
 # ──────── 欢迎菜单按钮组 ────────────────────────────────────────────────────

@@ -14,36 +14,55 @@ const CFG_KEYS = {
 const CFG_VALIDATED_SAVE_ROUTE = '/api/ext/lgtbot/config/save';
 
 /* 每个编辑器一份状态:
+ *   dataKey  —— get_data() 返回的 JSON 里对应哪个 key(缺失 = 后端没渲染该区块)
  *   absPath  —— 保存请求要原样回传给 /api/config-file/save 的绝对路径
  *   original —— 最近一次从后端拉到的内容,用来做 dirty 检测 + 「↩ 恢复」
  *   format   —— 主框架保存端点的格式 hint(yaml / json / text)
- *   editorId / pathId / msgId / saveBtnId —— 对应 DOM 元素 id */
+ *   editorId / pathId / msgId / saveBtnId —— 对应 DOM 元素 id
+ *
+ * 表项 → 数据的对应全靠 dataKey,cfgApplyData 直接遍历本表 —— 服务端按运行时
+ * 开关裁掉某一段(见 page_config.render_tab_js)时这里少一项即可,不用改别处。 */
 const cfgEditors = {
   yaml: {
+    dataKey: 'config_yaml',
     absPath: '', original: '', format: 'yaml', target: 'config_yaml',
     editorId: 'cfg-yaml-editor', pathId: 'cfg-yaml-path',
     msgId: 'cfg-yaml-msg', saveBtnId: 'cfg-yaml-save', revertBtnId: 'cfg-yaml-revert',
     saveHint: '，请点「🔁 热重载配置」即时下发到运行时',
   },
   important: {
+    dataKey: 'important_update',
     absPath: '', original: '', format: 'text',
     editorId: 'cfg-important-editor', pathId: 'cfg-important-path',
     msgId: 'cfg-important-msg', saveBtnId: 'cfg-important-save', revertBtnId: 'cfg-important-revert',
     saveHint: '，下次发送「更新公告」指令时即生效；留空则不渲染该区块',
   },
   notice: {
+    dataKey: 'update_notice',
     absPath: '', original: '', format: 'text',
     editorId: 'cfg-notice-editor', pathId: 'cfg-notice-path',
     msgId: 'cfg-notice-msg', saveBtnId: 'cfg-notice-save', revertBtnId: 'cfg-notice-revert',
     saveHint: '，下次发送「更新公告」指令时即生效',
   },
   trouble: {
+    dataKey: 'troubleshooting',
     absPath: '', original: '', format: 'text',
     editorId: 'cfg-trouble-editor', pathId: 'cfg-trouble-path',
     msgId: 'cfg-trouble-msg', saveBtnId: 'cfg-trouble-save', revertBtnId: 'cfg-trouble-revert',
     saveHint: '，下次发送「疑难解答」指令时即生效',
   },
+  /* SPONSOR_JS_START
+   * sponsor_enabled 关闭时整段被服务端切掉,标记之内不要放别的表项。 */
+  sponsors: {
+    dataKey: 'sponsors',
+    absPath: '', original: '', format: 'text',
+    editorId: 'cfg-sponsors-editor', pathId: 'cfg-sponsors-path',
+    msgId: 'cfg-sponsors-msg', saveBtnId: 'cfg-sponsors-save', revertBtnId: 'cfg-sponsors-revert',
+    saveHint: '，下次发送「赞助支持」指令时即生效',
+  },
+  /* SPONSOR_JS_END */
   engine: {
+    dataKey: 'engine_config',
     absPath: '', original: '', format: 'json', target: 'engine_json',
     editorId: 'cfg-engine-editor', pathId: 'cfg-engine-path',
     msgId: 'cfg-engine-msg', saveBtnId: 'cfg-engine-save', revertBtnId: 'cfg-engine-revert',
@@ -52,16 +71,9 @@ const cfgEditors = {
 };
 
 function cfgApplyData(data) {
-  const map = {
-    yaml: data.config_yaml,
-    important: data.important_update,
-    notice: data.update_notice,
-    trouble: data.troubleshooting,
-    engine: data.engine_config,
-  };
-  Object.entries(map).forEach(([k, info]) => {
+  Object.entries(cfgEditors).forEach(([k, state]) => {
+    const info = data[state.dataKey];
     if (!info) return;
-    const state = cfgEditors[k];
     state.absPath = info.abs_path || '';
     state.original = info.content || '';
     const pathEl = document.getElementById(state.pathId);

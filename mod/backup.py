@@ -83,6 +83,7 @@ def _collect_sources() -> list[tuple[str, str, str]]:
         ('data/update_notice.txt',    os.path.join(boot.DATA_DIR, 'update_notice.txt'),    'plain'),
         ('data/important_update.txt', os.path.join(boot.DATA_DIR, 'important_update.txt'), 'plain'),
         ('data/troubleshooting.txt',  os.path.join(boot.DATA_DIR, 'troubleshooting.txt'),  'plain'),
+        ('data/sponsors.txt',         os.path.join(boot.DATA_DIR, 'sponsors.txt'),         'plain'),
     ]
     return [(arc, abs_p, kind) for arc, abs_p, kind in candidates
             if os.path.isfile(abs_p)]

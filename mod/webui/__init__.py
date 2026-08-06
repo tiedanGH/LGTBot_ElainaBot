@@ -7,8 +7,9 @@ Python 模块(仅做逻辑 + 模板加载):
                    ``web_pages._registry``,卸载时 ``webui.unregister()`` 摘除。
     page_dashboard 「仪表盘」标签(默认最左):版本/统计/缓存清理,提供检查更新、
                    git pull、子模块 update、缓存清理等 action
-    page_config    「配置管理」标签:4 块编辑器(config.yaml / update_notice.txt
-                   / troubleshooting.txt / lgtbot.json)+ 热重载 action
+    page_config    「配置管理」标签:6 块编辑器(config.yaml / important_update.txt
+                   / update_notice.txt / troubleshooting.txt / sponsors.txt
+                   / lgtbot.json)+ 热重载 action
     page_build     「引擎编译」标签:子进程跑 bash build.sh,跨 WebUI 进程
                    重启仍能续看(state.json + build.log),支持中途终止;
                    ANSI 颜色转 HTML 渲染
