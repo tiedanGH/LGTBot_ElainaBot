@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import glob
 import os
+import re
 import shutil
 import threading
 
@@ -191,3 +192,46 @@ def test_file_status_matches_file():
     assert st['count'] == 2
     assert st['oldest_ts'] == entries[0]['ts']
     assert st['size_bytes'] == os.path.getsize(audit.AUDIT_PATH)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 11. 类别 / 来源常量 —— page_audit 的徽标与筛选按钮全靠它们
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_every_recorded_category_is_declared():
+    """★ 漂移闸:源码里 ``audit.record('<cat>', ...)`` 用到的每个短码都必须在 ``CATEGORIES`` 中登记。
+    漏登记不会报错 —— 只是面板上那条记录的类别徽标渲染成空白、筛选按钮里也找不到它,极易长期无人察觉。"""
+    mod_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'mod')
+    used = set()
+    for root, _dirs, files in os.walk(mod_dir):
+        for fn in files:
+            if not fn.endswith('.py'):
+                continue
+            with open(os.path.join(root, fn), 'r', encoding='utf-8') as f:
+                used |= set(re.findall(r"""audit\.record\(\s*['"]([a-z_]+)['"]""",
+                                       f.read()))
+    assert used, '没扫到任何 audit.record 调用,正则或目录布局变了'
+    assert used <= set(audit.CATEGORIES), \
+        f'未在 CATEGORIES 登记的类别: {sorted(used - set(audit.CATEGORIES))}'
+
+
+def test_categories_entries_are_emoji_label_pairs():
+    """page_audit._payload 直接解包成 (emoji, label),形状错了会 ValueError。"""
+    for cat, val in audit.CATEGORIES.items():
+        assert isinstance(cat, str) and cat
+        emoji, label = val                     # 解包即校验二元组
+        assert emoji and label
+
+
+def test_source_constants_are_distinct():
+    """四个来源在面板上各有徽标配色,值重复会让 API / 自动触发的记录混进面板类。"""
+    srcs = [audit.SRC_PANEL, audit.SRC_CMD, audit.SRC_AUTO, audit.SRC_API]
+    assert len(set(srcs)) == 4 and all(isinstance(s, str) and s for s in srcs)
+
+
+def test_record_defaults_to_panel_source_and_ok():
+    """省略 ok / src 时的默认值 —— 大多数面板端点都靠这个默认。"""
+    audit.record('cache', '清理缓存')
+    e = _read_file()[-1]
+    assert e['ok'] is True and e['src'] == audit.SRC_PANEL and e['detail'] == ''

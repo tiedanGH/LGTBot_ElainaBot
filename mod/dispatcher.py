@@ -1444,11 +1444,12 @@ async def _notify_auto_restart(reason: str) -> None:
     md = (
         '## 🔁 LGT-Bot 自动重启\n'
         '\n'
-        '> 当前无人正在进行游戏'
+        '> 当前无人正在进行游戏\n'
         '> 计划重启（自动模式）已触发\n'
         '\n'
-        + (f'📌 更新内容：\n- {reason}\n\n' if reason else '')
-        + '进程即将重启，预计十秒内恢复服务...'
+        + (f'📌 更新内容：\n- {reason}\n\n' if reason else '') +
+        '⏳ 主进程即将重启\n'
+        '预计 10 秒内自动恢复服务...'
     )
     try:
         from .webui import page_logs
