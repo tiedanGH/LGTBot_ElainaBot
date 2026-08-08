@@ -151,14 +151,18 @@ def _sec_title(d, x, y, text):
     _bold_text(d, (x + 22, y), text, _font(28), _TEXT)
 
 
-def _delta_pill(d, x, y, diff, h=38) -> int:
-    """涨跌胶囊(对比昨日;涨=绿、跌=红、平=灰,徽章式 18% 透明底),返回宽度。"""
+def _delta_pill(d, x, y, diff, h=40) -> int:
+    """涨跌胶囊(对比昨日同时段 / 上个区间),返回宽度。
+
+    风格与配色照搬主框架 dau 卡片:**涨红跌绿**、粗体、写死的浅色底 ——
+    两种统计图会被并排看到,标签形态必须一致。
+    """
     if diff is None:
         return 0
     if diff > 0:
-        txt, fg = f'↑ {_fmt(diff)}', _GREEN
+        txt, fg = f'↑ {_fmt(diff)}', _RED
     elif diff < 0:
-        txt, fg = f'↓ {_fmt(abs(diff))}', _RED
+        txt, fg = f'↓ {_fmt(abs(diff))}', _GREEN
     else:
         txt, fg = '· 0', _TEXT_MUTED
     f = _font(22)

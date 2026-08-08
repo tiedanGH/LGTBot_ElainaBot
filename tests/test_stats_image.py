@@ -104,6 +104,51 @@ def test_render_month_mode_layout():
     assert png and png[:8] == b'\x89PNG\r\n\x1a\n'
 
 
+def _delta_only_stats(diff_sign: int) -> dict:
+    """只让「今日对局」一张卡带涨跌,其余卡的对比数据留空(不画胶囊)。"""
+    return {
+        'available': True,
+        'today_matches': 100, 'today_players': 10, 'today_groups': 3,
+        'yesterday_matches_same_span': 100 - 20 * diff_sign,
+        'top_games_today': [], 'top_players_today': [], 'trend_10d': [],
+    }
+
+
+def _has_color(png: bytes, rgb: tuple) -> bool:
+    from PIL import Image
+    from io import BytesIO
+    return rgb in {c for _n, c in Image.open(BytesIO(png)).convert('RGB').getcolors(1 << 20)}
+
+
+@pytest.mark.parametrize('sign,want_bg,other_bg', [
+    (1, 'UP', 'DOWN'),        # 涨 → 红底
+    (-1, 'DOWN', 'UP'),       # 跌 → 绿底
+])
+def test_delta_pill_uses_dau_up_red_down_green(sign, want_bg, other_bg):
+    """★ 配色契约:涨跌胶囊与主框架 dau 卡片一致 —— **涨红跌绿**(证券风格),
+    与图标用的 _GREEN/_RED 语义相反。写反了图上只是颜色互换,没有任何报错,
+    所以这里直接在像素里找底色。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    png = stats_image.render_stats_image(_delta_only_stats(sign), sub_title='x')
+    assert _has_color(png, getattr(stats_image, f'_{want_bg}_BG'))
+    assert not _has_color(png, getattr(stats_image, f'_{other_bg}_BG'))
+    # 前景文字色同样落在图上(胶囊里的箭头 + 数字)
+    assert _has_color(png, getattr(stats_image, f'_{want_bg}'))
+
+
+def test_delta_pill_colors_match_dau_module_exactly():
+    """逐值比对主框架 dau 渲染器的常量 —— 任一侧调色都必须同步,
+    否则两张卡片并排看时标签颜色对不上。dau 不可导入时跳过(仅本插件仓库场景)。"""
+    try:
+        from plugins.system.app import _dau_image
+    except Exception:
+        pytest.skip('主框架 dau 渲染器不可用')
+    for name in ('_UP', '_UP_BG', '_DOWN', '_DOWN_BG', '_FLAT', '_FLAT_BG'):
+        assert getattr(stats_image, name) == getattr(_dau_image, name), name
+
+
 def test_render_swallows_exceptions(monkeypatch):
     """渲染内部异常 → None(调用方回退文本),不抛。"""
     monkeypatch.setattr(stats_image, '_render',

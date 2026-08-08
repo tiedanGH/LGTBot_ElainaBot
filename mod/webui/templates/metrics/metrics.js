@@ -110,23 +110,23 @@ function metricsRankRows(list, nameKey) {
   ).join('');
 }
 
+/* 涨跌标签(形态与配色对齐 dau 卡片:涨红跌绿)。前缀文案保持灰、只有标签着色,所以返回的是 HTML 片段而非纯文本。
+   diff 一律先过 Number:调用方给的是两数相减,理论上必为数字,强制收敛一次杜绝畸形 payload 让字符串拼进 innerHTML。 */
+function metricsDeltaTag(diff) {
+  const n = Number(diff);
+  if (!isFinite(n)) return '';
+  if (n > 0) return '<span class="metrics-delta-tag metrics-delta-up">↑ ' + n + '</span>';
+  if (n < 0) return '<span class="metrics-delta-tag metrics-delta-down">↓ ' + Math.abs(n) + '</span>';
+  return '<span class="metrics-delta-tag">- 0</span>';
+}
+
 /* 「较昨日同时段」涨跌副标题(模仿 dau 面板的增减标识):有对比数据时替换
-   卡片 sub 行并着色,缺数据(旧库 / 查询失败)保留原说明文案。 */
+   卡片 sub 行,缺数据(旧库 / 查询失败)保留原说明文案。 */
 function metricsDeltaSub(id, cur, yday, fallback) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.remove('metrics-delta-up', 'metrics-delta-down');
   if (cur == null || yday == null) { el.textContent = fallback; return; }
-  const diff = cur - yday;
-  if (diff > 0) {
-    el.textContent = '较昨日同时段 ↑ ' + diff;
-    el.classList.add('metrics-delta-up');
-  } else if (diff < 0) {
-    el.textContent = '较昨日同时段 ↓ ' + Math.abs(diff);
-    el.classList.add('metrics-delta-down');
-  } else {
-    el.textContent = '较昨日同时段持平';
-  }
+  el.innerHTML = '较昨日同时段 ' + metricsDeltaTag(cur - yday);
 }
 
 function metricsRenderGame(game, activePush) {
@@ -146,18 +146,14 @@ function metricsRenderGame(game, activePush) {
      任一缺数据回退原说明文案。卡片主数值(私信用户数)不动。 */
   const dm10Sub = document.getElementById('metrics-stat-dm10-sub');
   if (dm10Sub) {
-    dm10Sub.classList.remove('metrics-delta-up', 'metrics-delta-down');
     const trend10 = Array.isArray(g.trend_10d) ? g.trend_10d : [];
     const total10 = trend10.length
-      ? trend10.reduce((a, t) => a + (t.count || 0), 0) : null;
+      ? trend10.reduce((a, t) => a + (Number(t.count) || 0), 0) : null;
     if (total10 == null || g.prev10_matches == null) {
       dm10Sub.textContent = '私信过机器人的活跃用户数';
     } else {
-      const diff = total10 - g.prev10_matches;
-      let tag = '持平';
-      if (diff > 0) { tag = '↑ ' + diff; dm10Sub.classList.add('metrics-delta-up'); }
-      else if (diff < 0) { tag = '↓ ' + Math.abs(diff); dm10Sub.classList.add('metrics-delta-down'); }
-      dm10Sub.textContent = '近 10 日对局 ' + total10 + ' · 较上个区间 ' + tag;
+      dm10Sub.innerHTML = '近 10 日对局 ' + total10 + ' '
+        + metricsDeltaTag(total10 - g.prev10_matches);
     }
   }
 

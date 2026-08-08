@@ -160,6 +160,26 @@ def test_metrics_get_data_is_valid_embeddable_json(_metrics_env):
     assert json.loads(data)['stats']['lgtbot_matches'] == 120
 
 
+def test_metrics_delta_tag_style_contract():
+    """★ 涨跌标签的样式契约(纯前端,只能查模板文本):
+
+      · 标签类 ``.metrics-delta-tag`` 存在,涨=红 #e34d59、跌=绿 #00a870 ——
+        与 dau 卡片和 stats_image 胶囊三处同色。JS 不得再往 sub 元素上挂 delta 颜色类,着色只发生在标签 span 内。
+    """
+    _a, page_metrics, _l = _pages()
+    css, js = page_metrics.TAB_CSS, page_metrics.TAB_JS
+    assert '.metrics-delta-tag' in css
+    assert re.search(r'\.metrics-delta-tag\.metrics-delta-up\s*\{[^}]*#e34d59', css)
+    assert re.search(r'\.metrics-delta-tag\.metrics-delta-down\s*\{[^}]*#00a870', css)
+    # 旧写法:直接给 .metrics-status-sub 上色 —— 已废弃,复活即变红
+    assert not re.search(r'\.metrics-status-sub\.metrics-delta-(up|down)', css)
+    assert "classList.add('metrics-delta-up'" not in js
+    assert "classList.add('metrics-delta-down'" not in js
+    # 两处文案都必须走标签函数包裹
+    assert js.count('metricsDeltaTag(') >= 3            # 1 处定义 + 2 处调用
+    assert '较昨日同时段 \' + metricsDeltaTag(' in js
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # page_logs —— 环形缓冲(数据层)
 # ─────────────────────────────────────────────────────────────────────────

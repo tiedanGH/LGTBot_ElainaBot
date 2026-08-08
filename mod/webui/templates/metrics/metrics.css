@@ -33,9 +33,17 @@
 .metrics-status-sub {
   font-size: 11px; color: var(--text-faint);
 }
-/* 「较昨日同时段」涨跌着色(JS metricsDeltaSub 切换;涨绿 / 跌红,平保持灰) */
-.metrics-status-sub.metrics-delta-up { color: var(--in); }
-.metrics-status-sub.metrics-delta-down { color: #dc3545; }
+/* 涨跌标签 —— 形态同 dashboard 的 .dash-badge */
+.metrics-delta-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 9px;
+  font-weight: 600; background: var(--tag-bg); color: var(--text-muted);
+}
+.metrics-delta-tag.metrics-delta-up {
+  background: color-mix(in srgb, #e34d59 18%, transparent); color: #e34d59;
+}
+.metrics-delta-tag.metrics-delta-down {
+  background: color-mix(in srgb, #00a870 18%, transparent); color: #00a870;
+}
 
 .metrics-action-msg { font-size: 12px; display: block; margin-top: 8px; }
 .metrics-action-msg:empty { display: none; }
