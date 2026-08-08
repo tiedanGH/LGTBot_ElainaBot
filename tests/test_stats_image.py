@@ -104,49 +104,70 @@ def test_render_month_mode_layout():
     assert png and png[:8] == b'\x89PNG\r\n\x1a\n'
 
 
-def _delta_only_stats(diff_sign: int) -> dict:
-    """只让「今日对局」一张卡带涨跌,其余卡的对比数据留空(不画胶囊)。"""
-    return {
+def _delta_only_stats(diff) -> dict:
+    """只让「今日对局」一张卡带涨跌胶囊,其余卡不给对比数据(不画胶囊)。
+
+    ``diff=None`` → 连这张卡也不画胶囊,用作像素差分的基准版。
+    """
+    g = {
         'available': True,
         'today_matches': 100, 'today_players': 10, 'today_groups': 3,
-        'yesterday_matches_same_span': 100 - 20 * diff_sign,
         'top_games_today': [], 'top_players_today': [], 'trend_10d': [],
     }
+    if diff is not None:
+        g['yesterday_matches_same_span'] = 100 - diff
+    return g
 
 
-def _has_color(png: bytes, rgb: tuple) -> bool:
-    from PIL import Image
+def _pill_colors(diff: int) -> set:
+    """渲染「带胶囊」与「无胶囊」两版做像素差分,返回**只属于胶囊**的颜色集。
+
+    不能直接在整图里找颜色:_GREEN / _RED 同时用于图标底色与配额告警,满图都有,分辨不出胶囊到底画成了哪种。
+    两版布局完全一致(``_delta_pill`` 在 diff 为 None 时什么都不画),所以差异像素精确等于胶囊本身。
+    """
     from io import BytesIO
-    return rgb in {c for _n, c in Image.open(BytesIO(png)).convert('RGB').getcolors(1 << 20)}
+    from PIL import Image, ImageChops
+    base = Image.open(BytesIO(stats_image.render_stats_image(
+        _delta_only_stats(None), sub_title='x'))).convert('RGB')
+    shot = Image.open(BytesIO(stats_image.render_stats_image(
+        _delta_only_stats(diff), sub_title='x'))).convert('RGB')
+    assert base.size == shot.size, '两版布局应一致,差分才有意义'
+    mask = ImageChops.difference(base, shot).convert('L')
+    box = mask.getbbox()
+    assert box, '带 diff 的一版应当多画出胶囊'
+    return {shot.getpixel((x, y))
+            for x in range(box[0], box[2]) for y in range(box[1], box[3])
+            if mask.getpixel((x, y))}
 
 
-@pytest.mark.parametrize('sign,want_bg,other_bg', [
-    (1, 'UP', 'DOWN'),        # 涨 → 红底
-    (-1, 'DOWN', 'UP'),       # 跌 → 绿底
+@pytest.mark.parametrize('diff,want,other', [
+    (20, '_RED', '_GREEN'),        # 涨 → 红
+    (-20, '_GREEN', '_RED'),       # 跌 → 绿
 ])
-def test_delta_pill_uses_dau_up_red_down_green(sign, want_bg, other_bg):
-    """★ 配色契约:涨跌胶囊与主框架 dau 卡片一致 —— **涨红跌绿**(证券风格),
-    与图标用的 _GREEN/_RED 语义相反。写反了图上只是颜色互换,没有任何报错,
-    所以这里直接在像素里找底色。"""
+def test_delta_pill_is_up_red_down_green(diff, want, other):
+    """★ 配色契约:涨跌胶囊同 dau 卡片取**涨红跌绿**(证券风格),与这两个常量
+    在图标 / 配额处的语义正好相反 —— 极易在后续改动里被"顺手改回来"。
+    写反了图上只是颜色互换,没有任何报错,所以直接查胶囊像素。"""
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
-    png = stats_image.render_stats_image(_delta_only_stats(sign), sub_title='x')
-    assert _has_color(png, getattr(stats_image, f'_{want_bg}_BG'))
-    assert not _has_color(png, getattr(stats_image, f'_{other_bg}_BG'))
-    # 前景文字色同样落在图上(胶囊里的箭头 + 数字)
-    assert _has_color(png, getattr(stats_image, f'_{want_bg}'))
+    colors = _pill_colors(diff)
+    want_fg, other_fg = getattr(stats_image, want), getattr(stats_image, other)
+    assert want_fg in colors                          # 箭头 + 数字
+    assert stats_image._tint(want_fg) in colors       # 胶囊底(18% 透明底)
+    assert other_fg not in colors and stats_image._tint(other_fg) not in colors
 
 
-def test_delta_pill_colors_match_dau_module_exactly():
-    """逐值比对主框架 dau 渲染器的常量 —— 任一侧调色都必须同步,
-    否则两张卡片并排看时标签颜色对不上。dau 不可导入时跳过(仅本插件仓库场景)。"""
-    try:
-        from plugins.system.app import _dau_image
-    except Exception:
-        pytest.skip('主框架 dau 渲染器不可用')
-    for name in ('_UP', '_UP_BG', '_DOWN', '_DOWN_BG', '_FLAT', '_FLAT_BG'):
-        assert getattr(stats_image, name) == getattr(_dau_image, name), name
+def test_delta_pill_flat_is_neutral_grey():
+    """持平(diff == 0)既不红也不绿 —— 用中性灰,避免 0 变化被误读成趋势。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    colors = _pill_colors(0)
+    assert stats_image._tint(stats_image._TEXT_MUTED) in colors
+    for c in (stats_image._RED, stats_image._GREEN):
+        assert c not in colors and stats_image._tint(c) not in colors
+
 
 
 def test_render_swallows_exceptions(monkeypatch):

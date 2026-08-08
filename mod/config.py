@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
 CONFIG_COMMENTS = {
     'bind_bot_appid': '绑定机器人 appid（可在仪表盘配置）。留空 = 自动使用框架第一个 bot；绑定后仅处理该 bot 的消息，其他 bot 的事件静默忽略',
     'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
-    'image_hosting': '游戏图片走 markdown 内嵌时使用的图床。默认 any 自动依次尝试全部可用图床；也可指定单个提升效率，可选值以主框架 image_hosting 模块为准：cos / bilibili / chatglm / xingye / nature / qq_file；留空 = 不启用图床。失败回退 msg_type=7',
+    'image_hosting': '游戏图片走 markdown 内嵌时使用的图床。默认 any 自动依次尝试全部可用图床，单选提升效率。可选值以 image_hosting 模块为准：cos / bilibili / chatglm / xingye / nature / qq_file；留空 = 不启用图床。失败回退 msg_type=7',
     'refresh_wait_timeout': '被动消息配额耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
     'active_push_daily_limit': '单个群 / 用户每日主动消息条数上限（QQ 官方接口限制，默认 1000）。用满后该群 / 用户当日退回「刷新按钮」被动机制，次日 0 点自动恢复；设 0 = 不限制',
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
