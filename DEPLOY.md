@@ -182,8 +182,8 @@ python3 main.py         # 启动主框架，自动加载插件
 bind_bot_appid: ''
 # LGTBot 内部管理员 openid 列表（不同于 ElainaBot 的 owner_ids）
 admin_uids: []
-# 游戏图片走 markdown 内嵌时使用的图床。留空 = 不启用图床，所有图片直接以 msg_type=7 发送
-image_hosting: ''
+# 游戏图片走 markdown 内嵌时使用的图床。any = 自动依次尝试全部可用图床；也可指定单个；留空 = 不启用，所有图片直接以 msg_type=7 发送
+image_hosting: 'any'
 # 被动消息配额（5条）耗尽时等待用户点击「刷新」按钮的最长秒数，超时改走主动消息
 refresh_wait_timeout: 15.0
 # 单个群 / 用户每日主动消息条数上限（QQ 官方接口限制）；用满后当日退回刷新按钮机制，次日 0 点恢复；0 = 不限制
@@ -210,22 +210,22 @@ sponsor_enabled: false
 
 **配置项说明（按 yaml 字段顺序）：**
 
-| 字段                        | 类型          | 默认      | 说明                                                                                                           |
-|---------------------------|-------------|---------|--------------------------------------------------------------------------------------------------------------|
-| `bind_bot_appid`          | `str`       | `''`    | 绑定机器人 appid（仪表盘可视化选择）。留空自动使用第一个 bot。绑定后所有功能均走该 bot，**其他 bot 的事件被静默忽略**。appid 为纯数字，手工填写可不加引号                  |
-| `admin_uids`              | `list[str]` | `[]`    | LGTBot 内部管理员的 QQ openid 列表                                                                                   |
-| `image_hosting`           | `str`       | `''`    | markdown 图片内嵌使用的图床（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`），留空 = 直接走 msg_type=7       |
-| `refresh_wait_timeout`    | `float`     | `15.0`  | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                               |
-| `active_push_daily_limit` | `int`       | `1000`  | **单个群 / 单个用户**每日主动消息条数上限（QQ 官方接口限制，官方调整后改这里即可）。用满后该群 / 用户当日失去主动直推资格，退回「刷新按钮」被动机制；**次日 0 点自动重置**。`0` = 不限制。   |
-| `image_upload_dedup_ttl`  | `float`     | `60.0`  | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用 |
-| `crash_notify_group`      | `str`       | `''`    | 严重问题通知群 openid —— 引擎崩溃时向此群主动推送崩溃报告。留空 = 不推送。该群需给本 bot 开了全量推送权限,主动消息才能落地                                      |
-| `blocked_commands`        | `list[str]` | `[]`    | 屏蔽指令列表：命中的消息（文本 / 按钮回调）不再转发给 LGTBot 引擎，化解其他插件的指令冲突。带 / 不带 `/` **严格按配置匹配**，`指令 参数` 形式也命中。                     |
-| `sandbox_dm_users`        | `list[str]` | `[]`    | 私信主动直推名单。填 `["all"]`（仅此一项）= 全员直推模式：官方现已默认允许 bot 向好友推送主动私信，配额耗尽后对任意用户直推、不再丢弃。                                 |
-| `menu_game_buttons`       | `list[str]` | (6 项)   | 欢迎菜单里「游戏快捷开局」按钮列表，每行最多 3 个；游戏名需与 `/游戏列表` 输出一致                                                                |
-| `sponsor_enabled`         | `bool`      | `false` | 赞助功能总开关。`true` 时「更多功能 / 关于 / 更新公告」下出现「赞助支持」按钮，`赞助支持` 指令按引用块展示鸣谢名单。**第三方部署请保持 `false`**                       |
+| 字段                        | 类型          | 默认      | 说明                                                                                                                                    |
+|---------------------------|-------------|---------|---------------------------------------------------------------------------------------------------------------------------------------|
+| `bind_bot_appid`          | `str`       | `''`    | 绑定机器人 appid（仪表盘可视化选择）。留空自动使用第一个 bot。绑定后所有功能均走该 bot，**其他 bot 的事件被静默忽略**。appid 为纯数字，手工填写可不加引号                                           |
+| `admin_uids`              | `list[str]` | `[]`    | LGTBot 内部管理员的 QQ openid 列表                                                                                                            |
+| `image_hosting`           | `str`       | `'any'` | markdown 图片内嵌使用的图床。`any`（默认）按主框架优先级自动依次尝试；也可指定单个（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`）省去逐个重试；失败走 msg_type=7 |
+| `refresh_wait_timeout`    | `float`     | `15.0`  | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                                                        |
+| `active_push_daily_limit` | `int`       | `1000`  | **单个群 / 单个用户**每日主动消息条数上限（QQ 官方接口限制，官方调整后改这里即可）。用满后该群 / 用户当日失去主动直推资格，退回「刷新按钮」被动机制；**次日 0 点自动重置**。`0` = 不限制。                            |
+| `image_upload_dedup_ttl`  | `float`     | `60.0`  | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用                          |
+| `crash_notify_group`      | `str`       | `''`    | 严重问题通知群 openid —— 引擎崩溃时向此群主动推送崩溃报告。留空 = 不推送。该群需给本 bot 开了全量推送权限,主动消息才能落地                                                               |
+| `blocked_commands`        | `list[str]` | `[]`    | 屏蔽指令列表：命中的消息（文本 / 按钮回调）不再转发给 LGTBot 引擎，化解其他插件的指令冲突。带 / 不带 `/` **严格按配置匹配**，`指令 参数` 形式也命中。                                              |
+| `sandbox_dm_users`        | `list[str]` | `[]`    | 私信主动直推名单。填 `["all"]`（仅此一项）= 全员直推模式：官方现已默认允许 bot 向好友推送主动私信，配额耗尽后对任意用户直推、不再丢弃。                                                          |
+| `menu_game_buttons`       | `list[str]` | (6 项)   | 欢迎菜单里「游戏快捷开局」按钮列表，每行最多 3 个；游戏名需与 `/游戏列表` 输出一致                                                                                         |
+| `sponsor_enabled`         | `bool`      | `false` | 赞助功能总开关。`true` 时「更多功能 / 关于 / 更新公告」下出现「赞助支持」按钮，`赞助支持` 指令按引用块展示鸣谢名单。**第三方部署请保持 `false`**                                                |
 
-> 💡 **图床（可选）**：启用 ElainaBot 主框架的 `image_hosting` 模块并配置目标图床后，把图床名填到本插件 `config.yaml` 的 `image_hosting` 字段
-> 本插件就会用 markdown `![](url)` 内嵌发送游戏图片（保留原生 `<@>` 提及和按钮）。**仅尝试指定的这一个图床**，上传失败立即回退 `msg_type=7` 媒体
+> 💡 **图床（可选）**：启用 ElainaBot 主框架的 `image_hosting` 模块并配置目标图床后，本插件就会用 markdown `![](url)` 内嵌发送游戏图片（保留原生 `<@>` 提及和按钮）
+> 本插件 `config.yaml` 的 `image_hosting` 默认 `any`，按主框架优先级依次尝试可用图床；填单个图床名则**只尝试这一个**（省去逐个重试的耗时）。两种方式全部失败都立即回退 `msg_type=7` 媒体
 > 注意：图床域名需先在 QQ 开放平台「消息 URL 配置」里报备，否则消息不显示（COS 自有 CDN 与 Nature 的 download.nature.qq.com 最易过审）。
 
 > 💡 **全量群（可选）**：主框架 `config/bot.yaml` 里 `non_at_message.enabled` 或 `non_at_message.group_whitelist` 配的群，本插件会自动适配——

@@ -303,6 +303,32 @@ def test_default_config_and_comments_cover_same_fields():
     assert set(config.DEFAULT_CONFIG) == set(config.CONFIG_COMMENTS)
 
 
+def test_image_hosting_defaults_to_any():
+    """新装 / 老配置缺字段时默认 ``any``:自动依次尝试全部可用图床,开箱即走
+    markdown 内嵌通道。'any' 不在任何图床名单里,必须被校验器与运行时都当作
+    合法值放行(而不是当未知图床禁用)。"""
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    assert config.DEFAULT_CONFIG['image_hosting'] == 'any'
+
+    class _H:
+        @staticmethod
+        def status():
+            return {'cos': {}}
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(uploader, '_get_hosting', lambda: _H)
+        config._apply_runtime_tunables(_base_cfg())
+        assert uploader.SELECTED_BACKEND == 'any'
+    finally:
+        monkeypatch.undo()
+
+    pytest.importorskip('aiohttp')
+    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    errors, _w = page_config._validate_config_yaml("image_hosting: 'any'")
+    assert not any('image_hosting' in e for e in errors)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # persist_bind_bot_appid —— 行级替换保注释
 # ─────────────────────────────────────────────────────────────────────────
