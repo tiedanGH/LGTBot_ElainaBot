@@ -87,40 +87,73 @@ def humanize_mentions(text: str) -> str:
 # 解析每次调用惰性完成(bot 列表在框架侧可能晚于插件加载就绪,启动时缓存会拿到空)。
 # 来自其他 bot 的入站事件由 ``is_foreign_event`` 在 dispatcher 各 handler 顶部静默挡掉。
 
-def _count_full_volume_groups(appid: str) -> int | None:
-    """查指定 bot 的 data.db ``full_access_groups`` 表行数(该 bot 的全量群数量)。
+# 两个权限位是**QQ 后台分别开通**的不同东西,一个群可能只有其中之一:
+#   · is_full_access      全量消息权限 —— bot 收得到群里非 @ 的普通消息
+#   · allow_proactive_msg 主动推送权限 —— bot 可不依赖被动 msg_id 主动发消息
+# 已退群的记录不计:框架 _handle_group_del 只置 in_group=0,权限位原样残留,不排除会把早就退掉的群算进数量里。
+_SQL_GROUP_PERMS = (
+    'SELECT SUM(is_full_access = 1) AS full_n, '
+    '       SUM(allow_proactive_msg = 1) AS push_n '
+    'FROM groups_users WHERE COALESCE(in_group, 1) = 1'
+)
+# 老框架兜底(插件可能先于框架升级):旧表只有全量群,主动推送列不一定存在
+_SQL_GROUP_PERMS_LEGACY = 'SELECT COUNT(*) AS full_n FROM full_access_groups'
 
-    数据是框架 ``core\\bot\\event.py::_record_full_access_group`` 按实际收到
-    GROUP_MESSAGE_CREATE 落库的 per-bot 持久事实,不依赖运行时集合,故每个
-    bot(含未绑定的)都能各自统计。bot 未加载 / 查询失败 → None(前端显 —)。
+
+def _count_group_perms(appid: str) -> dict:
+    """统计指定 bot 的两类群权限数量,``{'full': int|None, 'push': int|None}``。
+
+    数据是框架按实际收到的事件落库的 per-bot 持久事实,不依赖运行时集合,
+    故每个 bot(含未绑定的)都能各自统计。bot 未加载 / 查询失败 → 两项均
+    None(前端显 —)。老框架回退旧表时主动推送数无从得知,单独留 None。
     """
+    none = {'full': None, 'push': None}
     try:
         from core.bot.manager import _bot_manager_ref
         if _bot_manager_ref is None:
-            return None
+            return none
         bot = _bot_manager_ref._bots.get(appid)
         if bot is None:
-            return None
-        rows = bot.log_service.query_data('SELECT COUNT(*) AS n FROM full_access_groups')
-        return int(rows[0].get('n')) if rows else 0
+            return none
+        try:
+            rows = bot.log_service.query_data(_SQL_GROUP_PERMS)
+        except Exception:
+            rows = bot.log_service.query_data(_SQL_GROUP_PERMS_LEGACY)
+        if not rows:
+            return {'full': 0, 'push': 0}
+        r = rows[0]
+        missing = object()
+
+        def _n(key):
+            """列缺失 → None(旧表没有主动推送这一列,是**未知**);
+            列在但值为 NULL → 0(SUM 在空表上返回 NULL,是真的一个都没有)。"""
+            v = r.get(key, missing)
+            return None if v is missing else int(v or 0)
+        return {'full': _n('full_n') or 0, 'push': _n('push_n')}
     except Exception as e:
-        log.warning(f'查询 bot {appid} 全量群数失败: {e}')
-        return None
+        log.warning(f'查询 bot {appid} 群权限数失败: {e}')
+        return none
 
 
 def list_framework_bots() -> list[dict]:
-    """枚举主框架 bot.yaml 里配置的机器人,``[{'appid', 'qq', 'full_volume'}]``,
-    供面板选择;``full_volume`` 为该 bot 的全量群数量(未加载 / 查询失败为 None)。"""
+    """枚举主框架 bot.yaml 里配置的机器人,供面板选择。
+
+    ``[{'appid', 'qq', 'full_volume', 'proactive'}]``:后两项分别是该 bot 的
+    **全量消息**群数与**主动推送**群数(见 ``_count_group_perms`` —— 两种权限
+    由 QQ 后台分别开通,数量通常不等,面板要各显各的)。未加载 / 查询失败为 None。
+    """
     try:
         from core.base.config import cfg as core_cfg
         out = []
         for b in core_cfg.get_bot_configs() or []:
             appid = str(b.get('appid') or '').strip()
             if appid:
+                perms = _count_group_perms(appid)
                 out.append({
                     'appid': appid,
                     'qq': str(b.get('robot_qq') or '').strip(),
-                    'full_volume': _count_full_volume_groups(appid),
+                    'full_volume': perms['full'],
+                    'proactive': perms['push'],
                 })
         return out
     except Exception as e:
@@ -171,13 +204,23 @@ def is_foreign_event(event) -> bool:
     return (event.appid or '') != bound
 
 
+# 全量群 id 列表 —— 新框架的 groups_users(见 _SQL_GROUP_PERMS 注释),
+# 与旧框架的 full_access_groups 兜底
+_SQL_FULL_GROUPS = ('SELECT group_id FROM groups_users '
+                    'WHERE is_full_access = 1 AND COALESCE(in_group, 1) = 1')
+_SQL_FULL_GROUPS_LEGACY = 'SELECT group_id FROM full_access_groups'
+
+
 def seed_full_volume_groups_from_db() -> int:
-    """从绑定 bot 的 data.db 读 ``full_access_groups`` 表,整体替换运行时全量群集合。
+    """从绑定 bot 的 data.db 读全量群记录,整体替换运行时全量群集合。
 
     框架 ``core/bot/event.py::_record_full_access_group`` 按实际收到
     GROUP_MESSAGE_CREATE 落库(per-bot data.db),是跨进程重启的持久事实来源;
     这里在绑定生效时(启动 / 热重载 / 面板换绑)一次性载入,弥补
     ``state.full_volume_groups`` 进程重启即丢的缺口。
+
+    只取**全量消息**权限(``is_full_access``),不含主动推送权限 —— 本集合的唯一
+    用途是 ``is_full_volume_group``,决定要不要挂刷新按钮,那是被动消息的事。
 
     注意 ``state.full_volume_groups`` 是跨热重载持久 set(挂在 C++ 扩展上),
     必须**原地** clear+update,不能重新赋值。查询失败保留现状不清空。
@@ -187,7 +230,10 @@ def seed_full_volume_groups_from_db() -> int:
     if bot is None:
         return -1
     try:
-        rows = bot.log_service.query_data('SELECT group_id FROM full_access_groups')
+        try:
+            rows = bot.log_service.query_data(_SQL_FULL_GROUPS)
+        except Exception:
+            rows = bot.log_service.query_data(_SQL_FULL_GROUPS_LEGACY)
         gids = {str(r['group_id']) for r in rows if r.get('group_id')}
     except Exception as e:
         log.warning(f'读取绑定 bot 全量群失败: {e}')
@@ -278,8 +324,8 @@ def is_full_volume_group(gid: str) -> bool:
         被动配额耗尽后乱走主动消息**(用户反馈的现象)。
       · 框架自身在 ``core/bot/event.py::_record_full_access_group`` 也是按
         实际收到 ``GROUP_MESSAGE_CREATE`` 来记录全量群的(内存 cache + SQLite
-        表 ``full_access_groups``),并不查 ``non_at_message.*`` —— 这进一步
-        说明运行时观测才是 ground truth。
+        ``groups_users.is_full_access``),并不查 ``non_at_message.*`` ——
+        这进一步说明运行时观测才是 ground truth。
 
     取舍:进程首次启动后,第一次在某全量群收到 non-AT 消息前,helper 会暂时
     返回 False(空集合);该窗口里第一条引擎回复会按非全量逻辑挂刷新按钮 —— 视觉上多一个按钮,无功能损失。一旦任何 non-AT 消息到达,集合即标记,

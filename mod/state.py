@@ -60,8 +60,8 @@ pending_new_game_name: dict[str, str] = _p['pending_new_game_name']
 #     不同步。用 bot.yaml 配置当真值会把没开 QQ 权限的群误判为全量,后果是
 #     非全量群也走主动消息(QQ 必拒)+ 刷新按钮漏挂 —— 用户反馈过的现象。
 #   · 框架自身的 ``core/bot/event.py::_record_full_access_group`` 也是按实际
-#     收到 GROUP_MESSAGE_CREATE 来记的(内存 cache + SQLite ``full_access_groups``
-#     表),并不查 ``non_at_message.*``。
+#     收到 GROUP_MESSAGE_CREATE 来记的(内存 cache + SQLite
+#     ``groups_users.is_full_access``),并不查 ``non_at_message.*``。
 #
 # 持久化:跨热重载存活(挂在 C++ 扩展模块上,见 ``boot._get_persistent()``);
 # 进程重启即丢,首次在某全量群收到 non-AT 消息前会暂时按非全量行为兜底。

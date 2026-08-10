@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import sys
 import types
 
@@ -25,8 +26,15 @@ from plugins.LGTBot_ElainaBot.mod import helpers, state
 # ─────────────────────────────────────────────────────────────────────────
 
 class _FakeLogService:
+    """按 SQL 里出现的表名分派结果,模拟框架新旧两套 schema。
+
+    ``rows`` 直接给 list = 任何查询都返回它(老用例的简单形态);给 dict 则按
+    ``'groups_users'`` / ``'full_access_groups'`` 两个 key 分派,缺哪个 key 就
+    在查到那张表时抛 OperationalError —— 正是「表已被迁移删掉」的现场。
+    """
+
     def __init__(self, rows=None, raises=False):
-        self._rows = rows if rows is not None else []
+        self._rows = [] if rows is None else rows
         self._raises = raises
         self.queries: list = []
 
@@ -34,7 +42,12 @@ class _FakeLogService:
         self.queries.append(sql)
         if self._raises:
             raise RuntimeError('db boom')
-        return self._rows
+        if not isinstance(self._rows, dict):
+            return self._rows
+        table = ('groups_users' if 'groups_users' in sql else 'full_access_groups')
+        if table not in self._rows:
+            raise sqlite3.OperationalError(f'no such table: {table}')
+        return self._rows[table]
 
 
 class _FakeBot:
@@ -239,30 +252,62 @@ def _set_bot_configs(monkeypatch, configs, raises=False):
     monkeypatch.setattr(_core_cfg.cfg, 'get_bot_configs', _get, raising=False)
 
 
-def test_list_framework_bots_shape_and_full_volume(monkeypatch):
-    """每项 {appid, qq, full_volume};full_volume 来自该 bot 自己的
-    full_access_groups 表 —— 未加载的 bot 也在列表里,只是数量为 None。"""
+def test_list_framework_bots_counts_two_distinct_permissions(monkeypatch):
+    """每项 {appid, qq, full_volume, proactive}。★ 两个数来自 groups_users 的
+    **不同权限位**:全量消息(收得到群内全部消息)与主动推送(发得出主动消息)
+    由 QQ 后台分别开通,数量通常不等,不能合并成一个数。
+    未加载的 bot 也在列表里,只是两项都为 None。"""
     _set_bot_configs(monkeypatch, [
         {'appid': 'A', 'robot_qq': '10001'},
         {'appid': 'B', 'robot_qq': '20002'},
         {'appid': '  ', 'robot_qq': 'x'},        # 空 appid → 丢弃
     ])
-    _set_bots(monkeypatch, {'A': _FakeBot('A', rows=[{'n': 7}])})
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'groups_users': [{'full_n': 7, 'push_n': 3}]})})
     out = helpers.list_framework_bots()
     assert [b['appid'] for b in out] == ['A', 'B']
-    assert out[0] == {'appid': 'A', 'qq': '10001', 'full_volume': 7}
-    assert out[1]['full_volume'] is None          # B 未加载
+    assert out[0] == {'appid': 'A', 'qq': '10001',
+                      'full_volume': 7, 'proactive': 3}
+    assert out[1]['full_volume'] is None and out[1]['proactive'] is None
+
+
+def test_group_perm_count_excludes_left_groups(monkeypatch):
+    """★ 计数 SQL 必须排除已退群:框架 _handle_group_del 只置 in_group=0,
+    is_full_access / allow_proactive_msg 原样残留,不排除会把早退掉的群算进去。"""
+    bot = _FakeBot('A', rows={'groups_users': []})
+    _set_bots(monkeypatch, {'A': bot})
+    helpers._count_group_perms('A')
+    sql = bot.log_service.queries[0]
+    assert 'in_group' in sql
+    assert 'is_full_access' in sql and 'allow_proactive_msg' in sql
+    assert 'full_access_groups' not in sql        # 旧表已被框架迁移删除
+
+
+def test_group_perm_count_falls_back_to_legacy_table(monkeypatch):
+    """插件可能先于框架升级:新表不存在时回退旧 full_access_groups,
+    仍报出全量群数;旧表没有主动推送信息 → 该项 None(前端显 —)。"""
+    _set_bot_configs(monkeypatch, [{'appid': 'A', 'robot_qq': ''}])
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'full_access_groups': [{'full_n': 5}]})})
+    out = helpers.list_framework_bots()[0]
+    assert out['full_volume'] == 5 and out['proactive'] is None
 
 
 def test_list_framework_bots_survives_query_failure(monkeypatch):
     """单个 bot 查询抛错 → 该项 None,不影响其它项,更不能整个列表塌成 []。"""
     _set_bot_configs(monkeypatch, [{'appid': 'A', 'robot_qq': ''}])
     _set_bots(monkeypatch, {'A': _FakeBot('A', raises=True)})
-    assert helpers.list_framework_bots() == [{'appid': 'A', 'qq': '',
-                                              'full_volume': None}]
-    # 空结果集 → 0(而非 None):表存在但没有全量群
-    _set_bots(monkeypatch, {'A': _FakeBot('A', rows=[])})
+    assert helpers.list_framework_bots() == [
+        {'appid': 'A', 'qq': '', 'full_volume': None, 'proactive': None}]
+    # 空结果集 → 0(而非 None):表存在但没有任何有权限的群
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': []})})
     assert helpers.list_framework_bots()[0]['full_volume'] == 0
+    # SUM 在空表上返回 NULL → 归 0(是「一个都没有」,不是「不知道」;
+    # 只有旧表里**根本没有那一列**才算未知,见 legacy 用例)
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'groups_users': [{'full_n': None, 'push_n': None}]})})
+    got = helpers.list_framework_bots()[0]
+    assert got['full_volume'] == 0 and got['proactive'] == 0
 
 
 def test_list_framework_bots_empty_on_config_failure(monkeypatch):
@@ -279,9 +324,8 @@ def test_list_framework_bots_empty_on_config_failure(monkeypatch):
 def test_seed_full_volume_groups_replaces_in_place(monkeypatch):
     """★ 关键回归:``state.full_volume_groups`` 是挂在 C++ 扩展上的跨热重载持久 set,
     必须 clear+update **原地**改;一旦写成重新赋值,旧模块持有的引用就此分家,全量群判定跨热重载后集体失效。"""
-    _set_bots(monkeypatch, {'A': _FakeBot('A', rows=[{'group_id': 'G1'},
-                                                     {'group_id': 'G2'},
-                                                     {'group_id': ''}])})
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': [
+        {'group_id': 'G1'}, {'group_id': 'G2'}, {'group_id': ''}]})})
     before = state.full_volume_groups          # 持有引用,模拟旧模块
     state.full_volume_groups.add('STALE')
     n = helpers.seed_full_volume_groups_from_db()
@@ -300,6 +344,25 @@ def test_seed_full_volume_groups_keeps_state_on_failure(monkeypatch):
     _set_bots(monkeypatch, {'A': _FakeBot('A', raises=True)})   # 查询抛错
     assert helpers.seed_full_volume_groups_from_db() == -1
     assert 'G_KEEP' in state.full_volume_groups
+
+
+def test_seed_reads_only_full_access_and_skips_left_groups(monkeypatch):
+    """载入集合只认**全量消息**权限 —— 它的唯一用途是决定挂不挂刷新按钮,
+    那是被动消息的事,与主动推送权限无关;已退群同样排除。"""
+    bot = _FakeBot('A', rows={'groups_users': [{'group_id': 'G1'}]})
+    _set_bots(monkeypatch, {'A': bot})
+    assert helpers.seed_full_volume_groups_from_db() == 1
+    sql = bot.log_service.queries[0]
+    assert 'is_full_access = 1' in sql and 'in_group' in sql
+    assert 'allow_proactive_msg' not in sql
+
+
+def test_seed_falls_back_to_legacy_table(monkeypatch):
+    """老框架(groups_users 尚不存在)回退旧表,运行时集合照常载入。"""
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'full_access_groups': [{'group_id': 'G9'}]})})
+    assert helpers.seed_full_volume_groups_from_db() == 1
+    assert state.full_volume_groups == {'G9'}
 
 
 def test_is_full_volume_group_trusts_runtime_set_only():

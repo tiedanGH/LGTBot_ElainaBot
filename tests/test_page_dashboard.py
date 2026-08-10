@@ -84,3 +84,17 @@ def test_bot_section_collapse_markup_and_rules():
     assert '.dash-bot-body.collapsed' in css
     # 折叠态只在首屏定一次,之后换绑刷新不得再改(否则绑定结果提示会被收走)
     assert 'dashBotInited' in js
+
+
+def test_bot_rows_show_both_group_permissions():
+    """全量消息与主动推送是 QQ 后台分别开通的两种权限,面板要**各显各的**;
+    折叠摘要与展开列表共用同一个渲染函数,不会只改一处。"""
+    pd = _pd()
+    js = pd.TAB_JS
+    assert 'dashBotPermHtml' in js
+    # 断言**带 emoji 的实际输出串**,不是光看标签文字 —— 后者在注释里也出现,
+    # 删掉渲染代码照样能蒙混过关
+    assert '🌐 全量群 ' in js and '📢 主动 ' in js
+    assert 'bot.proactive' in js or '.proactive' in js
+    # 两处调用同一函数 —— 1 处定义 + 摘要 + 列表行
+    assert js.count('dashBotPermHtml') >= 3
