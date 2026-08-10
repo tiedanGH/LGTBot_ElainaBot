@@ -133,7 +133,8 @@ function dashSetBotCollapsed(collapsed) {
    仍是「默认第一个」的回退状态 → 展开,提示用户去挑一个。之后任何刷新(换绑成功后的 dashRefreshAll 等)都不再动折叠态。 */
 let dashBotInited = false;
 
-/* 折叠时标题右侧的绑定摘要:appid / QQ / 全量群 + 「已绑定」徽章,与展开后列表里同款 */
+/* 折叠时紧跟标题左对齐的绑定摘要:「已绑定」徽章打头,后接 appid / QQ / 全量群
+   (三项与展开后列表里同款)。bot 为空 = 未显式绑定,整个摘要连徽章一起不渲染。 */
 function dashRenderBotSummary(bot) {
   const el = document.getElementById('dash-bot-summary');
   if (!el) return;
@@ -141,11 +142,11 @@ function dashRenderBotSummary(bot) {
   const qq = bot.qq ? ('QQ：' + bot.qq) : 'QQ 未配置';
   const vol = (bot.full_volume == null) ? '—' : bot.full_volume;
   el.innerHTML =
+    '<span class="dash-badge dash-badge-ok">已绑定</span>' +
     '<span class="dash-mono">' + escapeHtml(bot.appid) + '</span>' +
     '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
     '<span class="dash-bot-vol" title="该机器人的全量群数量">🌐 全量群 ' +
-      escapeHtml(String(vol)) + '</span>' +
-    '<span class="dash-badge dash-badge-ok">已绑定</span>';
+      escapeHtml(String(vol)) + '</span>';
 }
 
 function dashRenderBots(data) {

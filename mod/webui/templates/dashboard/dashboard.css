@@ -147,7 +147,8 @@
 /* 折叠(标题可点 + caret + body.collapsed) */
 .dash-bot-body.collapsed { display: none; }
 #dash-bot-section.is-collapsed .dash-section-header { margin-bottom: 0; }
-/* 标题右侧的绑定摘要 —— 只在折叠态出现;展开后同样的信息已在下方列表里 */
+/* 折叠时紧跟标题的绑定摘要 —— 只在折叠态出现;展开后同样的信息已在下方列表里。 */
+#dash-bot-section .dash-section-header { justify-content: flex-start; }
 .dash-bot-summary {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   font-size: 13px;
