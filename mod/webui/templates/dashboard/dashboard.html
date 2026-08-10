@@ -47,13 +47,24 @@
   </section>
 
   <!-- ──── 机器人绑定 ──── -->
-  <section class="dash-section">
-    <h2 class="dash-section-title">🤖 机器人绑定</h2>
-    <p class="dash-pluginconf-desc">
-      本插件仅服务<b>绑定的机器人</b>：消息收发、全量群数据、邀请链接、错误推送均使用该 bot，其他 bot 的事件被静默忽略。<b>默认绑定框架第一个 bot</b>。
-    </p>
-    <div id="dash-bot-list" class="dash-bot-list"></div>
-    <div id="dash-bot-msg" class="dash-cache-msg"></div>
+  <!-- body 默认带 collapsed:此刻列表尚未由 JS 填充(空的),先收起不会闪;JS 拿到数据后按「是否已显式绑定」决定展开与否。
+    折叠时标题右侧显示绑定机器人的摘要,展开时摘要隐藏(信息已在下方列表里)。 -->
+  <section class="dash-section" id="dash-bot-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title dash-bot-title" id="dash-bot-toggle"
+          role="button" tabindex="0" title="点击展开 / 折叠">
+        <span id="dash-bot-caret" class="dash-bot-caret">▸</span>
+        🤖 机器人绑定
+      </h2>
+      <div id="dash-bot-summary" class="dash-bot-summary"></div>
+    </div>
+    <div id="dash-bot-body" class="dash-bot-body collapsed">
+      <p class="dash-pluginconf-desc">
+        本插件仅服务<b>绑定的机器人</b>：消息收发、全量群数据、邀请链接、错误推送均使用该 bot，其他 bot 的事件被静默忽略。<b>默认绑定框架第一个 bot</b>。
+      </p>
+      <div id="dash-bot-list" class="dash-bot-list"></div>
+      <div id="dash-bot-msg" class="dash-cache-msg"></div>
+    </div>
   </section>
 
   <!-- ──── 运行环境自检 ──── -->

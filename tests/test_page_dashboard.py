@@ -53,3 +53,34 @@ def test_update_hint_empty_without_cache_or_on_failure(monkeypatch):
     assert pd._get_update_hint() == {'has_update': False, 'remote_version': ''}
     _seed_cache('v9.9.9', success=False)          # 检查失败的缓存不产生标识
     assert pd._get_update_hint() == {'has_update': False, 'remote_version': ''}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 机器人绑定区的折叠契约(纯前端,只能查模板文本)
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_bot_section_payload_carries_raw_binding():
+    """折叠判定要区分「显式绑定」与「回退第一个」,靠的是 ``bind_configured``
+    这个**原始配置值**(``bound_appid`` 永远有值,分不出来)。"""
+    pd = _pd()
+    assert 'bind_configured' in pd.TAB_JS
+    assert "'bind_configured'" in open(pd.__file__, encoding='utf-8').read()
+
+
+def test_bot_section_collapse_markup_and_rules():
+    """折叠范式与「运行环境」一致;摘要只在折叠态出现,展开后由 CSS 隐藏
+    (展开时下方列表已含同样信息,再显示一份就是重复)。"""
+    pd = _pd()
+    html, css, js = pd.TAB_HTML, pd.TAB_CSS, pd.TAB_JS
+    # 结构:section id + 可点标题 + caret + 摘要容器 + 可折叠 body
+    for frag in ('id="dash-bot-section"', 'id="dash-bot-toggle"',
+                 'id="dash-bot-caret"', 'id="dash-bot-summary"',
+                 'id="dash-bot-body"'):
+        assert frag in html, frag
+    # body 初始就带 collapsed:此刻列表还没被 JS 填充,先收起不会闪
+    assert 'class="dash-bot-body collapsed"' in html
+    # 摘要仅折叠态可见
+    assert '#dash-bot-section:not(.is-collapsed) .dash-bot-summary' in css
+    assert '.dash-bot-body.collapsed' in css
+    # 折叠态只在首屏定一次,之后换绑刷新不得再改(否则绑定结果提示会被收走)
+    assert 'dashBotInited' in js

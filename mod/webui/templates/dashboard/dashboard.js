@@ -120,11 +120,46 @@ async function dashMatchesRefresh() {
 }
 
 /* ──── 机器人绑定 ──── */
+function dashSetBotCollapsed(collapsed) {
+  const body = document.getElementById('dash-bot-body');
+  const caret = document.getElementById('dash-bot-caret');
+  const section = document.getElementById('dash-bot-section');
+  if (body) body.classList.toggle('collapsed', collapsed);
+  if (caret) caret.textContent = collapsed ? '▸' : '▾';
+  if (section) section.classList.toggle('is-collapsed', collapsed);
+}
+
+/* 折叠态只在首屏自动决定一次:已显式绑定(config.yaml 写了 bind_bot_appid 且该 bot 确实在线)→ 折叠,信息压缩进标题右侧摘要;
+   仍是「默认第一个」的回退状态 → 展开,提示用户去挑一个。之后任何刷新(换绑成功后的 dashRefreshAll 等)都不再动折叠态。 */
+let dashBotInited = false;
+
+/* 折叠时标题右侧的绑定摘要:appid / QQ / 全量群 + 「已绑定」徽章,与展开后列表里同款 */
+function dashRenderBotSummary(bot) {
+  const el = document.getElementById('dash-bot-summary');
+  if (!el) return;
+  if (!bot) { el.innerHTML = ''; return; }
+  const qq = bot.qq ? ('QQ：' + bot.qq) : 'QQ 未配置';
+  const vol = (bot.full_volume == null) ? '—' : bot.full_volume;
+  el.innerHTML =
+    '<span class="dash-mono">' + escapeHtml(bot.appid) + '</span>' +
+    '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
+    '<span class="dash-bot-vol" title="该机器人的全量群数量">🌐 全量群 ' +
+      escapeHtml(String(vol)) + '</span>' +
+    '<span class="dash-badge dash-badge-ok">已绑定</span>';
+}
+
 function dashRenderBots(data) {
   const wrap = document.getElementById('dash-bot-list');
   if (!wrap) return;
   const bots = data.bots || [];
   const bound = data.bound_appid || '';
+  const configured = data.bind_configured || '';
+  const isExplicit = !!configured && configured === bound;
+  dashRenderBotSummary(isExplicit ? bots.find(b => b.appid === bound) : null);
+  if (!dashBotInited) {
+    dashBotInited = true;
+    dashSetBotCollapsed(isExplicit);
+  }
   if (!bots.length) {
     wrap.innerHTML = '<span class="dash-msg-warn">未在主框架配置中发现任何机器人</span>';
     return;
@@ -949,6 +984,12 @@ window.addEventListener('DOMContentLoaded', () => {
   if (jumpBtn) jumpBtn.addEventListener('click', () => {
     const t = document.querySelector('.tabs .tab[data-tab="prebuilt"]');
     if (t) t.click();
+  });
+  /* 机器人绑定标题点击 → 展开 / 折叠 */
+  const botToggle = document.getElementById('dash-bot-toggle');
+  if (botToggle) botToggle.addEventListener('click', () => {
+    const body = document.getElementById('dash-bot-body');
+    dashSetBotCollapsed(!(body && body.classList.contains('collapsed')));
   });
   /* 标题点击 → 展开 / 折叠(折叠态此后完全由用户控制) */
   const scToggle = document.getElementById('dash-selfcheck-toggle');
