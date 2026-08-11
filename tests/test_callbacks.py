@@ -183,7 +183,7 @@ async def test_active_push_daily_limit_falls_back_to_refresh(monkeypatch):
     # 普通群配额满会阻塞等刷新 → mock 成立即返回 None(等待超时)
     monkeypatch.setattr(callbacks.quota, 'wait_and_consume',
                         AsyncMock(return_value=None))
-    state.full_volume_groups.add('GLIM')
+    state.proactive_groups.add('GLIM')
     key = callbacks.helpers.target_key('GLIM', False)
 
     # ① 额度未满(已用 999 < 1000)→ 直推,不进等待分支
@@ -232,7 +232,7 @@ async def test_quota_exhausted_not_counted_for_full_volume_group(monkeypatch):
     monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: calls.append(1))
     key = callbacks.helpers.target_key('GFULL', False)
     _exhaust_ref(key)
-    state.full_volume_groups.add('GFULL')          # 标记全量群 → is_active_push True
+    state.proactive_groups.add('GFULL')          # 标记全量群 → is_active_push True
 
     await callbacks._send_text_quota_managed('GFULL', False, 'hi', None)
 
@@ -250,7 +250,7 @@ async def test_quota_exhausted_counted_for_normal_group(monkeypatch):
     # 普通群耗尽会阻塞等刷新 → mock 立即返回 None,避免测试挂满超时
     monkeypatch.setattr(callbacks.quota, 'wait_and_consume', AsyncMock(return_value=None))
     key = callbacks.helpers.target_key('GNORM', False)
-    _exhaust_ref(key)                              # 不加入 full_volume_groups
+    _exhaust_ref(key)                              # 不加入 proactive_groups
 
     await callbacks._send_text_quota_managed('GNORM', False, 'hi', None)
 
@@ -411,11 +411,11 @@ def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
         callbacks.cb_match_event('grp1', False, 'new_game', game)
         assert 'g:grp1' in callbacks._pending_tip_keys
         assert 'g:grp1' not in callbacks._pending_dm_warn_keys
-        # 全量群新建同款 → 私信提示打标(教学 consume 时会因全量群跳过)
-        state.full_volume_groups.add('grpF')
+        # 可主动推送的群新建同款 → 私信提示打标(教学 consume 时会跳过)
+        state.proactive_groups.add('grpF')
         callbacks.cb_match_event('grpF', False, 'new_game', game)
         assert 'g:grpF' in callbacks._pending_dm_warn_keys
-        # 全量群新建非私信游戏 → 不标私信提示
+        # 可推送群新建非私信游戏 → 不标私信提示
         callbacks._pending_dm_warn_keys.clear()
         callbacks.cb_match_event('grpF', False, 'new_game', '五子棋')
         assert 'g:grpF' not in callbacks._pending_dm_warn_keys
@@ -432,6 +432,64 @@ def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
         callbacks._pending_tip_keys.clear()
         state.current_game.clear()
         state.pending_buttons.clear()
+
+
+def test_reply_limit_tip_targets_only_targets_without_push_permission(monkeypatch):
+    """★「消息回复限制」教学的投递面 —— 只发给**发不出主动消息**的目标:
+
+      · 群聊看 ``allow_proactive_msg``(state.proactive_groups)。**只开全量
+        消息不算** —— 那只管收得到什么,配额耗尽照样推不出去,仍要教学。
+      · 私信没有平台侧权限位可查(框架 users 表没有该字段),沿用沙箱名单,
+        ``sandbox_dm_users: ["all"]`` 即全员有权限。
+    """
+    sent: list = []
+    monkeypatch.setattr(callbacks, '_schedule_refresh_tip',
+                        lambda tid, is_uid: sent.append((tid, is_uid)))
+
+    def _consume(target_id, is_uid):
+        key = callbacks.helpers.target_key(target_id, is_uid)
+        callbacks._pending_tip_keys.add(key)
+        callbacks._consume_pending_tip(key, target_id, is_uid)
+
+    try:
+        state.full_volume_groups.add('gFullOnly')     # 全量,但没主动推送权限
+        state.proactive_groups.add('gPush')           # 非全量,有主动推送权限
+        _consume('gFullOnly', False)
+        _consume('gPush', False)
+        _consume('gPlain', False)                     # 两种权限都没有
+        assert sent == [('gFullOnly', False), ('gPlain', False)]
+
+        # 私信:白名单内跳过、白名单外照发
+        sent.clear()
+        monkeypatch.setattr(callbacks, 'DM_PUSH_ALL', False)
+        monkeypatch.setattr(callbacks, 'SANDBOX_DM_USERS', frozenset({'uOK'}))
+        _consume('uOK', True)
+        _consume('uNo', True)
+        assert sent == [('uNo', True)]
+
+        # all 模式:所有私信用户都有权限 → 一条都不发
+        sent.clear()
+        monkeypatch.setattr(callbacks, 'DM_PUSH_ALL', True)
+        _consume('uAnyone', True)
+        assert sent == []
+    finally:
+        callbacks._pending_tip_keys.clear()
+        state.full_volume_groups.discard('gFullOnly')
+        state.proactive_groups.discard('gPush')
+
+
+def test_active_push_eligibility_requires_push_permission(monkeypatch):
+    """配额耗尽后能否转主动消息,同样只认主动推送权限 —— 只开全量的群
+    仍走「等刷新按钮」路径,不能往没权限的群硬推(QQ 必拒且烧配额)。"""
+    assert callbacks.helpers.can_push_group('gFullOnly') is False
+    state.full_volume_groups.add('gFullOnly')
+    assert callbacks.helpers.can_push_group('gFullOnly') is False
+    state.proactive_groups.add('gFullOnly')
+    try:
+        assert callbacks.helpers.can_push_group('gFullOnly') is True
+    finally:
+        state.full_volume_groups.discard('gFullOnly')
+        state.proactive_groups.discard('gFullOnly')
 
 
 def test_single_player_game_over_restart_button_has_name():
@@ -532,13 +590,13 @@ async def test_mixed_send_single_markdown_in_engine_order(monkeypatch):
     _patch_send_env(monkeypatch, sender, push_all=False)
     monkeypatch.setattr(callbacks.uploader, 'upload_image',
                         AsyncMock(return_value='http://bed/a.png'))
-    state.full_volume_groups.add('GMIX')
+    state.proactive_groups.add('GMIX')
     try:
         segs = [('image', 0), ('text', '\n游戏结束')]
         await callbacks._send_mixed_message('GMIX', False, segs,
                                             {0: (_PNG_1x1, 'a.png')}, '\n游戏结束', None)
     finally:
-        state.full_volume_groups.discard('GMIX')
+        state.proactive_groups.discard('GMIX')
 
     sender.send_to_group.assert_awaited_once()
     md = sender.send_to_group.call_args[0][1]
@@ -552,14 +610,14 @@ async def test_mixed_send_merges_multiple_images_into_one_message(monkeypatch):
     urls = iter(['http://bed/1.png', 'http://bed/2.png'])
     monkeypatch.setattr(callbacks.uploader, 'upload_image',
                         AsyncMock(side_effect=lambda *a, **k: next(urls)))
-    state.full_volume_groups.add('GMULTI')
+    state.proactive_groups.add('GMULTI')
     try:
         segs = [('image', 0), ('text', '中间'), ('image', 1)]
         await callbacks._send_mixed_message(
             'GMULTI', False, segs,
             {0: (_PNG_1x1, '1.png'), 1: (_PNG_1x1, '2.png')}, '中间', None)
     finally:
-        state.full_volume_groups.discard('GMULTI')
+        state.proactive_groups.discard('GMULTI')
 
     sender.send_to_group.assert_awaited_once()
     md = sender.send_to_group.call_args[0][1]
@@ -592,12 +650,12 @@ async def test_mixed_send_text_only_when_no_image_readable(monkeypatch):
     """图片一张都没读出来 → 退化成纯文本,文案不跟着丢。"""
     sender = _fake_sender()
     _patch_send_env(monkeypatch, sender, push_all=False)
-    state.full_volume_groups.add('GTXT')
+    state.proactive_groups.add('GTXT')
     try:
         await callbacks._send_mixed_message('GTXT', False, [('text', '只剩文字')],
                                             {}, '只剩文字', None)
     finally:
-        state.full_volume_groups.discard('GTXT')
+        state.proactive_groups.discard('GTXT')
     sender.send_to_group.assert_awaited_once()
     assert sender.send_to_group.call_args[0][1] == '只剩文字'
 

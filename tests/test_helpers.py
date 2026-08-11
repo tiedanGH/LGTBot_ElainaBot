@@ -325,7 +325,9 @@ def test_seed_full_volume_groups_replaces_in_place(monkeypatch):
     """★ 关键回归:``state.full_volume_groups`` 是挂在 C++ 扩展上的跨热重载持久 set,
     必须 clear+update **原地**改;一旦写成重新赋值,旧模块持有的引用就此分家,全量群判定跨热重载后集体失效。"""
     _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': [
-        {'group_id': 'G1'}, {'group_id': 'G2'}, {'group_id': ''}]})})
+        {'group_id': 'G1', 'is_full_access': 1},
+        {'group_id': 'G2', 'is_full_access': 1},
+        {'group_id': '', 'is_full_access': 1}]})})
     before = state.full_volume_groups          # 持有引用,模拟旧模块
     state.full_volume_groups.add('STALE')
     n = helpers.seed_full_volume_groups_from_db()
@@ -346,23 +348,47 @@ def test_seed_full_volume_groups_keeps_state_on_failure(monkeypatch):
     assert 'G_KEEP' in state.full_volume_groups
 
 
-def test_seed_reads_only_full_access_and_skips_left_groups(monkeypatch):
-    """载入集合只认**全量消息**权限 —— 它的唯一用途是决定挂不挂刷新按钮,
-    那是被动消息的事,与主动推送权限无关;已退群同样排除。"""
-    bot = _FakeBot('A', rows={'groups_users': [{'group_id': 'G1'}]})
+def test_seed_fills_two_independent_permission_sets(monkeypatch):
+    """★ 两个权限位各自成集合,互不牵连 —— 一个群可能只有其中之一。
+    已退群由 SQL 排除(权限位在框架 group_del 后会残留)。"""
+    bot = _FakeBot('A', rows={'groups_users': [
+        {'group_id': 'GF', 'is_full_access': 1, 'allow_proactive_msg': 0},
+        {'group_id': 'GP', 'is_full_access': 0, 'allow_proactive_msg': 1},
+        {'group_id': 'GB', 'is_full_access': 1, 'allow_proactive_msg': 1},
+        {'group_id': 'GN', 'is_full_access': 0, 'allow_proactive_msg': 0},
+    ]})
     _set_bots(monkeypatch, {'A': bot})
-    assert helpers.seed_full_volume_groups_from_db() == 1
+    assert helpers.seed_full_volume_groups_from_db() == 2      # 返回值是全量群数
+    assert state.full_volume_groups == {'GF', 'GB'}
+    assert state.proactive_groups == {'GP', 'GB'}
     sql = bot.log_service.queries[0]
-    assert 'is_full_access = 1' in sql and 'in_group' in sql
-    assert 'allow_proactive_msg' not in sql
+    assert 'is_full_access' in sql and 'allow_proactive_msg' in sql
+    assert 'in_group' in sql
 
 
-def test_seed_falls_back_to_legacy_table(monkeypatch):
-    """老框架(groups_users 尚不存在)回退旧表,运行时集合照常载入。"""
+def test_can_push_group_ignores_full_access(monkeypatch):
+    """★ 本次改动的核心:主动推送资格**只看** allow_proactive_msg。
+    只开全量不开主动推送的群发不出主动消息,必须判 False(照常挂刷新按钮 +
+    发《消息回复限制》教学);反过来没开全量但开了主动推送的群判 True。"""
+    state.full_volume_groups.update({'GF', 'GB'})
+    state.proactive_groups.update({'GP', 'GB'})
+    assert helpers.can_push_group('GF') is False   # 全量但不能推 → 仍需刷新按钮
+    assert helpers.can_push_group('GP') is True    # 非全量但能推 → 无需刷新按钮
+    assert helpers.can_push_group('GB') is True
+    assert helpers.can_push_group('GN') is False
+    assert helpers.can_push_group('') is False
+
+
+def test_seed_legacy_table_leaves_proactive_empty(monkeypatch):
+    """老框架旧表没有主动推送信息 → 推送集合留空,按「无权限」兜底
+    (宁可多挂刷新按钮,也不要往没权限的群硬推)。"""
+    state.proactive_groups.add('STALE')
     _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
-        'full_access_groups': [{'group_id': 'G9'}]})})
+        'full_access_groups': [{'group_id': 'G1'}]})})
     assert helpers.seed_full_volume_groups_from_db() == 1
-    assert state.full_volume_groups == {'G9'}
+    assert state.full_volume_groups == {'G1'}
+    assert state.proactive_groups == set()
+
 
 
 def test_is_full_volume_group_trusts_runtime_set_only():

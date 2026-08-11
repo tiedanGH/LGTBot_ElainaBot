@@ -94,7 +94,7 @@ def test_bot_rows_show_both_group_permissions():
     assert 'dashBotPermHtml' in js
     # 断言**带 emoji 的实际输出串**,不是光看标签文字 —— 后者在注释里也出现,
     # 删掉渲染代码照样能蒙混过关
-    assert '🌐 全量群 ' in js and '📢 主动 ' in js
+    assert '🌐 全量 ' in js and '📢 主动 ' in js
     assert 'bot.proactive' in js or '.proactive' in js
     # 两处调用同一函数 —— 1 处定义 + 摘要 + 列表行
     assert js.count('dashBotPermHtml') >= 3

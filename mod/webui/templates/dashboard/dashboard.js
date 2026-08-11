@@ -138,7 +138,7 @@ let dashBotInited = false;
 function dashBotPermHtml(bot) {
   const vol = (bot.full_volume == null) ? '—' : bot.full_volume;
   const push = (bot.proactive == null) ? '—' : bot.proactive;
-  return '<span class="dash-bot-vol" title="可接收群内全部消息的群数量">🌐 全量群 ' +
+  return '<span class="dash-bot-vol" title="可接收群内全部消息的群数量">🌐 全量 ' +
            escapeHtml(String(vol)) + '</span>' +
          '<span class="dash-bot-vol" title="可发送主动消息的群数量">📢 主动 ' +
            escapeHtml(String(push)) + '</span>';

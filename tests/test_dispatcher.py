@@ -574,7 +574,7 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
                                  'trend_10d': []})
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
     monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 1000 if u else 12)
-    _state.full_volume_groups.add('G1')        # 全量群才谈额度(否则走警告分支)
+    _state.proactive_groups.add('G1')        # 全量群才谈额度(否则走警告分支)
 
     ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
     ev.reply = AsyncMock()
@@ -693,7 +693,7 @@ async def test_stats_date_command_today_falls_back_to_normal(monkeypatch):
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
     monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
-    _state.full_volume_groups.add('G1')
+    _state.proactive_groups.add('G1')
     called = []
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
                         lambda ds: called.append(ds))
@@ -718,7 +718,7 @@ async def test_stats_command_text_shows_same_span_delta(monkeypatch):
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
     monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
-    _state.full_volume_groups.add('G1')
+    _state.proactive_groups.add('G1')
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
                         lambda: {'available': True, 'today_matches': 23,
                                  'today_players': 8, 'today_groups': 1,
@@ -754,7 +754,7 @@ def test_push_quota_view_near_limit_threshold():
     orig_limit = callbacks.ACTIVE_PUSH_DAILY_LIMIT
     used_val = {'n': 0}
     metrics.active_push_used = lambda t, u: used_val['n']
-    _state.full_volume_groups.add('GW')
+    _state.proactive_groups.add('GW')
     try:
         callbacks.ACTIVE_PUSH_DAILY_LIMIT = 1000
         used_val['n'] = 849                      # 84.9% → 未到阈值
@@ -788,7 +788,7 @@ async def test_stats_command_text_warns_near_limit(monkeypatch):
                                  'trend_10d': []})
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
     monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 900)
-    _state.full_volume_groups.add('GWARN')
+    _state.proactive_groups.add('GWARN')
     ev = _mock_event(is_group=True, group_id='GWARN', user_id='U1', content='数据统计')
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev, None)
@@ -799,8 +799,8 @@ async def test_stats_command_text_warns_near_limit(monkeypatch):
 def test_push_quota_view_no_permission_for_non_full_group():
     """非全量群:no_permission=True(该群无主动推送权限,额度数字无意义);
     全量群与私信都不是警告态。"""
-    _state.full_volume_groups.discard('GNOPERM')
-    _state.full_volume_groups.add('GFULLOK')
+    _state.proactive_groups.discard('GNOPERM')
+    _state.proactive_groups.add('GFULLOK')
     v = dispatcher._push_quota_view('GNOPERM', False)
     assert v['shown'] and v['no_permission'] is True
     assert dispatcher._push_quota_view('GFULLOK', False)['no_permission'] is False
@@ -818,7 +818,7 @@ async def test_stats_command_warns_when_group_lacks_full_volume(monkeypatch):
                                  'today_players': 0, 'today_groups': 0,
                                  'top_games_today': [], 'top_players_today': [],
                                  'trend_10d': []})
-    _state.full_volume_groups.discard('GNF')
+    _state.proactive_groups.discard('GNF')
     ev = _mock_event(is_group=True, group_id='GNF', user_id='U1', content='数据统计')
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev, None)
@@ -883,7 +883,7 @@ async def test_welcome_menu_full_volume_cmd_line(monkeypatch):
     assert buttons.MENU_FULL_VOLUME_CMD_MD.strip() in md
     assert 'qqbot-cmd-input text="全量申请"' in md
     # 全量群 → 不追加
-    state.full_volume_groups.add('GFULL')
+    state.proactive_groups.add('GFULL')
     md = await _menu_md(_mock_event(is_group=True, group_id='GFULL', user_id='U1'))
     assert '全量申请' not in md
     # 私信 → 不追加

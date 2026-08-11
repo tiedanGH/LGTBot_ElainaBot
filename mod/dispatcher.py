@@ -75,9 +75,9 @@ async def _send_welcome_menu(event) -> None:
             md = (buttons.MENU_TEXT_HEADER
                   + buttons.MENU_TEXT_BODY
                   + buttons.MENU_HEADER_EXTRA_MD)
-        # 非全量群追加「全量申请」内联指令行(全量群已免限制、私信无群概念,不加)
+        # 无主动推送资格的群才追加「全量申请」内联指令行;私信无群概念,不加
         menu_gid = event.group_id or event.channel_id or ''
-        if event.is_group and menu_gid and not helpers.is_full_volume_group(menu_gid):
+        if event.is_group and menu_gid and not helpers.can_push_group(menu_gid):
             md += buttons.MENU_FULL_VOLUME_CMD_MD
         await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
         uid = event.user_id or ''
@@ -182,7 +182,7 @@ def _push_quota_view(target_id: str, is_uid: bool) -> dict:
     from . import callbacks as _callbacks      # 函数内导入,避免模块级互引
     limit = int(_callbacks.ACTIVE_PUSH_DAILY_LIMIT or 0)
     used = metrics.active_push_used(target_id, is_uid)
-    no_perm = (not is_uid) and not helpers.is_full_volume_group(target_id)
+    no_perm = (not is_uid) and not helpers.can_push_group(target_id)
     ratio = (used / limit) if limit else 0.0
     exhausted = bool(limit and used >= limit)
     return {

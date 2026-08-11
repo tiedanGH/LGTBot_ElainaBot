@@ -672,8 +672,8 @@ _pending_tip_keys: set[str] = set()
 #
 # 触发逻辑:
 #   1. C++ 引擎调 cb_match_event(kind='new_game', game_name='XXX')
-#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内**且为全量群**(群聊 + is_full_volume_group),
-#      key 进 _pending_dm_warn_keys;非全量群该位置标记的是 _pending_tip_keys
+#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内**且该群能主动推送**(群聊 + can_push_group),
+#      key 进 _pending_dm_warn_keys;不能推送的群该位置标记的是 _pending_tip_keys
 #   3. 引擎随后调 cb_send_text_message 发出「房间已创建」公告
 #   4. _serialized_text_send 在 Lock 内调 _consume_pending_dm_warn,
 #      pop 出 key 并调度 _schedule_dm_warning —— 该 task 抢同把 Lock 排在
@@ -808,15 +808,17 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
     Lock —— 当前 send task 释放锁后,教学提示 task 自然排到下一位,QQ 端先
     看到「游戏开始」再看到「消息回复限制」教学。
 
-    全量群里 bot 不被被动回复条数限制,refresh 按钮永远不会出现 —— 这条
-    教学的整段文案(在讲怎么点刷新按钮)会变成误导。所以只清掉标记,不发送。
+    有主动推送资格的群里 bot 不被被动回复条数限制,refresh 按钮永远不会出现
+    —— 这条教学的整段文案(在讲怎么点刷新按钮)会变成误导。所以只清掉标记,
+    不发送。判据是 ``can_push_group`` 而非全量群:**没开全量但开了主动推送**
+    的群同样全程不需要刷新按钮,不该收到这条提示。
     沙箱私信用户同理:配额满后直接主动直推,不依赖刷新按钮,教学同样会误导。
     """
     if key not in _pending_tip_keys:
         return
     _pending_tip_keys.discard(key)
-    if (not is_uid) and helpers.is_full_volume_group(target_id):
-        log.debug(f'全量群 {target_id} 跳过刷新按钮使用说明')
+    if (not is_uid) and helpers.can_push_group(target_id):
+        log.debug(f'主动群 {target_id} 跳过刷新按钮使用说明')
         return
     if _is_sandbox_dm(target_id, is_uid):
         log.debug(f'直推私信用户 {target_id} 跳过刷新按钮使用说明')
@@ -976,7 +978,7 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
             # 回复限制优先、私信提示抑制;私信里新建游戏不发私信提示
             # (玩家已在私信会话内)。
             if (not is_uid and game_name and game_name in _DM_LIMITED_GAMES
-                    and helpers.is_full_volume_group(target_id)):
+                    and helpers.can_push_group(target_id)):
                 _pending_dm_warn_keys.add(key)
     elif kind == 'all_left':
         state.pending_buttons[key] = buttons.build_dissolve_buttons()
@@ -1136,11 +1138,11 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     # 直推私信(all 模式全员 / 白名单沙箱用户):逻辑与全量群完全一致 ——
     # 前 5 次仍用 msg_id 被动回复(消耗配额),仅配额耗尽后才直接主动消息。
     is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
-    # 全量群判定:只看运行时观测到的事实(state.full_volume_groups),不再退回
-    # 框架 non_at_message.* 配置 —— 配置可能与 QQ 后台权限不同步,误判会让
-    # 非全量群也走主动消息(QQ 必拒,把 bot 的配额烧掉)。
-    is_full = (not is_uid) and helpers.is_full_volume_group(target_id)
-    # 主动直推资格(全量群 / 沙箱私信):配额满后可直接主动消息、不挂刷新按钮。
+    # 群的主动推送资格:全量群 ∪ QQ 后台开了 allow_proactive_msg 的群(两种权限分别开通,见 helpers.can_push_group)。
+    # 两个集合都只认落实过的事实,不看框架 non_at_message.* 配置 —— 配置可能与 QQ 后台权限不同步,
+    # 误判会让没权限的群也走主动消息(QQ 必拒,把 bot 的配额烧掉)。
+    is_full = (not is_uid) and helpers.can_push_group(target_id)
+    # 主动直推资格(可推送群 / 沙箱私信):配额满后可直接主动消息、不挂刷新按钮。
     # 注意"资格"不代表跳过被动配额 —— 前 5 次照常 try_consume_ref 走 msg_id。
     # 今日主动消息额度用满的目标**失去该资格**,退回刷新按钮机制(见 _active_push_allowed;跨天自动恢复)。
     is_active_push = (is_full or is_sandbox_dm) and _active_push_allowed(target_id, is_uid)
@@ -1423,7 +1425,7 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
     # 直推私信 / 全量群:前 5 次仍走 msg_id 被动回复,仅配额耗尽后主动直推
     # (逻辑同 _send_text_quota_managed,详见那里的注释)
     is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
-    is_full = (not is_uid) and helpers.is_full_volume_group(target_id)
+    is_full = (not is_uid) and helpers.can_push_group(target_id)
     # 今日主动消息额度用满 → 失去直推资格,退回刷新按钮机制(同文本路径)
     is_active_push = (is_full or is_sandbox_dm) and _active_push_allowed(target_id, is_uid)
 

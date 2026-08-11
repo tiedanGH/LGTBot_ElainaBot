@@ -204,43 +204,54 @@ def is_foreign_event(event) -> bool:
     return (event.appid or '') != bound
 
 
-# 全量群 id 列表 —— 新框架的 groups_users(见 _SQL_GROUP_PERMS 注释),
-# 与旧框架的 full_access_groups 兜底
-_SQL_FULL_GROUPS = ('SELECT group_id FROM groups_users '
-                    'WHERE is_full_access = 1 AND COALESCE(in_group, 1) = 1')
-_SQL_FULL_GROUPS_LEGACY = 'SELECT group_id FROM full_access_groups'
+# 群权限清单 —— 一次取回两个权限位,两个运行时集合同源载入;
+# 旧框架(groups_users 尚不存在)兜底旧表,只拿得到全量群
+_SQL_GROUP_FLAGS = ('SELECT group_id, is_full_access, allow_proactive_msg '
+                    'FROM groups_users WHERE COALESCE(in_group, 1) = 1')
+_SQL_GROUP_FLAGS_LEGACY = 'SELECT group_id FROM full_access_groups'
 
 
 def seed_full_volume_groups_from_db() -> int:
-    """从绑定 bot 的 data.db 读全量群记录,整体替换运行时全量群集合。
+    """从绑定 bot 的 data.db 读群权限记录,整体替换两个运行时集合。
 
-    框架 ``core/bot/event.py::_record_full_access_group`` 按实际收到
-    GROUP_MESSAGE_CREATE 落库(per-bot data.db),是跨进程重启的持久事实来源;
-    这里在绑定生效时(启动 / 热重载 / 面板换绑)一次性载入,弥补
-    ``state.full_volume_groups`` 进程重启即丢的缺口。
+    框架把「全量消息」与「主动推送」两个权限分列在 ``groups_users`` 的
+    ``is_full_access`` / ``allow_proactive_msg``(前者按实际收到
+    GROUP_MESSAGE_CREATE 落库,后者由 ``get_group_bot_state`` 查 QQ bot_state
+    接口后同步),是跨进程重启的持久事实来源;这里在绑定生效时(启动 / 热重载 /
+    面板换绑)一次性载入,弥补两个集合进程重启即丢的缺口。
 
-    只取**全量消息**权限(``is_full_access``),不含主动推送权限 —— 本集合的唯一
-    用途是 ``is_full_volume_group``,决定要不要挂刷新按钮,那是被动消息的事。
-
-    注意 ``state.full_volume_groups`` 是跨热重载持久 set(挂在 C++ 扩展上),
-    必须**原地** clear+update,不能重新赋值。查询失败保留现状不清空。
-    返回载入的群数量;bot 未就绪 / 查询失败返回 -1。
+    注意两个集合都是跨热重载持久 set(挂在 C++ 扩展上),必须**原地**
+    clear+update,不能重新赋值。查询失败保留现状不清空。
+    返回载入的**全量群**数量(主动推送数只落集合,不参与返回值);
+    bot 未就绪 / 查询失败返回 -1。
     """
     bot = get_bound_bot()
     if bot is None:
         return -1
     try:
         try:
-            rows = bot.log_service.query_data(_SQL_FULL_GROUPS)
+            rows = bot.log_service.query_data(_SQL_GROUP_FLAGS)
         except Exception:
-            rows = bot.log_service.query_data(_SQL_FULL_GROUPS_LEGACY)
-        gids = {str(r['group_id']) for r in rows if r.get('group_id')}
+            # 旧表没有主动推送信息 —— 全量群照常载入,推送集合留空(按无权限兜底)
+            rows = [dict(r, is_full_access=1)
+                    for r in bot.log_service.query_data(_SQL_GROUP_FLAGS_LEGACY)]
+        full, push = set(), set()
+        for r in rows:
+            gid = str(r.get('group_id') or '')
+            if not gid:
+                continue
+            if r.get('is_full_access'):
+                full.add(gid)
+            if r.get('allow_proactive_msg'):
+                push.add(gid)
     except Exception as e:
-        log.warning(f'读取绑定 bot 全量群失败: {e}')
+        log.warning(f'读取绑定 bot 群权限失败: {e}')
         return -1
     state.full_volume_groups.clear()
-    state.full_volume_groups.update(gids)
-    return len(gids)
+    state.full_volume_groups.update(full)
+    state.proactive_groups.clear()
+    state.proactive_groups.update(push)
+    return len(full)
 
 
 def get_bot_uin(appid: str = '') -> str:
@@ -306,7 +317,11 @@ def run_coro_blocking(coro, timeout: float = 15.0):
 
 
 def is_full_volume_group(gid: str) -> bool:
-    """判断 ``gid`` 是否是「全量推送」群 —— 只信任**运行时观测**到的事实。
+    """判断 ``gid`` 是否有「全量消息」权限 —— 只信任**运行时观测**到的事实。
+
+    ⚠️ 这只回答「bot 收得到该群的全部消息吗」。**能不能主动发消息是另一回事**,
+    由 ``can_push_group`` 按 ``allow_proactive_msg`` 判定 —— 刷新按钮、《消息
+    回复限制》教学、配额耗尽后转主动消息全都走那一个,不要拿本函数当推送资格用。
 
     判定唯一依据:``state.full_volume_groups`` 集合,由 dispatcher 在见到
     ``GROUP_MESSAGE_CREATE`` 事件时填入。
@@ -335,5 +350,27 @@ def is_full_volume_group(gid: str) -> bool:
         return False
     try:
         return gid in state.full_volume_groups
+    except Exception:
+        return False
+
+
+def can_push_group(gid: str) -> bool:
+    """``gid`` 能否让 bot **不依赖刷新按钮**正常发消息(主动推送资格)。
+
+    这是决定「挂不挂刷新按钮 / 发不发《消息回复限制》教学」的**唯一**判据。
+
+    只认 ``allow_proactive_msg``,**不含**全量群 —— 两者是 QQ 后台分别开通的
+    不同权限:全量消息只管 bot 收得到什么,能不能不引用 msg_id 主动发消息完全
+    由主动推送权限决定。开了全量却没开主动推送的群,配额耗尽照样发不出去,
+    该收到教学提示。
+
+    数据来源是框架 ``groups_users.allow_proactive_msg``(``get_group_bot_state``
+    查 QQ bot_state 接口后落库),没查过的群是 0 → 这里判 False,退回刷新按钮
+    机制。方向安全:宁可多挂一个按钮,也不要往没权限的群硬推(QQ 必拒且烧配额)。
+    """
+    if not gid:
+        return False
+    try:
+        return gid in state.proactive_groups
     except Exception:
         return False
