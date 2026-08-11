@@ -16,7 +16,7 @@ __plugin_meta__ = {
     'name': 'LGTBot 机器人',
     'author': '铁蛋',
     'description': '基于 C++ 的 LGTBot 游戏裁判机器人',
-    'version': '2.8.10',
+    'version': '2.8.11',
     'github': 'https://github.com/tiedanGH/LGTBot_ElainaBot',
 }
 
@@ -53,6 +53,7 @@ from plugins.LGTBot_ElainaBot.mod import callbacks         # C++ 回调（被 LG
 from plugins.LGTBot_ElainaBot.mod import config as _config
 from plugins.LGTBot_ElainaBot.mod import backup as _backup            # noqa: F401  数据库备份(自动 + 手动 + 恢复)
 from plugins.LGTBot_ElainaBot.mod import log_attribution as _log_attribution  # noqa: F401
+from plugins.LGTBot_ElainaBot.mod import helpers as _helpers                  # 群权限刷新任务入口
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -96,6 +97,14 @@ async def _setup():
 
     # 捕获主事件循环 —— C++ 工作线程通过 run_coroutine_threadsafe 调度到此循环
     _state.event_loop = asyncio.get_running_loop()
+
+    # 群权限集合(全量消息 / 主动推送)的后台刷新 —— 必须放在这里而不是靠
+    # load_plugin_config 里那次同步 seed:框架先 load 插件、后启动 BotRegistry,
+    # @on_load 这一刻 bot 列表还是空的,同步 seed 必然失败(详见 helpers 内注释)
+    try:
+        _helpers.ensure_group_perms_watcher()
+    except Exception as e:
+        log.warning(f'启动群权限刷新任务失败: {e}')
 
     # 计划重启的「自动重启」watcher:热重载后若模式仍开启且旧 task 已死,补拉起
     try:

@@ -379,6 +379,90 @@ def test_can_push_group_ignores_full_access(monkeypatch):
     assert helpers.can_push_group('') is False
 
 
+async def test_perms_watcher_seeds_after_bots_become_ready(monkeypatch):
+    """★ 冷启动回归:框架先 load 插件、后启 BotRegistry,@on_load 那一刻
+    ``_bots`` 还是空的 —— 同步 seed 必然失败。全量群集合能靠 GROUP_MESSAGE_CREATE
+    事件自愈,主动推送集合没有任何运行时信号,seed 不补上就**永远为空**,
+    于是每个群都被判成不能推送(全量群里照样挂刷新按钮 + 发回复限制提示)。
+    这里断言后台 task 会等到 bot 就绪后把集合补上。"""
+    monkeypatch.setattr(helpers, '_PERM_RETRY_INTERVAL', 0.01)
+    monkeypatch.setattr(helpers, '_PERM_REFRESH_INTERVAL', 0.05)
+    _set_bots(monkeypatch, {})                      # 冷启动:bot 尚未就绪
+    assert helpers.seed_full_volume_groups_from_db() == -1
+    assert state.proactive_groups == set()
+
+    task = asyncio.ensure_future(helpers._group_perms_watcher())
+    try:
+        await asyncio.sleep(0.03)
+        assert state.proactive_groups == set()      # 仍在等 bot
+        # bot 就绪 → 下一轮轮询即载入
+        _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': [
+            {'group_id': 'GP', 'is_full_access': 0, 'allow_proactive_msg': 1}]})})
+        for _ in range(60):
+            await asyncio.sleep(0.02)
+            if state.proactive_groups:
+                break
+        assert state.proactive_groups == {'GP'}
+        assert helpers.can_push_group('GP') is True
+    finally:
+        task.cancel()
+
+
+async def test_perms_watcher_refresh_keeps_runtime_observed_groups(monkeypatch):
+    """周期刷新不得清掉 dispatcher 刚从事件观测到的全量群 —— 框架那边是
+    ``db_queue`` 异步落库,刚观测到的群还没进 DB,清空会误删。
+    主动推送集合相反:DB 是唯一真相,必须整体替换,权限收回才反映得出来。"""
+    monkeypatch.setattr(helpers, '_PERM_RETRY_INTERVAL', 0.01)
+    monkeypatch.setattr(helpers, '_PERM_REFRESH_INTERVAL', 0.01)
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': [
+        {'group_id': 'GDB', 'is_full_access': 1, 'allow_proactive_msg': 1}]})})
+    task = asyncio.ensure_future(helpers._group_perms_watcher())
+    try:
+        for _ in range(60):
+            await asyncio.sleep(0.02)
+            if state.full_volume_groups:
+                break
+        # 模拟 dispatcher 从事件观测到一个尚未落库的群
+        state.full_volume_groups.add('GEVENT')
+        await asyncio.sleep(0.06)                   # 至少跨过一轮刷新
+        assert 'GEVENT' in state.full_volume_groups   # 未被刷新清掉
+        assert 'GDB' in state.full_volume_groups
+    finally:
+        task.cancel()
+
+
+async def test_ensure_perms_watcher_is_idempotent(monkeypatch):
+    """跨热重载复用旧 task(句柄存在持久字典里),不叠第二个;旧 task 已死才补拉起。
+
+    必须在**有运行中 loop** 的 async 测试里跑 —— 同步测试里 create_task 会先撞
+    RuntimeError 早退,幂等分支坏掉也看不出来。
+    """
+    from plugins.LGTBot_ElainaBot.mod import boot
+
+    class _Task:
+        def __init__(self, done):
+            self._done = done
+
+        def done(self):
+            return self._done
+
+    monkeypatch.setattr(helpers, '_PERM_RETRY_INTERVAL', 3600.0)
+    _set_bots(monkeypatch, {})
+    p = boot._get_persistent()
+    try:
+        p[helpers._PERM_WATCH_KEY] = _Task(False)              # 旧 task 还活着
+        helpers.ensure_group_perms_watcher()
+        assert isinstance(p[helpers._PERM_WATCH_KEY], _Task)   # 原样保留,没起新的
+
+        p[helpers._PERM_WATCH_KEY] = _Task(True)               # 旧 task 已死
+        helpers.ensure_group_perms_watcher()
+        t = p[helpers._PERM_WATCH_KEY]
+        assert not isinstance(t, _Task)                        # 换成了真 task
+        t.cancel()
+    finally:
+        p.pop(helpers._PERM_WATCH_KEY, None)
+
+
 def test_seed_legacy_table_leaves_proactive_empty(monkeypatch):
     """老框架旧表没有主动推送信息 → 推送集合留空,按「无权限」兜底
     (宁可多挂刷新按钮,也不要往没权限的群硬推)。"""

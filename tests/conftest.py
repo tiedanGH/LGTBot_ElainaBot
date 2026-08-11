@@ -60,6 +60,7 @@ _persistent: dict = {
     'pending_new_game_name': {},
     'full_volume_groups': set(),
     'proactive_groups': set(),
+    'group_perms_watcher': None,
     'mention_rewrites': {},
 }
 

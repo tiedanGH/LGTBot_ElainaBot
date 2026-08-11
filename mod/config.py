@@ -160,10 +160,14 @@ def _apply_runtime_tunables(cfg: dict):
         new = bind_appid or '(自动第一个)'
         log.info(f'bind_bot_appid: {old} → {new}')
         state.bind_bot_appid = bind_appid
-    # 每次加载都从绑定 bot 的 data.db 重载全量群集合。bot 未就绪时返回 -1,保留现状。
+    # 每次加载都试着从绑定 bot 的 data.db 重载群权限集合。**冷启动时这次必然失败**(框架先 load 插件、后启 BotRegistry,此刻 bot 列表为空)—— 真正
+    # 兜底的是 helpers.ensure_group_perms_watcher() 那个后台 task,这里只是热重载 / 换绑时能立刻生效的快路径。
     seeded = helpers.seed_full_volume_groups_from_db()
     if seeded >= 0:
-        log.info(f'全量群集合已从绑定 bot({helpers.get_bound_appid() or "?"}) 数据库载入: {seeded} 个')
+        log.info(f'群权限集合已从绑定 bot({helpers.get_bound_appid() or "?"}) 载入: '
+                 f'全量群 {seeded} 个、可主动推送 {len(state.proactive_groups)} 个')
+    else:
+        log.debug('bot 尚未就绪，群权限集合稍后由后台刷新任务载入')
 
     # ── image_hosting ─────────────────────────────────────────────────────
     # 图床名单**动态**取自主框架模块 status()(≥2.0.0 beds/ 自动发现);模块

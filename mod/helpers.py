@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""通用辅助：sender 查找 / 跨线程协程执行 / target_key / mention 美化"""
+"""通用辅助：sender 查找 / 跨线程协程执行 / target_key / mention 美化 / 群权限集合"""
 
 from __future__ import annotations
 import re
 import asyncio
 
 from core.base.logger import get_logger, PLUGIN
-from . import state, userinfo
+from . import boot, state, userinfo
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -211,17 +211,24 @@ _SQL_GROUP_FLAGS = ('SELECT group_id, is_full_access, allow_proactive_msg '
 _SQL_GROUP_FLAGS_LEGACY = 'SELECT group_id FROM full_access_groups'
 
 
-def seed_full_volume_groups_from_db() -> int:
-    """从绑定 bot 的 data.db 读群权限记录,整体替换两个运行时集合。
+def seed_full_volume_groups_from_db(replace: bool = True) -> int:
+    """从绑定 bot 的 data.db 读群权限记录,刷新两个运行时集合。
 
     框架把「全量消息」与「主动推送」两个权限分列在 ``groups_users`` 的
     ``is_full_access`` / ``allow_proactive_msg``(前者按实际收到
     GROUP_MESSAGE_CREATE 落库,后者由 ``get_group_bot_state`` 查 QQ bot_state
-    接口后同步),是跨进程重启的持久事实来源;这里在绑定生效时(启动 / 热重载 /
-    面板换绑)一次性载入,弥补两个集合进程重启即丢的缺口。
+    接口后同步),是跨进程重启的持久事实来源。
+
+    ``replace``:
+      · True(启动 / 换绑)—— 两个集合都整体替换,换绑到别的 bot 时旧数据必须清掉。
+      · False(周期刷新)—— 全量群集合只**并入**不清空:框架那边是 ``db_queue``
+        异步落库(``event.py::_record_full_access_group``),dispatcher 刚从事件
+        观测到的群可能还没写进 DB,清空会把它误删、直到下条消息才补回来。
+        主动推送集合仍整体替换 —— 它没有运行时信号,DB 是唯一真相,权限被收回
+        时也只有替换才能反映出来。
 
     注意两个集合都是跨热重载持久 set(挂在 C++ 扩展上),必须**原地**
-    clear+update,不能重新赋值。查询失败保留现状不清空。
+    clear/update,不能重新赋值。查询失败保留现状不动。
     返回载入的**全量群**数量(主动推送数只落集合,不参与返回值);
     bot 未就绪 / 查询失败返回 -1。
     """
@@ -247,11 +254,61 @@ def seed_full_volume_groups_from_db() -> int:
     except Exception as e:
         log.warning(f'读取绑定 bot 群权限失败: {e}')
         return -1
-    state.full_volume_groups.clear()
+    if replace:
+        state.full_volume_groups.clear()
     state.full_volume_groups.update(full)
     state.proactive_groups.clear()
     state.proactive_groups.update(push)
     return len(full)
+
+
+# ──── 群权限集合的后台刷新 ────────────────────────────────────────────────
+# 为什么必须有这个 task:框架启动顺序是「④ PluginManager.load_all() → ⑥
+# BotRegistry.start_all()」(core/application.py),插件 @on_load 跑的时候
+# ``_bot_registry`` 还是 None、``_bots`` 是空 dict —— 那一刻的 seed 必然返回 -1。
+#
+# 以前只有全量群集合,它能靠 dispatcher 收到 GROUP_MESSAGE_CREATE 自愈,所以
+# 这个「seed 在启动时从来没成功过」的事实一直没暴露。主动推送集合没有任何运行时
+# 信号,DB 是唯一来源:真重启(execv 清空持久字典)后它会**永远为空**,于是每个群
+# 都被判成不能主动推送 —— 表现就是全量群里照样挂刷新按钮 + 发《消息回复限制》。
+#
+# 所以改成后台 task:先快轮询等 bot 就绪(指数退避,bot 一直不来也不空转),
+# 成功后转低频刷新 —— 顺带让群主新授予的权限无需重启即可生效。
+_PERM_WATCH_KEY = 'group_perms_watcher'
+_PERM_RETRY_INTERVAL = 3.0        # bot 未就绪时的首个重试间隔(退避上限 = 刷新间隔)
+_PERM_REFRESH_INTERVAL = 300.0    # 就绪后的定期刷新间隔
+
+
+def ensure_group_perms_watcher() -> None:
+    """幂等启动群权限刷新 task(跨热重载复用旧 task;无 loop 时静默跳过)。"""
+    p = boot._get_persistent()
+    t = p.get(_PERM_WATCH_KEY)
+    if t is not None and not t.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        log.warning('无运行中 asyncio loop，群权限刷新任务未启动')
+        return
+    p[_PERM_WATCH_KEY] = loop.create_task(_group_perms_watcher())
+
+
+async def _group_perms_watcher() -> None:
+    """等 bot 就绪 → 载入群权限集合 → 转入低频刷新。"""
+    delay = _PERM_RETRY_INTERVAL
+    loaded = False
+    while True:
+        n = seed_full_volume_groups_from_db(replace=not loaded)
+        if n >= 0:
+            if not loaded:
+                loaded = True
+                log.info(f'群权限集合已载入: 全量群 {n} 个、'
+                         f'可主动推送 {len(state.proactive_groups)} 个')
+            delay = _PERM_REFRESH_INTERVAL
+        elif delay < _PERM_REFRESH_INTERVAL:
+            # bot 仍未就绪:退避到刷新间隔封顶,避免 bot 起不来时空转
+            delay = min(delay * 2, _PERM_REFRESH_INTERVAL)
+        await asyncio.sleep(delay)
 
 
 def get_bot_uin(appid: str = '') -> str:
