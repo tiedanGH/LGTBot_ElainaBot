@@ -141,8 +141,8 @@
   color: var(--text-faint); font-size: 11px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
 }
-/* 备注名(人工维护)—— 加粗 + 正文色,与自动取来的群名拉开层次 */
-.dash-match-remark { font-weight: 600; color: var(--text); }
+/* 备注名(人工维护)—— 只加粗,颜色继承 .dash-match-loc 的 muted 灰 */
+.dash-match-remark { font-weight: 600; }
 .dash-match-since { color: var(--text-muted); font-size: 12px; white-space: nowrap; margin-left: auto; }
 
 /* ──── 机器人绑定 ──── */
