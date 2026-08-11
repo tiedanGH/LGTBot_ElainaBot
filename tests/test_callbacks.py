@@ -20,8 +20,21 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+
 # conftest.py 已 inject 假 boot,这里安全 import
 from plugins.LGTBot_ElainaBot.mod import callbacks, quota, state
+
+
+def mark_push_group(gid: str, ok: bool = True) -> None:
+    """把某群标记成(不)可主动推送 —— 直接写 helpers 的 TTL 缓存。
+
+    ``can_push_group`` 改成按群点查 DB + 缓存后,没有集合可写;这里预置一条
+    远期不过期的缓存项,等价于「DB 里该群 allow_proactive_msg 是 ok」。
+    """
+    import time as _t
+    from plugins.LGTBot_ElainaBot.mod import helpers as _h
+    _h._push_cache()[gid] = (ok, _t.time() + 3600)
+
 
 
 @pytest.fixture(autouse=True)
@@ -183,7 +196,7 @@ async def test_active_push_daily_limit_falls_back_to_refresh(monkeypatch):
     # 普通群配额满会阻塞等刷新 → mock 成立即返回 None(等待超时)
     monkeypatch.setattr(callbacks.quota, 'wait_and_consume',
                         AsyncMock(return_value=None))
-    state.proactive_groups.add('GLIM')
+    mark_push_group('GLIM')
     key = callbacks.helpers.target_key('GLIM', False)
 
     # ① 额度未满(已用 999 < 1000)→ 直推,不进等待分支
@@ -232,7 +245,7 @@ async def test_quota_exhausted_not_counted_for_full_volume_group(monkeypatch):
     monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: calls.append(1))
     key = callbacks.helpers.target_key('GFULL', False)
     _exhaust_ref(key)
-    state.proactive_groups.add('GFULL')          # 标记全量群 → is_active_push True
+    mark_push_group('GFULL')          # 标记全量群 → is_active_push True
 
     await callbacks._send_text_quota_managed('GFULL', False, 'hi', None)
 
@@ -412,7 +425,7 @@ def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
         assert 'g:grp1' in callbacks._pending_tip_keys
         assert 'g:grp1' not in callbacks._pending_dm_warn_keys
         # 可主动推送的群新建同款 → 私信提示打标(教学 consume 时会跳过)
-        state.proactive_groups.add('grpF')
+        mark_push_group('grpF')
         callbacks.cb_match_event('grpF', False, 'new_game', game)
         assert 'g:grpF' in callbacks._pending_dm_warn_keys
         # 可推送群新建非私信游戏 → 不标私信提示
@@ -437,7 +450,7 @@ def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
 def test_reply_limit_tip_targets_only_targets_without_push_permission(monkeypatch):
     """★「消息回复限制」教学的投递面 —— 只发给**发不出主动消息**的目标:
 
-      · 群聊看 ``allow_proactive_msg``(state.proactive_groups)。**只开全量
+      · 群聊看 ``allow_proactive_msg``(DB 权限位)。**只开全量
         消息不算** —— 那只管收得到什么,配额耗尽照样推不出去,仍要教学。
       · 私信没有平台侧权限位可查(框架 users 表没有该字段),沿用沙箱名单,
         ``sandbox_dm_users: ["all"]`` 即全员有权限。
@@ -453,7 +466,7 @@ def test_reply_limit_tip_targets_only_targets_without_push_permission(monkeypatc
 
     try:
         state.full_volume_groups.add('gFullOnly')     # 全量,但没主动推送权限
-        state.proactive_groups.add('gPush')           # 非全量,有主动推送权限
+        mark_push_group('gPush')           # 非全量,有主动推送权限
         _consume('gFullOnly', False)
         _consume('gPush', False)
         _consume('gPlain', False)                     # 两种权限都没有
@@ -475,7 +488,7 @@ def test_reply_limit_tip_targets_only_targets_without_push_permission(monkeypatc
     finally:
         callbacks._pending_tip_keys.clear()
         state.full_volume_groups.discard('gFullOnly')
-        state.proactive_groups.discard('gPush')
+        mark_push_group('gPush', False)
 
 
 def test_active_push_eligibility_requires_push_permission(monkeypatch):
@@ -484,12 +497,12 @@ def test_active_push_eligibility_requires_push_permission(monkeypatch):
     assert callbacks.helpers.can_push_group('gFullOnly') is False
     state.full_volume_groups.add('gFullOnly')
     assert callbacks.helpers.can_push_group('gFullOnly') is False
-    state.proactive_groups.add('gFullOnly')
+    mark_push_group('gFullOnly')
     try:
         assert callbacks.helpers.can_push_group('gFullOnly') is True
     finally:
         state.full_volume_groups.discard('gFullOnly')
-        state.proactive_groups.discard('gFullOnly')
+        mark_push_group('gFullOnly', False)
 
 
 def test_single_player_game_over_restart_button_has_name():
@@ -590,13 +603,13 @@ async def test_mixed_send_single_markdown_in_engine_order(monkeypatch):
     _patch_send_env(monkeypatch, sender, push_all=False)
     monkeypatch.setattr(callbacks.uploader, 'upload_image',
                         AsyncMock(return_value='http://bed/a.png'))
-    state.proactive_groups.add('GMIX')
+    mark_push_group('GMIX')
     try:
         segs = [('image', 0), ('text', '\n游戏结束')]
         await callbacks._send_mixed_message('GMIX', False, segs,
                                             {0: (_PNG_1x1, 'a.png')}, '\n游戏结束', None)
     finally:
-        state.proactive_groups.discard('GMIX')
+        mark_push_group('GMIX', False)
 
     sender.send_to_group.assert_awaited_once()
     md = sender.send_to_group.call_args[0][1]
@@ -610,14 +623,14 @@ async def test_mixed_send_merges_multiple_images_into_one_message(monkeypatch):
     urls = iter(['http://bed/1.png', 'http://bed/2.png'])
     monkeypatch.setattr(callbacks.uploader, 'upload_image',
                         AsyncMock(side_effect=lambda *a, **k: next(urls)))
-    state.proactive_groups.add('GMULTI')
+    mark_push_group('GMULTI')
     try:
         segs = [('image', 0), ('text', '中间'), ('image', 1)]
         await callbacks._send_mixed_message(
             'GMULTI', False, segs,
             {0: (_PNG_1x1, '1.png'), 1: (_PNG_1x1, '2.png')}, '中间', None)
     finally:
-        state.proactive_groups.discard('GMULTI')
+        mark_push_group('GMULTI', False)
 
     sender.send_to_group.assert_awaited_once()
     md = sender.send_to_group.call_args[0][1]
@@ -650,12 +663,12 @@ async def test_mixed_send_text_only_when_no_image_readable(monkeypatch):
     """图片一张都没读出来 → 退化成纯文本,文案不跟着丢。"""
     sender = _fake_sender()
     _patch_send_env(monkeypatch, sender, push_all=False)
-    state.proactive_groups.add('GTXT')
+    mark_push_group('GTXT')
     try:
         await callbacks._send_mixed_message('GTXT', False, [('text', '只剩文字')],
                                             {}, '只剩文字', None)
     finally:
-        state.proactive_groups.discard('GTXT')
+        mark_push_group('GTXT', False)
     sender.send_to_group.assert_awaited_once()
     assert sender.send_to_group.call_args[0][1] == '只剩文字'
 

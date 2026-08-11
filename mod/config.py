@@ -160,14 +160,9 @@ def _apply_runtime_tunables(cfg: dict):
         new = bind_appid or '(自动第一个)'
         log.info(f'bind_bot_appid: {old} → {new}')
         state.bind_bot_appid = bind_appid
-    # 每次加载都试着从绑定 bot 的 data.db 重载群权限集合。**冷启动时这次必然失败**(框架先 load 插件、后启 BotRegistry,此刻 bot 列表为空)—— 真正
-    # 兜底的是 helpers.ensure_group_perms_watcher() 那个后台 task,这里只是热重载 / 换绑时能立刻生效的快路径。
-    seeded = helpers.seed_full_volume_groups_from_db()
-    if seeded >= 0:
-        log.info(f'群权限集合已从绑定 bot({helpers.get_bound_appid() or "?"}) 载入: '
-                 f'全量群 {seeded} 个、可主动推送 {len(state.proactive_groups)} 个')
-    else:
-        log.debug('bot 尚未就绪，群权限集合稍后由后台刷新任务载入')
+    # 主动推送权限按群点查 + TTL 缓存(见 helpers.can_push_group),这里只需在
+    # 绑定可能变化时把缓存打掉 —— 权限是 per-bot 的,换个 bot 结论全变。
+    helpers.invalidate_push_cache()
 
     # ── image_hosting ─────────────────────────────────────────────────────
     # 图床名单**动态**取自主框架模块 status()(≥2.0.0 beds/ 自动发现);模块
@@ -373,8 +368,9 @@ def persist_bind_bot_appid(appid: str) -> tuple[bool, str]:
     old = state.bind_bot_appid or '(自动第一个)'
     state.bind_bot_appid = appid
     log.info(f'🤖 [面板换绑] bind_bot_appid: {old} → {appid or "(自动第一个)"}')
-    seeded = helpers.seed_full_volume_groups_from_db()
-    if seeded >= 0:
-        log.info(f'   全量群集合已从新绑定 bot 重载: {seeded} 个')
+    helpers.invalidate_push_cache()      # 权限 per-bot,换绑后旧结论全部作废
     resolved = helpers.get_bound_appid()
-    return True, f'已绑定 {resolved or "(无可用 bot)"}；全量群 {max(seeded, 0)} 个'
+    perms = helpers._count_group_perms(resolved) if resolved else {'full': None, 'push': None}
+    return True, (f'已绑定 {resolved or "(无可用 bot)"}；'
+                  f'全量群 {perms.get("full") or 0} 个、'
+                  f'可主动推送 {perms.get("push") or 0} 个')

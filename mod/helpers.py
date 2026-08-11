@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 import re
+import time
 import asyncio
 
 from core.base.logger import get_logger, PLUGIN
@@ -204,113 +205,6 @@ def is_foreign_event(event) -> bool:
     return (event.appid or '') != bound
 
 
-# 群权限清单 —— 一次取回两个权限位,两个运行时集合同源载入;
-# 旧框架(groups_users 尚不存在)兜底旧表,只拿得到全量群
-_SQL_GROUP_FLAGS = ('SELECT group_id, is_full_access, allow_proactive_msg '
-                    'FROM groups_users WHERE COALESCE(in_group, 1) = 1')
-_SQL_GROUP_FLAGS_LEGACY = 'SELECT group_id FROM full_access_groups'
-
-
-def seed_full_volume_groups_from_db(replace: bool = True) -> int:
-    """从绑定 bot 的 data.db 读群权限记录,刷新两个运行时集合。
-
-    框架把「全量消息」与「主动推送」两个权限分列在 ``groups_users`` 的
-    ``is_full_access`` / ``allow_proactive_msg``(前者按实际收到
-    GROUP_MESSAGE_CREATE 落库,后者由 ``get_group_bot_state`` 查 QQ bot_state
-    接口后同步),是跨进程重启的持久事实来源。
-
-    ``replace``:
-      · True(启动 / 换绑)—— 两个集合都整体替换,换绑到别的 bot 时旧数据必须清掉。
-      · False(周期刷新)—— 全量群集合只**并入**不清空:框架那边是 ``db_queue``
-        异步落库(``event.py::_record_full_access_group``),dispatcher 刚从事件
-        观测到的群可能还没写进 DB,清空会把它误删、直到下条消息才补回来。
-        主动推送集合仍整体替换 —— 它没有运行时信号,DB 是唯一真相,权限被收回
-        时也只有替换才能反映出来。
-
-    注意两个集合都是跨热重载持久 set(挂在 C++ 扩展上),必须**原地**
-    clear/update,不能重新赋值。查询失败保留现状不动。
-    返回载入的**全量群**数量(主动推送数只落集合,不参与返回值);
-    bot 未就绪 / 查询失败返回 -1。
-    """
-    bot = get_bound_bot()
-    if bot is None:
-        return -1
-    try:
-        try:
-            rows = bot.log_service.query_data(_SQL_GROUP_FLAGS)
-        except Exception:
-            # 旧表没有主动推送信息 —— 全量群照常载入,推送集合留空(按无权限兜底)
-            rows = [dict(r, is_full_access=1)
-                    for r in bot.log_service.query_data(_SQL_GROUP_FLAGS_LEGACY)]
-        full, push = set(), set()
-        for r in rows:
-            gid = str(r.get('group_id') or '')
-            if not gid:
-                continue
-            if r.get('is_full_access'):
-                full.add(gid)
-            if r.get('allow_proactive_msg'):
-                push.add(gid)
-    except Exception as e:
-        log.warning(f'读取绑定 bot 群权限失败: {e}')
-        return -1
-    if replace:
-        state.full_volume_groups.clear()
-    state.full_volume_groups.update(full)
-    state.proactive_groups.clear()
-    state.proactive_groups.update(push)
-    return len(full)
-
-
-# ──── 群权限集合的后台刷新 ────────────────────────────────────────────────
-# 为什么必须有这个 task:框架启动顺序是「④ PluginManager.load_all() → ⑥
-# BotRegistry.start_all()」(core/application.py),插件 @on_load 跑的时候
-# ``_bot_registry`` 还是 None、``_bots`` 是空 dict —— 那一刻的 seed 必然返回 -1。
-#
-# 以前只有全量群集合,它能靠 dispatcher 收到 GROUP_MESSAGE_CREATE 自愈,所以
-# 这个「seed 在启动时从来没成功过」的事实一直没暴露。主动推送集合没有任何运行时
-# 信号,DB 是唯一来源:真重启(execv 清空持久字典)后它会**永远为空**,于是每个群
-# 都被判成不能主动推送 —— 表现就是全量群里照样挂刷新按钮 + 发《消息回复限制》。
-#
-# 所以改成后台 task:先快轮询等 bot 就绪(指数退避,bot 一直不来也不空转),
-# 成功后转低频刷新 —— 顺带让群主新授予的权限无需重启即可生效。
-_PERM_WATCH_KEY = 'group_perms_watcher'
-_PERM_RETRY_INTERVAL = 3.0        # bot 未就绪时的首个重试间隔(退避上限 = 刷新间隔)
-_PERM_REFRESH_INTERVAL = 300.0    # 就绪后的定期刷新间隔
-
-
-def ensure_group_perms_watcher() -> None:
-    """幂等启动群权限刷新 task(跨热重载复用旧 task;无 loop 时静默跳过)。"""
-    p = boot._get_persistent()
-    t = p.get(_PERM_WATCH_KEY)
-    if t is not None and not t.done():
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        log.warning('无运行中 asyncio loop，群权限刷新任务未启动')
-        return
-    p[_PERM_WATCH_KEY] = loop.create_task(_group_perms_watcher())
-
-
-async def _group_perms_watcher() -> None:
-    """等 bot 就绪 → 载入群权限集合 → 转入低频刷新。"""
-    delay = _PERM_RETRY_INTERVAL
-    loaded = False
-    while True:
-        n = seed_full_volume_groups_from_db(replace=not loaded)
-        if n >= 0:
-            if not loaded:
-                loaded = True
-                log.info(f'群权限集合已载入: 全量群 {n} 个、'
-                         f'可主动推送 {len(state.proactive_groups)} 个')
-            delay = _PERM_REFRESH_INTERVAL
-        elif delay < _PERM_REFRESH_INTERVAL:
-            # bot 仍未就绪:退避到刷新间隔封顶,避免 bot 起不来时空转
-            delay = min(delay * 2, _PERM_REFRESH_INTERVAL)
-        await asyncio.sleep(delay)
-
-
 def get_bot_uin(appid: str = '') -> str:
     """从主框架 BotManager 拿 bot 的 QQ uin (``BotInstance.robot_qq``)。
 
@@ -411,6 +305,34 @@ def is_full_volume_group(gid: str) -> bool:
         return False
 
 
+# ──── 主动推送资格:按群号点查 + TTL 缓存 ────────────────────────────────
+# 点查则只为**真正在用**的群付费:命中缓存 0.2µs,未命中一次 PK 索引查询(亚毫秒,且发消息本来就要走网络),缓存条目数取决于活跃群数(几十)而非总群数。
+# 顺带解决两件事:① 不再依赖启动时机(冷启动 bot 未就绪只是一次 miss,30s 后自愈),② 群主新授予权限最迟 TTL 后生效,不必等下一轮全量刷新。
+_SQL_GROUP_PUSH = ('SELECT allow_proactive_msg FROM groups_users '
+                   'WHERE group_id = ? AND COALESCE(in_group, 1) = 1')
+_PUSH_CACHE_KEY = 'group_push_cache'
+_PUSH_TTL = 300.0        # 查到确切结果的缓存时长
+_PUSH_MISS_TTL = 30.0    # bot 未就绪 / 查不到该群:短 TTL,别把「未知」当「无权限」钉死
+_PUSH_CACHE_MAX = 512    # 超过则先清理过期项(活跃群数远小于此,正常不会触发)
+
+
+def _push_cache() -> dict:
+    """缓存挂持久字典 —— 跨热重载保留,省得每次改代码都把缓存打空。"""
+    p = boot._get_persistent()
+    c = p.get(_PUSH_CACHE_KEY)
+    if c is None:
+        c = p[_PUSH_CACHE_KEY] = {}
+    return c
+
+
+def invalidate_push_cache() -> None:
+    """换绑 bot / 手动刷新后清空 —— 权限是 per-bot 的,换个 bot 结论全变。"""
+    try:
+        _push_cache().clear()
+    except Exception:
+        pass
+
+
 def can_push_group(gid: str) -> bool:
     """``gid`` 能否让 bot **不依赖刷新按钮**正常发消息(主动推送资格)。
 
@@ -422,12 +344,35 @@ def can_push_group(gid: str) -> bool:
     该收到教学提示。
 
     数据来源是框架 ``groups_users.allow_proactive_msg``(``get_group_bot_state``
-    查 QQ bot_state 接口后落库),没查过的群是 0 → 这里判 False,退回刷新按钮
-    机制。方向安全:宁可多挂一个按钮,也不要往没权限的群硬推(QQ 必拒且烧配额)。
+    查 QQ bot_state 接口后落库)。查不到 / bot 未就绪一律判 False 并短 TTL 重试,
+    方向安全:宁可多挂一个按钮,也不要往没权限的群硬推(QQ 必拒且烧配额)。
     """
     if not gid:
         return False
     try:
-        return gid in state.proactive_groups
-    except Exception:
+        cache = _push_cache()
+        now = time.time()
+        hit = cache.get(gid)
+        if hit is not None and now < hit[1]:
+            return hit[0]
+
+        bot = get_bound_bot()
+        if bot is None:
+            cache[gid] = (False, now + _PUSH_MISS_TTL)
+            return False
+        # query_data 失败时**返回 [] 而不抛**(框架 _base.query 吞掉异常),
+        # 所以空结果既可能是"没有该群",也可能是"表不存在/查询出错" —— 两种
+        # 都按无权限 + 短 TTL 处理,下次再试。
+        rows = bot.log_service.query_data(_SQL_GROUP_PUSH, (gid,))
+        if not rows:
+            cache[gid] = (False, now + _PUSH_MISS_TTL)
+            return False
+        ok = bool(rows[0].get('allow_proactive_msg'))
+        if len(cache) >= _PUSH_CACHE_MAX:
+            for k in [k for k, v in cache.items() if v[1] <= now]:
+                cache.pop(k, None)
+        cache[gid] = (ok, now + _PUSH_TTL)
+        return ok
+    except Exception as e:
+        log.warning(f'查询群 {gid} 主动推送权限失败: {e}')
         return False

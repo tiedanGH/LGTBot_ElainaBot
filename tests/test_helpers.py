@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import sys
+import time
 import types
 
 import pytest
@@ -37,9 +38,11 @@ class _FakeLogService:
         self._rows = [] if rows is None else rows
         self._raises = raises
         self.queries: list = []
+        self.params: list = []
 
-    def query_data(self, sql):
+    def query_data(self, sql, params=()):
         self.queries.append(sql)
+        self.params.append(params)
         if self._raises:
             raise RuntimeError('db boom')
         if not isinstance(self._rows, dict):
@@ -321,158 +324,97 @@ def test_list_framework_bots_empty_on_config_failure(monkeypatch):
 # 全量群集合
 # ─────────────────────────────────────────────────────────────────────────
 
-def test_seed_full_volume_groups_replaces_in_place(monkeypatch):
-    """★ 关键回归:``state.full_volume_groups`` 是挂在 C++ 扩展上的跨热重载持久 set,
-    必须 clear+update **原地**改;一旦写成重新赋值,旧模块持有的引用就此分家,全量群判定跨热重载后集体失效。"""
-    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': [
-        {'group_id': 'G1', 'is_full_access': 1},
-        {'group_id': 'G2', 'is_full_access': 1},
-        {'group_id': '', 'is_full_access': 1}]})})
-    before = state.full_volume_groups          # 持有引用,模拟旧模块
-    state.full_volume_groups.add('STALE')
-    n = helpers.seed_full_volume_groups_from_db()
-    assert n == 2
-    assert state.full_volume_groups is before  # 同一对象,没有被重新赋值
-    assert before == {'G1', 'G2'}              # 旧引用能看到新内容,且旧值被清掉
+def test_can_push_group_queries_by_group_and_caches(monkeypatch):
+    """★ 主动推送资格改为**按群点查 + TTL 缓存**(原本是全表扫描预载成集合)。
 
-
-def test_seed_full_volume_groups_keeps_state_on_failure(monkeypatch):
-    """bot 未就绪 / 查询失败返回 -1 并**保留现状** —— 不能把已知的全量群清空
-    (清空会让这些群里的回复退化成挂刷新按钮)。"""
-    state.full_volume_groups.add('G_KEEP')
-    _set_bots(monkeypatch, {})                       # 无 bot
-    assert helpers.seed_full_volume_groups_from_db() == -1
-    assert 'G_KEEP' in state.full_volume_groups
-    _set_bots(monkeypatch, {'A': _FakeBot('A', raises=True)})   # 查询抛错
-    assert helpers.seed_full_volume_groups_from_db() == -1
-    assert 'G_KEEP' in state.full_volume_groups
-
-
-def test_seed_fills_two_independent_permission_sets(monkeypatch):
-    """★ 两个权限位各自成集合,互不牵连 —— 一个群可能只有其中之一。
-    已退群由 SQL 排除(权限位在框架 group_del 后会残留)。"""
-    bot = _FakeBot('A', rows={'groups_users': [
-        {'group_id': 'GF', 'is_full_access': 1, 'allow_proactive_msg': 0},
-        {'group_id': 'GP', 'is_full_access': 0, 'allow_proactive_msg': 1},
-        {'group_id': 'GB', 'is_full_access': 1, 'allow_proactive_msg': 1},
-        {'group_id': 'GN', 'is_full_access': 0, 'allow_proactive_msg': 0},
-    ]})
+    群数一多,全表扫描的代价全落在与实际用量无关的总群数上,而框架 query_data 是
+    同步的 —— 实测 5 万群一次扫描 ~69ms、20 万群 ~288ms,这段时间事件循环整个卡住。
+    点查只为真正在用的群付费,且命中缓存后零查询。
+    """
+    bot = _FakeBot('A', rows={'groups_users': [{'allow_proactive_msg': 1}]})
     _set_bots(monkeypatch, {'A': bot})
-    assert helpers.seed_full_volume_groups_from_db() == 2      # 返回值是全量群数
-    assert state.full_volume_groups == {'GF', 'GB'}
-    assert state.proactive_groups == {'GP', 'GB'}
+    assert helpers.can_push_group('GP') is True
+    assert len(bot.log_service.queries) == 1
     sql = bot.log_service.queries[0]
-    assert 'is_full_access' in sql and 'allow_proactive_msg' in sql
-    assert 'in_group' in sql
+    assert 'group_id = ?' in sql and 'allow_proactive_msg' in sql   # 走主键点查
+    # 再问同一个群 → 命中缓存,不再打 DB
+    assert helpers.can_push_group('GP') is True
+    assert len(bot.log_service.queries) == 1
 
 
-def test_can_push_group_ignores_full_access(monkeypatch):
-    """★ 本次改动的核心:主动推送资格**只看** allow_proactive_msg。
-    只开全量不开主动推送的群发不出主动消息,必须判 False(照常挂刷新按钮 +
-    发《消息回复限制》教学);反过来没开全量但开了主动推送的群判 True。"""
-    state.full_volume_groups.update({'GF', 'GB'})
-    state.proactive_groups.update({'GP', 'GB'})
-    assert helpers.can_push_group('GF') is False   # 全量但不能推 → 仍需刷新按钮
-    assert helpers.can_push_group('GP') is True    # 非全量但能推 → 无需刷新按钮
-    assert helpers.can_push_group('GB') is True
-    assert helpers.can_push_group('GN') is False
+def test_can_push_group_false_paths(monkeypatch):
+    """权限位为 0 / 查不到该群 / 空 gid,一律 False —— 宁可多挂刷新按钮,
+    也不要往没权限的群硬推(QQ 必拒且烧配额)。"""
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'groups_users': [{'allow_proactive_msg': 0}]})})
+    assert helpers.can_push_group('G0') is False
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': []})})
+    assert helpers.can_push_group('GX') is False       # DB 里没有该群
     assert helpers.can_push_group('') is False
 
 
-async def test_perms_watcher_seeds_after_bots_become_ready(monkeypatch):
-    """★ 冷启动回归:框架先 load 插件、后启 BotRegistry,@on_load 那一刻
-    ``_bots`` 还是空的 —— 同步 seed 必然失败。全量群集合能靠 GROUP_MESSAGE_CREATE
-    事件自愈,主动推送集合没有任何运行时信号,seed 不补上就**永远为空**,
-    于是每个群都被判成不能推送(全量群里照样挂刷新按钮 + 发回复限制提示)。
-    这里断言后台 task 会等到 bot 就绪后把集合补上。"""
-    monkeypatch.setattr(helpers, '_PERM_RETRY_INTERVAL', 0.01)
-    monkeypatch.setattr(helpers, '_PERM_REFRESH_INTERVAL', 0.05)
-    _set_bots(monkeypatch, {})                      # 冷启动:bot 尚未就绪
-    assert helpers.seed_full_volume_groups_from_db() == -1
-    assert state.proactive_groups == set()
-
-    task = asyncio.ensure_future(helpers._group_perms_watcher())
-    try:
-        await asyncio.sleep(0.03)
-        assert state.proactive_groups == set()      # 仍在等 bot
-        # bot 就绪 → 下一轮轮询即载入
-        _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': [
-            {'group_id': 'GP', 'is_full_access': 0, 'allow_proactive_msg': 1}]})})
-        for _ in range(60):
-            await asyncio.sleep(0.02)
-            if state.proactive_groups:
-                break
-        assert state.proactive_groups == {'GP'}
-        assert helpers.can_push_group('GP') is True
-    finally:
-        task.cancel()
-
-
-async def test_perms_watcher_refresh_keeps_runtime_observed_groups(monkeypatch):
-    """周期刷新不得清掉 dispatcher 刚从事件观测到的全量群 —— 框架那边是
-    ``db_queue`` 异步落库,刚观测到的群还没进 DB,清空会误删。
-    主动推送集合相反:DB 是唯一真相,必须整体替换,权限收回才反映得出来。"""
-    monkeypatch.setattr(helpers, '_PERM_RETRY_INTERVAL', 0.01)
-    monkeypatch.setattr(helpers, '_PERM_REFRESH_INTERVAL', 0.01)
-    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': [
-        {'group_id': 'GDB', 'is_full_access': 1, 'allow_proactive_msg': 1}]})})
-    task = asyncio.ensure_future(helpers._group_perms_watcher())
-    try:
-        for _ in range(60):
-            await asyncio.sleep(0.02)
-            if state.full_volume_groups:
-                break
-        # 模拟 dispatcher 从事件观测到一个尚未落库的群
-        state.full_volume_groups.add('GEVENT')
-        await asyncio.sleep(0.06)                   # 至少跨过一轮刷新
-        assert 'GEVENT' in state.full_volume_groups   # 未被刷新清掉
-        assert 'GDB' in state.full_volume_groups
-    finally:
-        task.cancel()
-
-
-async def test_ensure_perms_watcher_is_idempotent(monkeypatch):
-    """跨热重载复用旧 task(句柄存在持久字典里),不叠第二个;旧 task 已死才补拉起。
-
-    必须在**有运行中 loop** 的 async 测试里跑 —— 同步测试里 create_task 会先撞
-    RuntimeError 早退,幂等分支坏掉也看不出来。
-    """
-    from plugins.LGTBot_ElainaBot.mod import boot
-
-    class _Task:
-        def __init__(self, done):
-            self._done = done
-
-        def done(self):
-            return self._done
-
-    monkeypatch.setattr(helpers, '_PERM_RETRY_INTERVAL', 3600.0)
-    _set_bots(monkeypatch, {})
-    p = boot._get_persistent()
-    try:
-        p[helpers._PERM_WATCH_KEY] = _Task(False)              # 旧 task 还活着
-        helpers.ensure_group_perms_watcher()
-        assert isinstance(p[helpers._PERM_WATCH_KEY], _Task)   # 原样保留,没起新的
-
-        p[helpers._PERM_WATCH_KEY] = _Task(True)               # 旧 task 已死
-        helpers.ensure_group_perms_watcher()
-        t = p[helpers._PERM_WATCH_KEY]
-        assert not isinstance(t, _Task)                        # 换成了真 task
-        t.cancel()
-    finally:
-        p.pop(helpers._PERM_WATCH_KEY, None)
-
-
-def test_seed_legacy_table_leaves_proactive_empty(monkeypatch):
-    """老框架旧表没有主动推送信息 → 推送集合留空,按「无权限」兜底
-    (宁可多挂刷新按钮,也不要往没权限的群硬推)。"""
-    state.proactive_groups.add('STALE')
+def test_can_push_group_full_access_does_not_grant_push(monkeypatch):
+    """★ 语义回归:只开全量消息不等于能主动推送 —— 点查只看
+    allow_proactive_msg,运行时观测到的全量群集合不参与判定。"""
+    state.full_volume_groups.add('GF')
     _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
-        'full_access_groups': [{'group_id': 'G1'}]})})
-    assert helpers.seed_full_volume_groups_from_db() == 1
-    assert state.full_volume_groups == {'G1'}
-    assert state.proactive_groups == set()
+        'groups_users': [{'allow_proactive_msg': 0}]})})
+    assert helpers.is_full_volume_group('GF') is True
+    assert helpers.can_push_group('GF') is False
 
+
+def test_can_push_group_unknown_state_uses_short_ttl(monkeypatch):
+    """★ bot 未就绪时**不能**把「未知」当「无权限」钉死 —— 冷启动(框架先 load
+    插件、后启 BotRegistry)必然撞上这一刻,长 TTL 会让整个进程都推不出消息。
+    短 TTL 到期后重查即自愈。"""
+    monkeypatch.setattr(helpers, '_PUSH_MISS_TTL', 0.05)
+    _set_bots(monkeypatch, {})                       # bot 尚未就绪
+    assert helpers.can_push_group('GP') is False
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'groups_users': [{'allow_proactive_msg': 1}]})})
+    assert helpers.can_push_group('GP') is False     # 短 TTL 未到,仍用缓存
+    time.sleep(0.06)
+    assert helpers.can_push_group('GP') is True      # 过期重查 → 自愈
+
+
+def test_can_push_group_unknown_group_uses_short_ttl(monkeypatch):
+    """★ DB 里查不到该群同样用短 TTL:``allow_proactive_msg`` 只在 bot 入群 /
+    面板刷新群资料时才落库,权限刚授予的群此刻还没有行 —— 长 TTL 会让它白等
+    一个刷新周期。"""
+    monkeypatch.setattr(helpers, '_PUSH_MISS_TTL', 0.05)
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={'groups_users': []})})
+    assert helpers.can_push_group('GNEW') is False
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'groups_users': [{'allow_proactive_msg': 1}]})})
+    assert helpers.can_push_group('GNEW') is False    # 短 TTL 内仍走缓存
+    time.sleep(0.06)
+    assert helpers.can_push_group('GNEW') is True     # 过期重查即生效
+
+
+def test_invalidate_push_cache_on_rebind(monkeypatch):
+    """权限是 per-bot 的,换绑后旧结论必须全部作废。"""
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'groups_users': [{'allow_proactive_msg': 1}]})})
+    assert helpers.can_push_group('GP') is True
+    _set_bots(monkeypatch, {'B': _FakeBot('B', rows={
+        'groups_users': [{'allow_proactive_msg': 0}]})})
+    assert helpers.can_push_group('GP') is True      # 仍是旧 bot 的缓存
+    helpers.invalidate_push_cache()
+    assert helpers.can_push_group('GP') is False
+
+
+def test_push_cache_prunes_expired_entries(monkeypatch):
+    """缓存条目数由活跃群数决定;逼近上限时先清过期项,不会无限涨。"""
+    monkeypatch.setattr(helpers, '_PUSH_CACHE_MAX', 4)
+    monkeypatch.setattr(helpers, '_PUSH_TTL', 0.05)
+    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
+        'groups_users': [{'allow_proactive_msg': 1}]})})
+    for i in range(4):
+        helpers.can_push_group(f'G{i}')
+    assert len(helpers._push_cache()) == 4
+    time.sleep(0.06)                                  # 全部过期
+    helpers.can_push_group('GNEW')
+    assert len(helpers._push_cache()) == 1            # 过期项被清掉,只剩新的
 
 
 def test_is_full_volume_group_trusts_runtime_set_only():

@@ -67,17 +67,6 @@ pending_new_game_name: dict[str, str] = _p['pending_new_game_name']
 # 进程重启即丢,首次在某全量群收到 non-AT 消息前会暂时按非全量行为兜底。
 full_volume_groups: set[str] = _p['full_volume_groups']
 
-# 「主动推送」权限群集合 —— 与全量群是**两种不同的权限**,QQ 后台分别开通:
-#   · 全量消息(is_full_access)  bot 收得到群里的全部消息
-#   · 主动推送(allow_proactive_msg)  bot 可以不引用 msg_id 主动发消息
-# 真正决定「用不用刷新按钮」的是后者。数据来自框架 ``groups_users``
-# (``get_group_bot_state`` 调 QQ ``bot_state`` 接口后同步落库),由
-# ``helpers.seed_full_volume_groups_from_db`` 在绑定生效时一次性载入。
-#
-# 与 full_volume_groups 的差别:后者能靠收到 GROUP_MESSAGE_CREATE 在运行时自证,
-# 本集合没有等价的运行时信号 —— 框架没为该群查过 bot_state 时会是空的,
-# 此时按「无权限」兜底(退回刷新按钮机制),方向安全。
-proactive_groups: set[str] = _p['proactive_groups']
 
 
 def is_planned_restart() -> bool:

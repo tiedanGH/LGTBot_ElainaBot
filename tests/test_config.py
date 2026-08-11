@@ -381,6 +381,19 @@ def test_persist_bind_appends_with_comment_when_key_absent(_cfg_file):
     assert "bind_bot_appid: 'A1'" in text
 
 
+def test_rebind_invalidates_push_permission_cache(_cfg_file, monkeypatch):
+    """★ 主动推送权限是 **per-bot** 的:换绑 / 重载配置后旧 bot 的结论必须作废,
+    否则新 bot 会沿用上一个 bot 的推送资格判定(该挂刷新按钮的群不挂,或反之)。"""
+    from plugins.LGTBot_ElainaBot.mod import helpers
+    helpers._push_cache()['G1'] = (True, 9e9)
+    config.persist_bind_bot_appid('NEWBOT')
+    assert helpers._push_cache() == {}
+
+    helpers._push_cache()['G1'] = (True, 9e9)
+    config._apply_runtime_tunables(_base_cfg(bind_bot_appid='OTHER'))
+    assert helpers._push_cache() == {}
+
+
 def test_persist_bind_creates_file_and_clears_binding(_cfg_file):
     """文件不存在照样落地;空串 = 解除绑定(回到自动第一个)。"""
     ok, _msg = config.persist_bind_bot_appid('')

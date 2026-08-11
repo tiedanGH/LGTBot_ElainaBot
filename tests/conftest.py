@@ -59,8 +59,7 @@ _persistent: dict = {
     'active_matches': {},
     'pending_new_game_name': {},
     'full_volume_groups': set(),
-    'proactive_groups': set(),
-    'group_perms_watcher': None,
+    'group_push_cache': {},
     'mention_rewrites': {},
 }
 
@@ -122,7 +121,7 @@ def _clean_runtime_state():
     _persistent['active_matches'].clear()
     _persistent['pending_new_game_name'].clear()
     _persistent['full_volume_groups'].clear()
-    _persistent['proactive_groups'].clear()
+    _persistent['group_push_cache'].clear()
     _persistent['mention_rewrites'].clear()
 
     # 清 uploader 模块状态(若已被 import)
@@ -154,3 +153,4 @@ def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+

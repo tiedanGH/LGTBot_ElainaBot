@@ -217,8 +217,8 @@ if _chdir_ok:
 #   current_game     - 群/用户 → 当前游戏名（/规则 按钮回查用，见 state.py）
 #   full_volume_groups - 已观测到 GROUP_MESSAGE_CREATE 的群 openid 集合
 #                       （helpers.is_full_volume_group 唯一信号源）
-#   proactive_groups - QQ 后台开了「主动推送」权限的群 openid 集合
-#                       （与全量群是两种权限，见 helpers.can_push_group）
+#   group_push_cache - 群 → (可否主动推送, 过期时间) 的 TTL 缓存
+#                       （helpers.can_push_group 按群点查 DB 的结果缓存）
 #   log_attribution_ctxvar - log_attribution 模块的 ContextVar 实例
 #                       （跨热重载身份保持,patched _log_push 闭包要捕获同一个对象）
 #
@@ -239,7 +239,7 @@ _PERSIST_DEFAULTS: dict = {
     'active_matches':          {},
     'pending_new_game_name':   {},
     'full_volume_groups':      set(),
-    'proactive_groups':        set(),
+    'group_push_cache':        {},
     'log_attribution_ctxvar':  None,
     'mention_rewrites':        {},
 }
