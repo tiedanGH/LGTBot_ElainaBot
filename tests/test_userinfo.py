@@ -63,18 +63,23 @@ class FakeBot:
 
 # ──────── 建库 helpers(schema 对齐主框架) ────────────────────────────────
 
-def _init_data_db(base: str, users=(), members=(), groups=()) -> None:
+def _init_data_db(base: str, users=(), members=(), groups=(), group_names=None) -> None:
     conn = sqlite3.connect(os.path.join(base, 'data.db'))
     conn.execute('CREATE TABLE users (user_id TEXT PRIMARY KEY, '
                  "name TEXT DEFAULT '', state INTEGER DEFAULT 0)")
     conn.execute('CREATE TABLE members (user_id TEXT PRIMARY KEY)')
     conn.execute('CREATE TABLE groups_users (group_id TEXT PRIMARY KEY, '
-                 "users TEXT DEFAULT '[]', in_group INTEGER DEFAULT 1)")
+                 "users TEXT DEFAULT '[]', group_name TEXT DEFAULT '', "
+                 'in_group INTEGER DEFAULT 1)')
     conn.executemany('INSERT INTO users (user_id, name) VALUES (?,?)', users)
     conn.executemany('INSERT INTO members (user_id) VALUES (?)',
                      [(m,) for m in members])
     conn.executemany('INSERT INTO groups_users (group_id, users, in_group) '
                      'VALUES (?,?,?)', groups)
+    for gid, gname in (group_names or {}).items():
+        conn.execute('INSERT INTO groups_users (group_id, group_name) VALUES (?,?) '
+                     'ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name',
+                     (gid, gname))
     conn.commit()
     conn.close()
 
@@ -338,3 +343,26 @@ def test_dm_active_count_window(fake_bot):
     ])
     assert userinfo.dm_active_count(7) == 2
     assert userinfo.dm_active_count(8) == 3
+
+
+# ──────── 群名批量查询(仪表盘「进行中的对局」展示名用) ────────────────────
+
+def test_get_group_names_batches_and_filters(fake_bot, tmp_path):
+    """一次 IN 查完全部群(进行中对局通常个位数,不逐个往返);
+    只回传真的查到非空名字的群 —— 空名 / 查不到的交给调用方降级。"""
+    _init_data_db(str(tmp_path), group_names={'G1': '铁蛋的游戏群', 'G2': '', 'G3': '测试群'})
+    got = userinfo.get_group_names(['G1', 'G2', 'G3', 'GX'])
+    assert got == {'G1': '铁蛋的游戏群', 'G3': '测试群'}   # G2 空名、GX 不存在都不回传
+
+
+def test_get_group_names_edge_cases(fake_bot, tmp_path):
+    """空入参 / 全是空串 → 不查库直接 {};无 bot 同样 {}(调用方回退 openid)。"""
+    _init_data_db(str(tmp_path), group_names={'G1': '群一'})
+    assert userinfo.get_group_names([]) == {}
+    assert userinfo.get_group_names(['', None]) == {}
+    monkey = userinfo._bound_bot
+    userinfo._bound_bot = lambda: None
+    try:
+        assert userinfo.get_group_names(['G1']) == {}
+    finally:
+        userinfo._bound_bot = monkey

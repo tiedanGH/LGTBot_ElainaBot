@@ -56,6 +56,74 @@ def test_update_hint_empty_without_cache_or_on_failure(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 进行中的对局:群局展示名的三级降级
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_active_matches_group_name_fallback_chain(monkeypatch):
+    """★ 群局展示名 **备注名 → 群名称 → openid** 三级降级,并用 ``name_src``
+    告诉前端命中了哪一级(备注名要加粗突出,自动取来的群名不加)。"""
+    from plugins.LGTBot_ElainaBot.mod import state
+    pd = _pd()
+    monkeypatch.setattr(pd, '_group_remarks',
+                        lambda: {'GR': {'name': '运维备注群'}})
+    monkeypatch.setattr(pd.userinfo, 'get_group_names',
+                        lambda gids: {'GN': '真实群名'})
+    monkeypatch.setattr(pd.userinfo, 'get_name', lambda uid: '铁蛋')
+    state.active_matches.clear()
+    for i, (tid, is_uid) in enumerate([('GR', False), ('GN', False),
+                                       ('GX', False), ('U1', True)]):
+        state.active_matches[f'k{i}'] = {'target_id': tid, 'is_uid': is_uid,
+                                         'game': '五子棋', 'since': 100 - i}
+    try:
+        view = {m['id']: m for m in pd._active_matches_view()}
+        assert (view['GR']['name'], view['GR']['name_src']) == ('运维备注群', 'remark')
+        assert (view['GN']['name'], view['GN']['name_src']) == ('真实群名', 'group')
+        assert (view['GX']['name'], view['GX']['name_src']) == ('', '')   # 前端显 openid
+        assert (view['U1']['name'], view['U1']['name_src']) == ('铁蛋', 'user')
+    finally:
+        state.active_matches.clear()
+
+
+def test_active_matches_skips_group_lookups_for_dm_only(monkeypatch):
+    """纯私聊场景不读备注文件、不查群名 —— 省掉无谓的磁盘 IO 与查询;
+    有备注名的群也不再查群名(备注优先级更高,查了也用不上)。"""
+    from plugins.LGTBot_ElainaBot.mod import state
+    pd = _pd()
+    calls = {'remarks': 0, 'names': []}
+
+    def _remarks():
+        calls['remarks'] += 1
+        return {'GR': {'name': '运维备注群'}}
+    monkeypatch.setattr(pd, '_group_remarks', _remarks)
+    monkeypatch.setattr(pd.userinfo, 'get_group_names',
+                        lambda gids: calls['names'].append(list(gids)) or {})
+    monkeypatch.setattr(pd.userinfo, 'get_name', lambda uid: '铁蛋')
+    state.active_matches.clear()
+    state.active_matches['k'] = {'target_id': 'U1', 'is_uid': True,
+                                 'game': 'x', 'since': 1}
+    try:
+        pd._active_matches_view()
+        assert calls == {'remarks': 0, 'names': []}          # 纯私聊:两者都不碰
+
+        state.active_matches['g'] = {'target_id': 'GR', 'is_uid': False,
+                                     'game': 'x', 'since': 2}
+        pd._active_matches_view()
+        assert calls['remarks'] == 1
+        assert calls['names'] == []                          # 备注已覆盖 → 不查群名
+    finally:
+        state.active_matches.clear()
+
+
+def test_match_name_rendering_bolds_remark_only():
+    """前端契约:备注名包 <b>,群名普通字重,无名回退灰字 mono openid。"""
+    pd = _pd()
+    js, css = pd.TAB_JS, pd.TAB_CSS
+    assert "m.name_src === 'remark'" in js
+    assert 'dash-match-remark' in js and 'dash-match-remark' in css
+    assert 'dash-match-id' in js                              # openid 兜底仍在
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # 机器人绑定区的折叠契约(纯前端,只能查模板文本)
 # ─────────────────────────────────────────────────────────────────────────
 

@@ -624,22 +624,39 @@ def _remark_name(val) -> str:
 def _active_matches_view() -> list:
     """把 ``state.active_matches`` 整理成仪表盘可渲染的进行中对局列表(最近开始的在前)。
 
-    展示名:私聊局用主框架 users 表昵称(userinfo);群局优先用主框架的群备注名。两者查不到时前端回退显示 openid。
-    ``game`` 为空(如单机局开局广播无 brief且此前无 new_game)时交给前端显示「未知游戏」。
+    展示名:
+      · 私聊局 —— 主框架 users 表昵称(userinfo)
+      · 群局   —— **备注名 → 群名称 → 群 openid** 三级降级:备注名来自框架
+        ``data/group_remarks.json``(人工维护,最贴近运维语境),没有则取
+        ``groups_users.group_name``(框架查群资料接口后落库),还是空就交给前端
+        显示 openid。
+    ``name_src`` 告诉前端这个名字是哪一级来的('remark' / 'group' / ''),
+    前端据此给备注名加粗突出。
+    ``game`` 为空(如单机局开局广播无 brief 且此前无 new_game)时交给前端显示「未知游戏」。
     ``since`` 为开局时刻的 epoch 秒,时长由前端计算。
     """
     matches = list(state.active_matches.values())
-    # 仅在存在群局时才读备注文件,省掉纯私聊场景的磁盘 IO
-    remarks = _group_remarks() if any(not m.get('is_uid') for m in matches) else {}
+    gids = [str(m.get('target_id', '')) for m in matches if not m.get('is_uid')]
+    # 仅在存在群局时才读备注文件 / 查群名,省掉纯私聊场景的磁盘 IO 与查询
+    remarks = _group_remarks() if gids else {}
+    # 备注名已覆盖的群不必再查名字(备注优先级更高)
+    need = [g for g in gids if not _remark_name(remarks.get(g))]
+    gnames = userinfo.get_group_names(need) if need else {}
     out = []
     for rec in matches:
         is_uid = bool(rec.get('is_uid'))
         tid = str(rec.get('target_id', ''))
-        name = (userinfo.get_name(tid) or '') if is_uid else _remark_name(remarks.get(tid))
+        if is_uid:
+            name, src = (userinfo.get_name(tid) or ''), 'user'
+        else:
+            name, src = _remark_name(remarks.get(tid)), 'remark'
+            if not name:
+                name, src = gnames.get(tid, ''), 'group'
         out.append({
             'is_uid': is_uid,
             'id': tid,
             'name': name,
+            'name_src': src if name else '',
             'game': rec.get('game', '') or '',
             'since': rec.get('since', 0) or 0,
         })

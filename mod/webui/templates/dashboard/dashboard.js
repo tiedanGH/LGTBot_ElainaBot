@@ -92,9 +92,12 @@ function dashRenderMatches(data) {
   wrap.innerHTML = matches.map(m => {
     const isUid = !!m.is_uid;
     const idText = escapeHtml(String(m.id || ''));
-    /* 昵称(私信)/ 备注名(群聊)存在就只显示它;否则回退 openid(灰字 mono)。 */
+    /* 展示名三级降级(后端 _active_matches_view 已定好):昵称(私信)/ 备注名 → 群名称 → openid(灰字 mono)。
+       备注名是人工维护的,加粗突出与自动取来的群名区分开;name_src 由后端下发,前端不重复判定优先级。 */
     const loc = m.name
-      ? escapeHtml(m.name)
+      ? (m.name_src === 'remark'
+          ? '<b class="dash-match-remark">' + escapeHtml(m.name) + '</b>'
+          : escapeHtml(m.name))
       : '<span class="dash-mono dash-match-id">' + idText + '</span>';
     const game = m.game ? escapeHtml(m.game) : '未知游戏';
     const since = dashFmtSince(m.since);

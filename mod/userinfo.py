@@ -117,6 +117,39 @@ def avatar_url(openid: str, size: int = 100) -> str:
     return _AVATAR_URL_TPL.format(appid=appid, openid=openid, size=size)
 
 
+def get_group_names(gids) -> dict:
+    """批量查群名:``{gid: group_name}``,只含真的查到非空名字的群。
+
+    数据来自框架 ``groups_users.group_name``(``get_group_info`` 调 QQ 接口后
+    落库)。**只读 DB 不碰接口** —— 群资料接口有频控,面板每次渲染都打会很快撞墙;
+    框架自己会在入群 / 面板刷新时把名字写进来。
+
+    一次 ``IN (...)`` 查完传入的全部群(进行中对局通常个位数),不逐个往返。
+    无 bot / 异常 / 空入参一律返回 ``{}``,调用方自行降级。
+    """
+    gids = [str(g) for g in (gids or []) if g]
+    if not gids:
+        return {}
+    bot = _bound_bot()
+    if bot is None:
+        return {}
+    try:
+        ph = ','.join('?' * len(gids))
+        rows = bot.log_service.query_data(
+            f'SELECT group_id, group_name FROM groups_users WHERE group_id IN ({ph})',
+            tuple(gids))
+    except Exception as e:
+        log.debug(f'userinfo.get_group_names 异常: {e}')
+        return {}
+    out = {}
+    for r in rows or []:
+        gid = str(r.get('group_id') or '')
+        name = str(r.get('group_name') or '').strip()
+        if gid and name:
+            out[gid] = name
+    return out
+
+
 def count_users() -> int:
     """框架 users 表总数(所有给绑定 bot 发过消息 / 点过按钮的用户)。"""
     bot = _bound_bot()
