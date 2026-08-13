@@ -333,6 +333,86 @@ def invalidate_push_cache() -> None:
         pass
 
 
+# ──── 权限时效:主动向 QQ 拉一次 bot_state ────────────────────────────────
+# 光靠读 DB 不够新:框架只在 **bot 入群** 与 **面板手动刷新群资料** 时才调 ``get_group_bot_state``
+# 写 ``allow_proactive_msg``,群主在 QQ 后台授权后**没有任何事件**通知框架 —— DB 里那个 0 会一直躺着,
+# 表现就是"授权很久了还在提醒消息回复受限"。所以这里自己去拉:框架那个方法本身就会把结果写回 DB,
+# 我们只需在拉完后把该群的缓存打掉,下一次判定即读到新值。
+#
+# 触发点(都很便宜,且都带节流):
+#   · can_push_group 得到否定结论时 —— 正是"可能已经授权但 DB 还没更新"的时刻
+#   · dispatcher 收到 GROUP_MESSAGE_CREATE 时 —— 该事件本身就是全量消息权限的
+#     直接证据,权限刚变动的可能性最高,借它做快速识别
+_PUSH_PROBE_KEY = 'group_push_probe_at'   # gid → 上次发起探测的时刻
+_PUSH_PROBE_INTERVAL = 60.0               # 每群最多每 60s 拉一次(群资料接口有频控)
+
+
+def _probe_marks() -> dict:
+    p = boot._get_persistent()
+    m = p.get(_PUSH_PROBE_KEY)
+    if m is None:
+        m = p[_PUSH_PROBE_KEY] = {}
+    return m
+
+
+def refresh_group_push_permission(gid: str) -> None:
+    """异步拉一次该群的 bot_state 刷新权限位(节流 + fire-and-forget)。
+
+    同步可调 —— C++ 工作线程也会走到这里,协程用 run_coroutine_threadsafe 丢给
+    事件循环,不阻塞调用方。拉取失败静默(下次节流窗口过后再试)。
+    """
+    if not gid:
+        return
+    try:
+        marks = _probe_marks()
+        now = time.time()
+        last = marks.get(gid, 0.0)
+        if now - last < _PUSH_PROBE_INTERVAL:
+            return
+        marks[gid] = now
+        bot = get_bound_bot()
+        loop = state.event_loop
+        if bot is None or loop is None or loop.is_closed():
+            return
+        sender = getattr(bot, 'sender', None)
+        if sender is None or not hasattr(sender, 'get_group_bot_state'):
+            return
+        asyncio.run_coroutine_threadsafe(_do_probe(sender, gid), loop)
+    except Exception as e:
+        log.debug(f'调度群 {gid} 权限刷新失败: {e}')
+
+
+async def _do_probe(sender, gid: str) -> None:
+    """调框架 ``get_group_bot_state``(它自己写回 DB),完成后打掉该群缓存。"""
+    try:
+        await sender.get_group_bot_state(gid, return_error=True)
+    except Exception as e:
+        log.debug(f'刷新群 {gid} bot_state 失败: {e}')
+        return
+    # 不看返回值:框架已把最新权限位落库,这里只负责让下次判定重新读 DB
+    try:
+        _push_cache().pop(gid, None)
+    except Exception:
+        pass
+
+
+def note_group_message(gid: str) -> None:
+    """收到 ``GROUP_MESSAGE_CREATE`` 时调用 —— 全量消息权限的直接证据。
+
+    除了记进 ``full_volume_groups``,还借机探一次主动推送权限:两个权限通常
+    在同一次授权流程里一起变动,这个事件是我们能拿到的**最快**的变动信号
+    (否则要等 DB 被别的路径刷新)。节流由 ``refresh_group_push_permission`` 负责。
+    """
+    if not gid:
+        return
+    state.full_volume_groups.add(gid)
+    # 已确知可推送的群不必再探(缓存命中且为 True)
+    hit = _push_cache().get(gid)
+    if hit is not None and hit[0] and time.time() < hit[1]:
+        return
+    refresh_group_push_permission(gid)
+
+
 def can_push_group(gid: str) -> bool:
     """``gid`` 能否让 bot **不依赖刷新按钮**正常发消息(主动推送资格)。
 
@@ -366,12 +446,17 @@ def can_push_group(gid: str) -> bool:
         rows = bot.log_service.query_data(_SQL_GROUP_PUSH, (gid,))
         if not rows:
             cache[gid] = (False, now + _PUSH_MISS_TTL)
+            refresh_group_push_permission(gid)     # 该群还没被框架查过,拉一次
             return False
         ok = bool(rows[0].get('allow_proactive_msg'))
         if len(cache) >= _PUSH_CACHE_MAX:
             for k in [k for k, v in cache.items() if v[1] <= now]:
                 cache.pop(k, None)
-        cache[gid] = (ok, now + _PUSH_TTL)
+        # 否定结论只缓存 MISS_TTL 而非 TTL:DB 里的 0 可能只是"授权后还没人刷新过",
+        # 同时主动拉一次 bot_state —— 真授权了的话下次判定就能翻过来
+        cache[gid] = (ok, now + (_PUSH_TTL if ok else _PUSH_MISS_TTL))
+        if not ok:
+            refresh_group_push_permission(gid)
         return ok
     except Exception as e:
         log.warning(f'查询群 {gid} 主动推送权限失败: {e}')

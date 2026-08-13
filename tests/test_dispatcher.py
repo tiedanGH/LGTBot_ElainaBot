@@ -246,6 +246,27 @@ async def test_dispatch_at_self_guard_blocks_group_chitchat(patched_downstream):
     patched_downstream['thread_start'].assert_not_called()
 
 
+async def test_group_message_event_notes_permission_change(patched_downstream,
+                                                           monkeypatch):
+    """★ GROUP_MESSAGE_CREATE 必须走 ``helpers.note_group_message`` 而不是只往
+    full_volume_groups 里塞 —— 这是权限变动最快的信号,要借它顺带探一次主动推送
+    权限(群主在 QQ 后台授权不产生任何事件,光等 DB 会拖很久)。
+    非 GROUP_MESSAGE_CREATE 的事件不触发。"""
+    _state.started = True
+    seen: list = []
+    monkeypatch.setattr(dispatcher.helpers, 'note_group_message', seen.append)
+
+    await dispatcher.lgtbot_dispatch(_mock_event(
+        event_type=dispatcher.GROUP_MESSAGE_CREATE, is_group=True,
+        group_id='GFULL', user_id='U1', message_id='M1', is_at_self=True), None)
+    assert seen == ['GFULL']
+
+    await dispatcher.lgtbot_dispatch(_mock_event(
+        event_type=dispatcher.GROUP_AT_MESSAGE_CREATE, is_group=True,
+        group_id='GAT', user_id='U1', message_id='M2', is_at_self=True), None)
+    assert seen == ['GFULL']          # @ 消息不代表全量权限,不触发
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 8. _is_blocked_command:内置屏蔽项 + 配置追加项
 # ─────────────────────────────────────────────────────────────────────────

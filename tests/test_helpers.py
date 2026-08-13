@@ -391,6 +391,114 @@ def test_can_push_group_unknown_group_uses_short_ttl(monkeypatch):
     assert helpers.can_push_group('GNEW') is True     # 过期重查即生效
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 权限时效:主动拉 bot_state
+# ─────────────────────────────────────────────────────────────────────────
+
+class _ProbeSender:
+    def __init__(self):
+        self.calls: list = []
+
+    async def get_group_bot_state(self, gid, return_error=False):
+        self.calls.append(gid)
+        return (None, None)
+
+
+def _bot_with_sender(sender, rows):
+    b = _FakeBot('A', rows=rows)
+    b.sender = sender
+    return b
+
+
+async def test_negative_result_triggers_bot_state_probe(monkeypatch):
+    """★ 授权后不必干等:DB 说「无权限」时主动拉一次 bot_state ——
+    框架只在入群 / 面板手动刷新时才写 allow_proactive_msg,群主在 QQ 后台授权
+    **不产生任何事件**,DB 里那个 0 会一直躺着。拉完打掉缓存,下次判定读到新值。"""
+    sender = _ProbeSender()
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 0}]})})
+    assert helpers.can_push_group('GP') is False
+    await asyncio.sleep(0)                       # 让 fire-and-forget 的探测跑完
+    await asyncio.sleep(0)
+    assert sender.calls == ['GP']
+    assert 'GP' not in helpers._push_cache()     # 探测完成后缓存已失效
+
+
+async def test_negative_result_cached_only_briefly(monkeypatch):
+    """★ 否定结论只缓存短 TTL:DB 里的 0 常常只是「授权了但没人刷新过」,用长 TTL 会让刚授权的群白等 5 分钟。肯定结论才用长 TTL。"""
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        _ProbeSender(), {'groups_users': [{'allow_proactive_msg': 0}]})})
+    helpers.can_push_group('GNO')
+    exp_no = helpers._push_cache().get('GNO', (None, 0))[1] - time.time()
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        _ProbeSender(), {'groups_users': [{'allow_proactive_msg': 1}]})})
+    helpers.can_push_group('GYES')
+    exp_yes = helpers._push_cache().get('GYES', (None, 0))[1] - time.time()
+    assert exp_no <= helpers._PUSH_MISS_TTL + 1
+    assert exp_yes > helpers._PUSH_MISS_TTL + 1        # 肯定结论明显更久
+
+
+async def test_positive_result_does_not_probe(monkeypatch):
+    """已确认有权限的群不再打接口(群资料接口有频控,省着用)。"""
+    sender = _ProbeSender()
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 1}]})})
+    assert helpers.can_push_group('GP') is True
+    await asyncio.sleep(0)
+    assert sender.calls == []
+
+
+async def test_probe_is_throttled_per_group(monkeypatch):
+    """节流:同一个群 60s 内只拉一次,别把接口打爆。"""
+    sender = _ProbeSender()
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(sender, {'groups_users': []})})
+    for _ in range(5):
+        helpers.refresh_group_push_permission('GP')
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert sender.calls == ['GP']
+    # 节流窗口过后可再拉
+    monkeypatch.setattr(helpers, '_PUSH_PROBE_INTERVAL', 0.0)
+    helpers.refresh_group_push_permission('GP')
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert sender.calls == ['GP', 'GP']
+
+
+async def test_group_message_event_marks_full_volume_and_probes(monkeypatch):
+    """★ GROUP_MESSAGE_CREATE 是权限变动最快的信号:记全量群 + 顺带探一次推送权限。已确知可推送的群跳过探测。"""
+    sender = _ProbeSender()
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(sender, {'groups_users': []})})
+    helpers.note_group_message('GNEW')
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert 'GNEW' in state.full_volume_groups
+    assert sender.calls == ['GNEW']
+
+    helpers._push_cache()['GOK'] = (True, time.time() + 999)
+    helpers.note_group_message('GOK')
+    await asyncio.sleep(0)
+    assert sender.calls == ['GNEW']              # 已确知可推送 → 不探
+    assert 'GOK' in state.full_volume_groups
+
+    helpers.note_group_message('')               # 空 gid 不炸也不探
+    assert sender.calls == ['GNEW']
+
+
+def test_probe_noop_without_loop_or_bot(monkeypatch):
+    """无事件循环 / 无 bot 时静默跳过(C++ 线程也会走到这里,绝不能抛)。"""
+    monkeypatch.setattr(state, 'event_loop', None)
+    _set_bots(monkeypatch, {'A': _bot_with_sender(_ProbeSender(), {'groups_users': []})})
+    helpers.refresh_group_push_permission('GP')   # 不抛即通过
+    _set_bots(monkeypatch, {})
+    helpers.refresh_group_push_permission('GP2')
+
+
 def test_invalidate_push_cache_on_rebind(monkeypatch):
     """权限是 per-bot 的,换绑后旧结论必须全部作废。"""
     _set_bots(monkeypatch, {'A': _FakeBot('A', rows={

@@ -1002,11 +1002,11 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     if not state.started:
         return
 
-    # GROUP_MESSAGE_CREATE 事件本身就是 QQ 给本 bot 在该群开了「全量推送」
-    # 的直接证据(QQ 后台没开根本不会投递),记下 gid 给 callbacks 端
-    # is_full_volume_group 用 —— 比框架 non_at_message 配置(可能滞后/缺失)更准。
+    # GROUP_MESSAGE_CREATE 事件本身就是 QQ 给本 bot 在该群开了「全量消息」权限的直接证据(QQ 后台没开根本不会投递)
+    # 比框架 non_at_message 配置(可能滞后 / 缺失)更准。note_group_message 除了记进 full_volume_groups,
+    # 还借这个最快的变动信号顺带探一次主动推送权限(节流,详见 helpers)。
     if event.event_type == GROUP_MESSAGE_CREATE and event.group_id:
-        state.full_volume_groups.add(event.group_id)
+        helpers.note_group_message(event.group_id)
 
     # 全量群里的日常对话必须挡掉(避免 r'.*' + ignore_at_check 把所有群消息
     # 都派给引擎)。这道闸**只对 GROUP_MESSAGE_CREATE 应用**:
