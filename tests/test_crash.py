@@ -427,6 +427,11 @@ def test_core_section_frontend_contract():
     m = re.search(r'\.crash-col-name\s*\{[^}]*width:\s*(\d+)px', css)
     assert m and int(m.group(1)) >= 400, m and m.group(1)
 
+    # 引擎崩溃重启卡的副行只留「最近一次」—— 分信号明细下方列表逐条可见,不重复
+    restart_fn = js[js.index('function crashApplyRestart'):js.index('function crashIdCell')]
+    assert '最近 ' in restart_fn and '暂无崩溃记录' in restart_fn
+    assert 'crash_by_sig' not in restart_fn and '×' not in restart_fn
+
     # 两个标题都带数量括号,同一个样式类
     assert 'id="crash-count-badge"' in html and 'id="crash-core-badge"' in html
     assert html.count('class="crash-title-badge"') == 2

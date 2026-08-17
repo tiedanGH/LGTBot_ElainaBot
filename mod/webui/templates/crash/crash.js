@@ -34,16 +34,15 @@ function crashSigClass(sig) {
   return 'misc';
 }
 
-/* 引擎崩溃重启卡片 —— 与「指标面板 · 运行指标」同格式(累计次数 / 分信号 / 最近一次) */
+/* 引擎崩溃重启卡片:累计次数 + 最近一次时间。不再列分信号明细(SIGSEGV ×N …)—— 下方转储列表每条都带信号列,一眼能看到,
+   在卡片上重复一遍只是把这行挤长。payload 里的 crash_by_sig 仍保留给指标面板用。 */
 function crashApplyRestart(r) {
   r = r || {};
   const total = r.crash_total || 0;
   document.getElementById('crash-restart-total').textContent = total + ' 次';
-  const bySig = r.crash_by_sig || {};
-  const parts = Object.entries(bySig).map(([sig, n]) => sig + ' ×' + n);
-  if (total > 0 && r.last_crash_ts) parts.push('最近 ' + crashFmtTime(r.last_crash_ts));
   document.getElementById('crash-restart-sub').textContent =
-      parts.length ? parts.join(' · ') : '暂无崩溃记录';
+      (total > 0 && r.last_crash_ts) ? ('最近 ' + crashFmtTime(r.last_crash_ts))
+                                     : '暂无崩溃记录';
 }
 
 /* 触发源分两列(用户 / 群聊)完整展示;有值则点击即可复制完整 ID */
