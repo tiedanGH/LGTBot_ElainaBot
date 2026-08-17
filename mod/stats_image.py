@@ -5,10 +5,13 @@
 样式对齐本插件 Web 面板的浅色主题(webui templates/main/main.css 的
 light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左侧色条标题),
 内容为 lgtbot 游戏数据:
-  · 数据总览:第一行 今日活跃玩家 / 今日活跃群聊(涨跌胶囊对比昨日同时段),
-    第二行 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期),
-    第三行群组总数 / 好友总数(``g['bot_groups']`` / ``['bot_friends']``,
-    胶囊是**今日净变化**本身而非与昨日对比),最后可选的主动消息额度通栏
+  · 数据总览,自上而下**先累计总数、再今日数据**:
+      1. 群组总数 / 好友总数(``g['bot_groups']`` / ``['bot_friends']``)——
+         这一行不是今日数据,所以底色换成 accent 系浅蓝紫 ``_TOTAL_BG``、角标用**描边**
+         胶囊,与下面的今日行一眼区分;角标是**今日净变化**本身,不是与昨日对比
+      2. 今日活跃玩家 / 今日活跃群聊(实底胶囊,对比昨日同时段)
+      3. 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期)
+      4. 可选的主动消息额度通栏
   · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条
 
@@ -46,6 +49,9 @@ _GREEN = (22, 163, 74)          # 涨(对局变多是积极信号)
 _RED = (220, 53, 69)            # 跌 / 面板 crash 红 #dc3545
 _WARN = (230, 162, 60)          # 警告黄(同面板计划重启按钮高亮 #e6a23c)
 _TAG_BG = (238, 240, 247)       # --tag-bg  #eef0f7
+# 累计总数卡的底色 / 边框 —— accent(#5b6ee8)按 15% / 30% 兑白得到的浅蓝紫。
+_TOTAL_BG = (230, 233, 251)
+_TOTAL_BORDER = (205, 211, 248)
 _RANK_COLORS = ((255, 172, 20), (160, 174, 192), (219, 154, 108))  # 金银铜
 
 # 排行榜条数上限(文本回退仍为 3 条控制消息长度)
@@ -142,9 +148,13 @@ def _section(d, box, radius=12, top_accent=False):
         d.rounded_rectangle((x0, y0, x1, y0 + 4), radius=2, fill=_ACCENT)
 
 
-def _tile(d, box, radius=8):
-    """区块内的小卡(panel-2 底,同面板 .metrics-status-card)。"""
-    d.rounded_rectangle(box, radius=radius, fill=_PANEL2, outline=_BORDER, width=1)
+def _tile(d, box, radius=8, fill=_PANEL2, outline=_BORDER):
+    """区块内的小卡(默认 panel-2 底,同面板 .metrics-status-card)。
+
+    ``fill`` / ``outline`` 用于区分数据口径:今日类指标用默认的近白底,累计总数类
+    用 ``_TOTAL_BG`` + ``_TOTAL_BORDER``(浅蓝紫),一眼能看出那一行不是"今天"的数字。
+    """
+    d.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=1)
 
 
 def _sec_title(d, x, y, text):
@@ -153,11 +163,13 @@ def _sec_title(d, x, y, text):
     _bold_text(d, (x + 22, y), text, _font(28), _TEXT)
 
 
-def _delta_pill(d, x, y, diff, h=40) -> int:
-    """涨跌胶囊(对比昨日同时段 / 上个区间),返回宽度。
+def _delta_pill(d, x, y, diff, h=40, *, outline=False, bg=None) -> int:
+    """涨跌胶囊,返回宽度。配色照搬主框架 dau 卡片:**涨红跌绿**、平灰。
 
-    风格与配色照搬主框架 dau 卡片:**涨红跌绿**、粗体、写死的浅色底 ——
-    两种统计图会被并排看到,标签形态必须一致。
+    两种形态,区分两类不同口径的角标:
+      · 实底(默认)—— 今日指标 vs「昨日同时段 / 上个区间」
+      · 描边(``outline=True``)—— 累计总数的**今日净增减**,只描边不填色;
+        ``bg`` 传所在卡片的底色,让胶囊内部与卡面齐平(看着是空心的)
     """
     if diff is None:
         return 0
@@ -169,7 +181,11 @@ def _delta_pill(d, x, y, diff, h=40) -> int:
         txt, fg = '· 0', _TEXT_MUTED
     f = _font(22)
     w = _text_w(d, txt, f) + 26
-    d.rounded_rectangle((x, y, x + w, y + h), radius=h // 2, fill=_tint(fg))
+    box = (x, y, x + w, y + h)
+    if outline:
+        d.rounded_rectangle(box, radius=h // 2, fill=(bg or _PANEL2), outline=fg, width=2)
+    else:
+        d.rounded_rectangle(box, radius=h // 2, fill=_tint(fg))
     d.text((x + 13, y + (h - 22) // 2 - 4), txt, font=f, fill=fg)
     return w
 
@@ -316,9 +332,37 @@ def _render(g: dict, sub_title: str) -> bytes | None:
         ]
     tile_w = (inner_w - 28 * 2 - tile_gap) // 2
     ty0 = y + 68
+
+    # ── bot 规模:群组总数 / 好友总数 —— 排在**第一行**(标题正下方)。
+    # 这两个是累计总数、不是今天的数字,所以放最上面先给全局盘子,再往下看今日。
+    # 数据来自框架绑定 bot 的 data.db(userinfo.count_groups / count_friends)。
+    scale_rows = 0
+    if show_scale:
+        scale_rows = 1
+        # 图标 / 配色与今日行错开:群组用 accent 蓝(区别于活跃群聊的橙)
+        srow = [('群组总数', g.get('bot_groups'), g.get('bot_groups_delta'),
+                 'group', _ACCENT),
+                ('好友总数', g.get('bot_friends'), g.get('bot_friends_delta'),
+                 'friend', (232, 121, 249))]
+        cy = ty0
+        for i, (label, val, delta, icon, fg) in enumerate(srow):
+            cx = pad + 28 + i * (tile_w + tile_gap)
+            _tile(d, (cx, cy, cx + tile_w, cy + tile_h),
+                  fill=_TOTAL_BG, outline=_TOTAL_BORDER)
+            _icon(d, icon, cx + 24, cy + (tile_h - 52) // 2, fg)
+            d.text((cx + 96, cy + 24), label, font=_font(24), fill=_TEXT_MUTED)
+            _bold_text(d, (cx + 96, cy + 60), _fmt(val), _font(48), _ACCENT)
+            # 这里的 delta 已经是净变化本身(不是"昨日值"),0 也画出来表示今日无变化。
+            # 用**描边**胶囊而非实底 —— 这一行的角标是「累计总数的今日净增减」,与"今日 vs 昨日同时段"不是一回事。
+            if delta is not None:
+                pw = _delta_pill(d, -1000, -1000, int(delta), outline=True)
+                _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, int(delta),
+                            outline=True, bg=_TOTAL_BG)
+
+    # ── 今日指标 2×2(值用 accent,同 .metrics-status-value)——排在总数行之下 ──
     for i, (label, val, y_val, icon, fg) in enumerate(cards):
         cx = pad + 28 + (i % 2) * (tile_w + tile_gap)
-        cy = ty0 + (i // 2) * (tile_h + tile_gap)
+        cy = ty0 + (scale_rows + i // 2) * (tile_h + tile_gap)
         _tile(d, (cx, cy, cx + tile_w, cy + tile_h))
         _icon(d, icon, cx + 24, cy + (tile_h - 52) // 2, fg)
         d.text((cx + 96, cy + 24), label, font=_font(24), fill=_TEXT_MUTED)
@@ -327,28 +371,6 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             diff = int(val) - int(y_val)
             pw = _delta_pill(d, -1000, -1000, diff)         # 预算宽度
             _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, diff)
-
-    # ── bot 规模:群组总数 / 好友总数(第 3 行,角标为今日净变化)──
-    # 数据来自框架绑定 bot 的 data.db(userinfo.count_groups / count_friends)。
-    scale_rows = 0
-    if show_scale:
-        scale_rows = 1
-        # 图标 / 配色都与上面两行错开:群组用 accent 蓝(区别于活跃群聊的橙)
-        srow = [('群组总数', g.get('bot_groups'), g.get('bot_groups_delta'),
-                 'group', _ACCENT),
-                ('好友总数', g.get('bot_friends'), g.get('bot_friends_delta'),
-                 'friend', (232, 121, 249))]
-        cy = ty0 + 2 * (tile_h + tile_gap)
-        for i, (label, val, delta, icon, fg) in enumerate(srow):
-            cx = pad + 28 + i * (tile_w + tile_gap)
-            _tile(d, (cx, cy, cx + tile_w, cy + tile_h))
-            _icon(d, icon, cx + 24, cy + (tile_h - 52) // 2, fg)
-            d.text((cx + 96, cy + 24), label, font=_font(24), fill=_TEXT_MUTED)
-            _bold_text(d, (cx + 96, cy + 60), _fmt(val), _font(48), _ACCENT)
-            # 这里的 delta 已经是净变化本身(不是"昨日值"),0 也画出来表示今日无变化
-            if delta is not None:
-                pw = _delta_pill(d, -1000, -1000, int(delta))
-                _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, int(delta))
 
     # ── 主动消息额度(通栏一行:用量 / 上限 + 进度条;用满转红)──
     # 非全量群走**黄色警告**变体:该群没有主动推送权限,额度数字没有意义,

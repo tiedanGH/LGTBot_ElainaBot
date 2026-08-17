@@ -193,28 +193,109 @@ def _colors(png: bytes) -> set:
     return {c for _n, c in im.getcolors(1 << 20)}
 
 
+def _first_bulk_y(png: bytes, rgb: tuple, min_run: int = 40):
+    """该颜色**成片**出现(某一行里至少 ``min_run`` 个像素)的最靠上行号,没有则 None。
+
+    不能用"存在即算":accent 色系元素(顶栏色条 / 标题字)的抗锯齿边缘会混出大量
+    中间色,恰好撞上目标色值的概率不低 —— 实测顶栏就能撞出一个 _TOTAL_BG。
+    只有整块卡面 / 图标底这种成片填充才够 min_run,单像素噪声自然被滤掉。
+    """
+    from io import BytesIO
+    from PIL import Image
+    im = Image.open(BytesIO(png)).convert('RGB')
+    w, h = im.size
+    px = im.load()
+    for y in range(h):
+        if sum(1 for x in range(w) if px[x, y] == rgb) >= min_run:
+            return y
+    return None
+
+
 def test_bot_scale_delta_is_net_change_not_yesterday():
     """★ 这两张卡的胶囊语义与其它卡**不同**:传进来的已经是今日净变化本身,
     不是「昨日值」—— 当成昨日值去做减法会算出相反数。
 
-    判据取 ``_tint(_RED)`` 的有无:本样本里没有别的 _RED 使用者(配额未告警),
-    所以「净增出现红底 / 净减不出现红底」能同时钉住两个方向。
-    (不用 _GREEN 判:活跃玩家的 person 图标底色就是它,满图都有。)
+    判据取 ``_RED``(描边 + 文字色)的有无:本样本里没有别的 _RED 使用者
+    (配额未告警、今日行也没给对比数据),所以「净增出现红 / 净减不出现红」
+    能同时钉住两个方向。(不用 _GREEN 判:活跃玩家的 person 图标就是它。)
     """
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
     base = dict(_sample_stats(with_trend=False, with_ranks=False),
                 bot_groups=100, bot_friends=100, bot_friends_delta=None)
-    red = stats_image._tint(stats_image._RED)
+    red = stats_image._RED
 
     up = stats_image.render_stats_image(dict(base, bot_groups_delta=5), sub_title='x')
     assert red in _colors(up)                       # 净增 = 涨 = 红
     down = stats_image.render_stats_image(dict(base, bot_groups_delta=-5), sub_title='x')
     assert red not in _colors(down)                 # 净减不该出现红
     flat = stats_image.render_stats_image(dict(base, bot_groups_delta=0), sub_title='x')
-    assert stats_image._tint(stats_image._TEXT_MUTED) in _colors(flat)
-    assert red not in _colors(flat)
+    assert red not in _colors(flat)                 # 持平也不该出现红
+
+
+def test_bot_scale_pill_is_outlined_today_pill_is_filled():
+    """★ 两类角标形态必须不同(用户要求):累计总数用**描边**胶囊、今日指标用
+    **实底**胶囊。判据是 ``_tint(_RED)``(实底胶囊的底色)—— 描边胶囊内部填的是
+    卡片底色,不会产生这个色值。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    filled = stats_image._tint(stats_image._RED)
+    base = _sample_stats(with_trend=False, with_ranks=False)
+
+    # 只有累计总数行带角标 → 描边,不该出现实底胶囊的底色
+    only_scale = stats_image.render_stats_image(
+        dict(base, bot_groups=100, bot_friends=100,
+             bot_groups_delta=5, bot_friends_delta=None), sub_title='x')
+    assert stats_image._RED in _colors(only_scale)
+    assert filled not in _colors(only_scale)
+
+    # 只有今日行带角标 → 实底
+    only_today = stats_image.render_stats_image(
+        dict(base, yesterday_matches_same_span=base['today_matches'] - 5),
+        sub_title='x')
+    assert filled in _colors(only_today)
+
+
+def test_total_bg_is_visibly_distinct_from_today_bg():
+    """★ 不能只断言"用了 _TOTAL_BG" —— 那是同义反复(测试读的就是这个常量,
+    改常量等于同时改期望)。这里改为约束**色差本身**:与今日卡的 _PANEL2 至少有
+    一个通道相差 16 个色阶。反例:曾经用过的 _TAG_BG 最大只差 12,并排几乎分不出。
+    色相仍可自由调整,只要分层足够。"""
+    d = [abs(a - b) for a, b in zip(stats_image._TOTAL_BG, stats_image._PANEL2)]
+    assert max(d) >= 16, (stats_image._TOTAL_BG, d)
+    # 边框也应比常规边框更明显,否则整块卡的轮廓会被卡面吃掉
+    db = [abs(a - b) for a, b in zip(stats_image._TOTAL_BORDER, stats_image._BORDER)]
+    assert max(db) >= 8, (stats_image._TOTAL_BORDER, db)
+
+
+def test_bot_scale_row_comes_first_and_has_distinct_bg():
+    """★ 行序与底色(用户要求):累计总数行排在**数据总览标题正下方**,今日行在其下;
+    且底色换成更深一档的 ``_TAG_BG``,与今日行的 ``_PANEL2`` 区分。
+
+    _TOTAL_BG 是这一行**专用**的色值(顶栏副标题小药丸用的是 _TAG_BG),
+    所以"它最靠上出现在哪一行"就等于这一行的位置。
+    """
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    g = dict(_sample_stats(with_trend=False, with_ranks=False),
+             bot_groups=1284, bot_friends=5391,
+             bot_groups_delta=7, bot_friends_delta=-3)
+    png = stats_image.render_stats_image(g, sub_title='')
+    # 阈值取 200px:卡面约 460px 宽,而描边胶囊的内部也填 _TOTAL_BG(~90px),
+    # 阈值放松到 40 的话胶囊就能冒充卡面,底色被改掉也测不出来
+    y_total = _first_bulk_y(png, stats_image._TOTAL_BG, min_run=200)
+    # 今日行的定位物:活跃玩家 person 图标的 52px 宽底块
+    y_today = _first_bulk_y(png, stats_image._tint(stats_image._GREEN))
+    assert y_total is not None and y_today is not None
+    assert y_total < y_today, (y_total, y_today)               # 总数行在今日行之上
+
+    # 没有累计总数时,_TAG_BG 不该出现在卡片区(证明它确实是这一行带来的)
+    plain = stats_image.render_stats_image(
+        _sample_stats(with_trend=False, with_ranks=False), sub_title='')
+    assert _first_bulk_y(plain, stats_image._TOTAL_BG, min_run=200) is None
 
 
 def test_friend_icon_distinct_from_person():
