@@ -624,6 +624,55 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
     assert '已用满' in txt2                        # 用满时给出说明
 
 
+async def test_stats_shows_bot_scale_with_net_change(monkeypatch):
+    """★ bot 规模(群组 / 好友总数)只注入**今日视图**,历史日 / 月视图不带
+    ——「当前总数」不是那天的事实。括号里是今日净变化本身,不是与昨日对比。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader, userinfo
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 1,
+                                 'today_players': 1, 'today_groups': 1,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    monkeypatch.setattr(userinfo, 'count_groups', lambda: 1284)
+    monkeypatch.setattr(userinfo, 'count_friends', lambda: 5391)
+    monkeypatch.setattr(userinfo, 'today_lifecycle_delta',
+                        lambda: {'group': 7, 'friend': -3})
+    mark_push_group('G1')
+
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    txt = ev.reply.await_args.args[0]
+    assert '群组总数: 1284 个（↑7）' in txt
+    assert '好友总数: 5391 人（↓3）' in txt
+
+    # 净变化为 0 → 持平;拿不到(None)→ 不带括号
+    monkeypatch.setattr(userinfo, 'today_lifecycle_delta',
+                        lambda: {'group': 0, 'friend': None})
+    ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
+    ev2.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev2, None)
+    txt2 = ev2.reply.await_args.args[0]
+    assert '群组总数: 1284 个（持平）' in txt2
+    assert '好友总数: 5391 人\n' in txt2 or txt2.rstrip().endswith('好友总数: 5391 人')
+
+    # 历史日视图不带这两项
+    import re as _re
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
+                        lambda ds: {'available': True, 'date': ds, 'day_matches': 3,
+                                    'day_players': 2, 'day_groups': 1,
+                                    'day_attendances': 5,
+                                    'top_games_day': [], 'top_players_day': []})
+    ev3 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0102')
+    ev3.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev3, _re.match(dispatcher._P_STATS, '数据统计0102'))
+    assert '群组总数' not in ev3.reply.await_args.args[0]
+
+
 async def test_stats_date_command_views_history(monkeypatch):
     """数据统计MMDD:历史日走 query_game_stats_for_date,无涨跌 / 无主动消息,
     文本含「当日对局人次」;该日无对局与非法日期分别报错。"""

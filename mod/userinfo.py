@@ -150,6 +150,75 @@ def get_group_names(gids) -> dict:
     return out
 
 
+def count_groups() -> int:
+    """绑定 bot **当前所在**的群数量。
+
+    与系统插件「用户统计」同源(``groups_users``),但多带 ``in_group`` 过滤 ——
+    框架 ``_handle_group_del`` 只把该列置 0、不删行,不过滤会把早就退掉的群算进来。
+    """
+    bot = _bound_bot()
+    if bot is None:
+        return 0
+    try:
+        rows = bot.log_service.query_data(
+            'SELECT COUNT(*) AS n FROM groups_users WHERE COALESCE(in_group, 1) = 1')
+        return int(rows[0].get('n') or 0) if rows else 0
+    except Exception as e:
+        log.debug(f'userinfo.count_groups 异常: {e}')
+        return 0
+
+
+def count_friends() -> int:
+    """绑定 bot 的好友数量(``members`` 表,同系统插件「用户统计」的好友总数)。
+
+    注意这是**累计加过好友的人数**:框架 ``_handle_friend_del`` 只记生命周期事件,
+    不从 members 删行 —— 口径由框架的数据模型决定,这里不自行修正,保持与「用户统计」一致。
+    """
+    bot = _bound_bot()
+    if bot is None:
+        return 0
+    try:
+        rows = bot.log_service.query_data('SELECT COUNT(*) AS n FROM members')
+        return int(rows[0].get('n') or 0) if rows else 0
+    except Exception as e:
+        log.debug(f'userinfo.count_friends 异常: {e}')
+        return 0
+
+
+def today_lifecycle_delta() -> dict:
+    """今日群 / 好友的**净变化**,``{'group': int|None, 'friend': int|None}``。
+
+    数据源是框架按日分库的 ``lifecycle.db``(``<log>/<appid>/<date>/lifecycle.db``,
+    入群 / 退群 / 加好友 / 删好友事件实时落库),**不读 dau 表** —— 后者今天的
+    那一行要等聚合任务跑过才有,当天取不到。
+
+    去重直接复用框架的 ``compute_lifecycle_counts``:同一个群 / 好友只看首末事件,
+    「先加后删」互相抵消不计数 —— 与主框架可视统计逐项对得上,不自己另算一套。
+    查不到 / 异常返回 None(前端与图片端显示为「无对比数据」而非 0)。
+    """
+    none = {'group': None, 'friend': None}
+    bot = _bound_bot()
+    if bot is None:
+        return none
+    try:
+        from core.storage.lifecycle_stats import compute_lifecycle_counts
+        rows = bot.log_service.query(
+            'lifecycle', 'SELECT type, user_id, group_id FROM log ORDER BY id',
+            date=datetime.now().strftime('%Y-%m-%d'))
+        if not rows:
+            return {'group': 0, 'friend': 0}     # 今天还没有任何生命周期事件
+        c = compute_lifecycle_counts(
+            (r.get('type', ''), r.get('user_id', ''), r.get('group_id', ''))
+            for r in rows)
+    except Exception as e:
+        log.debug(f'userinfo.today_lifecycle_delta 异常: {e}')
+        return none
+    return {
+        'group': int(c.get('group_join_count', 0)) - int(c.get('group_leave_count', 0)),
+        'friend': int(c.get('friend_add_count', 0)) - int(c.get('friend_remove_count', 0)),
+    }
+
+
 def count_users() -> int:
     """框架 users 表总数(所有给绑定 bot 发过消息 / 点过按钮的用户)。"""
     bot = _bound_bot()

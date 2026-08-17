@@ -33,9 +33,12 @@ class FakeLogService:
         self._base_dir = base_dir
         self.queued: list[tuple[str, tuple]] = []    # db_queue 调用记录
 
+    # 与框架 _base._resolve_db_path 一致:DAILY_TYPES 按日期分库,其余在根
+    _DAILY = frozenset({'message', 'framework', 'error', 'lifecycle'})
+
     def _path(self, log_type: str, date=None) -> str:
-        if log_type == 'message':
-            return os.path.join(self._base_dir, date or '', 'message.db')
+        if log_type in self._DAILY:
+            return os.path.join(self._base_dir, date or '', f'{log_type}.db')
         return os.path.join(self._base_dir, f'{log_type}.db')
 
     def query(self, log_type, sql, params=(), date=None):
@@ -366,3 +369,64 @@ def test_get_group_names_edge_cases(fake_bot, tmp_path):
         assert userinfo.get_group_names(['G1']) == {}
     finally:
         userinfo._bound_bot = monkey
+
+
+# ──────── 群 / 好友总数 + 今日净变化(数据统计卡的 bot 规模行) ──────────────
+
+def test_count_groups_excludes_left_groups(fake_bot, tmp_path):
+    """★ 与系统插件「用户统计」同源,但多带 in_group 过滤 —— 框架
+    _handle_group_del 只把该列置 0 不删行,不过滤会把早退掉的群算进来。"""
+    _init_data_db(str(tmp_path), groups=[('G1', '[]', 1), ('G2', '[]', 1),
+                                         ('GLEFT', '[]', 0)])
+    assert userinfo.count_groups() == 2
+
+
+def test_count_friends_reads_members_table(fake_bot, tmp_path):
+    """好友总数 = members 表行数(framework 在 friend_add 时 INSERT)。"""
+    _init_data_db(str(tmp_path), members=['U1', 'U2', 'U3'])
+    assert userinfo.count_friends() == 3
+
+
+def _init_lifecycle_db(base: str, date_str: str, rows) -> None:
+    d = os.path.join(base, date_str)
+    os.makedirs(d, exist_ok=True)
+    conn = sqlite3.connect(os.path.join(d, 'lifecycle.db'))
+    conn.execute('CREATE TABLE log (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+                 "timestamp TEXT, type TEXT, user_id TEXT DEFAULT '', "
+                 "group_id TEXT DEFAULT '', extra TEXT DEFAULT '')")
+    conn.executemany('INSERT INTO log (timestamp, type, user_id, group_id) '
+                     'VALUES (?,?,?,?)', rows)
+    conn.commit()
+    conn.close()
+
+
+def test_today_lifecycle_delta_net_and_dedup(fake_bot, tmp_path):
+    """★ 今日净变化取自**按日分库**的 lifecycle.db(实时落库),不读 dau 表 ——
+    后者今天那一行要等聚合任务跑过才有。去重复用框架 compute_lifecycle_counts:
+    同一实体先加后删互相抵消。"""
+    _init_data_db(str(tmp_path))
+    today = _day(0)
+    _init_lifecycle_db(str(tmp_path), today, [
+        ('t', 'group_add', '', 'GA'),        # 净 +1 群
+        ('t', 'group_add', '', 'GB'),
+        ('t', 'group_del', '', 'GB'),        # GB 先加后删 → 抵消
+        ('t', 'group_del', '', 'GC'),        # 净 -1 群
+        ('t', 'friend_add', 'U1', ''),       # 净 +1 好友
+        ('t', 'friend_add', 'U2', ''),
+        ('t', 'friend_del', 'U2', ''),       # 抵消
+    ])
+    got = userinfo.today_lifecycle_delta()
+    assert got == {'group': 0, 'friend': 1}     # 群:+1(GA) -1(GC) = 0
+
+
+def test_today_lifecycle_delta_zero_and_none(fake_bot, tmp_path):
+    """今天没有任何生命周期事件 → 0(而非 None);无 bot → None(显示无对比)。"""
+    _init_data_db(str(tmp_path))
+    assert userinfo.today_lifecycle_delta() == {'group': 0, 'friend': 0}
+    orig = userinfo._bound_bot
+    userinfo._bound_bot = lambda: None
+    try:
+        assert userinfo.today_lifecycle_delta() == {'group': None, 'friend': None}
+        assert userinfo.count_groups() == 0 and userinfo.count_friends() == 0
+    finally:
+        userinfo._bound_bot = orig

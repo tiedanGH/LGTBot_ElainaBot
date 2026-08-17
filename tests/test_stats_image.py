@@ -170,6 +170,83 @@ def test_delta_pill_flat_is_neutral_grey():
 
 
 
+def test_bot_scale_row_only_when_data_present():
+    """群组 / 好友总数那一行由 dispatcher 只在今日视图注入 —— 缺数据(历史日 /
+    月视图)时整行不画,画了就多一行高度。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    base = _sample_stats()
+    h_without = uploader.get_image_size(
+        stats_image.render_stats_image(base, sub_title='x'))[1]
+    withrow = dict(base, bot_groups=1284, bot_friends=5391,
+                   bot_groups_delta=7, bot_friends_delta=-3)
+    h_with = uploader.get_image_size(
+        stats_image.render_stats_image(withrow, sub_title='x'))[1]
+    assert h_with > h_without
+
+
+def _colors(png: bytes) -> set:
+    from io import BytesIO
+    from PIL import Image
+    im = Image.open(BytesIO(png)).convert('RGB')
+    return {c for _n, c in im.getcolors(1 << 20)}
+
+
+def test_bot_scale_delta_is_net_change_not_yesterday():
+    """★ 这两张卡的胶囊语义与其它卡**不同**:传进来的已经是今日净变化本身,
+    不是「昨日值」—— 当成昨日值去做减法会算出相反数。
+
+    判据取 ``_tint(_RED)`` 的有无:本样本里没有别的 _RED 使用者(配额未告警),
+    所以「净增出现红底 / 净减不出现红底」能同时钉住两个方向。
+    (不用 _GREEN 判:活跃玩家的 person 图标底色就是它,满图都有。)
+    """
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    base = dict(_sample_stats(with_trend=False, with_ranks=False),
+                bot_groups=100, bot_friends=100, bot_friends_delta=None)
+    red = stats_image._tint(stats_image._RED)
+
+    up = stats_image.render_stats_image(dict(base, bot_groups_delta=5), sub_title='x')
+    assert red in _colors(up)                       # 净增 = 涨 = 红
+    down = stats_image.render_stats_image(dict(base, bot_groups_delta=-5), sub_title='x')
+    assert red not in _colors(down)                 # 净减不该出现红
+    flat = stats_image.render_stats_image(dict(base, bot_groups_delta=0), sub_title='x')
+    assert stats_image._tint(stats_image._TEXT_MUTED) in _colors(flat)
+    assert red not in _colors(flat)
+
+
+def test_friend_icon_distinct_from_person():
+    """'friend' 与 'person' 必须画得不一样 —— 前者是后者加了爱心。"""
+    pytest.importorskip('PIL')
+    from PIL import Image, ImageDraw
+    img = Image.new('RGB', (120, 60), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    stats_image._icon(d, 'person', 0, 4, (0, 0, 0))
+    stats_image._icon(d, 'friend', 56, 4, (0, 0, 0))
+    assert img.crop((0, 0, 56, 60)).tobytes() != img.crop((56, 0, 112, 60)).tobytes()
+
+
+def test_bot_scale_row_uses_friend_icon_not_person(monkeypatch):
+    """★ 光有 'friend' 图标不够,渲染时**真的要用它** —— 顺手写回 'person' 会让
+    好友总数和「今日活跃玩家」的图标一模一样。这里记下 _icon 实际收到的 kind。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    kinds: list = []
+    real = stats_image._icon
+    monkeypatch.setattr(stats_image, '_icon',
+                        lambda d, kind, *a, **k: kinds.append(kind) or real(d, kind, *a, **k))
+    stats_image.render_stats_image(
+        dict(_sample_stats(with_trend=False, with_ranks=False),
+             bot_groups=1, bot_friends=2, bot_groups_delta=0, bot_friends_delta=0),
+        sub_title='x')
+    # 前两行已经用掉 person / group;bot 规模行必须是 group + friend
+    assert kinds.count('friend') == 1, kinds
+    assert kinds.count('person') == 1, kinds     # 只有「今日活跃玩家」那一张
+
+
 def test_render_swallows_exceptions(monkeypatch):
     """渲染内部异常 → None(调用方回退文本),不抛。"""
     monkeypatch.setattr(stats_image, '_render',

@@ -789,6 +789,13 @@ async def lgtbot_data_stats(event, match):
         await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
         return
 
+    # bot 规模:绑定 bot 当前所在群数 + 好友数,带今日净变化角标。只在今日视图注入。
+    _delta = userinfo.today_lifecycle_delta()
+    g['bot_groups'] = userinfo.count_groups()
+    g['bot_friends'] = userinfo.count_friends()
+    g['bot_groups_delta'] = _delta.get('group')
+    g['bot_friends_delta'] = _delta.get('friend')
+
     # 本会话(群 / 私信)的今日主动消息额度用量 —— 群里看本群、私信看本人。
     # 额度是 per-target 的,所以按当前会话目标取,不是全局汇总。
     _uid = event.user_id or ''
@@ -840,6 +847,19 @@ async def lgtbot_data_stats(event, match):
         f'👥 活跃群聊: {_n(g.get("today_groups"))} 个'
         f'{_delta(g.get("today_groups"), g.get("yesterday_groups_same_span"))}',
     ]
+    # bot 规模 —— 括号里是今日净变化(不是与昨日对比),0 显示「持平」
+    def _net(v):
+        if v is None:
+            return ''
+        v = int(v)
+        return f'（↑{v}）' if v > 0 else (f'（↓{abs(v)}）' if v < 0 else '（持平）')
+
+    if g.get('bot_groups') is not None:
+        lines.append(f'🏠 群组总数: {_n(g.get("bot_groups"))} 个'
+                     f'{_net(g.get("bot_groups_delta"))}')
+    if g.get('bot_friends') is not None:
+        lines.append(f'🧑‍🤝‍🧑 好友总数: {_n(g.get("bot_friends"))} 人'
+                     f'{_net(g.get("bot_friends_delta"))}')
     top_today = (g.get('top_games_today') or [])[:3]
     if top_today:
         lines.append('🔥 今日游戏榜:')

@@ -5,8 +5,10 @@
 样式对齐本插件 Web 面板的浅色主题(webui templates/main/main.css 的
 light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左侧色条标题),
 内容为 lgtbot 游戏数据:
-  · 数据总览 2×2:第一行 今日活跃玩家 / 今日活跃群聊(涨跌胶囊对比昨日
-    同时段),第二行 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期)
+  · 数据总览:第一行 今日活跃玩家 / 今日活跃群聊(涨跌胶囊对比昨日同时段),
+    第二行 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期),
+    第三行群组总数 / 好友总数(``g['bot_groups']`` / ``['bot_friends']``,
+    胶囊是**今日净变化**本身而非与昨日对比),最后可选的主动消息额度通栏
   · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条
 
@@ -207,6 +209,12 @@ def _icon(d, kind: str, ix: int, iy: int, fg) -> None:
         d.pieslice((ix + 5, iy + 27, ix + 29, iy + 49), 180, 360, fill=fg)
         d.ellipse((ix + 29, iy + 13, ix + 41, iy + 25), fill=fg)
         d.pieslice((ix + 23, iy + 27, ix + 47, iy + 49), 180, 360, fill=fg)
+    elif kind == 'friend':
+        d.ellipse((ix + 13, iy + 13, ix + 27, iy + 27), fill=fg)
+        d.pieslice((ix + 6, iy + 28, ix + 34, iy + 54), 180, 360, fill=fg)
+        d.ellipse((ix + 31, iy + 12, ix + 39, iy + 20), fill=fg)
+        d.ellipse((ix + 37, iy + 12, ix + 45, iy + 20), fill=fg)
+        d.polygon([(ix + 31, iy + 17), (ix + 45, iy + 17), (ix + 38, iy + 28)], fill=fg)
     else:  # calendar
         d.rounded_rectangle((ix + 11, iy + 14, ix + 41, iy + 42), radius=5, fill=fg)
         d.rectangle((ix + 11, iy + 22, ix + 41, iy + 24), fill=_tint(fg))
@@ -245,10 +253,14 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     # 主动消息额度(dispatcher 按当前会话目标注入;无则不画该行)
     pq = g.get('push_quota') or {}
     show_pq = bool(pq.get('shown'))
+    # bot 规模行(群组总数 / 好友总数)—— 同样由 dispatcher 只在今日视图注入
+    show_scale = g.get('bot_groups') is not None or g.get('bot_friends') is not None
 
     head_h = 118                                            # 顶栏
     tile_h, tile_gap = 138, 18                              # 指标小卡
-    overview_h = 76 + tile_h * 2 + tile_gap + 2 + ((tile_h + tile_gap) if show_pq else 0)
+    overview_h = (76 + tile_h * 2 + tile_gap + 2
+                  + ((tile_h + tile_gap) if show_scale else 0)
+                  + ((tile_h + tile_gap) if show_pq else 0))
     trend_h = 268 if trend else 0
     rank_h = 88 + list_rows * 74 + 14                       # 标题 + 行 ×N
     footer_h = 56
@@ -316,12 +328,34 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             pw = _delta_pill(d, -1000, -1000, diff)         # 预算宽度
             _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, diff)
 
+    # ── bot 规模:群组总数 / 好友总数(第 3 行,角标为今日净变化)──
+    # 数据来自框架绑定 bot 的 data.db(userinfo.count_groups / count_friends)。
+    scale_rows = 0
+    if show_scale:
+        scale_rows = 1
+        # 图标 / 配色都与上面两行错开:群组用 accent 蓝(区别于活跃群聊的橙)
+        srow = [('群组总数', g.get('bot_groups'), g.get('bot_groups_delta'),
+                 'group', _ACCENT),
+                ('好友总数', g.get('bot_friends'), g.get('bot_friends_delta'),
+                 'friend', (232, 121, 249))]
+        cy = ty0 + 2 * (tile_h + tile_gap)
+        for i, (label, val, delta, icon, fg) in enumerate(srow):
+            cx = pad + 28 + i * (tile_w + tile_gap)
+            _tile(d, (cx, cy, cx + tile_w, cy + tile_h))
+            _icon(d, icon, cx + 24, cy + (tile_h - 52) // 2, fg)
+            d.text((cx + 96, cy + 24), label, font=_font(24), fill=_TEXT_MUTED)
+            _bold_text(d, (cx + 96, cy + 60), _fmt(val), _font(48), _ACCENT)
+            # 这里的 delta 已经是净变化本身(不是"昨日值"),0 也画出来表示今日无变化
+            if delta is not None:
+                pw = _delta_pill(d, -1000, -1000, int(delta))
+                _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, int(delta))
+
     # ── 主动消息额度(通栏一行:用量 / 上限 + 进度条;用满转红)──
     # 非全量群走**黄色警告**变体:该群没有主动推送权限,额度数字没有意义,
     # 直接给授权指引(与文本输出同一判定 dispatcher._push_quota_view)。
     if show_pq and pq.get('no_permission'):
         cx = pad + 28
-        cy = ty0 + 2 * (tile_h + tile_gap)
+        cy = ty0 + (2 + scale_rows) * (tile_h + tile_gap)
         full_w = inner_w - 28 * 2
         _tile(d, (cx, cy, cx + full_w, cy + tile_h))
         d.rounded_rectangle((cx, cy, cx + 5, cy + tile_h), radius=2, fill=_WARN)
@@ -331,7 +365,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
                font=_font(23), fill=_TEXT_MUTED)
     elif show_pq:
         cx = pad + 28
-        cy = ty0 + 2 * (tile_h + tile_gap)
+        cy = ty0 + (2 + scale_rows) * (tile_h + tile_gap)
         full_w = inner_w - 28 * 2
         _tile(d, (cx, cy, cx + full_w, cy + tile_h))
         limit = int(pq.get('limit') or 0)
