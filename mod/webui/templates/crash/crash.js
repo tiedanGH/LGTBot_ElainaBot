@@ -67,6 +67,9 @@ function crashApplyData(data) {
   crashApplyRestart(data.restart);
   const body = document.getElementById('crash-table-body');
   const dumps = data.dumps || [];
+  /* 标题后的数量括号(必须在 dumps 声明之后 —— const 有 TDZ) */
+  const cntBadge = document.getElementById('crash-count-badge');
+  if (cntBadge) cntBadge.textContent = dumps.length ? ' (' + dumps.length + ')' : '';
   if (!dumps.length) {
     body.innerHTML = '<tr class="crash-empty"><td colspan="8">' +
       '暂无崩溃转储 —— 引擎未发生过 SIGSEGV / SIGBUS / SIGABRT</td></tr>';
@@ -140,14 +143,12 @@ function coreModuleCell(a) {
   if (!a || !a.ok || !a.crash_module) return '<span class="crash-core-unknown">—</span>';
   return '<span class="dash-mono">' + escapeHtml(a.crash_module) + '</span>';
 }
+/* 信号徽标。si_code 的人话解释放进 title 而不是另起一行 —— 信号列的宽度要和上方转储列表严格一致,塞不下一行中文说明。 */
 function coreSigCell(a) {
   if (!a || a.signal == null) return '<span class="crash-core-unknown">—</span>';
-  let html = '<span class="crash-sig ' + crashSigClass(a.signal) + '">' +
-             escapeHtml(a.signal_name || '') + '</span>';
-  if (a.signal_detail) {
-    html += '<span class="crash-core-detail">' + escapeHtml(a.signal_detail) + '</span>';
-  }
-  return html;
+  const tip = a.signal_detail ? ' title="' + escapeHtml(a.signal_detail) + '"' : '';
+  return '<span class="crash-sig ' + crashSigClass(a.signal) + '"' + tip + '>' +
+         escapeHtml(a.signal_name || '') + '</span>';
 }
 
 function coreApplyData(data) {
@@ -171,7 +172,9 @@ function coreApplyData(data) {
     const d = escapeHtml(String(c.dir_idx));
     const a = c.analysis || {};
     /* 出错地址 / 命令行 / 所在目录塞进 title,鼠标悬停即见,不占列宽 */
+    /* 文件名列宽固定,长名会省略号 —— title 里先给完整文件名,再带诊断信息 */
     const tip = [
+      c.name || '',
       (a.fault_addr != null) ? '出错地址 0x' + Number(a.fault_addr).toString(16) : '',
       a.cmdline ? '命令行 ' + a.cmdline : '',
       c.dir ? '目录 ' + c.dir : '',
@@ -181,11 +184,11 @@ function coreApplyData(data) {
         name + '" data-dir="' + d + '"></td>' +
       '<td class="crash-col-time">' + escapeHtml(crashFmtTime(c.crash_ts)) + '</td>' +
       '<td class="crash-col-sig">' + coreSigCell(a) + '</td>' +
-      '<td class="crash-col-game">' + coreGameCell(a) + '</td>' +
-      '<td class="crash-col-mod">' + coreModuleCell(a) + '</td>' +
       '<td class="crash-col-size dash-mono">' + crashFmtBytes(c.size) + '</td>' +
       '<td class="crash-col-name"><span class="dash-mono" title="' + escapeHtml(tip) + '">' +
         name + '</span></td>' +
+      '<td class="crash-col-mod">' + coreModuleCell(a) + '</td>' +
+      '<td class="crash-col-game">' + coreGameCell(a) + '</td>' +
       '<td class="crash-col-act"><span class="crash-act-btns">' +
         '<button class="dash-btn dash-btn-small core-dl" data-name="' + name +
         '" data-dir="' + d + '">⬇ 下载</button>' +

@@ -9,6 +9,7 @@ boot 由 conftest 假桩提供,CRASH_DIR 落在 tmp 插件目录内。
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -397,6 +398,42 @@ def test_core_section_frontend_contract():
         assert frag in html, frag
     assert html.index('id="crash-core-body"') > html.index('id="crash-table-body"')
     assert 'gdb' in html                                  # 说明了做不到什么
+
+    # ★ 列序:前四列与上方转储列表同序(两张表左侧对齐),core 专有列排在后面。
+    # thead 与 JS 生成的 tbody 必须同序 —— 只改一处就会串列。
+    core_head = html[html.index('id="crash-core-check-all"'):html.index('id="crash-core-body"')]
+    order = re.findall(r'class="crash-col-(\w+)"', core_head)
+    assert order == ['time', 'sig', 'size', 'name', 'mod', 'game', 'act'], order
+    # 必须锚到 coreApplyData 内部 —— crash-col-time 首次出现在上方 dump 的行模板里
+    core_fn = js[js.index('function coreApplyData'):js.index('function coreSyncSelection')]
+    assert re.findall(r'crash-col-(\w+)', core_fn) == \
+        ['chk', 'time', 'sig', 'size', 'name', 'mod', 'game', 'act']
+
+    # ★ 光同序不够:两张表是独立 table,auto 布局下各按内容算宽,左侧仍对不齐。
+    # 共享列必须写死宽度 + table-layout: fixed,宽度才由 CSS 说了算。
+    assert re.search(r'\.crash-table\s*\{[^}]*table-layout:\s*fixed', css)
+    for cls in ('chk', 'time', 'sig', 'size', 'name', 'act'):
+        assert re.search(r'\.crash-col-%s\s*\{[^}]*width:\s*\d+px' % cls, css), cls
+    # ★ 尾部两列也要上下对齐:fixed 布局下**未指定宽度**的列均分富余空间,
+    # 所以两张表必须**各留恰好两列**不给宽度(转储 uid/gid、core mod/game),
+    # 它们才会各占一半且逐像素同宽。多一列少一列都会让两表的尾部错开;
+    # 一列都不留则富余按比例摊回共享列,连前四列都跟着跑偏。
+    def _has_width(cls):
+        return bool(re.search(r'\.crash-col-%s\b[^{]*\{[^}]*width:' % cls, css))
+
+    assert [c for c in ('uid', 'gid') if not _has_width(c)] == ['uid', 'gid']
+    assert [c for c in ('mod', 'game') if not _has_width(c)] == ['mod', 'game']
+    # 文件列要放得下 core 的长命名(core-match_game_runn-<pid>-<秒>)
+    m = re.search(r'\.crash-col-name\s*\{[^}]*width:\s*(\d+)px', css)
+    assert m and int(m.group(1)) >= 400, m and m.group(1)
+
+    # 两个标题都带数量括号,同一个样式类
+    assert 'id="crash-count-badge"' in html and 'id="crash-core-badge"' in html
+    assert html.count('class="crash-title-badge"') == 2
+    assert '.crash-title-badge' in css
+    # ★ dumps 是 const,有 TDZ —— 数量括号必须写在它声明之后,否则首屏直接 ReferenceError
+    apply_fn = js[js.index('function crashApplyData'):js.index('function crashSelected')]
+    assert apply_fn.index('const dumps') < apply_fn.index('crash-count-badge')
     assert 'coreApplyData' in js and 'coreDeleteSelected' in js
     assert 'core-download' in js and 'core-delete' in js
     assert "'&d=' + encodeURIComponent" in js             # 删除 / 下载都带目录下标

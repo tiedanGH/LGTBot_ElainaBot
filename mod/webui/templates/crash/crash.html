@@ -22,7 +22,7 @@
         <div class="crash-status-sub">crash_&lt;时间&gt;_&lt;pid&gt;_&lt;tid&gt;.log</div>
       </div>
       <div class="crash-status-card">
-        <div class="crash-status-label">占用大小</div>
+        <div class="crash-status-label">转储日志占用</div>
         <div id="crash-size" class="crash-status-value">—</div>
         <div class="crash-status-sub">本地保存，可下载后自行清理</div>
       </div>
@@ -32,7 +32,7 @@
         <div class="crash-status-sub">游戏子进程 core 文件</div>
       </div>
       <div class="crash-status-card">
-        <div class="crash-status-label">core 占用</div>
+        <div class="crash-status-label">core 文件占用</div>
         <div id="crash-core-size" class="crash-status-value">—</div>
         <div class="crash-status-sub">体积较大，需要定期清理</div>
       </div>
@@ -42,7 +42,7 @@
   <!-- ──── 转储列表 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">📋 转储列表</h2>
+      <h2 class="dash-section-title">📋 转储列表<span id="crash-count-badge" class="crash-title-badge"></span></h2>
       <div class="dash-section-meta crash-list-actions">
         <span id="crash-action-msg" class="crash-action-msg"></span>
         <button id="crash-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新</button>
@@ -77,7 +77,7 @@
   <!-- ──── 游戏崩溃 core 文件 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">📋 游戏崩溃 core<span id="crash-core-badge" class="crash-core-badge"></span></h2>
+      <h2 class="dash-section-title">📋 游戏崩溃 core<span id="crash-core-badge" class="crash-title-badge"></span></h2>
       <div class="dash-section-meta crash-list-actions">
         <span id="crash-core-msg" class="crash-action-msg"></span>
         <button id="crash-core-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
@@ -91,10 +91,10 @@
             <th class="crash-col-chk"><input type="checkbox" id="crash-core-check-all" title="全选 / 全不选"></th>
             <th class="crash-col-time">时间</th>
             <th class="crash-col-sig">信号</th>
-            <th class="crash-col-game">游戏</th>
-            <th class="crash-col-mod">崩溃模块</th>
             <th class="crash-col-size">大小</th>
             <th class="crash-col-name">文件</th>
+            <th class="crash-col-mod">崩溃模块</th>
+            <th class="crash-col-game">游戏</th>
             <th class="crash-col-act">操作</th>
           </tr>
         </thead>

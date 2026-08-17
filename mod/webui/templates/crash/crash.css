@@ -24,7 +24,10 @@
 
 /* ── 列表 ── */
 .crash-table-wrap { overflow-x: auto; }
-.crash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.crash-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  table-layout: fixed; min-width: 1206px;
+}
 .crash-table th, .crash-table td {
   padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -32,11 +35,18 @@
 .crash-table th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
 .crash-table tbody tr:hover { background: var(--hover); }
 .crash-empty td { color: var(--text-faint); text-align: center; padding: 16px 10px; }
-.crash-col-chk { width: 1%; text-align: center; }
+.crash-col-chk { width: 36px; text-align: center; }
+.crash-col-time { width: 160px; }
+.crash-col-sig { width: 116px; }
+.crash-col-size { width: 100px; }
+.crash-col-name { width: 438px; }
+.crash-col-act { width: 152px; }
 .crash-col-chk input { cursor: pointer; }
-/* 文件名列收窄到内容宽度(width:1% + 全局 nowrap),把剩余宽度让给用户 / 群聊列 */
-.crash-col-name { width: 1%; }
-.crash-col-name .dash-mono { color: var(--text-muted); font-size: 12px; }
+/* 文件名放得下 core 的长命名(core-match_game_runn-<pid>-<秒>);真超出用省略号,完整名在 title 里 */
+.crash-col-name .dash-mono {
+  color: var(--text-muted); font-size: 12px;
+  display: block; overflow: hidden; text-overflow: ellipsis;
+}
 /* 触发源两列:用户 / 群聊 —— 完整显示,长 ID 换行,吸收剩余宽度 */
 .crash-col-uid, .crash-col-gid { font-size: 12px; white-space: normal; word-break: break-all; }
 .crash-none { color: var(--text-faint); }
@@ -62,14 +72,13 @@
 .crash-sig.misc { background: var(--tag-bg); color: var(--tag-text); }
 
 /* ──── 游戏崩溃 core 区(结构与转储列表同款,只多两列) ──── */
-.crash-core-badge { font-size: 13px; font-weight: 600; color: var(--text-muted); }
-.crash-col-game { width: 1%; white-space: nowrap; }
-.crash-col-mod { width: 1%; white-space: nowrap; font-size: 12px; }
+/* 标题后的数量括号 —— 转储列表与游戏 core 两个标题共用 */
+.crash-title-badge { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.crash-col-mod { white-space: nowrap; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
 .crash-col-mod .dash-mono { color: var(--text-muted); }
+.crash-col-game { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 解析不出 / 无该项 —— 用最淡的字提示,不抢真数据的注意力 */
 .crash-core-unknown { color: var(--text-faint); font-size: 12px; }
-/* si_code 的人话解释,跟在信号徽标后面换行显示 */
-.crash-core-detail { display: block; margin-top: 2px; font-size: 11px; color: var(--text-faint); }
 
 .crash-act-btns { display: inline-flex; gap: 6px; }
 .crash-note { margin-top: 12px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
