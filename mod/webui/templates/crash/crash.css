@@ -61,6 +61,16 @@
 .crash-sig.abrt { background: color-mix(in srgb, var(--img) 18%, transparent); color: var(--img); }
 .crash-sig.misc { background: var(--tag-bg); color: var(--tag-text); }
 
+/* ──── 游戏崩溃 core 区(结构与转储列表同款,只多两列) ──── */
+.crash-core-badge { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.crash-col-game { width: 1%; white-space: nowrap; }
+.crash-col-mod { width: 1%; white-space: nowrap; font-size: 12px; }
+.crash-col-mod .dash-mono { color: var(--text-muted); }
+/* 解析不出 / 无该项 —— 用最淡的字提示,不抢真数据的注意力 */
+.crash-core-unknown { color: var(--text-faint); font-size: 12px; }
+/* si_code 的人话解释,跟在信号徽标后面换行显示 */
+.crash-core-detail { display: block; margin-top: 2px; font-size: 11px; color: var(--text-faint); }
+
 .crash-act-btns { display: inline-flex; gap: 6px; }
 .crash-note { margin-top: 12px; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
 

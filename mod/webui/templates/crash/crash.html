@@ -26,6 +26,16 @@
         <div id="crash-size" class="crash-status-value">—</div>
         <div class="crash-status-sub">本地保存，可下载后自行清理</div>
       </div>
+      <div class="crash-status-card">
+        <div class="crash-status-label">游戏崩溃</div>
+        <div id="crash-core-count" class="crash-status-value">—</div>
+        <div class="crash-status-sub">游戏子进程 core 文件</div>
+      </div>
+      <div class="crash-status-card">
+        <div class="crash-status-label">core 占用</div>
+        <div id="crash-core-size" class="crash-status-value">—</div>
+        <div class="crash-status-sub">体积较大，需要定期清理</div>
+      </div>
     </div>
   </section>
 
@@ -61,6 +71,44 @@
     <p class="crash-note">
       引擎（C++ 桥接层）在崩溃时以 async-signal-safe 方式落盘信号 / si_addr / pid / tid + 触发源（uid·gid）+ backtrace 栈。
       点「👁 查看」在弹窗中查看 dump 完整信息与 backtrace，「⬇ 下载」保存原始 dump 用于排障。
+    </p>
+  </section>
+
+  <!-- ──── 游戏崩溃 core 文件 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📋 游戏崩溃 core<span id="crash-core-badge" class="crash-core-badge"></span></h2>
+      <div class="dash-section-meta crash-list-actions">
+        <span id="crash-core-msg" class="crash-action-msg"></span>
+        <button id="crash-core-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
+        <button id="crash-core-delete" class="dash-btn dash-btn-small dash-btn-warn" disabled>🗑 删除选中 (0)</button>
+      </div>
+    </div>
+    <div class="crash-table-wrap">
+      <table class="crash-table">
+        <thead>
+          <tr>
+            <th class="crash-col-chk"><input type="checkbox" id="crash-core-check-all" title="全选 / 全不选"></th>
+            <th class="crash-col-time">时间</th>
+            <th class="crash-col-sig">信号</th>
+            <th class="crash-col-game">游戏</th>
+            <th class="crash-col-mod">崩溃模块</th>
+            <th class="crash-col-size">大小</th>
+            <th class="crash-col-name">文件</th>
+            <th class="crash-col-act">操作</th>
+          </tr>
+        </thead>
+        <tbody id="crash-core-body">
+          <tr class="crash-empty"><td colspan="8">暂无 core 文件 —— 游戏子进程未发生过崩溃</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="crash-note">
+      游戏逻辑跑在引擎 fork 出的 <code>match_game_runner</code> 子进程里，它崩溃<b>不影响主进程</b>，也不会产生上面的 dump。
+      <br>
+      面板直接读 core 的 ELF note 段，解析出<b>信号</b>、出错地址、<b>是哪个游戏</b>（映射里的
+      <code>plugins/&lt;游戏&gt;/libgame.so</code>）以及崩溃 PC 落在哪个模块。
+      <b>完整调用栈需要 gdb</b>：<code>gdb &lt;build&gt;/match_game_runner &lt;core 文件&gt;</code> 后执行 <code>bt</code>。
     </p>
   </section>
 

@@ -7,6 +7,9 @@ const CRASH_LIST_KEY     = '__lgtbot_crash_list';
 const CRASH_VIEW_ROUTE   = '/api/ext/lgtbot/crash/view';
 const CRASH_DL_ROUTE     = '/api/ext/lgtbot/crash/download';
 const CRASH_DELETE_ROUTE = '/api/ext/lgtbot/crash/delete';
+/* 游戏子进程 core 的下载 / 批量删除(带 &d=<目录下标>) */
+const CORE_DL_ROUTE     = '/api/ext/lgtbot/crash/core-download';
+const CORE_DELETE_ROUTE = '/api/ext/lgtbot/crash/core-delete';
 
 function crashFmtBytes(n) {
   if (n == null) return '—';
@@ -57,6 +60,7 @@ function crashGidCell(d) {
 }
 
 function crashApplyData(data) {
+  coreApplyData(data);      // core 区与 dump 区共用同一份 payload
   document.getElementById('crash-dir').textContent = data.crash_dir || '—';
   document.getElementById('crash-count').textContent = (data.count != null) ? data.count : '—';
   document.getElementById('crash-size').textContent = crashFmtBytes(data.total_bytes);
@@ -117,6 +121,133 @@ function crashSyncSelection() {
     master.indeterminate = sel.length > 0 && sel.length < all.length;
   }
 }
+
+/* ──── 游戏崩溃 core 列表 ──── */
+/* core 定位需要「目录下标 + 文件名」—— 同名 core 在本地 build/ 与预编译
+   build_prebuilt/build/ 里都可能存在,只给名字无法区分。 */
+function coreRouteUrl(route, name, dirIdx) {
+  return route + TOKEN_QS + (TOKEN_QS ? '&' : '?') +
+         'name=' + encodeURIComponent(name) + '&d=' + encodeURIComponent(dirIdx);
+}
+
+/* 解析结果 → 各列。解析不出就如实写「无法解析」—— core 本身仍可下载给 gdb 看,不因为面板读不懂就把它藏起来。 */
+function coreGameCell(a) {
+  if (!a || !a.ok) return '<span class="crash-core-unknown">无法解析</span>';
+  if (!a.game) return '<span class="crash-core-unknown">未识别</span>';
+  return '<b>' + escapeHtml(a.game) + '</b>';
+}
+function coreModuleCell(a) {
+  if (!a || !a.ok || !a.crash_module) return '<span class="crash-core-unknown">—</span>';
+  return '<span class="dash-mono">' + escapeHtml(a.crash_module) + '</span>';
+}
+function coreSigCell(a) {
+  if (!a || a.signal == null) return '<span class="crash-core-unknown">—</span>';
+  let html = '<span class="crash-sig ' + crashSigClass(a.signal) + '">' +
+             escapeHtml(a.signal_name || '') + '</span>';
+  if (a.signal_detail) {
+    html += '<span class="crash-core-detail">' + escapeHtml(a.signal_detail) + '</span>';
+  }
+  return html;
+}
+
+function coreApplyData(data) {
+  const cores = data.cores || [];
+  const cnt = document.getElementById('crash-core-count');
+  if (cnt) cnt.textContent = (data.core_count != null) ? data.core_count : '—';
+  const sz = document.getElementById('crash-core-size');
+  if (sz) sz.textContent = crashFmtBytes(data.core_bytes);
+  const badge = document.getElementById('crash-core-badge');
+  if (badge) badge.textContent = cores.length ? ' (' + cores.length + ')' : '';
+  const body = document.getElementById('crash-core-body');
+  if (!body) return;
+  if (!cores.length) {
+    body.innerHTML = '<tr class="crash-empty"><td colspan="8">' +
+      '暂无 core 文件 —— 游戏子进程未发生过崩溃</td></tr>';
+    coreSyncSelection();
+    return;
+  }
+  body.innerHTML = cores.map(c => {
+    const name = escapeHtml(c.name || '');
+    const d = escapeHtml(String(c.dir_idx));
+    const a = c.analysis || {};
+    /* 出错地址 / 命令行 / 所在目录塞进 title,鼠标悬停即见,不占列宽 */
+    const tip = [
+      (a.fault_addr != null) ? '出错地址 0x' + Number(a.fault_addr).toString(16) : '',
+      a.cmdline ? '命令行 ' + a.cmdline : '',
+      c.dir ? '目录 ' + c.dir : '',
+    ].filter(Boolean).join(' | ');
+    return '<tr>' +
+      '<td class="crash-col-chk"><input type="checkbox" class="core-check" data-name="' +
+        name + '" data-dir="' + d + '"></td>' +
+      '<td class="crash-col-time">' + escapeHtml(crashFmtTime(c.crash_ts)) + '</td>' +
+      '<td class="crash-col-sig">' + coreSigCell(a) + '</td>' +
+      '<td class="crash-col-game">' + coreGameCell(a) + '</td>' +
+      '<td class="crash-col-mod">' + coreModuleCell(a) + '</td>' +
+      '<td class="crash-col-size dash-mono">' + crashFmtBytes(c.size) + '</td>' +
+      '<td class="crash-col-name"><span class="dash-mono" title="' + escapeHtml(tip) + '">' +
+        name + '</span></td>' +
+      '<td class="crash-col-act"><span class="crash-act-btns">' +
+        '<button class="dash-btn dash-btn-small core-dl" data-name="' + name +
+        '" data-dir="' + d + '">⬇ 下载</button>' +
+      '</span></td></tr>';
+  }).join('');
+  body.querySelectorAll('.core-dl').forEach(b =>
+    b.addEventListener('click', () =>
+      window.open(coreRouteUrl(CORE_DL_ROUTE, b.dataset.name, b.dataset.dir), '_blank')));
+  body.querySelectorAll('.core-check').forEach(c =>
+    c.addEventListener('change', coreSyncSelection));
+  coreSyncSelection();
+}
+
+/* 与 dump 区的 crashSyncSelection 完全并行,两区选择互不干扰 */
+function coreSyncSelection() {
+  const all = [...document.querySelectorAll('.core-check')];
+  const sel = all.filter(c => c.checked);
+  const btn = document.getElementById('crash-core-delete');
+  if (btn) {
+    btn.textContent = '🗑 删除选中 (' + sel.length + ')';
+    btn.disabled = sel.length === 0;
+  }
+  const master = document.getElementById('crash-core-check-all');
+  if (master) {
+    master.checked = all.length > 0 && sel.length === all.length;
+    master.indeterminate = sel.length > 0 && sel.length < all.length;
+  }
+}
+
+function coreShowMsg(text, kind) {
+  const el = document.getElementById('crash-core-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'crash-action-msg' + (kind ? ' ' + kind : '');
+}
+
+async function coreDeleteSelected() {
+  const picked = [...document.querySelectorAll('.core-check:checked')]
+    .map(c => ({ name: c.dataset.name, d: c.dataset.dir }));
+  if (!picked.length) return;
+  const ok = await dashConfirm(
+    '确认删除选中的 ' + picked.length + ' 个 core 文件？\n\n' +
+    (picked.length <= 8 ? picked.map(p => p.name).join('\n') + '\n\n' : '') +
+    'core 是排查游戏崩溃的唯一现场（gdb 要用它）。删除后无法恢复，建议先下载留存。',
+    { level: 'danger' }
+  );
+  if (!ok) return;
+  /* name 与 d 按下标一一配对,后端 zip 起来用 */
+  const qs = TOKEN_QS + (TOKEN_QS ? '&' : '?') +
+             picked.map(p => 'name=' + encodeURIComponent(p.name) +
+                             '&d=' + encodeURIComponent(p.d)).join('&');
+  try {
+    const r = await fetch(CORE_DELETE_ROUTE + qs, { cache: 'no-store' });
+    const data = await r.json();
+    coreShowMsg((data.success ? '✅ ' : '⚠️ ') + (data.message || ''),
+                data.success ? 'info' : 'err');
+    crashRefresh();
+  } catch (e) {
+    coreShowMsg('❌ 删除失败: ' + e.message, 'err');
+  }
+}
+
 
 function crashLoadInline() {
   try {
@@ -285,6 +416,16 @@ window.addEventListener('DOMContentLoaded', () => {
   if (btn) btn.addEventListener('click', crashRefresh);
   const del = document.getElementById('crash-delete-btn');
   if (del) del.addEventListener('click', crashDeleteSelected);
+  const coreRef = document.getElementById('crash-core-refresh');
+  if (coreRef) coreRef.addEventListener('click', crashRefresh);
+  const coreDel = document.getElementById('crash-core-delete');
+  if (coreDel) coreDel.addEventListener('click', coreDeleteSelected);
+  const coreMaster = document.getElementById('crash-core-check-all');
+  if (coreMaster) coreMaster.addEventListener('change', () => {
+    document.querySelectorAll('.core-check')
+      .forEach(c => { c.checked = coreMaster.checked; });
+    coreSyncSelection();
+  });
   const master = document.getElementById('crash-check-all');
   if (master) master.addEventListener('change', () => {
     document.querySelectorAll('.crash-check').forEach(c => { c.checked = master.checked; });

@@ -21,6 +21,11 @@ Python 侧职责:
     (信号 / si_addr / pid / tid / 触发源 uid·gid / 原始消息),供大弹窗展示
   · ``download_handler`` —— 带 ``?name=`` 的真路由(附件下载)
   · ``delete_handler`` —— 带多个 ``?name=`` 的真路由(批量删除,写操作审计)
+
+另有一块**游戏子进程 core 文件**(见 ``_CORE_DIRS`` 段注释):游戏代码崩溃只打死
+``match_game_runner`` 子进程,主进程无感也不产生 crash_*.log,只在编译产物目录留下
+内核 core。``_list_cores`` 列出它们并用 ``mod/corefile`` 解析出信号 / 游戏名 /
+崩溃模块,``core_download_handler`` / ``core_delete_handler`` 提供下载与批量删除。
 """
 
 from __future__ import annotations
@@ -34,7 +39,7 @@ import time
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import audit, boot, metrics
+from .. import audit, boot, corefile, metrics
 
 log = get_logger(PLUGIN, 'LGTBot')
 
@@ -57,6 +62,28 @@ _DUMP_RE = re.compile(r'^crash_\d+_\d+_\d+\.log$')
 _MAX_VIEW_BYTES = 256 * 1024        # 查看 / 下载读取上限,防异常超大文件撑爆内存
 # 信号号 → 名称(与 callbacks._SIG_NAMES 同源:引擎只可能落这几种)
 _SIG_NAMES = {4: 'SIGILL', 6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
+
+
+# ──────── 游戏子进程 core 文件 ────────────────────────────────────────────
+# 游戏崩溃只打死 fork 出来的 match_game_runner 子进程,主进程无感、也不会留 crash_*.log(那是桥接层信号处理器写的,只覆盖主进程)。
+# 内核按 core_pattern 把 core 落在子进程 cwd —— boot._make_runner_wrapper 的 wrapper 会先 `cd "$BUILD_DIR"`,所以 core 就在编译产物目录里。
+#
+# **两种部署的目录不同**,而且切换模式后旧 core 还留在另一边,所以两个都扫:
+#   · 本地编译  <plugin>/build/
+#   · 预编译包  <plugin>/build_prebuilt/build/   ← 包内保留了 build/ 前缀
+# 列表用「目录下标 + 文件名」定位(同名 core 可能两边都有),下标越界即拒。
+_CORE_DIRS = []
+for _d in (getattr(boot, 'LOCAL_BUILD_DIR', ''),
+           os.path.join(getattr(boot, 'PREBUILT_DIR', ''), 'build'),
+           boot.BUILD_DIR):
+    if _d and _d not in _CORE_DIRS:
+        _CORE_DIRS.append(_d)
+CORE_DIRS = tuple(_CORE_DIRS)
+# 内核默认 `core`、常见 `core.<pid>`,以及本项目实测的 `core-%e-%p-%t`
+# (如 core-match_game_runn-42418-1786852068)。收紧到 core 开头 + 无路径分隔符。
+_CORE_RE = re.compile(r'^core(?:[.-][A-Za-z0-9._-]+)?$')
+# core-<exe>-<pid>-<秒>:从名字里取 pid / 时间(比 mtime 更贴近崩溃时刻)
+_CORE_NAME_RE = re.compile(r'^core-(?P<exe>[^-]+)-(?P<pid>\d+)-(?P<ts>\d+)$')
 
 
 def _fragment(payload: dict) -> str:
@@ -137,6 +164,63 @@ def _list_dumps() -> list:
     return out
 
 
+def _safe_core_path(name: str, dir_idx) -> str | None:
+    """校验 core 文件定位参数,返回绝对路径;非法 / 不存在返回 None。
+
+    ``dir_idx`` 是 ``CORE_DIRS`` 的下标 —— 用下标而不是让前端传目录,调用方
+    永远碰不到任意路径;``name`` 再过纯 basename + core 命名白名单。
+    """
+    try:
+        idx = int(dir_idx)
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= idx < len(CORE_DIRS):
+        return None
+    if not name or os.path.basename(name) != name or not _CORE_RE.match(name):
+        return None
+    path = os.path.join(CORE_DIRS[idx], name)
+    return path if os.path.isfile(path) else None
+
+
+def _list_cores(analyze: bool = True) -> list:
+    """列出各 build 目录下的 core 文件(按时间倒序),可选带 ELF 解析结果。
+
+    ``analyze=False`` 用于只要总数 / 体积的场合,省掉逐个读 note 段。
+    """
+    out = []
+    for idx, d in enumerate(CORE_DIRS):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue                          # 目录不存在(未编译 / 未装预编译包)
+        for name in names:
+            if not _CORE_RE.match(name):
+                continue
+            path = os.path.join(d, name)
+            try:
+                stt = os.stat(path)
+            except OSError:
+                continue
+            if not os.path.isfile(path):
+                continue
+            m = _CORE_NAME_RE.match(name)
+            item = {
+                'name': name,
+                'dir_idx': idx,
+                'dir': d,
+                'size': stt.st_size,
+                'mtime': int(stt.st_mtime),
+                # 文件名里的秒数比 mtime 更贴近崩溃瞬间;没有就退回 mtime
+                'crash_ts': int(m.group('ts')) if m else int(stt.st_mtime),
+                'pid': int(m.group('pid')) if m else None,
+            }
+            if analyze:
+                item['analysis'] = corefile.analyze(path)
+            out.append(item)
+    out.sort(key=lambda c: c['crash_ts'], reverse=True)
+    return out
+
+
 def _restart_stats() -> dict:
     """引擎崩溃重启概况 —— 与「指标面板 · 运行指标」同源(mod/metrics 持久计数器),同格式展示(累计次数 / 分信号 / 最近一次)。"""
     snap = metrics.snapshot()
@@ -150,11 +234,17 @@ def _restart_stats() -> dict:
 
 def _payload() -> dict:
     dumps = _list_dumps()
+    cores = _list_cores()
     return {
         'dumps': dumps,
         'count': len(dumps),
         'total_bytes': sum(d['size'] for d in dumps),
         'crash_dir': CRASH_DIR,
+        # 游戏子进程 core:数量 / 总占用进顶部统计,列表进「转储列表」下方新栏目
+        'cores': cores,
+        'core_count': len(cores),
+        'core_bytes': sum(c['size'] for c in cores),
+        'core_dirs': list(CORE_DIRS),
         'restart': _restart_stats(),
         'query_time': int(time.time()),
     }
@@ -237,3 +327,56 @@ async def delete_handler(request: 'web.Request') -> 'web.Response':
                  ok=ok, src=audit.SRC_PANEL)
     msg = f'已删除 {len(deleted)} 个转储' + (f',{len(failed)} 个失败(不存在 / 名称非法)' if failed else '')
     return web.json_response({'success': ok, 'deleted': deleted, 'failed': failed, 'message': msg})
+
+
+async def core_download_handler(request: 'web.Request') -> 'web.Response':
+    """``GET /api/ext/lgtbot/crash/core-download?name=<core...>&d=<目录下标>``。
+
+    core 文件动辄几十上百 MB,用 ``FileResponse`` 流式回,不读进内存。
+    """
+    name = (request.query.get('name') or '').strip()
+    path = _safe_core_path(name, request.query.get('d'))
+    if not path:
+        return web.json_response({'success': False, 'message': '无效的 core 文件'}, status=400)
+    # name 已过 core 命名白名单(仅字母数字 . _ -),可安全放进 header
+    return web.FileResponse(path, headers={
+        'Content-Disposition': f'attachment; filename="{name}"',
+    })
+
+
+async def core_delete_handler(request: 'web.Request') -> 'web.Response':
+    """``GET /api/ext/lgtbot/crash/core-delete?name=a&d=0&name=b&d=1`` —— 批量删除。
+
+    ``name`` 与 ``d`` **按下标一一配对**(同名 core 在本地 / 预编译两个目录里都可能
+    存在,只给名字无法定位)。每对都过 ``_safe_core_path`` 白名单;删除结果计入审计。
+    """
+    names = [n.strip() for n in request.query.getall('name', []) if n.strip()]
+    dirs = request.query.getall('d', [])
+    if not names:
+        return web.json_response({'success': False, 'message': '未指定要删除的 core'}, status=400)
+    if len(dirs) != len(names):
+        return web.json_response(
+            {'success': False, 'message': 'name 与 d 数量不匹配'}, status=400)
+    deleted, failed, freed = [], [], 0
+    for name, d in zip(names, dirs):
+        path = _safe_core_path(name, d)
+        if not path:
+            failed.append(name)
+            continue
+        try:
+            size = os.path.getsize(path)
+            os.remove(path)
+            deleted.append(name)
+            freed += size
+        except OSError as e:
+            log.warning(f'[crash] 删除 core 失败 {name}: {e}')
+            failed.append(name)
+    ok = bool(deleted) and not failed
+    audit.record('cache', '删除游戏 core',
+                 f'删除 {len(deleted)} 个、释放 {freed} 字节'
+                 + (f',失败 {len(failed)} 个' if failed else ''),
+                 ok=ok, src=audit.SRC_PANEL)
+    msg = (f'已删除 {len(deleted)} 个 core 文件'
+           + (f',{len(failed)} 个失败(不存在 / 名称非法)' if failed else ''))
+    return web.json_response({'success': ok, 'deleted': deleted, 'failed': failed,
+                              'freed_bytes': freed, 'message': msg})
