@@ -251,6 +251,67 @@ def test_log_clear_empties_buffer(_logs):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# page_config —— 「配置管理」的版式契约
+# ─────────────────────────────────────────────────────────────────────────
+
+def _page_config():
+    pytest.importorskip('aiohttp')
+    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    return page_config
+
+
+def test_config_layout_yaml_full_width_rest_in_grid():
+    """插件配置通栏在最上,其余编辑器全在 .cfg-grid 里,且**顺序即行序**。
+
+    grid 靠 DOM 顺序自动配对左右两栏,所以挪动任何一块都会改变分行 ——
+    这条断言就是那份"重要更新|更新公告 / 紧急公告|疑难解答 / …"的版式说明书。
+    """
+    pc = _page_config()
+    html = pc.TAB_HTML
+    i_grid = html.index('<div class="cfg-grid">')
+    assert html.index('cfg-yaml-editor') < i_grid, '插件配置应在分栏之外(通栏)'
+    order = ['cfg-important-editor', 'cfg-notice-editor',
+             'cfg-urgent-editor', 'cfg-trouble-editor',
+             'cfg-sponsors-editor', 'cfg-engine-editor']
+    idx = [html.index(e) for e in order]
+    assert all(i > i_grid for i in idx), '除插件配置外都要进分栏'
+    assert idx == sorted(idx), f'分栏内顺序变了,版式会跟着变: {order}'
+
+
+def test_config_grid_is_two_columns_only_on_wide_screens():
+    """基线单列(窄屏不变),两列只在 @media min-width 里开 —— 且断点要够宽:
+    编辑器折成两栏后每栏太窄的话,文本框一行放不下几个字。"""
+    import re as _re
+    pc = _page_config()
+    css = pc.TAB_CSS
+    base = css[css.index('.cfg-grid {'):]
+    base = base[:base.index('}')]
+    assert 'grid-template-columns: 1fr;' in base, base
+    m = _re.search(r'@media \(min-width: (\d+)px\)\s*\{\s*\.cfg-grid \{([^}]*)\}', css)
+    assert m, '缺少宽屏两列的 @media 规则'
+    assert '1fr 1fr' in m.group(2) or 'repeat(2' in m.group(2), m.group(2)
+    assert int(m.group(1)) >= 900, f'断点 {m.group(1)}px 太窄,两栏编辑器挤不下'
+
+
+@pytest.mark.parametrize('sponsor_on', [True, False])
+def test_config_html_div_balance_survives_section_strip(monkeypatch, sponsor_on):
+    """★ 分栏包了一层 div,``<div>`` / ``</div>`` 必须始终配平 —— 两态都要。
+
+    真实风险:若 SPONSOR 标记一头在分栏内、一头在分栏外,服务端整段切除会顺手吃掉 grid 的收尾 ``</div>``,
+    整个页面结构塌掉(浏览器容错后表现为版式乱掉,没有任何报错)。
+    """
+    pc = _page_config()
+    from plugins.LGTBot_ElainaBot.mod import buttons
+    monkeypatch.setattr(buttons, 'SPONSOR_ENABLED', sponsor_on)
+    html = pc.render_tab_html()
+    assert html.count('<div') == html.count('</div>'), (
+        html.count('<div'), html.count('</div>'))
+    assert html.count('<section') == html.count('</section>')
+    # 分栏容器本身在两态下都完好
+    assert html.count('<div class="cfg-grid">') == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # webui/main.py —— 注册契约
 # ─────────────────────────────────────────────────────────────────────────
 

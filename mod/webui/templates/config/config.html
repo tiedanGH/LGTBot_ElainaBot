@@ -29,139 +29,143 @@
     <div id="cfg-yaml-reload-result" class="dash-pluginconf-msg"></div>
   </section>
 
-  <!-- ──── 重要更新 (important_update.txt) ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title">⚠️ 重要更新</h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">文件</span>
-        <span id="cfg-important-path" class="dash-meta-value dash-mono">—</span>
-      </div>
-    </div>
-    <p class="dash-pluginconf-desc">
-      置顶公告：bot 发送「更新公告」时，本文件内容会渲染在常规公告代码块的上方。<b>留空则不显示该区块</b>。
-    </p>
-    <textarea id="cfg-important-editor" class="dash-editor" spellcheck="false"
-              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-    <div class="dash-editor-actions">
-      <button id="cfg-important-save" class="dash-btn dash-btn-primary">💾 保存</button>
-      <button id="cfg-important-revert" class="dash-btn">↩ 恢复</button>
-      <span id="cfg-important-msg" class="dash-config-msg"></span>
-    </div>
-  </section>
+  <div class="cfg-grid">
 
-  <!-- ──── 更新公告 (update_notice.txt) ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title">📢 更新公告</h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">文件</span>
-        <span id="cfg-notice-path" class="dash-meta-value dash-mono">—</span>
+    <!-- ──── 重要更新 (important_update.txt) ──── -->
+    <section class="dash-section">
+      <div class="dash-section-header">
+        <h2 class="dash-section-title">⚠️ 重要更新</h2>
+        <div class="dash-section-meta">
+          <span class="dash-meta-label">文件</span>
+          <span id="cfg-important-path" class="dash-meta-value dash-mono">—</span>
+        </div>
       </div>
-    </div>
-    <p class="dash-pluginconf-desc">
-      bot 收到「更新公告」指令时，按代码块展示本文件内容。<b>每次调用都重新读盘，修改立即生效</b>。
-    </p>
-    <textarea id="cfg-notice-editor" class="dash-editor" spellcheck="false"
-              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-    <div class="dash-editor-actions">
-      <button id="cfg-notice-save" class="dash-btn dash-btn-primary">💾 保存</button>
-      <button id="cfg-notice-revert" class="dash-btn">↩ 恢复</button>
-      <span id="cfg-notice-msg" class="dash-config-msg"></span>
-    </div>
-  </section>
+      <p class="dash-pluginconf-desc">
+        置顶公告：bot 发送「更新公告」时，本文件内容会渲染在常规公告代码块的上方。<b>留空则不显示该区块</b>。
+      </p>
+      <textarea id="cfg-important-editor" class="dash-editor" spellcheck="false"
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      <div class="dash-editor-actions">
+        <button id="cfg-important-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-important-revert" class="dash-btn">↩ 恢复</button>
+        <span id="cfg-important-msg" class="dash-config-msg"></span>
+      </div>
+    </section>
 
-  <!-- ──── 紧急公告 (urgent_notice.txt) ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title">🚨 紧急公告</h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">文件</span>
-        <span id="cfg-urgent-path" class="dash-meta-value dash-mono">—</span>
+    <!-- ──── 更新公告 (update_notice.txt) ──── -->
+    <section class="dash-section">
+      <div class="dash-section-header">
+        <h2 class="dash-section-title">📢 更新公告</h2>
+        <div class="dash-section-meta">
+          <span class="dash-meta-label">文件</span>
+          <span id="cfg-notice-path" class="dash-meta-value dash-mono">—</span>
+        </div>
       </div>
-    </div>
-    <p class="dash-pluginconf-desc">
-      临时紧急通知：本文件内容以<b>引用块</b>渲染在欢迎菜单。<b>仅「已启用」时才展示</b>。启用期间，每个群在<b>首次</b>新建游戏房间时会额外收到紧急公告。关闭公告功能<b>不会</b>清除已通知群记录。
-    </p>
-    <textarea id="cfg-urgent-editor" class="dash-editor" spellcheck="false"
-              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-    <div class="dash-editor-actions">
-      <button id="cfg-urgent-save" class="dash-btn dash-btn-primary">💾 保存</button>
-      <button id="cfg-urgent-revert" class="dash-btn">↩ 恢复</button>
-      <!-- 启用态由 JS 加 .active -->
-      <button id="cfg-urgent-toggle" class="dash-btn cfg-urgent-toggle"
-              title="启用后欢迎菜单展示紧急公告，新群首次建房额外通知一次，重启后依然生效">🚨 启用紧急公告</button>
-      <button id="cfg-urgent-reset" class="dash-btn dash-btn-danger"
-              title="清除全部已通知群记录，这些群下次新建游戏会再次收到紧急公告">♻ 重置全部已通知群（0 个）</button>
-      <span id="cfg-urgent-msg" class="dash-config-msg"></span>
-    </div>
-  </section>
+      <p class="dash-pluginconf-desc">
+        bot 收到「更新公告」指令时，按代码块展示本文件内容。<b>每次调用都重新读盘，修改立即生效</b>。
+      </p>
+      <textarea id="cfg-notice-editor" class="dash-editor" spellcheck="false"
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      <div class="dash-editor-actions">
+        <button id="cfg-notice-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-notice-revert" class="dash-btn">↩ 恢复</button>
+        <span id="cfg-notice-msg" class="dash-config-msg"></span>
+      </div>
+    </section>
 
-  <!-- ──── 疑难解答 (troubleshooting.txt) ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title">❓ 疑难解答</h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">文件</span>
-        <span id="cfg-trouble-path" class="dash-meta-value dash-mono">—</span>
+    <!-- ──── 紧急公告 (urgent_notice.txt) ──── -->
+    <section class="dash-section">
+      <div class="dash-section-header">
+        <h2 class="dash-section-title">🚨 紧急公告</h2>
+        <div class="dash-section-meta">
+          <span class="dash-meta-label">文件</span>
+          <span id="cfg-urgent-path" class="dash-meta-value dash-mono">—</span>
+        </div>
       </div>
-    </div>
-    <p class="dash-pluginconf-desc">
-      bot 收到「疑难解答」指令时，按代码块展示本文件内容。<b>每次调用都重新读盘，修改立即生效</b>。
-    </p>
-    <textarea id="cfg-trouble-editor" class="dash-editor" spellcheck="false"
-              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-    <div class="dash-editor-actions">
-      <button id="cfg-trouble-save" class="dash-btn dash-btn-primary">💾 保存</button>
-      <button id="cfg-trouble-revert" class="dash-btn">↩ 恢复</button>
-      <span id="cfg-trouble-msg" class="dash-config-msg"></span>
-    </div>
-  </section>
+      <p class="dash-pluginconf-desc">
+        以<b>引用块</b>渲染在欢迎菜单。仅<b>启用</b>时才展示。每个群<b>首次</b>新建游戏时会额外收到紧急公告。关闭公告功能<b>不会</b>清除已通知群记录。
+      </p>
+      <textarea id="cfg-urgent-editor" class="dash-editor" spellcheck="false"
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      <div class="dash-editor-actions">
+        <button id="cfg-urgent-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-urgent-revert" class="dash-btn">↩ 恢复</button>
+        <!-- 启用态由 JS 加 .active -->
+        <button id="cfg-urgent-toggle" class="dash-btn cfg-urgent-toggle"
+                title="启用后欢迎菜单展示紧急公告，新群首次建房额外通知一次，重启后依然生效">🚨 启用紧急公告</button>
+        <button id="cfg-urgent-reset" class="dash-btn dash-btn-danger"
+                title="清除全部已通知群记录，这些群下次新建游戏会再次收到紧急公告">♻ 重置全部已通知群（0 个）</button>
+        <span id="cfg-urgent-msg" class="dash-config-msg"></span>
+      </div>
+    </section>
 
-  <!-- SPONSOR_SECTION_START -->
-  <!-- ──── 赞助鸣谢 (sponsors.txt) ────
-       首尾这对 SPONSOR_SECTION_START / END 标记不能删,也不要在标记之外提到赞助:
-       page_config.render_tab_html() 在 sponsor_enabled 关闭时按标记整段切掉 -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title">❤️ 赞助鸣谢</h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">文件</span>
-        <span id="cfg-sponsors-path" class="dash-meta-value dash-mono">—</span>
+    <!-- ──── 疑难解答 (troubleshooting.txt) ──── -->
+    <section class="dash-section">
+      <div class="dash-section-header">
+        <h2 class="dash-section-title">❓ 疑难解答</h2>
+        <div class="dash-section-meta">
+          <span class="dash-meta-label">文件</span>
+          <span id="cfg-trouble-path" class="dash-meta-value dash-mono">—</span>
+        </div>
       </div>
-    </div>
-    <p class="dash-pluginconf-desc">
-      bot 收到「赞助支持」指令时，按<b>引用块</b>展示本文件内容（保留 markdown 行内语法）。<b>每次调用都重新读盘，修改立即生效</b>。
-    </p>
-    <textarea id="cfg-sponsors-editor" class="dash-editor" spellcheck="false"
-              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-    <div class="dash-editor-actions">
-      <button id="cfg-sponsors-save" class="dash-btn dash-btn-primary">💾 保存</button>
-      <button id="cfg-sponsors-revert" class="dash-btn">↩ 恢复</button>
-      <span id="cfg-sponsors-msg" class="dash-config-msg"></span>
-    </div>
-  </section>
-  <!-- SPONSOR_SECTION_END -->
+      <p class="dash-pluginconf-desc">
+        bot 收到「疑难解答」指令时，按代码块展示本文件内容。<b>每次调用都重新读盘，修改立即生效</b>。
+      </p>
+      <textarea id="cfg-trouble-editor" class="dash-editor" spellcheck="false"
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      <div class="dash-editor-actions">
+        <button id="cfg-trouble-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-trouble-revert" class="dash-btn">↩ 恢复</button>
+        <span id="cfg-trouble-msg" class="dash-config-msg"></span>
+      </div>
+    </section>
 
-  <!-- ──── 引擎配置 (lgtbot.json) ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title">⚙️ 引擎配置</h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">文件</span>
-        <span id="cfg-engine-path" class="dash-meta-value dash-mono">—</span>
+    <!-- SPONSOR_SECTION_START -->
+    <!-- ──── 赞助鸣谢 (sponsors.txt) ────
+         首尾这对 SPONSOR_SECTION_START / END 标记不能删,也不要在标记之外提到赞助:
+         page_config.render_tab_html() 在 sponsor_enabled 关闭时按标记整段切掉 -->
+    <section class="dash-section">
+      <div class="dash-section-header">
+        <h2 class="dash-section-title">❤️ 赞助鸣谢</h2>
+        <div class="dash-section-meta">
+          <span class="dash-meta-label">文件</span>
+          <span id="cfg-sponsors-path" class="dash-meta-value dash-mono">—</span>
+        </div>
       </div>
-    </div>
-    <p class="dash-pluginconf-desc">
-      LGTBot C++ 引擎的 JSON 配置，启动时一次性读取。<b>保存后需重启 LGTBot 引擎或整进程才能生效</b>。
-    </p>
-    <textarea id="cfg-engine-editor" class="dash-editor" spellcheck="false"
-              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-    <div class="dash-editor-actions">
-      <button id="cfg-engine-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
-      <button id="cfg-engine-revert" class="dash-btn">↩ 恢复</button>
-      <span id="cfg-engine-msg" class="dash-config-msg"></span>
-    </div>
-  </section>
+      <p class="dash-pluginconf-desc">
+        bot 收到「赞助支持」指令时，按<b>引用块</b>展示本文件内容。<b>每次调用都重新读盘，修改立即生效</b>。
+      </p>
+      <textarea id="cfg-sponsors-editor" class="dash-editor" spellcheck="false"
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      <div class="dash-editor-actions">
+        <button id="cfg-sponsors-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-sponsors-revert" class="dash-btn">↩ 恢复</button>
+        <span id="cfg-sponsors-msg" class="dash-config-msg"></span>
+      </div>
+    </section>
+    <!-- SPONSOR_SECTION_END -->
+
+    <!-- ──── 引擎配置 (lgtbot.json) ──── -->
+    <section class="dash-section">
+      <div class="dash-section-header">
+        <h2 class="dash-section-title">⚙️ 引擎配置</h2>
+        <div class="dash-section-meta">
+          <span class="dash-meta-label">文件</span>
+          <span id="cfg-engine-path" class="dash-meta-value dash-mono">—</span>
+        </div>
+      </div>
+      <p class="dash-pluginconf-desc">
+        LGTBot C++ 引擎的 JSON 配置，启动时一次性读取。<b>保存后需重启 LGTBot 引擎或整进程才能生效</b>。
+      </p>
+      <textarea id="cfg-engine-editor" class="dash-editor" spellcheck="false"
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      <div class="dash-editor-actions">
+        <button id="cfg-engine-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
+        <button id="cfg-engine-revert" class="dash-btn">↩ 恢复</button>
+        <span id="cfg-engine-msg" class="dash-config-msg"></span>
+      </div>
+    </section>
+
+  </div>
 
 </div>

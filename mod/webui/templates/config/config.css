@@ -21,6 +21,18 @@
 }
 
 
+/* ── 编辑器分栏(「插件配置」以外的其余块) ──
+   窄屏一列,宽屏两列 —— 七块编辑器竖排下来要滚很久,半栏宽度足够。 */
+.cfg-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: inherit;
+}
+@media (min-width: 1000px) {
+  .cfg-grid { grid-template-columns: 1fr 1fr; }
+}
+
+
 /* ── 插件配置(主框架编辑入口 + 热重载) ── */
 .dash-pluginconf-grid {
   display: grid; gap: 12px;
