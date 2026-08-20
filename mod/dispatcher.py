@@ -118,7 +118,7 @@ _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启$'
 _P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
-_P_STATS    = r'^/?数据统计\s*(总|\d{4}|\d{2})?$'
+_P_STATS    = r'^/?数据统计\s*(总|\d{8}|\d{6}|\d{4}|\d{2})?$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 _P_SPONSOR  = r'^/?赞助支持$'
@@ -624,6 +624,75 @@ _SPAN_VIEWS = {
 }
 
 
+def _parse_stats_date(year: int, mm: str, dd: str, arg: str, today, hint: str) -> tuple:
+    """把 (年, MM, DD) 解析成目标日期;非法日期 → 报错项。
+
+    输入的就是今天 → 返回 ``'today'``:等价于无参数,仍走带涨跌 / 额度 / 趋势的
+    今日视图(带不带年份都一样,`数据统计0803` 与 `数据统计20260803` 同义)。
+    """
+    try:
+        target = _date(year, int(mm), int(dd))
+    except ValueError:
+        return 'error', None, f'日期无效：{arg}（格式 {hint}）'
+    return ('today', None, '') if target == today else ('date', target, '')
+
+
+def _parse_stats_arg(arg: str, today) -> tuple:
+    """解析「数据统计」的参数,返回 ``(kind, payload, error)``。
+
+    ``kind`` ∈ ``today`` / ``total`` / ``year`` / ``month`` / ``date`` / ``error``;
+    payload 依次为 None / None / 年 / (年, 月) / ``date`` 对象 / None。
+
+        (无)        今日
+        总          全部历史累计
+        MM          当年某月            如 08
+        MMDD        当年某日            如 0803
+        YYYY        某年                如 2026
+        YYYYMM      某年某月            如 202608
+        YYYYMMDD    某年某日            如 20260803
+
+    **4 位参数的年份与 MMDD 不会撞车**:MMDD 的前两位必须是合法月份 01-12,而 2000-2099 的年份前两位恒为 20
+    两个取值域天然不相交。所以 4 位的路由规则就一句:前两位是合法月份 → 按 MMDD,否则按年份。6 / 8 位只可能带年份,不存在歧义。
+
+    纯函数(时间从 ``today`` 传入),错误文案在这里一处产出 —— handler 只负责回。
+    """
+    if not arg:
+        return 'today', None, ''
+    if arg == '总':
+        return 'total', None, ''
+    n, this_year = len(arg), today.year
+
+    if n == 2:                                            # MM —— 当年某月
+        month = int(arg)
+        if not 1 <= month <= 12:
+            return 'error', None, f'月份无效：{arg}（格式 MM，如 数据统计08 查看 8月）'
+        return 'month', (this_year, month), ''
+    if n == 4 and 1 <= int(arg[:2]) <= 12:                # MMDD —— 当年某日
+        return _parse_stats_date(this_year, arg[:2], arg[2:], arg, today,
+                                 'MMDD，如 数据统计0802 查看 8月2日')
+    if n == 4:                                            # YYYY —— 某年
+        year = int(arg)
+        if not _MIN_STATS_YEAR <= year <= this_year:
+            return ('error', None,
+                    f'参数无效：{arg}（按年 YYYY 如 数据统计{this_year}，'
+                    f'可查 {_MIN_STATS_YEAR}-{this_year}；按日 MMDD 如 数据统计0802）')
+        return 'year', year, ''
+
+    # 6 / 8 位:前 4 位一定是年份
+    year = int(arg[:4])
+    if not _MIN_STATS_YEAR <= year <= this_year:
+        return ('error', None,
+                f'年份无效：{arg[:4]}（可查 {_MIN_STATS_YEAR}-{this_year}）')
+    if n == 6:                                            # YYYYMM —— 某年某月
+        month = int(arg[4:])
+        if not 1 <= month <= 12:
+            return ('error', None,
+                    f'月份无效：{arg}（格式 YYYYMM，如 数据统计{this_year}08）')
+        return 'month', (year, month), ''
+    return _parse_stats_date(year, arg[4:6], arg[6:], arg, today,   # YYYYMMDD
+                            f'YYYYMMDD，如 数据统计{this_year}0802')
+
+
 async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
                               label: str, sub_title: str) -> None:
     """窗口视图的统一实现:``stats`` 是 metrics 的窗口查询结果,``prefix`` 是它的键前缀。
@@ -740,18 +809,18 @@ async def _reply_total_stats(event) -> None:
 
 @handler(_P_STATS,
          name='数据统计',
-         desc='数据统计 / 游戏榜 / 玩家参与榜 / 近期趋势，可按日(MMDD)/按月(MM)/按年(YYYY)/累计(总)查询',
+         desc='数据统计/游戏榜/玩家参与榜/近期趋势，可按日(MMDD/YYYYMMDD)、按月(MM/YYYYMM)、按年(YYYY)、累计(总)查询',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_data_stats(event, match):
     """收到「数据统计」(文本或按钮)→ 输出 lgtbot.db 游戏数据摘要(dau 风格)。
 
-    四个窗口视图(见 _SPAN_VIEWS / _reply_period_stats):
-      · 「数据统计MMDD」(如 数据统计0802,默认今年)  某个历史日期
-      · 「数据统计MM」  (如 数据统计08)              当年某自然月
-      · 「数据统计YYYY」(如 数据统计2026)            某个自然年
-      · 「数据统计总」                               全部历史累计
+    窗口视图(参数解析见 _parse_stats_arg,口径见 _SPAN_VIEWS / _reply_period_stats):
+      · 「数据统计MMDD」 / 「数据统计YYYYMMDD」  某个历史日期(不带年 = 今年)
+      · 「数据统计MM」   / 「数据统计YYYYMM」    某个自然月(不带年 = 今年)
+      · 「数据统计YYYY」                        某个自然年
+      · 「数据统计总」                          全部历史累计
     共同口径:无涨跌标识、无主动消息、无趋势图,第 4 卡为该期对局人次
     (不去重),双榜 TOP10;无对局直接报错。「总」额外带群组 / 好友总数一行
     (无增减角标)。输入今天的日期等价于无参数(仍带涨跌)。
@@ -774,44 +843,29 @@ async def lgtbot_data_stats(event, match):
         except Exception:
             pass
 
-    # ── 窗口查询分支(总 / 按年 YYYY / 按日 MMDD / 按月 MM)──────────────────
-    # 4 位数字的**年份与 MMDD 不会撞车**:MMDD 的前两位必须是合法月份 01-12,
-    # 而 2000-2099 的年份前两位恒为 20 —— 两个取值域天然不相交。
-    # 所以路由规则就一句:前两位是合法月份 → 按 MMDD,否则按年份解析。
+    # ── 窗口查询分支(总 / 按年 / 按月 / 按日)—— 参数解析见 _parse_stats_arg ──
     arg = ''
     try:
         arg = (match.group(1) or '') if match else ''
     except (AttributeError, IndexError):
         arg = ''
-    if arg == '总':                                      # 全部历史累计
+    kind, payload, err = _parse_stats_arg(arg, _date.today())
+    if err:
+        await event.reply(f'<@{event.user_id}>\n❌ {err}')
+        return
+    if kind == 'total':
         await _reply_total_stats(event)
         return
-    if len(arg) == 2:                                    # 两位 = 月份(默认今年)
-        month = int(arg)
-        if not 1 <= month <= 12:
-            await event.reply(f'<@{event.user_id}>\n❌ 月份无效：{arg}（格式 MM，如 数据统计08 查看 8月）')
-            return
-        await _reply_month_stats(event, _date.today().year, month)
+    if kind == 'year':
+        await _reply_year_stats(event, payload)
         return
-    if len(arg) == 4 and not 1 <= int(arg[:2]) <= 12:     # 前两位非月份 → 按年份
-        year, this_year = int(arg), _date.today().year
-        if not _MIN_STATS_YEAR <= year <= this_year:
-            await event.reply(
-                f'<@{event.user_id}>\n❌ 参数无效：{arg}'
-                f'（按年 YYYY 如 数据统计{this_year}，可查 {_MIN_STATS_YEAR}-{this_year}；'
-                f'按日 MMDD 如 数据统计0802）')
-            return
-        await _reply_year_stats(event, year)
+    if kind == 'month':
+        await _reply_month_stats(event, *payload)
         return
-    if arg:
-        try:
-            target_day = _date(_date.today().year, int(arg[:2]), int(arg[2:]))
-        except ValueError:
-            await event.reply(f'<@{event.user_id}>\n❌ 日期无效：{arg}（格式 MMDD，如 数据统计0802 查看 8月2日）')
-            return
-        if target_day != _date.today():                  # 输今天 → 走默认今日视图
-            await _reply_date_stats(event, target_day)
-            return
+    if kind == 'date':
+        await _reply_date_stats(event, payload)
+        return
+    # kind == 'today' —— 无参数,或输入的就是今天(等价于无参数,仍带涨跌 / 额度 / 趋势)
 
     g = metrics.query_game_stats()
     if not g.get('available'):

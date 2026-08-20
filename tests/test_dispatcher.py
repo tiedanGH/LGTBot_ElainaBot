@@ -768,6 +768,130 @@ async def test_stats_month_command_views_month(monkeypatch):
     assert txt3.startswith('<@U1>\n') and '月份无效' in txt3
 
 
+# 年份用例一律相对 _MIN_STATS_YEAR 取 —— 那个下界是可调策略(部署方按自己建库时间填),
+# 写死年份会让调一下常量就红一片。假"今天"取下界的次年,于是下界与下界+1 两个年份都在可查范围内。
+_MIN_Y = dispatcher._MIN_STATS_YEAR
+_FAKE_TODAY = __import__('datetime').date(_MIN_Y + 1, 8, 20)
+_D = __import__('datetime').date
+
+
+@pytest.mark.parametrize('arg,expected', [
+    ('',                       ('today', None)),
+    ('总',                      ('total', None)),
+    ('08',                     ('month', (_MIN_Y + 1, 8))),        # MM → 今年
+    ('0803',                   ('date', _D(_MIN_Y + 1, 8, 3))),    # MMDD → 今年
+    (f'{_MIN_Y + 1}',          ('year', _MIN_Y + 1)),              # YYYY
+    (f'{_MIN_Y}',              ('year', _MIN_Y)),                  # YYYY 下界
+    (f'{_MIN_Y}05',            ('month', (_MIN_Y, 5))),            # YYYYMM
+    (f'{_MIN_Y}0803',          ('date', _D(_MIN_Y, 8, 3))),        # YYYYMMDD
+    (f'{_MIN_Y + 1}0803',      ('date', _D(_MIN_Y + 1, 8, 3))),
+    ('0820',                   ('today', None)),   # 就是今天 → 等价无参数(仍带涨跌)
+    (f'{_MIN_Y + 1}0820',      ('today', None)),   # 带年份的今天,同上
+])
+def test_parse_stats_arg_table(arg, expected):
+    """★ 参数解析表(纯函数,不碰事件 / 不碰库):七种形态各自落到哪个视图。
+
+    「不带年份默认今年」与「带年份按给的年查」是同一张表里的相邻两行,最容易被改歪成"8 位也用今年"。
+    """
+    kind, payload, err = dispatcher._parse_stats_arg(arg, _FAKE_TODAY)
+    assert err == '', err
+    assert (kind, payload) == expected
+
+
+@pytest.mark.parametrize('arg,frag', [
+    ('13',                     '月份无效'),   # MM 越界
+    ('00',                     '月份无效'),
+    ('0231',                   '日期无效'),   # MMDD:2 月 31 日
+    ('1899',                   '参数无效'),   # 4 位:既非 MMDD 前缀,也非可查年份
+    (f'{_MIN_Y + 2}',          '参数无效'),   # 4 位:未来年份
+    (f'{_MIN_Y - 1}08',        '年份无效'),   # 6 位:年份早于下界
+    (f'{_MIN_Y}13',            '月份无效'),   # 6 位:月份越界
+    (f'{_MIN_Y}00',            '月份无效'),
+    (f'{_MIN_Y}0231',          '日期无效'),   # 8 位:非法日期
+    (f'{_MIN_Y - 1}0803',      '年份无效'),   # 8 位:年份早于下界
+    (f'{_MIN_Y + 2}0101',      '年份无效'),   # 8 位:未来年份
+])
+def test_parse_stats_arg_errors(arg, frag):
+    """非法参数一律在解析阶段拦下(不查库),且措辞点明是年 / 月 / 日哪一段错。"""
+    kind, payload, err = dispatcher._parse_stats_arg(arg, _FAKE_TODAY)
+    assert kind == 'error' and payload is None
+    assert frag in err, err
+    assert arg[:4] in err or arg in err          # 把用户输的原值回显出来
+
+
+@pytest.mark.parametrize('cmd,group', [
+    ('数据统计', None),
+    ('数据统计总', '总'),
+    ('数据统计08', '08'),
+    ('数据统计0803', '0803'),
+    ('数据统计2026', '2026'),
+    ('数据统计202608', '202608'),
+    ('数据统计20260803', '20260803'),
+    ('/数据统计 20260803', '20260803'),
+])
+def test_stats_pattern_captures_every_form(cmd, group):
+    import re as _re
+    m = _re.match(dispatcher._P_STATS, cmd)
+    assert m is not None, cmd
+    assert m.group(1) == group
+
+
+@pytest.mark.parametrize('cmd', ['数据统计1', '数据统计123', '数据统计12345',
+                                 '数据统计1234567', '数据统计123456789',
+                                 '数据统计总计', '数据统计abc'])
+def test_stats_pattern_rejects_other_shapes(cmd):
+    """位数不对的参数不进本 handler —— 保持原样落进引擎的 catch-all。"""
+    import re as _re
+    assert _re.match(dispatcher._P_STATS, cmd) is None, cmd
+
+
+async def test_stats_with_year_queries_that_year(monkeypatch):
+    """★ 带年份的历史查询:8 位查那一年的那一天、6 位查那一年的那个月,
+    **不是**今年。不带年份的 4 / 2 位仍按今年。
+
+    这里把可查下界压到 5 年前:``_MIN_STATS_YEAR`` 恰好等于今年时,
+    "给的年"与"今年"就是同一个数,这条断言会退化成恒真。
+    """
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    monkeypatch.setattr(dispatcher, '_MIN_STATS_YEAR',
+                        __import__('datetime').date.today().year - 5)
+    seen = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
+                        lambda ds: seen.append(('date', ds)) or {
+                            'available': True, 'day_matches': 1, 'day_players': 1,
+                            'day_groups': 1, 'day_attendances': 1,
+                            'top_games_day': [], 'top_players_day': []})
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
+                        lambda y, m: seen.append(('month', y, m)) or {
+                            'available': True, 'month_matches': 1, 'month_players': 1,
+                            'month_groups': 1, 'month_attendances': 1,
+                            'top_games_month': [], 'top_players_month': []})
+    this_year = __import__('datetime').date.today().year
+
+    async def _run(cmd):
+        ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+        ev.reply = AsyncMock()
+        await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, cmd))
+        return ev.reply.await_args.args[0]
+
+    txt = await _run('数据统计20250803')
+    assert seen == [('date', '2025-08-03')]
+    assert '(2025-08-03)' in txt and '当日对局' in txt
+    seen.clear()
+    await _run('数据统计202505')
+    assert seen == [('month', 2025, 5)]
+    seen.clear()
+    # 不带年份 → 仍按今年
+    await _run('数据统计0803')
+    assert seen == [('date', f'{this_year}-08-03')]
+    seen.clear()
+    await _run('数据统计05')
+    assert seen == [('month', this_year, 5)]
+
+
 async def test_stats_year_command_views_year(monkeypatch):
     """数据统计YYYY:走 query_game_stats_for_year,文案「当年」,无涨跌 / 无额度。"""
     import re as _re
