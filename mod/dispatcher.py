@@ -79,6 +79,8 @@ async def _send_welcome_menu(event) -> None:
         menu_gid = event.group_id or event.channel_id or ''
         if event.is_group and menu_gid and not helpers.can_push_group(menu_gid):
             md += buttons.MENU_FULL_VOLUME_CMD_MD
+        # 「紧急公告」(data/urgent_notice.txt)垫在菜单最后,引用块渲染;文件空 / 不存在时 _menu_urgent_block() 返回 ''
+        md += _menu_urgent_block()
         await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
         uid = event.user_id or ''
         gid = event.group_id or event.channel_id or ''
@@ -404,6 +406,9 @@ _DEFAULT_UPDATE_NOTICE = '暂无更新公告'
 #   · 不自动写入默认占位 —— 这是"按需添加的置顶提示",平时应处于"不存在"状态
 _IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
 
+# 「紧急公告」—— 显示在**欢迎菜单**里(引用块),定位是"用户一 @bot 就能看到的临时通知
+_URGENT_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'urgent_notice.txt')
+
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 
 # 赞助鸣谢名单 —— 与其他 txt 同一套「实时读盘 + 面板可编辑」机制。
@@ -453,21 +458,31 @@ def _read_update_notice() -> str:
         _UPDATE_NOTICE_PATH, _DEFAULT_UPDATE_NOTICE, 'update_notice.txt')
 
 
-def _read_important_update() -> str:
-    """读 ``important_update.txt`` 并 strip。文件缺失 / 内容全空白 → 返回 ``''``。
+def _read_optional_txt(path: str, label: str) -> str:
+    """读「按需存在」的可选 txt 并 strip。文件缺失 / 内容全空白 → 返回 ``''``。
 
-    跟 ``_read_txt_with_default`` 不同:**不自动创建**也不返回默认值 —— 这是
-    "按需置顶提示",不该有自动写入的占位文件污染 ``data/``。空返回让
-    ``lgtbot_update_notice`` 把整个「重要更新」区块跳过,不留空标题。
+    跟 ``_read_txt_with_default`` 不同:**不自动创建**也不返回默认值 —— 这类文本
+    都是"按需添加的临时提示",不该有自动写入的占位文件污染 ``data/``。空返回让
+    调用方把整个区块跳过,不留空标题 / 空行。
     """
-    if not os.path.isfile(_IMPORTANT_UPDATE_PATH):
+    if not os.path.isfile(path):
         return ''
     try:
-        with open(_IMPORTANT_UPDATE_PATH, 'r', encoding='utf-8') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return f.read().strip()
     except Exception as e:
-        log.warning(f'读取 important_update.txt 失败: {e}')
+        log.warning(f'读取 {label} 失败: {e}')
         return ''
+
+
+def _read_important_update() -> str:
+    """「重要更新」置顶区 —— 空则 ``lgtbot_update_notice`` 跳过该代码块。"""
+    return _read_optional_txt(_IMPORTANT_UPDATE_PATH, 'important_update.txt')
+
+
+def _read_urgent_notice() -> str:
+    """「紧急公告」—— 空则欢迎菜单里整块不出现(见 ``_menu_urgent_block``)。"""
+    return _read_optional_txt(_URGENT_NOTICE_PATH, 'urgent_notice.txt')
 
 
 def _read_troubleshooting() -> str:
@@ -487,6 +502,19 @@ def _as_quote(text: str) -> str:
     空行也必须带 ``>``,否则 QQ 客户端会在空行处把引用截断成两块。
     """
     return '\n'.join(f'> {ln}' if ln else '>' for ln in text.split('\n'))
+
+
+def _menu_urgent_block() -> str:
+    """欢迎菜单里的「紧急公告」区块;内容为空 → 返回 ``''``,连空行都不留。
+
+    用引用块(而非代码块)渲染:引用保留 markdown 行内语法,管理员想加粗 / 加 emoji 直接在 txt 里写即可,
+    前后各垫一个空行:前面的隔开上一行内联指令,后面的保证 markdown 的 lazy continuation 不会把日后可能追加
+    在菜单末尾的普通行吸进引用块里(尾部空行不产生可见内容)。
+    """
+    text = _read_urgent_notice()
+    if not text:
+        return ''
+    return '\n' + _as_quote(text) + '\n\n'
 
 
 @handler(_P_MENU,

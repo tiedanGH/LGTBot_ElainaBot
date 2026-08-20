@@ -314,7 +314,7 @@ def test_panel_js_entry_stripped_when_disabled(monkeypatch):
     assert '赞助' not in js
     # 只切赞助那一项,其余表项与后续代码必须完好
     for key in ('config_yaml', 'important_update', 'update_notice',
-                'troubleshooting', 'engine_config'):
+                'urgent_notice', 'troubleshooting', 'engine_config'):
         assert f"dataKey: '{key}'" in js
     assert 'function cfgApplyData' in js
     assert 'cfgReloadConfig' in js

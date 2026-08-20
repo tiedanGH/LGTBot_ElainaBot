@@ -44,6 +44,13 @@ const cfgEditors = {
     msgId: 'cfg-notice-msg', saveBtnId: 'cfg-notice-save', revertBtnId: 'cfg-notice-revert',
     saveHint: '，下次发送「更新公告」指令时即生效',
   },
+  urgent: {
+    dataKey: 'urgent_notice',
+    absPath: '', original: '', format: 'text',
+    editorId: 'cfg-urgent-editor', pathId: 'cfg-urgent-path',
+    msgId: 'cfg-urgent-msg', saveBtnId: 'cfg-urgent-save', revertBtnId: 'cfg-urgent-revert',
+    saveHint: '，下次打开欢迎菜单时即生效；留空则整块不显示',
+  },
   trouble: {
     dataKey: 'troubleshooting',
     absPath: '', original: '', format: 'text',

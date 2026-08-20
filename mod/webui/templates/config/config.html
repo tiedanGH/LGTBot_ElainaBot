@@ -71,6 +71,27 @@
     </div>
   </section>
 
+  <!-- ──── 紧急公告 (urgent_notice.txt) ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🚨 紧急公告</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">文件</span>
+        <span id="cfg-urgent-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+    <p class="dash-pluginconf-desc">
+      临时紧急通知：本文件内容以<b>引用块</b>渲染在欢迎菜单。<b>留空则整块不显示</b>。
+    </p>
+    <textarea id="cfg-urgent-editor" class="dash-editor" spellcheck="false"
+              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div class="dash-editor-actions">
+      <button id="cfg-urgent-save" class="dash-btn dash-btn-primary">💾 保存</button>
+      <button id="cfg-urgent-revert" class="dash-btn">↩ 恢复</button>
+      <span id="cfg-urgent-msg" class="dash-config-msg"></span>
+    </div>
+  </section>
+
   <!-- ──── 疑难解答 (troubleshooting.txt) ──── -->
   <section class="dash-section">
     <div class="dash-section-header">

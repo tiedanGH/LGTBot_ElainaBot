@@ -82,6 +82,7 @@ def _collect_sources() -> list[tuple[str, str, str]]:
         # 管理员自定义文本(若有)
         ('data/update_notice.txt',    os.path.join(boot.DATA_DIR, 'update_notice.txt'),    'plain'),
         ('data/important_update.txt', os.path.join(boot.DATA_DIR, 'important_update.txt'), 'plain'),
+        ('data/urgent_notice.txt',    os.path.join(boot.DATA_DIR, 'urgent_notice.txt'),    'plain'),
         ('data/troubleshooting.txt',  os.path.join(boot.DATA_DIR, 'troubleshooting.txt'),  'plain'),
         ('data/sponsors.txt',         os.path.join(boot.DATA_DIR, 'sponsors.txt'),         'plain'),
     ]
