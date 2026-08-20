@@ -768,6 +768,188 @@ async def test_stats_month_command_views_month(monkeypatch):
     assert txt3.startswith('<@U1>\n') and '月份无效' in txt3
 
 
+async def test_stats_year_command_views_year(monkeypatch):
+    """数据统计YYYY:走 query_game_stats_for_year,文案「当年」,无涨跌 / 无额度。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
+    seen = {}
+
+    def fake_for_year(y):
+        seen['year'] = y
+        return {'available': True, 'year': f'{y:04d}',
+                'year_matches': 900, 'year_players': 120, 'year_groups': 45,
+                'year_attendances': 3100,
+                'top_games_year': [{'game_name': '决胜五子', 'count': 210}],
+                'top_players_year': [{'display': '铁蛋', 'count': 88}]}
+
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year', fake_for_year)
+    year = __import__('datetime').date.today().year
+    cmd = f'数据统计{year}'
+    m = _re.match(dispatcher._P_STATS, cmd)
+    assert m and m.group(1) == str(year)
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, m)
+    txt = ev.reply.await_args.args[0]
+    assert seen['year'] == year
+    assert f'({year})' in txt and '当年对局: 900 局' in txt
+    assert '当年对局人次: 3100 人次' in txt
+    assert '↑' not in txt and '↓' not in txt          # 无涨跌
+    assert '主动消息' not in txt                        # 无额度行
+    assert '群组总数' not in txt                        # 顶部总数行只给今日 / 累计
+
+
+async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
+    """★ 4 位参数的路由:前两位是合法月份 → MMDD,否则按年份。
+
+    两个取值域天然不相交(年份 20xx 的前两位恒为 20,不是合法月份),所以「数据统计0818」永远是 8月18日、「数据统计2026」永远是 2026 年。
+    """
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    routed = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
+                        lambda ds: routed.append(('date', ds)) or {'available': True, 'day_matches': 0})
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year',
+                        lambda y: routed.append(('year', y)) or {'available': True, 'year_matches': 0})
+    year = __import__('datetime').date.today().year
+
+    async def _run(cmd):
+        ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+        ev.reply = AsyncMock()
+        await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, cmd))
+        return ev.reply.await_args.args[0]
+
+    await _run('数据统计0818')
+    assert routed == [('date', f'{year}-08-18')]
+    routed.clear()
+    await _run(f'数据统计{year}')
+    assert routed == [('year', year)]
+
+    # 既不是合法 MMDD 前缀、也不是可查年份 → 参数无效,一次库都不查
+    routed.clear()
+    txt = await _run('数据统计1899')
+    assert routed == [] and '参数无效' in txt
+    txt = await _run(f'数据统计{year + 1}')                # 未来年份同样挡掉
+    assert routed == [] and '参数无效' in txt
+
+
+async def test_stats_total_command_views_all_history(monkeypatch):
+    """数据统计总:累计口径 + **带**群组 / 好友总数(无增减角标)。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader, userinfo
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    called = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_total',
+                        lambda: called.append(1) or {
+                            'available': True,
+                            'total_matches': 12345, 'total_players': 678,
+                            'total_groups': 90, 'total_attendances': 45678,
+                            'top_games_total': [{'game_name': '决胜五子', 'count': 3000}],
+                            'top_players_total': [{'display': '铁蛋', 'count': 500}]})
+    monkeypatch.setattr(userinfo, 'count_groups', lambda: 1284)
+    monkeypatch.setattr(userinfo, 'count_friends', lambda: 5391)
+    # 今日净变化即便查得到也不该出现在累计视图里
+    monkeypatch.setattr(userinfo, 'today_lifecycle_delta',
+                        lambda: {'group': 7, 'friend': -3})
+
+    cmd = '数据统计总'
+    m = _re.match(dispatcher._P_STATS, cmd)
+    assert m and m.group(1) == '总'
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, m)
+    txt = ev.reply.await_args.args[0]
+    assert called == [1]
+    assert '(全部历史)' in txt
+    assert '累计对局: 12345 局' in txt and '累计对局人次: 45678 人次' in txt
+    assert '累计玩家: 678 人' in txt and '累计群聊: 90 个' in txt
+    assert '群组总数: 1284 个' in txt and '好友总数: 5391 人' in txt
+    assert '↑' not in txt and '↓' not in txt and '持平' not in txt   # 无增减标识
+    assert '主动消息' not in txt
+
+
+async def test_stats_total_image_carries_scale_row_without_delta(monkeypatch):
+    """★ 图片侧同一口径:累计视图注入 bot_groups / bot_friends,但 delta 留空 ——
+    有 delta 就会画出角标,而"今日净变化"在累计视图里没有意义(用户要求)。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader, userinfo
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_total',
+                        lambda: {'available': True, 'total_matches': 5,
+                                 'total_players': 4, 'total_groups': 3,
+                                 'total_attendances': 9,
+                                 'top_games_total': [], 'top_players_total': []})
+    monkeypatch.setattr(userinfo, 'count_groups', lambda: 1284)
+    monkeypatch.setattr(userinfo, 'count_friends', lambda: 5391)
+    # 今日净变化查得到**真数字** —— 否则"顺手把 delta 也注入"的写法会因为拿不到 bot 而恰好返回 None,这条断言就白设了
+    monkeypatch.setattr(userinfo, 'today_lifecycle_delta',
+                        lambda: {'group': 7, 'friend': -3})
+    seen = {}
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
+                        lambda g, sub: seen.update(g=g, sub=sub) or None)
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计总')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, '数据统计总'))
+    g = seen['g']
+    assert g['total_mode'] is True and g['date_mode'] is True
+    assert g['bot_groups'] == 1284 and g['bot_friends'] == 5391
+    assert g.get('bot_groups_delta') is None and g.get('bot_friends_delta') is None
+    assert not g.get('trend_10d') and 'push_quota' not in g
+    assert g['rank_limit'] == 10
+    assert '累计' in seen['sub']
+
+
+_THIS_YEAR = __import__('datetime').date.today().year
+
+
+@pytest.mark.parametrize('cmd,flag', [
+    ('数据统计0818', None),
+    ('数据统计08', 'month_mode'),
+    (f'数据统计{_THIS_YEAR}', 'year_mode'),
+])
+async def test_period_views_other_than_total_have_no_scale_row(monkeypatch, cmd, flag):
+    """★ 顶部群组 / 好友总数只给**今日**与**累计**两个视图(用户要求):
+    按日 / 按月 / 按年都不注入 bot_groups —— 「当前总数」不是那一期的事实。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
+                        lambda ds: {'available': True, 'day_matches': 2,
+                                    'day_players': 1, 'day_groups': 1,
+                                    'day_attendances': 3,
+                                    'top_games_day': [], 'top_players_day': []})
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
+                        lambda y, m: {'available': True, 'month_matches': 2,
+                                      'month_players': 1, 'month_groups': 1,
+                                      'month_attendances': 3,
+                                      'top_games_month': [], 'top_players_month': []})
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year',
+                        lambda y: {'available': True, 'year_matches': 2,
+                                   'year_players': 1, 'year_groups': 1,
+                                   'year_attendances': 3,
+                                   'top_games_year': [], 'top_players_year': []})
+    seen = {}
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
+                        lambda g, sub: seen.update(g=g) or None)
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, cmd))
+    g = seen['g']
+    assert 'bot_groups' not in g and 'bot_friends' not in g
+    assert g.get('total_mode') is None
+    if flag:
+        assert g[flag] is True
+    else:
+        assert g.get('month_mode') is None and g.get('year_mode') is None
+
+
 async def test_stats_date_command_today_falls_back_to_normal(monkeypatch):
     """输入今天的 MMDD → 等价无参数:走今日视图(带涨跌),不调历史查询。"""
     import re as _re

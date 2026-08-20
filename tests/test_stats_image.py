@@ -328,6 +328,58 @@ def test_bot_scale_row_uses_friend_icon_not_person(monkeypatch):
     assert kinds.count('person') == 1, kinds     # 只有「今日活跃玩家」那一张
 
 
+def test_period_word_matches_dispatcher_span_views():
+    """★ 跨模块措辞防漂移:图片的期间词必须与 dispatcher 文本保底的一致。
+
+    两条出口(图片 / 文本)各有一份措辞表,同一条指令图片写「当年」、渲染失败退
+    到文本却写「当日」是最容易发生、也最难被发现的漂移。这里按
+    ``_SPAN_VIEWS`` 的 flags 反推图片侧的取词,逐个视图对齐。
+    """
+    for view, cfg in dispatcher._SPAN_VIEWS.items():
+        g = dict(cfg['flags'], date_mode=True)
+        assert stats_image._period_word(g) == cfg['period'], view
+    # 今日视图(非 date_mode)不走期间词,默认值不该被当成它的文案
+    assert stats_image._period_word({}) == '当日'
+
+
+def test_total_mode_scale_row_shows_no_pill():
+    """★ 累计视图的总数行**不带角标**(用户要求):delta 为 None 时一个胶囊都不画。
+
+    判据取描边胶囊的边框色 ``_RED`` —— 关掉榜单 / 趋势后,这个色值在图里只可能
+    来自涨跌胶囊(奖牌色与 accent 系都不撞)。对照组给同一份数据加上 delta。
+    """
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    base = dict(_sample_stats(with_trend=False, with_ranks=False),
+                date_mode=True, total_mode=True, attendances=9,
+                bot_groups=1284, bot_friends=5391)
+    png = stats_image.render_stats_image(base, sub_title='累计总统计')
+    assert png and stats_image._RED not in _colors(png)
+    # 对照:同一视图给了 delta 就该出现胶囊(证明判据有效,不是恒不出现)
+    with_delta = stats_image.render_stats_image(
+        dict(base, bot_groups_delta=7), sub_title='累计总统计')
+    assert stats_image._RED in _colors(with_delta)
+
+
+def test_total_mode_still_draws_the_scale_row():
+    """累计视图仍要有那一行(只是没角标)—— 少了它整块高度会塌一行。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    base = dict(_sample_stats(with_trend=False, with_ranks=False),
+                date_mode=True, total_mode=True, attendances=9)
+    h_without = uploader.get_image_size(
+        stats_image.render_stats_image(base, sub_title='x'))[1]
+    h_with = uploader.get_image_size(stats_image.render_stats_image(
+        dict(base, bot_groups=1284, bot_friends=5391), sub_title='x'))[1]
+    assert h_with > h_without
+    # 这一行的专用底色也要在(与今日行区分那套配色照旧生效)
+    png = stats_image.render_stats_image(
+        dict(base, bot_groups=1284, bot_friends=5391), sub_title='x')
+    assert _first_bulk_y(png, stats_image._TOTAL_BG, min_run=200) is not None
+
+
 def test_render_swallows_exceptions(monkeypatch):
     """渲染内部异常 → None(调用方回退文本),不抛。"""
     monkeypatch.setattr(stats_image, '_render',

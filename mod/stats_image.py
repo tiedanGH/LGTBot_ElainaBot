@@ -15,14 +15,19 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
   · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条
 
-历史日期模式(``g['date_mode']`` 真,「数据统计MMDD」指令):无涨跌胶囊、
-无主动消息行、无趋势图;第 4 卡换成「当日对局人次」(``g['attendances']``,
-user_with_match 计次不去重,票根图标);双榜 TOP10(``g['rank_limit']``);
-卡片文案去「今日」改「当日」。再叠 ``g['month_mode']``(「数据统计MM」
-指令)则布局同上,文案「当日」改「当月」。
+窗口模式(``g['date_mode']`` 真):无涨跌胶囊、无主动消息行、无趋势图;第 4 卡换成「对局人次」
+(``g['attendances']``,user_with_match 计次不去重,票根图标);双榜 TOP10(``g['rank_limit']``);卡片文案去「今日」。
+在此之上叠一个子模式开关决定期间词(见 ``_period_word``,与 dispatcher._SPAN_VIEWS 同措辞):
 
-PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)
-回退纯文本输出 —— 渲染是增强,不是依赖。
+    (无)                 当日  「数据统计MMDD」
+    ``month_mode``       当月  「数据统计MM」
+    ``year_mode``        当年  「数据统计YYYY」
+    ``total_mode``       累计  「数据统计总」(前两卡也改「累计玩家 / 累计群聊」)
+
+第一行的群组 / 好友总数只在调用方注入 ``bot_groups`` / ``bot_friends`` 时出现 ——
+即今日视图(带今日净变化角标)与累计总计视图(**无角标**,``*_delta`` 留空)。
+
+PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)回退纯文本输出 —— 渲染是增强,不是依赖。
 """
 
 from __future__ import annotations
@@ -253,6 +258,20 @@ def render_stats_image(g: dict, sub_title: str = '') -> bytes | None:
         return None
 
 
+def _period_word(g: dict) -> str:
+    """窗口视图的期间词 —— ``date_mode`` 下按子模式开关取(默认当日)。
+
+    与 dispatcher._SPAN_VIEWS 的 period 同措辞:图片与文本保底两条出口的用词必须一致。
+    """
+    if g.get('total_mode'):
+        return '累计'
+    if g.get('year_mode'):
+        return '当年'
+    if g.get('month_mode'):
+        return '当月'
+    return '当日'
+
+
 def _render(g: dict, sub_title: str) -> bytes | None:
     from PIL import Image, ImageDraw
     if not _find_font():
@@ -309,11 +328,13 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     _section(d, (pad, y, width - pad, y + overview_h))
     _sec_title(d, pad + 28, y + 24, '数据总览')
     if date_mode:
-        # 历史日期 / 按月:无涨跌;第 4 卡为该期**对局人次**(user_with_match 计次,不去重)
-        period = '当月' if g.get('month_mode') else '当日'
+        # 历史日 / 月 / 年 / 累计总计:无涨跌;第 4 卡为该期**对局人次**(user_with_match 计次,不去重)。
+        # 总计视图前两卡也改「累计」——全量口径下"活跃玩家"会被误读成"当前还在玩的人"。
+        period = _period_word(g)
+        who = '累计' if g.get('total_mode') else '活跃'
         cards = [
-            ('活跃玩家', g.get('today_players'), None, 'person', _GREEN),
-            ('活跃群聊', g.get('today_groups'), None, 'group', _ORANGE),
+            (f'{who}玩家', g.get('today_players'), None, 'person', _GREEN),
+            (f'{who}群聊', g.get('today_groups'), None, 'group', _ORANGE),
             (f'{period}对局', g.get('today_matches'), None, 'die', _ACCENT),
             (f'{period}对局人次', g.get('attendances'), None, 'ticket', (232, 121, 249)),
         ]
@@ -459,10 +480,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
 
     # ── 排行榜:今日游戏榜(accent)/ 玩家参与榜(橙);历史日期为当日双榜 ──
     half_w = (inner_w - gap) // 2
-    if g.get('month_mode'):
-        games_label = '当月游戏榜'
-    else:
-        games_label = '当日游戏榜' if date_mode else '今日游戏榜'
+    games_label = f'{_period_word(g)}游戏榜' if date_mode else '今日游戏榜'
     ranks = ((games_label, top_games, 'game_name', _ACCENT),
              ('玩家参与榜', top_players, 'display', _ORANGE))
     for i, (label, items, key, fg) in enumerate(ranks):

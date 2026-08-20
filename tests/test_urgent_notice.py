@@ -322,11 +322,12 @@ def test_notify_message_needs_enabled_and_text():
 
 
 def test_notify_message_is_title_plus_raw_text():
-    """固定标题 + ⚠️,正文用公告原文 —— **不套引用块**(需求明确)。"""
+    """固定标题(markdown 标题 + ⚠️)+ 公告原文 —— **不套引用块**(需求明确)。"""
     write_notice('引擎维护中\n\n预计 20:00 恢复')
     urgent.set_enabled(True)
     md = urgent.notify_message()
-    assert md.startswith('## ⚠️ ')
+    head = md.splitlines()[0]
+    assert head.startswith('#') and '⚠️' in head
     assert '\n\n引擎维护中\n\n预计 20:00 恢复' in md
     # 正文里不该出现引用前缀
     assert '>' not in md
@@ -405,7 +406,8 @@ def enabled_notice():
 ])
 async def test_new_game_commands_notify(enabled_notice, content):
     _ev_, sent = await _notify(content)
-    assert sent and sent.startswith('## ⚠️ ')
+    assert sent and sent.startswith(urgent.NOTIFY_TITLE)
+    assert '引擎维护中' in sent
     assert urgent.is_notified('G1') is True
 
 

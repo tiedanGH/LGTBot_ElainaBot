@@ -465,85 +465,79 @@ def query_game_stats() -> dict:
     return out
 
 
-def query_game_stats_for_month(year: int, month: int) -> dict:
-    """某个**自然月**的游戏统计(只读,供「数据统计MM」指令)。
+# ── 窗口统计:按日 / 按月 / 按年 / 累计总计共用一份 SQL ────────────────────
+# 四个视图的**口径完全一致**,只有时间窗口不同(总计连窗口都没有):
+#   · matches      窗口内已完成对局数
+#   · players      窗口内去重玩家
+#   · groups       窗口内活跃群聊(私聊局 group_id 为 NULL / 空,不计)
+#   · attendances  窗口内**对局人次**(user_with_match 行数,不去重 —— 同一玩家打 3 局计 3;这四个视图的第 4 张卡用它替代「近10日对局」)
+#   · top_games / top_players  窗口内双榜,LIMIT 10
+# 所以 SQL 只写一遍 —— 复制四份必然漂移(「活跃群聊要排掉私聊局」「人次不去重」
+# 这类细节最容易只改一处)。各视图的公开函数只做键名改写(见 _prefixed)。
 
-    窗口 [当月 1 日 00:00, 次月 1 日 00:00),全整天:
-      · month_matches / month_players / month_groups  当月对局 / 去重玩家 / 活跃群聊
-      · month_attendances  当月**对局人次**(user_with_match 行数,不去重 ——
-        同一玩家打 3 局计 3;月视图卡片用它替代「近10日对局」)
-      · top_games_month / top_players_month  当月双榜,LIMIT 10
+_SPAN_KEYS = ('matches', 'players', 'groups', 'attendances')
 
-    月度查询不含涨跌对比(调用方也不展示)。失败语义同 query_game_stats。
+
+def _blank_span(*errors: str) -> dict:
+    """空窗口结果(available=False),供库缺失 / 参数非法时早退。"""
+    out: dict = {'available': False, 'errors': list(errors),
+                 'top_games': [], 'top_players': []}
+    out.update({k: None for k in _SPAN_KEYS})
+    return out
+
+
+def _span_stats(start: str | None, end: str | None) -> dict:
+    """统计 ``[start, end)`` 窗口内的游戏数据;``start``/``end`` 为 None = 全量总计。
+
+    失败语义同 ``query_game_stats``:available=False,或单项 None + errors 累加。
     """
-    out: dict = {
-        'available': False,
-        'errors': [],
-        'month': f'{year:04d}-{month:02d}',
-        'month_matches': None,
-        'month_players': None,
-        'month_groups': None,
-        'month_attendances': None,
-        'top_games_month': [],
-        'top_players_month': [],
-    }
     if not os.path.isfile(boot.DB_PATH):
-        out['errors'].append(f'lgtbot.db 不存在:{boot.DB_PATH}')
-        return out
-    start = f'{year:04d}-{month:02d}-01 00:00:00'
-    ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
-    end = f'{ny:04d}-{nm:02d}-01 00:00:00'
+        return _blank_span(f'lgtbot.db 不存在:{boot.DB_PATH}')
+    out = _blank_span()
+    # 无窗口(总计)时不挂时间条件;有窗口时 match 表用 finish_time、带 join 的查询用 m.finish_time
+    if start is None or end is None:
+        w_m = w_j = ''
+        args: tuple = ()
+    else:
+        w_m = ' WHERE finish_time >= ? AND finish_time < ?'
+        w_j = ' WHERE m.finish_time >= ? AND m.finish_time < ?'
+        args = (start, end)
+    join = 'FROM user_with_match uwm JOIN match m ON m.match_id = uwm.match_id'
+    # 群聊那条的附加条件:有窗口时接在后面当 AND,没窗口时它自己就是 WHERE
+    _gc = "group_id IS NOT NULL AND group_id != ''"
+    w_g = f'{w_m} AND {_gc}' if w_m else f' WHERE {_gc}'
 
     conn = None
     try:
         conn = sqlite3.connect(f'file:{boot.DB_PATH}?mode=ro', uri=True, timeout=2.0)
         out['available'] = True
 
-        def _rows(sql: str, args: tuple, tag: str) -> list:
+        def _rows(sql: str, tag: str) -> list:
             try:
                 return conn.execute(sql, args).fetchall()
             except sqlite3.OperationalError as e:
                 out['errors'].append(f'{tag}:{e}')
                 return []
 
-        def _scalar(sql: str, args: tuple, tag: str):
-            rows = _rows(sql, args, tag)
+        def _scalar(sql: str, tag: str):
+            rows = _rows(sql, tag)
             return int(rows[0][0]) if rows else None
 
-        span = (start, end)
-        out['month_matches'] = _scalar(
-            'SELECT COUNT(*) FROM match WHERE finish_time >= ? AND finish_time < ?',
-            span, 'month_matches')
-        out['month_players'] = _scalar(
-            'SELECT COUNT(DISTINCT uwm.user_id) FROM user_with_match uwm '
-            'JOIN match m ON m.match_id = uwm.match_id '
-            'WHERE m.finish_time >= ? AND m.finish_time < ?',
-            span, 'month_players')
-        out['month_groups'] = _scalar(
-            'SELECT COUNT(DISTINCT group_id) FROM match '
-            "WHERE finish_time >= ? AND finish_time < ? "
-            "AND group_id IS NOT NULL AND group_id != ''",
-            span, 'month_groups')
-        out['month_attendances'] = _scalar(
-            'SELECT COUNT(*) FROM user_with_match uwm '
-            'JOIN match m ON m.match_id = uwm.match_id '
-            'WHERE m.finish_time >= ? AND m.finish_time < ?',
-            span, 'month_attendances')
-
-        out['top_games_month'] = [
+        out['matches'] = _scalar(f'SELECT COUNT(*) FROM match{w_m}', 'matches')
+        out['players'] = _scalar(
+            f'SELECT COUNT(DISTINCT uwm.user_id) {join}{w_j}', 'players')
+        out['groups'] = _scalar(
+            f'SELECT COUNT(DISTINCT group_id) FROM match{w_g}', 'groups')
+        out['attendances'] = _scalar(f'SELECT COUNT(*) {join}{w_j}', 'attendances')
+        out['top_games'] = [
             {'game_name': str(gname), 'count': int(c)} for gname, c in _rows(
-                'SELECT game_name, COUNT(*) c FROM match '
-                'WHERE finish_time >= ? AND finish_time < ? '
-                'GROUP BY game_name ORDER BY c DESC LIMIT 10',
-                span, 'top_games_month')]
-        out['top_players_month'] = [
+                f'SELECT game_name, COUNT(*) c FROM match{w_m} '
+                'GROUP BY game_name ORDER BY c DESC LIMIT 10', 'top_games')]
+        out['top_players'] = [
             {'display': userinfo.get_name(str(uid)) or mask_id(str(uid)),
              'count': int(c)} for uid, c in _rows(
-                'SELECT uwm.user_id, COUNT(*) c FROM user_with_match uwm '
-                'JOIN match m ON m.match_id = uwm.match_id '
-                'WHERE m.finish_time >= ? AND m.finish_time < ? '
-                'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10',
-                span, 'top_players_month')]
+                f'SELECT uwm.user_id, COUNT(*) c {join}{w_j} '
+                'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10', 'top_players')]
     except Exception as e:
         out['errors'].append(f'打开 lgtbot.db 失败:{e}')
         out['available'] = False
@@ -556,98 +550,63 @@ def query_game_stats_for_month(year: int, month: int) -> dict:
     return out
 
 
+def _prefixed(span: dict, prefix: str) -> dict:
+    """通用键 → ``<prefix>_matches`` / ``top_games_<prefix>`` 等各视图命名。"""
+    out = {'available': span['available'], 'errors': span['errors']}
+    for k in _SPAN_KEYS:
+        out[f'{prefix}_{k}'] = span[k]
+    out[f'top_games_{prefix}'] = span['top_games']
+    out[f'top_players_{prefix}'] = span['top_players']
+    return out
+
+
+def query_game_stats_for_month(year: int, month: int) -> dict:
+    """某个**自然月**的游戏统计(只读,供「数据统计MM」指令)。
+
+    窗口 [当月 1 日 00:00, 次月 1 日 00:00) 全整天,键前缀 ``month_``。不含涨跌对比。
+    """
+    start = f'{year:04d}-{month:02d}-01 00:00:00'
+    ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
+    end = f'{ny:04d}-{nm:02d}-01 00:00:00'
+    out = _prefixed(_span_stats(start, end), 'month')
+    out['month'] = f'{year:04d}-{month:02d}'
+    return out
+
+
+def query_game_stats_for_year(year: int) -> dict:
+    """某个**自然年**的游戏统计(只读,供「数据统计YYYY」指令)。
+
+    窗口 [当年 1 月 1 日 00:00, 次年 1 月 1 日 00:00),键前缀 ``year_``。
+    """
+    out = _prefixed(_span_stats(f'{year:04d}-01-01 00:00:00',
+                                f'{year + 1:04d}-01-01 00:00:00'), 'year')
+    out['year'] = f'{year:04d}'
+    return out
+
+
+def query_game_stats_total() -> dict:
+    """**全部历史**累计的游戏统计(只读,供「数据统计总」指令),键前缀 ``total_``。
+
+    不加任何时间条件 —— 于是「累计 = 各月之和」在口径上天然成立(同一套 SQL)。
+    """
+    return _prefixed(_span_stats(None, None), 'total')
+
+
 def query_game_stats_for_date(date_str: str) -> dict:
     """某个**历史日期**的游戏统计(只读,供「数据统计MMDD」指令)。
 
-    ``date_str`` 形如 ``'2026-08-02'``。窗口全部整天:
-      · day_*             该日 [00:00, 次日 00:00) 的对局 / 去重玩家 / 活跃群聊
-      · day_attendances   该日**对局人次**(user_with_match 行数,不去重 ——
-        同一玩家打 3 局计 3;日视图卡片用它替代「近10日对局」,与月视图一致)
-      · top_games_day / top_players_day  该日双榜,LIMIT 10(历史回看给全量,
-        今日视图是 5;昵称解析与脱敏同 query_game_stats)
-
-    历史日期查询,不含涨跌对比(调用方也不展示)。失败语义同
-    ``query_game_stats``:available=False / 单项 None + errors。
+    ``date_str`` 形如 ``'2026-08-02'``;窗口 [该日 00:00, 次日 00:00) 全整天,
+    键前缀 ``day_``。双榜 LIMIT 10(历史回看给全量,今日视图是 5)。
+    日期格式非法 → available=False + errors,不查库。
     """
-    out: dict = {
-        'available': False,
-        'errors': [],
-        'date': date_str,
-        'day_matches': None,
-        'day_players': None,
-        'day_groups': None,
-        'day_attendances': None,
-        'top_games_day': [],
-        'top_players_day': [],
-    }
-    if not os.path.isfile(boot.DB_PATH):
-        out['errors'].append(f'lgtbot.db 不存在:{boot.DB_PATH}')
-        return out
     try:
         day = datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
-        out['errors'].append(f'日期格式非法:{date_str!r}')
+        out = _prefixed(_blank_span(f'日期格式非法:{date_str!r}'), 'day')
+        out['date'] = date_str
         return out
     fmt = '%Y-%m-%d %H:%M:%S'
-    day_start = day.strftime(fmt)
-    day_end = (day + timedelta(days=1)).strftime(fmt)
-
-    conn = None
-    try:
-        conn = sqlite3.connect(f'file:{boot.DB_PATH}?mode=ro', uri=True, timeout=2.0)
-        out['available'] = True
-
-        def _rows(sql: str, args: tuple, tag: str) -> list:
-            try:
-                return conn.execute(sql, args).fetchall()
-            except sqlite3.OperationalError as e:
-                out['errors'].append(f'{tag}:{e}')
-                return []
-
-        def _scalar(sql: str, args: tuple, tag: str):
-            rows = _rows(sql, args, tag)
-            return int(rows[0][0]) if rows else None
-
-        out['day_matches'] = _scalar(
-            'SELECT COUNT(*) FROM match WHERE finish_time >= ? AND finish_time < ?',
-            (day_start, day_end), 'day_matches')
-        out['day_players'] = _scalar(
-            'SELECT COUNT(DISTINCT uwm.user_id) FROM user_with_match uwm '
-            'JOIN match m ON m.match_id = uwm.match_id '
-            'WHERE m.finish_time >= ? AND m.finish_time < ?',
-            (day_start, day_end), 'day_players')
-        out['day_groups'] = _scalar(
-            'SELECT COUNT(DISTINCT group_id) FROM match '
-            "WHERE finish_time >= ? AND finish_time < ? "
-            "AND group_id IS NOT NULL AND group_id != ''",
-            (day_start, day_end), 'day_groups')
-        out['day_attendances'] = _scalar(
-            'SELECT COUNT(*) FROM user_with_match uwm '
-            'JOIN match m ON m.match_id = uwm.match_id '
-            'WHERE m.finish_time >= ? AND m.finish_time < ?',
-            (day_start, day_end), 'day_attendances')
-
-        out['top_games_day'] = [
-            {'game_name': str(gname), 'count': int(c)} for gname, c in _rows(
-                'SELECT game_name, COUNT(*) c FROM match '
-                'WHERE finish_time >= ? AND finish_time < ? '
-                'GROUP BY game_name ORDER BY c DESC LIMIT 10',
-                (day_start, day_end), 'top_games_day')]
-        out['top_players_day'] = [
-            {'display': userinfo.get_name(str(uid)) or mask_id(str(uid)),
-             'count': int(c)} for uid, c in _rows(
-                'SELECT uwm.user_id, COUNT(*) c FROM user_with_match uwm '
-                'JOIN match m ON m.match_id = uwm.match_id '
-                'WHERE m.finish_time >= ? AND m.finish_time < ? '
-                'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10',
-                (day_start, day_end), 'top_players_day')]
-    except Exception as e:
-        out['errors'].append(f'打开 lgtbot.db 失败:{e}')
-        out['available'] = False
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
+    out = _prefixed(_span_stats(day.strftime(fmt),
+                                (day + timedelta(days=1)).strftime(fmt)), 'day')
+    out['date'] = date_str
     return out

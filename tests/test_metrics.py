@@ -390,6 +390,69 @@ def test_query_game_stats_for_month_window_and_attendances():
     assert mon['top_players_month'][0]['count'] == 2  # U1 两局居首
 
 
+def test_query_game_stats_for_year_window():
+    """年度查询:[当年 1 月 1 日, 次年 1 月 1 日) —— 跨年边界两侧都不算进来。"""
+    _make_db([
+        ('五子棋', '2025-01-01 00:00:00', 'G1', ['U1']),          # 年内首刻
+        ('大富翁', '2025-12-31 23:59:59', 'G2', ['U1', 'U2']),    # 年内末刻
+        ('五子棋', '2024-12-31 23:59:59', 'G1', ['U3']),          # 上一年 → 不计
+        ('五子棋', '2026-01-01 00:00:00', 'G1', ['U4']),          # 次年首刻 → 不计
+        ('五子棋', '2025-06-01 12:00:00', None, ['U5']),          # 年内私聊局(NULL)
+        # 空串 group_id:COUNT(DISTINCT) 只天然忽略 NULL,'' 会被计成一个群
+        ('狼人杀', '2025-06-02 12:00:00', '', ['U6']),
+    ])
+    yr = metrics.query_game_stats_for_year(2025)
+    assert yr['available'] is True and yr['year'] == '2025'
+    assert yr['year_matches'] == 4
+    assert yr['year_players'] == 4                    # U1/U2/U5/U6 去重
+    assert yr['year_attendances'] == 5                # U1×2 + U2 + U5 + U6
+    assert yr['year_groups'] == 2                     # G1/G2;NULL 与 '' 都不计
+    # 榜首确定(2 局),1 局的三款并列 → SQLite 排序不稳定,用集合断言
+    top = yr['top_games_year']
+    assert (top[0]['game_name'], top[0]['count']) == ('五子棋', 2)
+    assert {t['game_name'] for t in top} == {'五子棋', '大富翁', '狼人杀'}
+    assert yr['top_players_year'][0]['count'] == 2    # U1 两局居首
+
+
+def test_query_game_stats_total_covers_everything():
+    """累计总计:不加任何时间条件 —— 多久以前的对局都计入。"""
+    _make_db([
+        ('五子棋', '2021-03-01 12:00:00', 'G1', ['U1']),
+        ('五子棋', '2025-06-01 12:00:00', 'G2', ['U1', 'U2']),
+        ('大富翁', 0, None, ['U3']),                   # 今天 + 私聊局(NULL)
+        # 空串 group_id:``COUNT(DISTINCT)`` 会**照常把 '' 计成一个值**
+        # (只有 NULL 被它天然忽略),所以 group_id != '' 这条过滤缺一不可
+        ('狼人杀', 0, '', ['U4']),
+    ])
+    tot = metrics.query_game_stats_total()
+    assert tot['available'] is True
+    assert tot['total_matches'] == 4
+    assert tot['total_players'] == 4                  # U1 去重
+    assert tot['total_attendances'] == 5              # U1×2 + U2 + U3 + U4
+    assert tot['total_groups'] == 2                   # G1/G2;NULL 与 '' 都不计
+    assert {t['game_name'] for t in tot['top_games_total']} == \
+        {'五子棋', '大富翁', '狼人杀'}
+
+
+def test_total_equals_sum_of_year_windows():
+    """★ 四个视图共用一份 SQL 的意义:累计 == 各年之和,口径不会各自漂移。
+
+    以前按日 / 按月各自复制过一份 SQL,这条不变式就是那种复制的防线 ——
+    任何一处窗口条件被改歪(比如群聊那条漏掉私聊局排除)都会让等式失衡。
+    """
+    _make_db([
+        ('五子棋', '2024-05-01 10:00:00', 'G1', ['U1', 'U2']),
+        ('大富翁', '2025-05-01 10:00:00', 'G1', ['U1']),
+        ('狼人杀', '2025-07-01 10:00:00', None, ['U3']),
+    ])
+    tot = metrics.query_game_stats_total()
+    y24 = metrics.query_game_stats_for_year(2024)
+    y25 = metrics.query_game_stats_for_year(2025)
+    assert tot['total_matches'] == y24['year_matches'] + y25['year_matches']
+    assert tot['total_attendances'] == \
+        y24['year_attendances'] + y25['year_attendances']
+
+
 def test_query_game_stats_for_month_december_wraps_year():
     """12 月窗口上界跨年 → 次年 1 月 1 日 00:00(不含)。"""
     _make_db([
