@@ -6,7 +6,7 @@
   1. 🔧 插件配置 (data/config.yaml)         + 「前往插件模块」link + 热重载按钮
   2. ⚠️ 重要更新 (data/important_update.txt) 置顶提示，空则不渲染区块
   3. 📢 更新公告 (data/update_notice.txt)    保存即时热加载(下次指令触发就生效)
-  4. 🚨 紧急公告 (data/urgent_notice.txt)    欢迎菜单里的引用块，空则整块不显示
+  4. 🚨 紧急公告 (data/urgent_notice.txt)    欢迎菜单里的引用块；**另有「启用 / 关闭」与「重置已通知群」两个动作**，状态存 data/urgent_notice.json
   5. ❓ 疑难解答 (data/troubleshooting.txt)  同上
   6. ❤️ 赞助鸣谢 (data/sponsors.txt)         同上；**仅 sponsor_enabled 开启时渲染**，关闭时整段区块与数据都不进页面
   7. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
@@ -28,7 +28,7 @@ import yaml
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import audit, boot
+from .. import audit, boot, urgent
 from .. import config as _plugin_config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -99,7 +99,7 @@ def render_tab_js() -> str:
 _CONFIG_YAML_PATH = os.path.join(boot.DATA_DIR, 'config.yaml')
 _IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
 _UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
-_URGENT_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'urgent_notice.txt')
+_URGENT_NOTICE_PATH = urgent.NOTICE_PATH   # 紧急公告文案的**唯一**路径源在 urgent.py
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 _SPONSORS_PATH = os.path.join(boot.DATA_DIR, 'sponsors.txt')
 
@@ -178,11 +178,13 @@ def get_data() -> str:
             'content': notice_content,
             'read_error': notice_err,
         },
-        'urgent_notice': {
-            'abs_path': os.path.abspath(_URGENT_NOTICE_PATH),
-            'content': urgent_content,
-            'read_error': urgent_err,
-        },
+        # 紧急公告多带一份运行状态(开关 / 已通知群数)—— 前端据此渲染「启用 / 关闭」按钮的文案与高亮、以及重置按钮上的计数
+        'urgent_notice': dict(
+            abs_path=os.path.abspath(_URGENT_NOTICE_PATH),
+            content=urgent_content,
+            read_error=urgent_err,
+            **urgent.state_view(),
+        ),
         'troubleshooting': {
             'abs_path': os.path.abspath(_TROUBLESHOOTING_PATH),
             'content': trouble_content,
@@ -316,6 +318,47 @@ def render_reload_config() -> str:
     if admin_changed:
         payload['note'] = 'admin_uids 改动需重启 LGTBot 引擎才能生效 (C++ 侧仅在 start() 时读一次)'
     return _fragment(payload)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Action 端点 —— 紧急公告的开关 / 重置已通知群
+# ─────────────────────────────────────────────────────────────────────────
+# 两个都是**无参 toggle / 清空**语义,沿用隐藏 action 的 fragment 协议;状态由 urgent.py 落盘,响应里回带最新状态供前端刷新按钮文案与高亮。
+
+def _urgent_payload(message: str, **extra) -> str:
+    st = urgent.state_view()
+    return _fragment(dict(success=True, message=message,
+                          enabled=st['enabled'],
+                          notified_count=st['notified_count'], **extra))
+
+
+def render_urgent_toggle() -> str:
+    """翻转紧急公告总开关。关闭时**不动**已通知群记录(重新启用不重复打扰老群)。"""
+    want = not urgent.is_enabled()
+    if not urgent.set_enabled(want):
+        audit.record('config', '紧急公告开关', '写入 urgent_notice.json 失败', ok=False)
+        return _fragment({'success': False, 'enabled': urgent.is_enabled(),
+                          'notified_count': urgent.notified_count(),
+                          'message': '❌ 状态写盘失败，开关未生效（详见日志）'})
+    n = urgent.notified_count()
+    if want:
+        log.warning(f'🚨 [紧急公告] 已启用（已通知 {n} 群，文案 {len(urgent.notice_text())} 字符）')
+    else:
+        log.info(f'🚨 [紧急公告] 已关闭（保留 {n} 条已通知群记录）')
+    audit.record('config', '紧急公告开关',
+                 ('已启用' if want else '已关闭') + f'；已通知 {n} 群')
+    return _urgent_payload(
+        ('✅ 紧急公告已启用：欢迎菜单展示公告，新群建房时额外通知一次'
+         if want else '✅ 紧急公告已关闭：菜单不再展示（已通知群记录保留）'))
+
+
+def render_urgent_reset() -> str:
+    """清空已通知群记录 —— 这些群下次建房会重新收到一次公告。"""
+    n = urgent.reset_notified()
+    log.warning(f'🚨 [紧急公告] 已重置已通知群记录（清除 {n} 群）')
+    audit.record('config', '重置紧急公告已通知群', f'清除 {n} 群')
+    return _urgent_payload(f'✅ 已清除 {n} 个群的通知记录，这些群下次建房会再次收到公告',
+                           cleared=n)
 
 
 # ─────────────────────────────────────────────────────────────────────────

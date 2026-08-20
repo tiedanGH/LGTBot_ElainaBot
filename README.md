@@ -94,7 +94,8 @@ cd ../.. && python3 main.py
   - 用 markdown 内嵌图片，保留原生 mention 与按钮。使用 image_hosting 模块动态发现，默认 `any` 自动依次尝试，也可指定单个图床。留空 / 上传失败回退 `msg_type=7`
 - **按钮与菜单交互** —— 单独 @ 机器人回复模板欢迎菜单（`config.yaml` 可配置的快捷开局）
   - `/新游戏` `/加入` 等自动附交互按钮，游戏结束附「查看战绩 / 重开一局」
-  - **紧急公告**（`data/urgent_notice.txt`，面板「配置管理」可编辑）显示在欢迎菜单
+- **紧急公告** —— 面板「配置管理」里编辑文案（`data/urgent_notice.txt`）+ 一个总开关，实时读盘
+  - **新群通知**：启用期间，某个群**首次**新建游戏房间时额外收到一条紧急公告，之后该群不再重复
 - **全量群适配** —— 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查）
 - **两种群权限分开判定** —— **全量消息**（收得到群内全部消息）与**主动推送**（发得出主动消息）由群主分别开通
   - 决定 刷新按钮、消息回复限制 的**只有主动推送权限**：没开全量但开了主动推送的群全程无需刷新按钮；只开全量却没开主动推送的群照常按被动配额走
@@ -174,6 +175,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── callbacks.py         C++ 引擎回调（cb_* 入口 + 异步发送实现）
 │   ├── dispatcher.py        @handler 注册（消息派发 + INTERACTION 处理）
 │   ├── config.py            data/config.yaml 读写
+│   ├── urgent.py            紧急公告：文案 + 总开关 / 已通知群记录（落盘，重启仍生效）
 │   ├── userinfo.py          主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
 │   ├── corefile.py          游戏子进程 core 文件的 ELF note 解析（信号 / 游戏名 / 崩溃模块）
 │   ├── stats_image.py       「数据统计」指令的统计卡片渲染（PIL，缺字体自动回退文本）
@@ -239,6 +241,7 @@ plugins/LGTBot_ElainaBot/
 │
 └── data/                    🗂 运行时数据（自动创建）
     ├── config.yaml          插件配置（Web UI 可在线编辑）
+    ├── urgent_notice.json   紧急公告：启用状态 + 已通知群记录（面板按钮维护）
     ├── match_runner_cwd.sh  自动生成：游戏子进程启动 wrapper（保证赛况图能渲染）
     ├── user_cache.db        *旧版昵称缓存遗留文件（已完全停用，可删除）*
     ├── build/               引擎编译状态 + 日志（WebUI「引擎编译」标签使用）

@@ -83,6 +83,8 @@ def _collect_sources() -> list[tuple[str, str, str]]:
         ('data/update_notice.txt',    os.path.join(boot.DATA_DIR, 'update_notice.txt'),    'plain'),
         ('data/important_update.txt', os.path.join(boot.DATA_DIR, 'important_update.txt'), 'plain'),
         ('data/urgent_notice.txt',    os.path.join(boot.DATA_DIR, 'urgent_notice.txt'),    'plain'),
+        # 紧急公告的开关 + 已通知群记录
+        ('data/urgent_notice.json',   os.path.join(boot.DATA_DIR, 'urgent_notice.json'),   'plain'),
         ('data/troubleshooting.txt',  os.path.join(boot.DATA_DIR, 'troubleshooting.txt'),  'plain'),
         ('data/sponsors.txt',         os.path.join(boot.DATA_DIR, 'sponsors.txt'),         'plain'),
     ]

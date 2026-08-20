@@ -69,6 +69,8 @@ _DASH_CLEAR_GEN_7D_KEY      = '__lgtbot_dash_clear_gen_7d'
 _DASH_CLEAR_MATCH_ALL_KEY   = '__lgtbot_dash_clear_match_all'
 _DASH_CLEAR_MATCH_7D_KEY    = '__lgtbot_dash_clear_match_7d'
 _DASH_RELOAD_CONFIG_KEY     = '__lgtbot_dash_reload_config'        # 插件配置热重载
+_URGENT_TOGGLE_KEY          = '__lgtbot_urgent_toggle'            # 紧急公告总开关(翻转)
+_URGENT_RESET_KEY           = '__lgtbot_urgent_reset'             # 清空紧急公告已通知群记录
 _DASH_MATCHES_KEY           = '__lgtbot_dash_matches'             # 进行中对局列表(只读,前端实时轮询)
 
 # 引擎编译标签的 action 端点(JS 侧 BUILD_KEYS 与此一一对应)
@@ -146,6 +148,8 @@ _HIDDEN_KEYS = frozenset({
     _DASH_CLEAR_MATCH_ALL_KEY,
     _DASH_CLEAR_MATCH_7D_KEY,
     _DASH_RELOAD_CONFIG_KEY,
+    _URGENT_TOGGLE_KEY,
+    _URGENT_RESET_KEY,
     _DASH_MATCHES_KEY,
     _BUILD_FULL_KEY,
     _BUILD_INCR_KEY,
@@ -374,6 +378,8 @@ def register():
       · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
         —— Dashboard 赛况缓存「清理全部 / 保留 7 天」
       · ``__lgtbot_dash_reload_config`` —— Dashboard「插件配置」热重载 yaml 到运行时
+      · ``__lgtbot_urgent_toggle`` / ``__lgtbot_urgent_reset``
+        —— 配置管理「紧急公告」的总开关翻转 / 清空已通知群记录
       · ``__lgtbot_dash_build_full / incr / bridge / list / custom / newtarget /
          kill / clean / remove / log`` —— 引擎编译标签的 10 个动作 + 轮询端点
       · ``__lgtbot_backup_create / list`` —— 数据备份标签的创建 / 列表端点
@@ -410,6 +416,9 @@ def register():
     _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,    page_dashboard.render_clear_match_7d)
     # 注:_DASH_RELOAD_CONFIG_KEY 历史 key 不变(JS / 文档兼容),provider 已搬到 page_config
     _register_hidden_action(_DASH_RELOAD_CONFIG_KEY,     page_config.render_reload_config)
+    # 配置管理「紧急公告」的两个动作(开关翻转 / 清空已通知群)
+    _register_hidden_action(_URGENT_TOGGLE_KEY,          page_config.render_urgent_toggle)
+    _register_hidden_action(_URGENT_RESET_KEY,           page_config.render_urgent_reset)
     # 进行中对局列表(只读,前端每几秒实时轮询)
     _register_hidden_action(_DASH_MATCHES_KEY,           page_dashboard.render_matches)
 

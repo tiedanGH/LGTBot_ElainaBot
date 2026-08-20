@@ -3,6 +3,7 @@
 """通用辅助：sender 查找 / 跨线程协程执行 / target_key / mention 美化 / 群权限集合"""
 
 from __future__ import annotations
+import os
 import re
 import time
 import asyncio
@@ -60,6 +61,35 @@ def strip_md_escapes(text: str) -> str:
 def target_key(target_id: str, is_uid: bool) -> str:
     """统一 target 标识：群消息 'g:<gid>'，私聊 'u:<uid>'"""
     return ('u:' if is_uid else 'g:') + target_id
+
+
+# ──── 管理员可编辑文本的共用工具(dispatcher 的公告 / 疑难解答 / urgent) ─────
+
+def as_quote(text: str) -> str:
+    """把多行文本转成 markdown 引用块(每行前缀 ``> ``)。
+
+    引用而非代码块 —— 引用会保留 markdown 行内语法,管理员想给某行加粗 / 加 emoji 直接在 txt 里写即可。
+    空行也必须带 ``>``,否则 QQ 客户端会在空行处把引用截断成两块。
+    """
+    return '\n'.join(f'> {ln}' if ln else '>' for ln in text.split('\n'))
+
+
+def read_optional_txt(path: str, label: str) -> str:
+    """读「按需存在」的可选 txt 并 strip。文件缺失 / 内容全空白 → 返回 ``''``。
+
+    与「有默认内容」的那批 txt(更新公告 / 疑难解答)不同:**不自动创建**也不返回默认值
+    这类文本都是"按需添加的临时提示",不该有自动写入的占位文件污染 ``data/``。空返回让调用方把整个区块跳过,不留空标题 / 空行。
+
+    每次调用都重新开文件 —— 管理员在面板改完存盘,下一条消息就拿到新内容。
+    """
+    if not os.path.isfile(path):
+        return ''
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception as e:
+        log.warning(f'读取 {label} 失败: {e}')
+        return ''
 
 
 def humanize_mentions(text: str) -> str:

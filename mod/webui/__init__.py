@@ -10,6 +10,7 @@ Python 模块(仅做逻辑 + 模板加载):
     page_config    「配置管理」标签:7 块编辑器(config.yaml / important_update.txt
                    / update_notice.txt / urgent_notice.txt / troubleshooting.txt
                    / sponsors.txt / lgtbot.json)+ 热重载 action
+                   + 紧急公告的「启用 / 关闭」与「重置已通知群」两个 action
     page_build     「引擎编译」标签:子进程跑 bash build.sh,跨 WebUI 进程
                    重启仍能续看(state.json + build.log),支持中途终止;
                    ANSI 颜色转 HTML 渲染

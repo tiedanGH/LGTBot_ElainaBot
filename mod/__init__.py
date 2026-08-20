@@ -25,6 +25,9 @@
                       接收侧适配全量群 GROUP_MESSAGE_CREATE
     config            ``data/config.yaml`` 读写 + 运行时下发(refresh_wait_timeout
                       / image_hosting / menu_game_buttons / crash_notify_group)
+    urgent            紧急公告:文案(urgent_notice.txt)+ 总开关与已通知群记录
+                      (urgent_notice.json,落盘所以重启仍生效);出口是欢迎菜单
+                      尾部的引用块与新群首次建房的额外通知
     userinfo          主框架用户数据只读门面(data.db/wakeup.db/statistics.db;
                       昵称缓存 + 变化时经 db_queue 写回最新昵称)
     uploader          图床上传调度(名单随主框架模块动态发现) + 图片尺寸解析

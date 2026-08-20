@@ -23,7 +23,8 @@ from core.message.event import (
     INTERACTION_CREATE,
 )
 
-from . import state, quota, helpers, boot, buttons, uploader, userinfo, audit, metrics, stats_image
+from . import (state, quota, helpers, boot, buttons, uploader, userinfo, audit,
+               metrics, stats_image, urgent)
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -79,8 +80,8 @@ async def _send_welcome_menu(event) -> None:
         menu_gid = event.group_id or event.channel_id or ''
         if event.is_group and menu_gid and not helpers.can_push_group(menu_gid):
             md += buttons.MENU_FULL_VOLUME_CMD_MD
-        # 「紧急公告」(data/urgent_notice.txt)垫在菜单最后,引用块渲染;文件空 / 不存在时 _menu_urgent_block() 返回 ''
-        md += _menu_urgent_block()
+        # 「紧急公告」垫在菜单最后,引用块渲染;未启用 / 文案为空时 menu_block() 返回 ''
+        md += urgent.menu_block()
         await event.reply(md, buttons=buttons.build_menu_buttons(event.appid or ''))
         uid = event.user_id or ''
         gid = event.group_id or event.channel_id or ''
@@ -156,6 +157,36 @@ def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
     else:
         return
     state.pending_new_game_name[key] = m.group(1)
+
+
+async def _maybe_notify_urgent(event, content: str, gid: str) -> None:
+    """新群第一次建房 → 额外推一条「紧急公告」,发完记下该群,此后不再打扰。
+
+    只在**群聊**里做(已通知群记录按群号存,私信没有群概念);判定条件全在
+    ``urgent.pending_notify``(公告已启用 + 文案非空 + 该群没被通知过)。
+
+    建房命令的识别复用「计划重启」维护闸的同一枚 ``_NEW_GAME_RE`` —— ``/新游戏`` 与 ``/随机游戏`` 都算,
+    **不区分单机局**(单机没有引擎的建房广播,但命令层面一视同仁,少一处特例)。调用点与 ``_capture_pending_game_name``
+    对称:消息事件与按钮 INTERACTION 两条路径都要覆盖(菜单快捷开局按钮的 data  就是 ``/新游戏 X``)。
+
+    先发后记:发送失败(网络 / 配额)就不落记录,下次建房还能补上;反过来先记后发一旦发失败,这个群就永远收不到公告了。
+    """
+    if not (event.is_group and gid) or not _NEW_GAME_RE.match(content):
+        return
+    md = urgent.pending_notify(gid)
+    if not md:
+        return
+    try:
+        # 直接 reply 会真实吃掉一条被动引用额度,和欢迎菜单分支一样先把计数烧掉对齐。
+        quota.try_consume_ref(helpers.target_key(gid, False))
+        await event.reply(md)
+    except Exception as e:
+        log.warning(f'紧急公告通知发送失败 ({gid}): {e}')
+        return
+    page_logs.log_outgoing(gid, False, '[紧急公告通知]')
+    if urgent.mark_notified(gid):
+        log.info(f'📣 [紧急公告] 已通知新群 {gid}（累计 {urgent.notified_count()} 群）')
+
 
 # 主动消息额度「即将用尽」告警阈值 —— 用量达上限的该比例即转黄色警告。
 PUSH_QUOTA_WARN_RATIO = 0.85
@@ -406,9 +437,6 @@ _DEFAULT_UPDATE_NOTICE = '暂无更新公告'
 #   · 不自动写入默认占位 —— 这是"按需添加的置顶提示",平时应处于"不存在"状态
 _IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
 
-# 「紧急公告」—— 显示在**欢迎菜单**里(引用块),定位是"用户一 @bot 就能看到的临时通知
-_URGENT_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'urgent_notice.txt')
-
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 
 # 赞助鸣谢名单 —— 与其他 txt 同一套「实时读盘 + 面板可编辑」机制。
@@ -458,31 +486,15 @@ def _read_update_notice() -> str:
         _UPDATE_NOTICE_PATH, _DEFAULT_UPDATE_NOTICE, 'update_notice.txt')
 
 
-def _read_optional_txt(path: str, label: str) -> str:
-    """读「按需存在」的可选 txt 并 strip。文件缺失 / 内容全空白 → 返回 ``''``。
-
-    跟 ``_read_txt_with_default`` 不同:**不自动创建**也不返回默认值 —— 这类文本
-    都是"按需添加的临时提示",不该有自动写入的占位文件污染 ``data/``。空返回让
-    调用方把整个区块跳过,不留空标题 / 空行。
-    """
-    if not os.path.isfile(path):
-        return ''
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception as e:
-        log.warning(f'读取 {label} 失败: {e}')
-        return ''
+# 「按需存在」的可选 txt 读取 / markdown 引用块包装
+# 实现在 helpers,紧急公告(urgent.py)与这里共用同一份,避免两处各写一遍再漂移(引用块里空行必须带裸 ``>`` 这种细节最容易只改一边)。
+_read_optional_txt = helpers.read_optional_txt
+_as_quote = helpers.as_quote
 
 
 def _read_important_update() -> str:
     """「重要更新」置顶区 —— 空则 ``lgtbot_update_notice`` 跳过该代码块。"""
     return _read_optional_txt(_IMPORTANT_UPDATE_PATH, 'important_update.txt')
-
-
-def _read_urgent_notice() -> str:
-    """「紧急公告」—— 空则欢迎菜单里整块不出现(见 ``_menu_urgent_block``)。"""
-    return _read_optional_txt(_URGENT_NOTICE_PATH, 'urgent_notice.txt')
 
 
 def _read_troubleshooting() -> str:
@@ -493,28 +505,6 @@ def _read_troubleshooting() -> str:
 def _read_sponsors() -> str:
     return _read_txt_with_default(
         _SPONSORS_PATH, _DEFAULT_SPONSORS, 'sponsors.txt')
-
-
-def _as_quote(text: str) -> str:
-    """把多行文本转成 markdown 引用块(每行前缀 ``> ``)。
-
-    赞助鸣谢用引用而非代码块 —— 引用会保留 markdown 行内语法,管理员想给某个名字加粗 / 加 emoji 直接在 txt 里写即可。
-    空行也必须带 ``>``,否则 QQ 客户端会在空行处把引用截断成两块。
-    """
-    return '\n'.join(f'> {ln}' if ln else '>' for ln in text.split('\n'))
-
-
-def _menu_urgent_block() -> str:
-    """欢迎菜单里的「紧急公告」区块;内容为空 → 返回 ``''``,连空行都不留。
-
-    用引用块(而非代码块)渲染:引用保留 markdown 行内语法,管理员想加粗 / 加 emoji 直接在 txt 里写即可,
-    前后各垫一个空行:前面的隔开上一行内联指令,后面的保证 markdown 的 lazy continuation 不会把日后可能追加
-    在菜单末尾的普通行吸进引用块里(尾部空行不产生可见内容)。
-    """
-    text = _read_urgent_notice()
-    if not text:
-        return ''
-    return '\n' + _as_quote(text) + '\n\n'
 
 
 @handler(_P_MENU,
@@ -1136,6 +1126,9 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     # 单机局游戏名兜底:派发前从「/新游戏 X」命令抓游戏名(见 _capture_pending_game_name)
     _capture_pending_game_name(content, event, gid, uid)
 
+    # 新群首次建房 → 额外推一条紧急公告(公告已启用且该群没通知过时才发)
+    await _maybe_notify_urgent(event, content, gid)
+
     # 派发给 C++ 引擎（独立线程，避免 C++ match-lock 与 asyncio loop 互锁）
     try:
         if event.is_group and gid:
@@ -1276,6 +1269,9 @@ async def lgtbot_interaction_dispatch(event, match):
 
     # 单机局游戏名兜底:与 lgtbot_dispatch 对称,按钮 data 若为「/新游戏 X」也抓一手
     _capture_pending_game_name(content, event, gid, uid)
+
+    # 紧急公告通知:菜单「游戏快捷开局」按钮的 data 也是建房命令,与消息路径对称
+    await _maybe_notify_urgent(event, content, gid)
 
     try:
         if event.is_group and gid:

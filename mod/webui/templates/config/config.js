@@ -10,6 +10,8 @@
 
 const CFG_KEYS = {
   reload_config: '__lgtbot_dash_reload_config',
+  urgent_toggle: '__lgtbot_urgent_toggle',
+  urgent_reset: '__lgtbot_urgent_reset',
 };
 const CFG_VALIDATED_SAVE_ROUTE = '/api/ext/lgtbot/config/save';
 
@@ -49,7 +51,7 @@ const cfgEditors = {
     absPath: '', original: '', format: 'text',
     editorId: 'cfg-urgent-editor', pathId: 'cfg-urgent-path',
     msgId: 'cfg-urgent-msg', saveBtnId: 'cfg-urgent-save', revertBtnId: 'cfg-urgent-revert',
-    saveHint: '，下次打开欢迎菜单时即生效；留空则整块不显示',
+    saveHint: '，下次打开欢迎菜单时即生效（需「启用紧急公告」）',
   },
   trouble: {
     dataKey: 'troubleshooting',
@@ -77,7 +79,29 @@ const cfgEditors = {
   },
 };
 
+/* ──── 紧急公告的运行状态(开关 / 已通知群数) ────
+ * 与文案编辑器分开:文案存 txt,这两项存 data/urgent_notice.json(重启后仍生效)。
+ * 服务端在 urgent_notice 数据块里回带 enabled / notified_count,这里只负责把它画到按钮上。 */
+function cfgApplyUrgentState(info) {
+  if (!info) return;
+  const on = !!info.enabled;
+  const toggle = document.getElementById('cfg-urgent-toggle');
+  if (toggle) {
+    toggle.textContent = on ? '🚨 关闭紧急公告' : '🚨 启用紧急公告';
+    toggle.classList.toggle('active', on);
+    toggle.disabled = false;          /* 动作跑完后由这里统一恢复可点 */
+  }
+  const reset = document.getElementById('cfg-urgent-reset');
+  if (reset) {
+    const n = info.notified_count || 0;
+    reset.textContent = '♻ 重置全部已通知群（' + n + ' 个）';
+    /* 一个都没通知过时没什么可重置,禁用避免误点(仍留着让人知道有这功能) */
+    reset.disabled = !n;
+  }
+}
+
 function cfgApplyData(data) {
+  cfgApplyUrgentState(data.urgent_notice);
   Object.entries(cfgEditors).forEach(([k, state]) => {
     const info = data[state.dataKey];
     if (!info) return;
@@ -183,6 +207,53 @@ function cfgRevert(key) {
   cfgShowMsg(key, '已恢复至上次加载内容', 'info');
 }
 
+/* ──── 紧急公告:启用 / 关闭 + 重置已通知群 ────
+ * 两个动作都走隐藏 action 的 fragment 协议(<pre id="result">JSON</pre>),
+ * 与热重载同款;响应回带最新 enabled / notified_count,直接喂给 cfgApplyUrgentState。
+ * 两个都先弹确认:开关影响所有用户看到的菜单,重置会让全部群再收一次公告。 */
+async function cfgUrgentAction(key, btnId) {
+  const btn = document.getElementById(btnId);
+  const wasDisabled = btn ? btn.disabled : false;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch(apiUrl(CFG_KEYS[key]), { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    const el = doc.getElementById('result');
+    if (!el) throw new Error('响应不含 #result');
+    const data = JSON.parse(el.textContent);
+    /* 成功与否都按服务端状态重画按钮(写盘失败时状态没变,按钮也就不该变) */
+    cfgApplyUrgentState(data);
+    cfgShowMsg('urgent', data.message || (data.success ? '✅ 已完成' : '❌ 操作失败'),
+               data.success ? 'ok' : 'err');
+  } catch (e) {
+    cfgShowMsg('urgent', '❌ 请求失败：' + e.message, 'err');
+    if (btn) btn.disabled = wasDisabled;
+  }
+}
+
+async function cfgUrgentToggle() {
+  const btn = document.getElementById('cfg-urgent-toggle');
+  const isOn = btn && btn.classList.contains('active');
+  const ok = await dashConfirm(
+    isOn
+      ? '确认关闭紧急公告？\n\n欢迎菜单将不再展示公告，新群建房也不再额外通知。\n已通知群记录会保留（重新启用时这些群不会被重复通知）。'
+      : '确认启用紧急公告？\n\n欢迎菜单会展示当前公告文案；启用后每个群首次新建游戏房间时，会额外收到一条紧急公告。\n状态写入数据文件，重启后依然生效，直到手动关闭。',
+    {level: isOn ? 'info' : 'warn', okText: isOn ? '关闭' : '启用'}
+  );
+  if (!ok) return;
+  await cfgUrgentAction('urgent_toggle', 'cfg-urgent-toggle');
+}
+
+async function cfgUrgentReset() {
+  const ok = await dashConfirm(
+    '确认重置全部已通知群？\n\n将清除所有「已通知」记录，这些群下次新建游戏时会再次收到紧急公告。\n此操作不可撤销，也不会改变公告的启用状态。',
+    {level: 'warn', okText: '重置'}
+  );
+  if (!ok) return;
+  await cfgUrgentAction('urgent_reset', 'cfg-urgent-reset');
+}
+
 /* ──── 热重载 config.yaml(仅 yaml editor 旁的按钮) ──── */
 async function cfgReloadConfig() {
   const ok = await dashConfirm(
@@ -262,4 +333,10 @@ window.addEventListener('DOMContentLoaded', () => {
   /* 热重载按钮(只在 yaml editor 旁) */
   const reloadBtn = document.getElementById('cfg-yaml-reload');
   if (reloadBtn) reloadBtn.addEventListener('click', cfgReloadConfig);
+
+  /* 紧急公告的两个动作按钮(各自带确认弹窗) */
+  const urgentToggle = document.getElementById('cfg-urgent-toggle');
+  if (urgentToggle) urgentToggle.addEventListener('click', cfgUrgentToggle);
+  const urgentReset = document.getElementById('cfg-urgent-reset');
+  if (urgentReset) urgentReset.addEventListener('click', cfgUrgentReset);
 });

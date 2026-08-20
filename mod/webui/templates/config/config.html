@@ -81,13 +81,18 @@
       </div>
     </div>
     <p class="dash-pluginconf-desc">
-      临时紧急通知：本文件内容以<b>引用块</b>渲染在欢迎菜单。<b>留空则整块不显示</b>。
+      临时紧急通知：本文件内容以<b>引用块</b>渲染在欢迎菜单。<b>仅「已启用」时才展示</b>。启用期间，每个群在<b>首次</b>新建游戏房间时会额外收到紧急公告。关闭公告功能<b>不会</b>清除已通知群记录。
     </p>
     <textarea id="cfg-urgent-editor" class="dash-editor" spellcheck="false"
               autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
     <div class="dash-editor-actions">
       <button id="cfg-urgent-save" class="dash-btn dash-btn-primary">💾 保存</button>
       <button id="cfg-urgent-revert" class="dash-btn">↩ 恢复</button>
+      <!-- 启用态由 JS 加 .active -->
+      <button id="cfg-urgent-toggle" class="dash-btn cfg-urgent-toggle"
+              title="启用后欢迎菜单展示紧急公告，新群首次建房额外通知一次，重启后依然生效">🚨 启用紧急公告</button>
+      <button id="cfg-urgent-reset" class="dash-btn dash-btn-danger"
+              title="清除全部已通知群记录，这些群下次新建游戏会再次收到紧急公告">♻ 重置全部已通知群（0 个）</button>
       <span id="cfg-urgent-msg" class="dash-config-msg"></span>
     </div>
   </section>
