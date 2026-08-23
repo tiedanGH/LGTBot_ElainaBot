@@ -24,7 +24,7 @@
     dispatcher        ``@handler`` 注册(消息派发 + INTERACTION + ``/重启``);
                       接收侧适配全量群 GROUP_MESSAGE_CREATE
     config            ``data/config.yaml`` 读写 + 运行时下发(refresh_wait_timeout
-                      / image_hosting / menu_game_buttons / crash_notify_group)
+                      / image_hosting / menu_game_buttons / notify_groups)
     urgent            紧急公告:文案(urgent_notice.txt)+ 总开关与已通知群记录
                       (urgent_notice.json,落盘所以重启仍生效);出口是欢迎菜单
                       尾部的引用块与新群首次建房的额外通知

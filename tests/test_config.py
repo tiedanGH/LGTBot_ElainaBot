@@ -41,7 +41,7 @@ def _reset_tunables(monkeypatch):
     (uploader.SELECTED_BACKEND / URL_CACHE_TTL 由 conftest 的 autouse 复位。)"""
     monkeypatch.setattr(state, 'bind_bot_appid', '')
     monkeypatch.setattr(quota, 'REFRESH_WAIT_TIMEOUT', 15.0)
-    monkeypatch.setattr(callbacks, 'CRASH_NOTIFY_GROUP', '')
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ())
     monkeypatch.setattr(callbacks, 'SANDBOX_DM_USERS', frozenset())
     monkeypatch.setattr(callbacks, 'DM_PUSH_ALL', False)
     monkeypatch.setattr(dispatcher, 'BLOCKED_COMMANDS', ())
@@ -121,9 +121,35 @@ def test_bind_bot_appid_bool_and_garbage_still_ignored():
     assert state.bind_bot_appid == ''
 
 
-def test_crash_notify_group_unquoted_number_coerced_to_str():
-    config._apply_runtime_tunables(_base_cfg(crash_notify_group=987654321))
-    assert callbacks.CRASH_NOTIFY_GROUP == '987654321'
+def test_notify_groups_normalized_to_tuple_of_str():
+    """多个群:strip + 去空 + 去重保序;裸数字群号(yaml 不带引号)按字符串收下。"""
+    config._apply_runtime_tunables(
+        _base_cfg(notify_groups=['G1', ' G2 ', '', 'G1', 987654321]))
+    assert callbacks.NOTIFY_GROUPS == ('G1', 'G2', '987654321')
+
+
+def test_notify_groups_non_list_ignored():
+    """填成字符串 / 数字等非列表 → 视为未配置(不推送),不崩。"""
+    for bad in ('G1', 123, {'a': 1}, True):
+        config._apply_runtime_tunables(_base_cfg(notify_groups=bad))
+        assert callbacks.NOTIFY_GROUPS == ()
+
+
+def test_legacy_crash_notify_group_still_honored():
+    """★ 旧字段名兼容:notify_groups 留空而旧的 crash_notify_group 有值时沿用旧值。
+
+    老部署升级后 yaml 里只有旧字段,若直接无视,崩溃 / 重启通知会**静默消失** ——
+    而这几条恰恰是最不能漏的消息。新字段一旦填了就完全接管(不再合并旧值)。
+    """
+    cfg = _base_cfg(crash_notify_group='GOLD')
+    cfg['notify_groups'] = []
+    config._apply_runtime_tunables(cfg)
+    assert callbacks.NOTIFY_GROUPS == ('GOLD',)
+
+    # 新字段有值 → 旧字段被忽略
+    cfg2 = _base_cfg(crash_notify_group='GOLD', notify_groups=['GNEW'])
+    config._apply_runtime_tunables(cfg2)
+    assert callbacks.NOTIFY_GROUPS == ('GNEW',)
 
 
 def test_validator_warns_not_errors_on_numeric_id_fields():
@@ -413,3 +439,20 @@ def test_persist_bind_reports_failure_without_touching_state(monkeypatch, _cfg_f
     ok, msg = config.persist_bind_bot_appid('NEW')
     assert ok is False and 'config.yaml' in msg
     assert state.bind_bot_appid == 'KEEP'
+
+
+def test_validator_flags_renamed_field_as_migration_not_unknown():
+    """★ 改过名的字段仍被运行时读作兼容值 —— 校验器不能说它"不会读取"。
+
+    面板里那句「未知字段(本插件不会读取)」会让人以为旧配置已经失效,进而误删掉唯一生效的通知群配置。这里要求提示的是改名去向。
+    """
+    pytest.importorskip('aiohttp')
+    from plugins.LGTBot_ElainaBot.mod.webui import page_config as pc
+    errs, warns = pc._validate_config_yaml('crash_notify_group: GOLD\n')
+    assert errs == []
+    hit = [w for w in warns if 'crash_notify_group' in w]
+    assert hit and 'notify_groups' in hit[0], warns
+    assert '不会读取' not in hit[0]
+    # 真正的未知字段仍照旧提示
+    _e, w2 = pc._validate_config_yaml('nonsense_field: 1\n')
+    assert any('未知字段' in w for w in w2)

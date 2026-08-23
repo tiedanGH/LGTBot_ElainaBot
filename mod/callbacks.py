@@ -74,11 +74,14 @@ _CRASH_COLLATERAL_MD = (
     '非常抱歉给您带来不便，我们会尽快修复 🌹'
 )
 
-# 严重问题通知群 openid —— 由 config.py::_apply_runtime_tunables 按 yaml 配置覆盖。
-# 空字符串 = 不推送。设了的话,引擎崩溃时除了给玩家发道歉,还向此群主动推送
-# 一条崩溃报告。通常填管理员监控的全量群 —— 该群在 QQ 后台开了全量推送权限,
-# bot 才能向它走主动消息(没 msg_id 引用)。
-CRASH_NOTIFY_GROUP: str = ''
+# 通知群 openid 列表 —— 由 config.py::_apply_runtime_tunables 按 yaml 的
+# ``notify_groups`` 覆盖(旧字段名 ``crash_notify_group``,单个群)。
+# 空 = 不推送。三类通知都会**向列表里的全部群**推送:
+#   · 引擎崩溃报告(_try_send_crash_notification)
+#   · 崩溃死循环熔断告警(_alert_crash_loop_tripped)
+#   · 自动重启说明(dispatcher._notify_auto_restart)
+# 通常填管理员监控的全量群 —— 这些群要给本 bot 开全量推送权限,主动消息(没 msg_id 引用)才能落地。
+NOTIFY_GROUPS: tuple = ()
 
 # 私信主动直推资格 —— 两个变量均由 config.py::_apply_runtime_tunables 按 yaml 的
 # sandbox_dm_users 覆盖:
@@ -220,10 +223,9 @@ async def _send_crash_messages(uid: str, gid: str, is_uid: bool,
     """
     coros = []
     # 优先级:通知群 > 道歉。先 append 表示在 gather 里优先调度,实际 HTTP 并发。
-    notify_group = CRASH_NOTIFY_GROUP
-    if notify_group:
+    if NOTIFY_GROUPS:
         coros.append(_try_send_crash_notification(
-            notify_group, sig_name, uid, gid, is_uid, msg_len))
+            sig_name, uid, gid, is_uid, msg_len))
     target_id = uid if is_uid else gid
     if target_id:
         coros.append(_try_send_crash_apology(target_id, is_uid))
@@ -311,15 +313,50 @@ async def _send_collateral_notice(target_id: str, is_uid: bool) -> None:
         log.warning(f'对局中断通知发送失败 ({target_id}): {e}')
 
 
-async def _try_send_crash_notification(notify_group: str, sig_name: str,
-                                       uid: str, gid: str, is_uid: bool,
-                                       msg_len: int,
-                                       *, is_belated: bool = False) -> None:
-    """向严重问题通知群推送一条**主动消息**汇报崩溃。
+async def broadcast_notify(md: str, label: str, *, timeout: float = 8.0) -> int:
+    """把一条**主动消息**广播到 ``NOTIFY_GROUPS`` 的全部群,返回成功条数。
 
+    三类通知共用本函数:崩溃报告、崩溃死循环熔断告警、自动重启说明。
     用 ``sender.send_to_group(group_id, content)`` 不带 ``msg_id``/``event_id``
-    走 push API —— 仅在通知群 QQ 后台给本 bot 开了「全量推送」权限时能落地。
-    没权限就会被 QQ 拒,这里只打 warning 不报错,30s 后 execv 照常进行。
+    走 push API —— 仅在该群 QQ 后台给本 bot 开了「全量推送」权限时能落地,
+    没权限会被 QQ 拒。
+
+    几个刻意的选择:
+      · **并发发送 + ``return_exceptions=True``**:一个群失败绝不能连累其他群 —— 这几条恰恰是最不能漏的消息。
+      · **每条独立 ``wait_for``**:崩溃善后路径整体只有 8s 预算,不能让一个 hung 住的 HTTP 把其他群的推送一起拖死。
+      · 失败只 ``warning``,绝不抛 —— 调用方(崩溃善后 / 重启流程)不能被通知推送反过来打断。
+      · 未配置通知群 / 拿不到 sender → 返回 0 静默跳过。
+    """
+    if not NOTIFY_GROUPS:
+        return 0
+    sender = helpers.get_sender('')
+    if sender is None:
+        log.warning(f'无可用 sender，跳过{label}推送')
+        return 0
+
+    async def _one(group_id: str) -> bool:
+        page_logs.log_outgoing(group_id, False, md)
+        try:
+            with log_attribution.mark_outbound():
+                await asyncio.wait_for(sender.send_to_group(group_id, md),
+                                       timeout=timeout)
+            return True
+        except Exception as e:
+            log.warning(f'{label}推送失败 ({group_id}): {e}')
+            return False
+
+    results = await asyncio.gather(*(_one(g) for g in NOTIFY_GROUPS),
+                                   return_exceptions=True)
+    ok = sum(1 for r in results if r is True)
+    if ok < len(NOTIFY_GROUPS):
+        log.warning(f'{label}:{len(NOTIFY_GROUPS)} 个通知群中 {ok} 个送达')
+    return ok
+
+
+async def _try_send_crash_notification(sig_name: str, uid: str, gid: str,
+                                       is_uid: bool, msg_len: int,
+                                       *, is_belated: bool = False) -> None:
+    """向全部通知群推送一条**主动消息**汇报崩溃(发送细节见 broadcast_notify)。
 
     ``is_belated=True`` 走补发路径(OnCxxTerminate marker):此时进程已经重启
     完成,把「进程将在 N 秒后自动重启」这行替换为「机器人已自动重启恢复服务」,
@@ -333,11 +370,6 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
     ``log.error`` 里,管理员凭 target + 时间戳去 WebUI「消息日志」或
     framework 全局日志反查即可,本地查完全无风险。
     """
-    sender = helpers.get_sender('')
-    if sender is None:
-        log.warning('无可用 sender，跳过崩溃通知群推送')
-        return
-
     # 触发源块:私聊单行,群聊两行(群号 + 用户号各占一行,提升可读性)
     if is_uid:
         target_block = f'用户 {uid}'
@@ -367,12 +399,7 @@ async def _try_send_crash_notification(notify_group: str, sig_name: str,
         '\n'
         '> 💡 此消息为自动推送，请尽快联系开发者排查修复'
     )
-    page_logs.log_outgoing(notify_group, False, md)
-    try:
-        with log_attribution.mark_outbound():
-            await sender.send_to_group(notify_group, md)
-    except Exception as e:
-        log.warning(f'崩溃通知群推送失败 ({notify_group}): {e}')
+    await broadcast_notify(md, '崩溃通知群')
 
 
 # ──────── 上一轮 C++ terminate 路径补发道歉/通知 ─────────────────────────
@@ -517,11 +544,9 @@ async def _belated_apology(marker_path: str, info: dict) -> None:
         log.error('=' * 60)
 
         coros = []
-        notify_group = CRASH_NOTIFY_GROUP
-        if notify_group:
+        if NOTIFY_GROUPS:
             coros.append(_try_send_crash_notification(
-                notify_group, sig_name, uid, gid, is_uid, msg_len,
-                is_belated=True))
+                sig_name, uid, gid, is_uid, msg_len, is_belated=True))
         target_id = uid if is_uid else gid
         if target_id:
             coros.append(_try_send_crash_apology(target_id, is_uid,
@@ -615,14 +640,7 @@ def check_crash_loop() -> bool:
 
 
 async def _alert_crash_loop_tripped(count: int) -> None:
-    """向通知群推送一条「崩溃死循环已熔断」主动消息。无通知群 / 无 sender 时静默跳过。"""
-    notify_group = CRASH_NOTIFY_GROUP
-    if not notify_group:
-        return
-    sender = helpers.get_sender('')
-    if sender is None:
-        log.warning('无可用 sender，跳过崩溃熔断告警')
-        return
+    """向全部通知群推送一条「崩溃死循环已熔断」主动消息。未配置通知群时静默跳过。"""
     md = (
         '$$\\textcolor{red}{\\Huge\\text{严重告警}}$$'
         '\n'
@@ -638,12 +656,7 @@ async def _alert_crash_loop_tripped(count: int) -> None:
         '\n'
         '> 💡 此消息为自动推送，请尽快联系开发者排查修复'
     )
-    page_logs.log_outgoing(notify_group, False, md)
-    try:
-        with log_attribution.mark_outbound():
-            await sender.send_to_group(notify_group, md)
-    except Exception as e:
-        log.warning(f'崩溃熔断告警推送失败 ({notify_group}): {e}')
+    await broadcast_notify(md, '崩溃熔断告警')
 
 
 # ──────── 「消息回复限制」教学提示(新建房间触发,紧跟建房公告发出) ──────────

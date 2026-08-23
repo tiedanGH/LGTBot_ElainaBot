@@ -231,7 +231,7 @@ def _snapshot_runtime_tunables() -> dict:
         'image_hosting': _uploader.SELECTED_BACKEND or '',
         'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
         'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
-        'crash_notify_group': _callbacks.CRASH_NOTIFY_GROUP or '',
+        'notify_groups': list(_callbacks.NOTIFY_GROUPS),
         'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
         'sandbox_dm_users': ['all'] if _callbacks.DM_PUSH_ALL else sorted(_callbacks.SANDBOX_DM_USERS),
         'menu_game_buttons': list(_buttons.MENU_GAMES),
@@ -384,7 +384,13 @@ def _valid_backends() -> set:
 # 纯数字 ID 类字段:不带引号时 yaml 解析成 int,运行时
 # (config._apply_runtime_tunables)按字符串接受 —— 校验器同语义放行(警告级)。
 # 其余 str 字段(如 image_hosting)填数字仍是错误。
-_INT_OK_STR_FIELDS = {'bind_bot_appid', 'crash_notify_group'}
+# (notify_groups 这类**列表**字段不用登记:列表项的 int 由下面的元素检查放行)
+_INT_OK_STR_FIELDS = {'bind_bot_appid'}
+
+# 改过名的字段:仍被 config.py 读作兼容值,提示改名即可。
+_LEGACY_FIELDS = {
+    'crash_notify_group': 'notify_groups（现支持多个群；旧字段仍会被读取，建议迁移）',
+}
 
 
 def _validate_config_yaml(text: str) -> tuple[list, list]:
@@ -460,7 +466,11 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
     if missing:
         warnings.append(f'缺少字段 {"、".join(missing)}(下次加载自动补默认值)')
     for key in data:
-        if key not in _plugin_config.DEFAULT_CONFIG:
+        if key in _plugin_config.DEFAULT_CONFIG:
+            continue
+        if key in _LEGACY_FIELDS:
+            warnings.append(f'{key} 已更名为 {_LEGACY_FIELDS[key]}')
+        else:
             warnings.append(f'未知字段 {key}(本插件不会读取)')
     return errors, warnings
 

@@ -9,7 +9,7 @@
   · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
   · active_push_daily_limit: int     单个群 / 用户每日主动消息条数上限（0 = 不限）
   · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
-  · crash_notify_group: str          严重问题通知群 openid（崩溃时向此群主动推报告）
+  · notify_groups: list[str]         通知群 openid 列表（崩溃报告 / 熔断告警 / 自动重启说明向全部群主动推送）
   · blocked_commands: list[str]      追加屏蔽指令（与 dispatcher 内置屏蔽表共同生效，命中的消息不转发给引擎）
   · sandbox_dm_users: list[str]      沙箱测试用户 openid 列表（私信主动直推；["all"] = 全员直推模式）
   · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
@@ -37,7 +37,7 @@ DEFAULT_CONFIG = {
     'refresh_wait_timeout': 15.0,
     'active_push_daily_limit': 1000,
     'image_upload_dedup_ttl': 60.0,
-    'crash_notify_group': '',
+    'notify_groups': [],
     'blocked_commands': [],
     'sandbox_dm_users': [],
     'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
@@ -50,7 +50,7 @@ CONFIG_COMMENTS = {
     'refresh_wait_timeout': '被动消息配额耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
     'active_push_daily_limit': '单个群 / 用户每日主动消息条数上限（QQ 官方接口限制，默认 1000）。用满后该群 / 用户当日退回「刷新按钮」被动机制，次日 0 点自动恢复；设 0 = 不限制',
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
-    'crash_notify_group': 'LGTBot 引擎严重问题通知群 openid，该群需要全量消息权限',
+    'notify_groups': 'LGTBot 重要通知群 openid 列表，可填多个：引擎崩溃 / 引擎告警 / 自动重启提示 会同时推送给全部群。这些群需要主动消息权限',
     'blocked_commands': '屏蔽指令列表：命中的消息不再转发给引擎，用于化解与其他插件的指令冲突',
     'sandbox_dm_users': '沙箱用户 openid 列表，列表内用户私信走主动消息直推；填 ["all"]（仅此一项）= 全员直推模式',
     'menu_game_buttons': '欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
@@ -137,7 +137,7 @@ def _apply_runtime_tunables(cfg: dict):
     下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
     ``load_plugin_config`` 处理,不在此函数内):
       bind_bot_appid → image_hosting → refresh_wait_timeout →
-      active_push_daily_limit → image_upload_dedup_ttl → crash_notify_group → blocked_commands →
+      active_push_daily_limit → image_upload_dedup_ttl → notify_groups → blocked_commands →
       sandbox_dm_users → menu_game_buttons → sponsor_enabled
     """
     from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
@@ -239,22 +239,37 @@ def _apply_runtime_tunables(cfg: dict):
             log.info(f'image_upload_dedup_ttl: {old_desc} → {new_desc}')
             uploader.URL_CACHE_TTL = ttl_f
 
-    # ── crash_notify_group ────────────────────────────────────────────────
-    # 引擎崩溃时往这里推送主动消息。非 str 或空白 → 视为未配置(空字符串);
-    # callbacks.CRASH_NOTIFY_GROUP 在崩溃善后路径里读这个值,empty 跳过推送。
-    raw_notify = cfg.get('crash_notify_group', '')
-    # 同 bind_bot_appid:纯数字群 id 不带引号会解析成 int,按字符串接受
-    if isinstance(raw_notify, int) and not isinstance(raw_notify, bool):
-        raw_notify = str(raw_notify)
-    if not isinstance(raw_notify, str):
-        log.warning(f'crash_notify_group 应为字符串，已忽略 (got {type(raw_notify).__name__})')
-        raw_notify = ''
-    notify_group = raw_notify.strip()
-    if _callbacks.CRASH_NOTIFY_GROUP != notify_group:
-        old = _callbacks.CRASH_NOTIFY_GROUP or '(未配置)'
-        new = notify_group or '(未配置)'
-        log.info(f'crash_notify_group: {old} → {new}')
-        _callbacks.CRASH_NOTIFY_GROUP = notify_group
+    # ── notify_groups ─────────────────────────────────────────────────────
+    # 通知消息(崩溃报告 / 崩溃熔断告警 / 自动重启说明)的推送目标,可填多个群 ——
+    # 三类通知都会向**全部**群推送(见 callbacks.broadcast_notify)。
+    # 规范化:strip + 去空 + 去重保序;非列表 / 缺失 → 空(不推送)。
+    # 纯数字群 id 不带引号时 yaml 解析成 int,str() 统一收下(同 bind_bot_appid)。
+    raw_groups = cfg.get('notify_groups', None)
+    groups: list = []
+    if isinstance(raw_groups, list):
+        seen_g: set = set()
+        for g in raw_groups:
+            gid = str(g).strip()
+            if gid and gid not in seen_g:
+                seen_g.add(gid)
+                groups.append(gid)
+    elif raw_groups not in (None, ''):
+        log.warning(f'notify_groups 应为列表，已忽略 (got {type(raw_groups).__name__})')
+    # 旧字段名兼容:crash_notify_group 是单个群的字符串。
+    # 新字段留空而旧字段有值时沿用旧值并提示迁移 —— 否则老部署升级后通知会**静默消失**,而这几条恰恰是最不能漏的消息。
+    if not groups:
+        legacy = cfg.get('crash_notify_group', '')
+        legacy = '' if isinstance(legacy, bool) else str(legacy).strip()
+        if legacy:
+            groups = [legacy]
+            log.warning(f'crash_notify_group 已更名为 notify_groups（可填多个群），'
+                        f'本次沿用旧值；建议改写成 notify_groups: ["{legacy}"]')
+    new_groups = tuple(groups)
+    if _callbacks.NOTIFY_GROUPS != new_groups:
+        old = ', '.join(_callbacks.NOTIFY_GROUPS) or '(未配置)'
+        new = ', '.join(new_groups) or '(未配置)'
+        log.info(f'notify_groups: {old} → {new}')
+        _callbacks.NOTIFY_GROUPS = new_groups
 
     # ── blocked_commands ──────────────────────────────────────────────────
     # 追加屏蔽指令:与 dispatcher.BUILTIN_BLOCKED_COMMANDS 共同组成屏蔽表(两个 catch-all 派发前调 _is_blocked_command 检查)。

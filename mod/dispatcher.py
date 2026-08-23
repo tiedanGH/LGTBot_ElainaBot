@@ -1537,19 +1537,13 @@ async def _auto_restart_watcher() -> None:
 
 
 async def _notify_auto_restart(reason: str) -> None:
-    """自动重启触发时向严重问题通知群推送一条说明(手动重启不推)。
+    """自动重启触发时向**全部通知群**推送一条说明(手动重启不推)。
 
-    复用崩溃通知的通道语义:``CRASH_NOTIFY_GROUP`` 配置的群 + 主动消息
-    (该群需全量权限,没权限会被 QQ 拒,仅 warning 不阻断重启)。
-    整体限时 5s —— 通知只是锦上添花,不能卡住已经释放引擎的重启流程。
+    与崩溃报告 / 熔断告警共用 ``callbacks.broadcast_notify`` 与同一份 ``notify_groups`` 配置
+    (这些群需全量推送权限,没权限会被 QQ 拒,仅 warning)。单条限时 5s(比崩溃路径的 8s 更紧)
+    通知只是锦上添花,不能卡住已经释放引擎的重启流程;多个群并发推,不会因为群多而线性变慢。
     """
     from . import callbacks as _callbacks   # 延迟取,拿 config 覆盖后的最新值
-    notify_group = getattr(_callbacks, 'CRASH_NOTIFY_GROUP', '') or ''
-    if not notify_group:
-        return
-    sender = helpers.get_sender('')
-    if sender is None:
-        return
     md = (
         '## 🔁 LGT-Bot 自动重启\n'
         '\n'
@@ -1560,14 +1554,7 @@ async def _notify_auto_restart(reason: str) -> None:
         '⏳ 主进程即将重启\n'
         '预计 10 秒内自动恢复服务...'
     )
-    try:
-        from .webui import page_logs
-        from . import log_attribution
-        page_logs.log_outgoing(notify_group, False, md)
-        with log_attribution.mark_outbound():
-            await asyncio.wait_for(sender.send_to_group(notify_group, md), timeout=5.0)
-    except Exception as e:
-        log.warning(f'自动重启通知推送失败 ({notify_group}): {e}')
+    await _callbacks.broadcast_notify(md, '自动重启通知', timeout=5.0)
 
 
 @handler(_P_MATCHLIST,

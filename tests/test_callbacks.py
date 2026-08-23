@@ -686,3 +686,70 @@ def test_mention_rewrite_registry_lives_in_persistent_dict():
     out = callbacks._apply_mention_rewrite('g:GX', '<@ADMIN_UID> 中断成功')
     assert out == '<@OP_UID> 中断成功'
     assert 'g:GX' not in shared                       # 一次性:命中即注销
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 通知群广播(崩溃报告 / 熔断告警 / 自动重启说明共用)
+# ─────────────────────────────────────────────────────────────────────────
+
+async def test_broadcast_notify_reaches_every_group(monkeypatch):
+    """★ 配了多个通知群 → 每个群都收到同一条消息,返回成功条数。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ('G1', 'G2', 'G3'))
+    ok = await callbacks.broadcast_notify('# 告警', '测试通知')
+    assert ok == 3
+    sent = {c.args[0]: c.args[1] for c in sender.send_to_group.await_args_list}
+    assert sent == {'G1': '# 告警', 'G2': '# 告警', 'G3': '# 告警'}
+
+
+async def test_broadcast_notify_one_failure_does_not_block_others(monkeypatch):
+    """★ 一个群失败(最常见:没开全量推送权限被 QQ 拒)不能连累其他群 ——
+    这几条恰恰是最不能漏的消息。异常吞掉,只反映在返回的成功条数上。"""
+    sender = _fake_sender()
+
+    async def _send(gid, md, **kw):
+        if gid == 'G2':
+            raise RuntimeError('QQ rejected: no push permission')
+        return (True, {}, {})
+
+    sender.send_to_group = AsyncMock(side_effect=_send)
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ('G1', 'G2', 'G3'))
+    ok = await callbacks.broadcast_notify('# 告警', '测试通知')
+    assert ok == 2
+    assert {c.args[0] for c in sender.send_to_group.await_args_list} == {'G1', 'G2', 'G3'}
+
+
+async def test_broadcast_notify_skips_when_unconfigured(monkeypatch):
+    """未配置通知群 → 连 sender 都不取(0 条),静默跳过。"""
+    called = []
+    monkeypatch.setattr(callbacks.helpers, 'get_sender',
+                        lambda appid='': called.append(1))
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ())
+    assert await callbacks.broadcast_notify('x', '测试通知') == 0
+    assert called == []
+
+
+async def test_crash_notification_fans_out_to_every_group(monkeypatch):
+    """崩溃报告走同一条广播 —— 多个群都收到,且正文不含用户原文(风控约束)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ('GA', 'GB'))
+    await callbacks._try_send_crash_notification(
+        'SIGSEGV', 'U1', 'G9', False, 42)
+    sent = {c.args[0]: c.args[1] for c in sender.send_to_group.await_args_list}
+    assert set(sent) == {'GA', 'GB'}
+    md = sent['GA']
+    assert 'SIGSEGV' in md and '群聊 G9' in md and '42 字符' in md
+    assert sent['GA'] == sent['GB']
+
+
+async def test_crash_loop_alert_fans_out_to_every_group(monkeypatch):
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ('GA', 'GB'))
+    await callbacks._alert_crash_loop_tripped(5)
+    sent = {c.args[0]: c.args[1] for c in sender.send_to_group.await_args_list}
+    assert set(sent) == {'GA', 'GB'}
+    assert '熔断' in sent['GA'] and '5 次' in sent['GA']

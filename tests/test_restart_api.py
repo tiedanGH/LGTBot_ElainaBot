@@ -290,7 +290,7 @@ async def test_notify_auto_restart_sends_markdown(monkeypatch):
     sender = MagicMock()
     sender.send_to_group = AsyncMock(return_value=(True, {}, {}))
     monkeypatch.setattr(helpers, 'get_sender', lambda appid='': sender)
-    monkeypatch.setattr(callbacks, 'CRASH_NOTIFY_GROUP', 'GNOTIFY')
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ('GNOTIFY',))
 
     await dispatcher._notify_auto_restart('夜间升级')
     args = sender.send_to_group.await_args.args
@@ -304,6 +304,22 @@ async def test_notify_auto_restart_sends_markdown(monkeypatch):
     assert '自动重启' in md                        # 主体通知仍完整
 
     sender.send_to_group.reset_mock()
-    monkeypatch.setattr(callbacks, 'CRASH_NOTIFY_GROUP', '')
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ())
     await dispatcher._notify_auto_restart('x')     # 未配置通知群 → 不发送
     sender.send_to_group.assert_not_called()
+
+
+async def test_notify_auto_restart_fans_out_to_every_group(monkeypatch):
+    """★ 配了多个通知群 → **每个群都收到**同一条自动重启说明。"""
+    from unittest.mock import AsyncMock, MagicMock
+    from plugins.LGTBot_ElainaBot.mod import callbacks, helpers
+    sender = MagicMock()
+    sender.send_to_group = AsyncMock(return_value=(True, {}, {}))
+    monkeypatch.setattr(helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ('G1', 'G2', 'G3'))
+
+    await dispatcher._notify_auto_restart('夜间升级')
+    sent = {c.args[0]: c.args[1] for c in sender.send_to_group.await_args_list}
+    assert set(sent) == {'G1', 'G2', 'G3'}
+    assert len({md for md in sent.values()}) == 1      # 三个群内容一致
+    assert '自动重启' in next(iter(sent.values()))
