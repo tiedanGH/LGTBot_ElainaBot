@@ -50,6 +50,9 @@ active_matches: dict[str, dict] = _p['active_matches']
 # 单机局引擎跳过 new_game 广播、game_started 又无 brief,current_game 拿不到名字 → 回退用这里抓的命令名;
 # 多人局仍以引擎 new_game 的 brief 为准,这份只在 current_game 为空时兜底。跨热重载持久。
 pending_new_game_name: dict[str, str] = _p['pending_new_game_name']
+# 群管刚发过 `/中断` 的群(target_key → 过期时间戳),由 dispatcher 写入、callbacks 在引擎那条「还差 N 人确定中断」的广播上消费一次(挂「强制中断游戏」按钮)。
+# 一次性 + 短 TTL:引擎的两条回执紧跟命令而来,超时未命中(如全员已确定 → 直接中断、没有那条广播)就让它自然过期,不留悬挂标记。跨热重载持久。
+force_interrupt_hints: dict[str, float] = _p['force_interrupt_hints']
 # 运行时观测到 ``GROUP_MESSAGE_CREATE`` 的群 openid 集合 —— 由 dispatcher 填入。
 #
 # 这是「真·全量群」的唯一判定信号。理由:

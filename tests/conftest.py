@@ -62,6 +62,7 @@ _persistent: dict = {
     'group_push_cache': {},
     'group_push_probe_at': {},
     'mention_rewrites': {},
+    'force_interrupt_hints': {},
 }
 
 
@@ -125,6 +126,7 @@ def _clean_runtime_state():
     _persistent['group_push_cache'].clear()
     _persistent['group_push_probe_at'].clear()
     _persistent['mention_rewrites'].clear()
+    _persistent['force_interrupt_hints'].clear()
 
     # 清 uploader 模块状态(若已被 import)
     try:

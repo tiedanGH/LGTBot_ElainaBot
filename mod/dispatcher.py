@@ -159,6 +159,33 @@ def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
     state.pending_new_game_name[key] = m.group(1)
 
 
+# 玩家投票中断:`/中断`(可带其他参数,但 `取消` 是反向操作,不算)。
+# `%中断` 是群管的强制中断,有专属 handler,不走这里。
+_USER_INTERRUPT_RE = re.compile(r'^[/#]?中断(?:\s+(?!取消)\S+)?$')
+# 群管发过 /中断 的标记有效期 —— 引擎的两条回执紧随命令(毫秒级)而来,60s 足够宽松;
+# 留 TTL 只是为了让"没等到那条广播"的情形(全员已确定 → 直接中断,或命令被引擎报错拒绝)自然过期。
+_FORCE_INTERRUPT_HINT_TTL = 60.0
+
+
+def _mark_force_interrupt_hint(event, content: str, gid: str) -> None:
+    """群主 / 群管理员发 ``/中断`` 时打个一次性标记。
+
+    随后引擎那条「有玩家确定中断比赛，目前 N 人尚未确定中断…」广播会被
+    ``callbacks._force_interrupt_buttons_for`` 认领,挂上「强制中断游戏」按钮。
+    普通玩家发 ``/中断`` 不打标记 —— 那条广播就不带任何按钮(需求即口径)。
+
+    判定沿用 ``lgtbot_admin_interrupt`` 的同一套 ``member_role``:群管本来就
+    只被授权了 ``%中断`` 这一条管理指令,按钮不过是它的快捷入口。
+    """
+    if not (event.is_group and gid) or not _USER_INTERRUPT_RE.match(content):
+        return
+    role = getattr(event, 'member_role', '') or ''
+    if role not in _GROUP_ADMIN_ROLES:
+        return
+    state.force_interrupt_hints[helpers.target_key(gid, False)] = (
+        time.time() + _FORCE_INTERRUPT_HINT_TTL)
+
+
 async def _maybe_notify_urgent(event, content: str, gid: str) -> None:
     """新群第一次建房 → 额外推一条「紧急公告」,发完记下该群,此后不再打扰。
 
@@ -1201,6 +1228,9 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 
     # 新群首次建房 → 额外推一条紧急公告(公告已启用且该群没通知过时才发)
     await _maybe_notify_urgent(event, content, gid)
+
+    # 群管发的 /中断:给随后那条中断投票广播预约「强制中断游戏」按钮
+    _mark_force_interrupt_hint(event, content, gid)
 
     # 派发给 C++ 引擎（独立线程，避免 C++ match-lock 与 asyncio loop 互锁）
     try:

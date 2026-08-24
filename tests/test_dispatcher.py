@@ -1296,3 +1296,57 @@ def test_capture_pending_game_name_group_and_dm():
     dispatcher._capture_pending_game_name('/新游戏', ev_g, 'G1', 'U1')      # 裸命令无名
     dispatcher._capture_pending_game_name('/随机游戏', ev_g, 'G1', 'U1')    # 随机游戏无名
     assert _state.pending_new_game_name == {}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 群管 /中断 → 预约「强制中断游戏」按钮
+# ─────────────────────────────────────────────────────────────────────────
+
+def _mark(content, *, role='', is_group=True, gid='G1'):
+    """跑一次 _mark_force_interrupt_hint,返回**是否打上了任何标记**。
+
+    私信场景刻意仍传一个非空 gid(频道私信带 channel_id,dispatcher 传进来的 gid 就是它)
+    只判断"gid 有没有值"的闸会放行私信,断言必须能看出来。
+    """
+    from plugins.LGTBot_ElainaBot.mod import state as _st
+    _st.force_interrupt_hints.clear()
+    ev = _mock_event(is_group=is_group, is_direct=not is_group,
+                     group_id=gid if is_group else '', user_id='U1',
+                     content=content)
+    ev.channel_id = '' if is_group else gid
+    ev.member_role = role
+    dispatcher._mark_force_interrupt_hint(ev, content, gid)
+    return bool(_st.force_interrupt_hints)
+
+
+@pytest.mark.parametrize('role', ['owner', 'admin'])
+def test_interrupt_hint_marked_for_group_admins(role):
+    """群主 / 群管理员发 /中断 → 打标记(随后那条投票广播会挂强制中断按钮)。"""
+    assert _mark('/中断', role=role) is True
+
+
+@pytest.mark.parametrize('role', ['', 'member', 'MEMBER', None])
+def test_interrupt_hint_not_marked_for_plain_members(role):
+    """★ 普通玩家发 /中断 → 不打标记 → 广播上不会出现任何按钮(需求即口径)。"""
+    assert _mark('/中断', role=role or '') is False
+
+
+@pytest.mark.parametrize('content', ['/中断', '中断', '#中断'])
+def test_interrupt_hint_accepts_command_variants(content):
+    """带不带 / # 前缀都是同一条投票指令。"""
+    assert _mark(content, role='admin') is True
+
+
+@pytest.mark.parametrize('content', [
+    '/中断 取消',      # 反向操作:取消中断,不该给强制中断的近路
+    '%中断',           # 群管强制中断本身(有专属 handler,不走这里)
+    '/中断游戏',       # 不是这条指令
+    '/新游戏 中断',
+])
+def test_interrupt_hint_ignores_other_commands(content):
+    assert _mark(content, role='owner') is False
+
+
+def test_interrupt_hint_group_only():
+    """私信没有群管概念,也没有「强制中断」这条授权路径。"""
+    assert _mark('/中断', role='owner', is_group=False) is False

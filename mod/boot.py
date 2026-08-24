@@ -242,6 +242,7 @@ _PERSIST_DEFAULTS: dict = {
     'group_push_cache':        {},
     'log_attribution_ctxvar':  None,
     'mention_rewrites':        {},
+    'force_interrupt_hints':   {},
 }
 
 

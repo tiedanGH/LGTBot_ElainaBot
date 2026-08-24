@@ -1085,6 +1085,31 @@ def _apply_mention_rewrite(key: str, msg: str) -> str:
     return msg.replace(token, f'<@{to_uid}>')
 
 
+# 中断投票广播的识别串 —— 上游 match.cc::UserInterrupt 的 Boardcast:
+#   「有玩家确定中断比赛，目前 N 人尚未确定中断，所有玩家可通过「/中断」…」
+# 取「尚未确定中断」这段:N 是变量,前半段「确定 / 取消」也会变(取消中断走同一条广播),中间这几个字在两种情形下都在,且全库仅此一处出现。
+# (与 bridge 的 ClassifyMatchEvent 同一套「依赖契约级稳定文本」的做法,只是这条判定要结合"谁发的命令",放在 Python 侧才拿得到发起人身份。)
+_INTERRUPT_VOTE_MARKER = '尚未确定中断'
+
+
+def _force_interrupt_buttons_for(key: str, msg: str):
+    """群管发过 ``/中断`` 且本条正是中断投票广播 → 返回「强制中断游戏」按钮组。
+
+    其余情况返回 None(不挂任何按钮),包括:普通玩家发起的中断投票、群管发起但本条不是那条广播(如「确定中断成功」回执)、标记已过期。
+    标记一次性:命中即注销,免得同一个群里后续别人的中断投票也蹭到按钮。
+    """
+    expires = state.force_interrupt_hints.get(key)
+    if not expires:
+        return None
+    if time.time() > expires:
+        state.force_interrupt_hints.pop(key, None)
+        return None
+    if _INTERRUPT_VOTE_MARKER not in msg:
+        return None                      # 不是目标广播,留给下一条(直到过期)
+    state.force_interrupt_hints.pop(key, None)
+    return buttons.build_force_interrupt_buttons()
+
+
 def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """C++ → Python：发送文本消息（fire-and-forget,不阻塞 C++ 调用线程）
 
@@ -1105,6 +1130,10 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """
     key = helpers.target_key(target_id, is_uid)
     extra_buttons = state.pending_buttons.pop(key, None)
+    if not extra_buttons:
+        # 群管发起的中断投票 → 给「还差 N 人」那条广播挂「强制中断游戏」。
+        # 只在没有其他按钮时挂,不抢 cb_match_event 排好的按钮组。
+        extra_buttons = _force_interrupt_buttons_for(key, msg)
     # 代理指令(%中断)的回执把 @引擎管理员 改回 @真实操作者;无登记时原样返回
     msg = _apply_mention_rewrite(key, msg)
     # 日志是纯文本展示语境:引擎文本里源头转义的昵称(\#foo)还原后再记录,

@@ -21,7 +21,7 @@ import random
 # ──────── 按钮构造函数 ──────────────────────────────────────────────────────
 
 def btn(text: str, data: str = '', *, type: int = 2, style: int = 0,
-        link: str = '') -> dict:
+        link: str = '', admin: bool = False) -> dict:
     """构造单个按钮 dict(本插件唯一按钮入口,统一不带 ``enter``,见模块 docstring)。
 
     Args:
@@ -29,12 +29,16 @@ def btn(text: str, data: str = '', *, type: int = 2, style: int = 0,
         data:   点击行为数据 —— ``type=2`` 回填输入框 / ``type=1`` 纯 callback
         type:   QQ 按钮 action type,默认 2(回填);``link`` 非空时忽略
         style:  视觉样式 0-4(框架 render_data.style)
-        link:   非空则生成链接按钮(仅 ``{'text','link'}``,QQ 侧按 type=0
-                跳转处理,不带 style)
+        link:   非空则生成链接按钮(仅 ``{'text','link'}``,QQ 侧按 type=0 跳转处理,不带 style)
+        admin:  True = **仅群主 / 群管理员可点**(框架 keyboard.py 据此下发
+                ``permission {'type': 1}``;默认所有人可点 ``{'type': 2}``)
     """
     if link:
         return {'text': text, 'link': link}
-    return {'text': text, 'data': data, 'type': type, 'style': style}
+    b = {'text': text, 'data': data, 'type': type, 'style': style}
+    if admin:
+        b['admin'] = True
+    return b
 
 
 # ──────── 外部链接常量 ──────────────────────────────────────────────────────
@@ -71,6 +75,8 @@ BTN_CONFIG_HELP     = btn('⚙️ 配置帮助', '帮助', type=1, style=4)
 BTN_GAME_HELP       = btn('🎮 游戏帮助', '帮助', type=1, style=4)
 # 「全量申请」入口(type=2 回填,用户自行补群号;实际命令由另一插件实现)
 BTN_FULL_VOLUME_APPLY = btn('全量消息授权', '全量申请', style=4)
+# 群管专用:中断投票广播上的「强制中断游戏」,admin=True 只对群主/群管理员放行点击。
+BTN_FORCE_INTERRUPT = btn('强制中断游戏', '%中断', style=3, admin=True)
 # 欢迎菜单固定区(type=1 callback 版帮助 / 列表 —— 菜单上点击即触发不回填)
 BTN_MENU_HELP       = btn('📖 查看帮助', '/帮助', type=1, style=4)
 BTN_MENU_GAME_LIST  = btn('🎲 游戏列表', '/游戏列表', type=1, style=4)
@@ -116,6 +122,15 @@ def build_game_action_buttons(game_name: str | None = None,
             btn(f'📖 《{game_name}》规则', f'/规则 {game_name}', type=1, style=4),
         ])
     return rows
+
+
+def build_force_interrupt_buttons() -> list[list[dict]]:
+    """「强制中断游戏」单按钮 —— 只挂在群管发起 ``/中断`` 后的引擎广播上。
+
+    普通玩家发 ``/中断`` 时**整组不出现**(挂载判定见 ``callbacks._force_interrupt_buttons_for``):
+    这颗按钮的作用是给群管一条"投票太慢就直接强制"的近路,对没有权限的人只是噪声。
+    """
+    return [[BTN_FORCE_INTERRUPT]]
 
 
 def build_dissolve_buttons() -> list[list[dict]]:

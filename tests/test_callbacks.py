@@ -753,3 +753,108 @@ async def test_crash_loop_alert_fans_out_to_every_group(monkeypatch):
     sent = {c.args[0]: c.args[1] for c in sender.send_to_group.await_args_list}
     assert set(sent) == {'GA', 'GB'}
     assert '熔断' in sent['GA'] and '5 次' in sent['GA']
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 群管中断投票 → 「强制中断游戏」按钮
+# ─────────────────────────────────────────────────────────────────────────
+# 引擎对 /中断 会连发两条(上游 match.cc::UserInterrupt):
+#   ① reply()     「确定中断成功」
+#   ② Boardcast() 「有玩家确定中断比赛，目前 N 人尚未确定中断，所有玩家可通过…」
+# 按钮只挂第 ②,且只在**群管**发起时挂。
+
+_VOTE_MSG = ('有玩家确定中断比赛，目前 6 人尚未确定中断，'
+             '所有玩家可通过「/中断」命令确定中断比赛，或「/中断 取消」命令取消中断比赛')
+
+
+def _hint(key: str, ttl: float = 60.0) -> None:
+    """模拟 dispatcher 端记下「群管刚发过 /中断」。"""
+    import time as _t
+    callbacks.state.force_interrupt_hints[key] = _t.time() + ttl
+
+
+def test_force_interrupt_button_only_on_the_vote_broadcast():
+    """★ 只认第 ② 条广播:第 ① 条「确定中断成功」不挂,标记留给下一条。"""
+    _hint('g:G1')
+    assert callbacks._force_interrupt_buttons_for('g:G1', '确定中断成功') is None
+    assert 'g:G1' in callbacks.state.force_interrupt_hints      # 标记还在
+    btns = callbacks._force_interrupt_buttons_for('g:G1', _VOTE_MSG)
+    assert btns == [[callbacks.buttons.BTN_FORCE_INTERRUPT]]
+
+
+def test_force_interrupt_button_absent_without_admin_hint():
+    """★ 普通玩家发 /中断 → dispatcher 不打标记 → 广播上不挂任何按钮。"""
+    assert callbacks._force_interrupt_buttons_for('g:G1', _VOTE_MSG) is None
+
+
+def test_force_interrupt_hint_is_one_shot():
+    """命中即注销 —— 同群里后续别人的中断投票不会蹭到按钮。"""
+    _hint('g:G1')
+    assert callbacks._force_interrupt_buttons_for('g:G1', _VOTE_MSG)
+    assert callbacks._force_interrupt_buttons_for('g:G1', _VOTE_MSG) is None
+    assert 'g:G1' not in callbacks.state.force_interrupt_hints
+
+
+def test_force_interrupt_hint_expires():
+    """全员已确定(引擎直接中断、没有那条广播)时标记会过期,不悬挂。"""
+    _hint('g:G1', ttl=-1)                     # 已过期
+    assert callbacks._force_interrupt_buttons_for('g:G1', _VOTE_MSG) is None
+    assert 'g:G1' not in callbacks.state.force_interrupt_hints
+
+
+def test_force_interrupt_button_shape():
+    """按钮契约:data=%中断 / style=3 / 仅管理员可点。"""
+    b = callbacks.buttons.BTN_FORCE_INTERRUPT
+    assert b['data'] == '%中断'
+    assert b['style'] == 3
+    assert b.get('admin') is True             # 框架 keyboard.py → permission type=1
+    assert b['text'] == '强制中断游戏'
+
+
+async def test_force_interrupt_does_not_steal_engine_buttons(monkeypatch):
+    """★ 已有 cb_match_event 排好的按钮组时不抢位 —— 那组按钮是对局动作,更重要。"""
+    sent = await _capture_send(monkeypatch, hint=True, msg=_VOTE_MSG,
+                               pending=[[{'text': '既有按钮'}]])
+    assert sent['btns'] == [[{'text': '既有按钮'}]]
+    assert 'g:G1' in callbacks.state.force_interrupt_hints    # 标记没被消费
+
+
+async def test_force_interrupt_button_reaches_the_send_task(monkeypatch):
+    """端到端:cb_send_text_message 真的把按钮交给发送任务。"""
+    sent = await _capture_send(monkeypatch, hint=True, msg=_VOTE_MSG)
+    assert sent['btns'] == [[callbacks.buttons.BTN_FORCE_INTERRUPT]]
+
+
+async def test_force_interrupt_absent_end_to_end_for_plain_user(monkeypatch):
+    """端到端反面:没有群管标记时,同一条广播不带任何按钮。"""
+    sent = await _capture_send(monkeypatch, hint=False, msg=_VOTE_MSG)
+    assert sent['btns'] is None
+
+
+async def _capture_send(monkeypatch, *, hint: bool, msg: str, pending=None) -> dict:
+    """跑一次 cb_send_text_message,截获交给发送任务的按钮组。
+
+    cb_send_text_message 是 fire-and-forget(投递到 state.event_loop),所以要把
+    当前测试的 loop 挂上去,再让出一次调度让投递的任务真正跑到。
+    """
+    import asyncio as _a
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks.state, 'event_loop', _a.get_running_loop())
+    sent: dict = {}
+
+    async def _fake_send(key, tid, is_uid, m, btns):
+        sent['btns'] = btns
+
+    monkeypatch.setattr(callbacks, '_serialized_text_send', _fake_send)
+    if hint:
+        _hint('g:G1')
+    if pending is not None:
+        callbacks.state.pending_buttons['g:G1'] = pending
+    callbacks.cb_send_text_message('G1', False, msg)
+    for _ in range(5):                    # 等 run_coroutine_threadsafe 排到
+        await _a.sleep(0)
+        if 'btns' in sent:
+            break
+    assert 'btns' in sent, '发送任务没有被调度'
+    return sent
