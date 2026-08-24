@@ -624,6 +624,14 @@ _SPAN_VIEWS = {
 }
 
 
+def _stats_image_md(uid: str, w: int, h: int, url: str) -> str:
+    """「数据统计」图片回执的 markdown —— @ 与图片之间**空一行**。
+
+    不换行时 QQ 客户端会把 @ 和图片挤在同一行的上下沿,视觉上黏成一块。
+    """
+    return f'<@{uid}>\n![数据统计 #{w}px #{h}px]({url})'
+
+
 def _parse_stats_date(year: int, mm: str, dd: str, arg: str, today, hint: str) -> tuple:
     """把 (年, MM, DD) 解析成目标日期;非法日期 → 报错项。
 
@@ -749,7 +757,7 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
                 target_is_uid=not is_group)
             if url:
                 w, h = uploader.get_image_size(img)
-                await event.reply(f'<@{uid}>![数据统计 #{w}px #{h}px]({url})')
+                await event.reply(_stats_image_md(uid, w, h, url))
                 return
 
     def _n(v):
@@ -902,7 +910,7 @@ async def lgtbot_data_stats(event, match):
                 target_is_uid=not is_group)
             if url:
                 w, h = uploader.get_image_size(img)
-                await event.reply(f'<@{uid}>![数据统计 #{w}px #{h}px]({url})')
+                await event.reply(_stats_image_md(uid, w, h, url))
                 return
         # 渲染 / 上传失败 → 落到下方文本保底
 

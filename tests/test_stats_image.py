@@ -453,3 +453,61 @@ async def test_stats_command_text_when_no_backend(monkeypatch, _stats_env):
     await dispatcher.lgtbot_data_stats(ev, None)
     assert called == []
     assert '今日对局' in ev.reply.await_args.args[0]
+
+
+# ──────── @ 与图片之间的换行(对齐主框架 dau 的回执格式)────────────────────
+
+def test_stats_image_md_separates_mention_from_image():
+    """★ @ 与图片之间空一行 —— 紧贴时 QQ 客户端会把两者挤成一块。"""
+    md = dispatcher._stats_image_md('U1', 640, 480, 'https://cdn/x.png')
+    assert md == '<@U1>\n![数据统计 #640px #480px](https://cdn/x.png)'
+
+
+def test_stats_image_md_is_the_only_place_building_that_markdown():
+    """图片回执的 markdown 只许有一处 —— 今日视图与四个窗口视图共用同一个出口。
+
+    历史上这两条出口各自拼过一份字符串,改格式时很容易只改一边。用字面量出现次数把它钉在 helper 里。
+    """
+    import inspect
+    src = inspect.getsource(dispatcher)
+    assert src.count('![数据统计 #') == 1, '数据统计图片 markdown 出现了多份拼装'
+
+
+async def test_today_view_image_reply_has_the_newline(monkeypatch, _stats_env):
+    """今日视图(无参数)的真实回执里带换行。"""
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + \
+        (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
+                        lambda g, sub: png)
+
+    async def fake_upload(data, filename, user_id='', *, target_id='', target_is_uid=False):
+        return 'https://cdn.example/stats.png'
+    monkeypatch.setattr(dispatcher.uploader, 'upload_image', fake_upload)
+
+    ev = _fake_event()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    assert ev.reply.await_args.args[0].startswith('<@USER1>\n![数据统计 ')
+
+
+async def test_window_view_image_reply_has_the_newline(monkeypatch, _stats_env):
+    """窗口视图(这里用「数据统计总」)走的是另一个出口,同样带换行。"""
+    import re as _re
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + \
+        (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
+                        lambda g, sub: png)
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_total',
+                        lambda: {'available': True, 'total_matches': 5,
+                                 'total_players': 4, 'total_groups': 3,
+                                 'total_attendances': 9,
+                                 'top_games_total': [], 'top_players_total': []})
+
+    async def fake_upload(data, filename, user_id='', *, target_id='', target_is_uid=False):
+        return 'https://cdn.example/stats.png'
+    monkeypatch.setattr(dispatcher.uploader, 'upload_image', fake_upload)
+
+    ev = _fake_event()
+    await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, '数据统计总'))
+    assert ev.reply.await_args.args[0].startswith('<@USER1>\n![数据统计 ')
