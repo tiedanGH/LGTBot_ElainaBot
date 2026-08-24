@@ -858,3 +858,85 @@ async def _capture_send(monkeypatch, *, hint: bool, msg: str, pending=None) -> d
             break
     assert 'btns' in sent, '发送任务没有被调度'
     return sent
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 引用**按时间过期**:非全量群直接丢弃,不等刷新、不强发
+# ─────────────────────────────────────────────────────────────────────────
+# 官方只认 TTL 内的 msg_id / event_id —— 群 5 分钟。次数没用完但时间过了,那条引用已经没有任何意义:
+# 等刷新没有可续命的对象(还会占着 per-target Lock 15s 把后续消息一起拖住),主动消息又会被 QQ 拒。
+# 典型场景:冷群里超时触发的「游戏解散」广播。
+
+def _expire_ref(key: str) -> None:
+    """建一个引用后把它的过期时间推到过去 —— 次数一条没用,纯粹是时间到了。"""
+    import time as _t
+    quota.refresh_ref(key, 'msg_id', 'M_OLD', 'APP')
+    quota._active_ref[key]['expires_at'] = _t.time() - 1
+
+
+async def test_group_drops_when_ref_expired_by_time(monkeypatch):
+    """★ 非全量群 + 引用已超时 → 直接丢弃:不发送、不进等待分支。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    waited = []
+    monkeypatch.setattr(callbacks.quota, 'wait_and_consume',
+                        AsyncMock(side_effect=lambda *a: waited.append(1)))
+    key = callbacks.helpers.target_key('GCOLD', False)
+    _expire_ref(key)
+
+    await callbacks._send_text_quota_managed('GCOLD', False, '游戏已解散', None)
+
+    sender.send_to_group.assert_not_called()
+    assert waited == [], '不该再阻塞等刷新'
+
+
+async def test_group_still_waits_when_quota_exhausted_in_ttl(monkeypatch):
+    """★ 对照:TTL 内、只是 5 条用完 → 仍按原逻辑等刷新(这条路没被误伤)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: None)
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_wait_timeout', lambda: None)
+    monkeypatch.setattr(callbacks.metrics, 'record_active_push', lambda *a: None)
+    waited = []
+    monkeypatch.setattr(callbacks.quota, 'wait_and_consume',
+                        AsyncMock(side_effect=lambda *a: waited.append(1)))
+    key = callbacks.helpers.target_key('GBUSY', False)
+    _exhaust_ref(key)
+
+    await callbacks._send_text_quota_managed('GBUSY', False, 'hi', None)
+
+    assert waited == [1]
+
+
+async def test_push_group_still_active_pushes_when_ref_expired(monkeypatch):
+    """★ 有主动推送权限的群不受影响:引用过期照常走主动消息(不带 msg_id)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks.metrics, 'record_active_push', lambda *a: None)
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(callbacks.metrics, 'active_push_used', lambda t, u: 0)
+    mark_push_group('GFULL')
+    _expire_ref(callbacks.helpers.target_key('GFULL', False))
+
+    await callbacks._send_text_quota_managed('GFULL', False, '游戏已解散', None)
+
+    sender.send_to_group.assert_awaited_once()
+    _args, kwargs = sender.send_to_group.call_args
+    assert 'msg_id' not in kwargs and 'event_id' not in kwargs
+
+
+async def test_image_path_drops_on_expired_ref_too(monkeypatch):
+    """图片走的是另一个函数,同一条规则要一起生效(否则赛况图仍会卡 15s)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    waited = []
+    monkeypatch.setattr(callbacks.quota, 'wait_and_consume',
+                        AsyncMock(side_effect=lambda *a: waited.append(1)))
+    monkeypatch.setattr(callbacks.uploader, 'SELECTED_BACKEND', '')
+    _expire_ref(callbacks.helpers.target_key('GCOLD2', False))
+
+    await callbacks._send_image_quota_managed(
+        'GCOLD2', False, b'\x89PNG', '赛况', 'x.png')
+
+    sender.send_to_group.assert_not_called()
+    assert waited == []

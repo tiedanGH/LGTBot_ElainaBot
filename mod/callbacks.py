@@ -1167,12 +1167,27 @@ async def _serialized_text_send(key: str, target_id: str, is_uid: bool,
         _consume_pending_dm_warn(key, target_id, is_uid)
 
 
+def _drop_scope(is_uid: bool) -> str:
+    """丢弃日志里的场景词 —— 私信 / 群聊各自可 grep。"""
+    return '私信' if is_uid else '群聊'
+
+
+def _no_ref_reason(key: str) -> str:
+    """「无有效引用」的丢弃说明,带上该场景的 TTL(群 5 分钟 / 私信 60 分钟)。"""
+    return f'{key} 无有效消息ID（未登记或已超 {quota.ref_ttl(key) / 60:.0f} 分钟）'
+
+
 async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     """文本发送核心：配额管理 + 自动追加刷新按钮 + 配额满时等待续命
 
     全量群分支:配额耗尽时不再阻塞等刷新按钮,直接走主动消息(``kwargs={}``);
     且整个生命周期不追加 ``build_refresh_button``,因为全量群里 bot 不被
     被动回复条数限制,这个教学按钮没有意义。
+
+    ``try_consume_ref`` 返回 None 的三种去向(``has_valid_ref`` 区分前两者):
+      · 有主动直推资格          → 直接主动消息
+      · 无有效引用(未登记 / 超 TTL)→ **直接丢弃**(等刷新与主动消息都是死路)
+      · TTL 内次数用完          → 阻塞等刷新 ≤15s,超时再看主动额度
     """
     key = helpers.target_key(target_id, is_uid)
     msg_preview = (msg or '')[:30].replace('\n', ' ')
@@ -1201,10 +1216,10 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
             # 全量群 / 沙箱私信:配额满 → 直接主动消息,不等刷新按钮
             tag = '私信直推' if is_sandbox_dm else '全量直推'
             log.info(f'⚡ [{tag}] {key} 配额已满，走主动消息: {msg_preview!r}')
-        elif is_uid and not had_valid_ref:
-            # 普通私信 + 无有效 msg_id(从未私信过 / 已超 60 分钟过期):
-            # 正式环境主动私信必拒 → 直接丢弃,只留一行 audit 日志。
-            log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃: {msg_preview!r}')
+        elif not had_valid_ref:
+            # **无有效引用**:要么从未登记,要么已过 TTL(群 5 分钟 / 私信 60 分钟)。
+            # → 直接丢弃,不白等、不白烧一次必失败的调用。典型场景:冷群里超时触发的「游戏解散」广播。
+            log.info(f'🗑️ [{_drop_scope(is_uid)}丢弃] {_no_ref_reason(key)}，丢弃: {msg_preview!r}')
             return
         else:
             # 群聊配额满 / 普通私信配额满(TTL 内仍有引用) → 阻塞等待刷新,
@@ -1458,7 +1473,7 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
          字段需 humanize mentions，无法挂按钮）
 
     主动直推(全量群 / 沙箱私信)时不等刷新按钮,直接主动消息(``ref_type=''``
-    透传到下游)。私信无有效 msg_id 时直接丢弃(同 _send_text_quota_managed)。
+    透传到下游)。无有效引用(未登记 / 已过 TTL)且无直推资格时直接丢弃(同 _send_text_quota_managed)。
 
     ``pre_url`` 是上游(``_send_mixed_message`` 的媒体兜底分支)已经拿到的上传结果:
     非空 = 直接用该 URL,``''`` = 已知上传失败、跳过重传直接走媒体,``None``(默认)= 本函数自己上传。
@@ -1480,9 +1495,9 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
         if is_active_push:
             tag = '私信直推' if is_sandbox_dm else '全量直推'
             log.info(f'⚡ [{tag}] {key} 配额已满，图片走主动消息')
-        elif is_uid and not had_valid_ref:
-            # 普通私信无有效 msg_id(从未私信过 / 已超 60 分钟):直接丢弃
-            log.info(f'🗑️ [私信丢弃] {key} 无有效消息ID，丢弃图片')
+        elif not had_valid_ref:
+            # 无有效引用 → 直接丢弃(判定与理由见 _send_text_quota_managed 同位分支)
+            log.info(f'🗑️ [{_drop_scope(is_uid)}丢弃] {_no_ref_reason(key)}，丢弃图片')
             return
         else:
             wait_start = time.monotonic()
