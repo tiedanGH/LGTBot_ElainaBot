@@ -268,14 +268,35 @@ async function crashCallAction(key) {
   return JSON.parse(el.textContent);
 }
 
+/* 两个区共用同一个端点、同一次刷新,刷新中要同时落在**两个**按钮。 */
+const CRASH_REFRESH_BTNS = ['crash-refresh-btn', 'crash-core-refresh'];
+
+function crashSetRefreshing(on) {
+  CRASH_REFRESH_BTNS.forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    if (on) {
+      if (btn.dataset.label === undefined) btn.dataset.label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ 刷新中……';
+    } else {
+      btn.disabled = false;
+      if (btn.dataset.label !== undefined) {
+        btn.textContent = btn.dataset.label;
+        delete btn.dataset.label;
+      }
+    }
+  });
+}
+
 async function crashRefresh() {
-  crashShowMsg('刷新中……', 'info');
+  crashSetRefreshing(true);
   try {
-    const data = await crashCallAction(CRASH_LIST_KEY);
-    crashApplyData(data);
-    crashShowMsg('', 'info');
+    crashApplyData(await crashCallAction(CRASH_LIST_KEY));
   } catch (e) {
     crashShowMsg('❌ 刷新失败: ' + e.message, 'err');
+  } finally {
+    crashSetRefreshing(false);
   }
 }
 
