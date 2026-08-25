@@ -430,3 +430,23 @@ def test_today_lifecycle_delta_zero_and_none(fake_bot, tmp_path):
         assert userinfo.count_groups() == 0 and userinfo.count_friends() == 0
     finally:
         userinfo._bound_bot = orig
+
+
+def test_list_users_message_count_is_read_live(fake_bot):
+    """★ 消息数每次都重查 statistics.db —— 插件侧**不缓存**这个值。
+
+    排查「面板消息数一直不变」时要能一眼排除插件:框架每天聚合一次 user_stats.total_messages,只要那行变了,下一次刷新就该跟着变。
+    谁要是给 list_users / _stats_rows 加了进程内缓存,这条会红。
+    """
+    base = fake_bot.log_service._base_dir
+    _init_data_db(base, users=[('UA', '甲')])
+    _init_stats_db(base, rows=[('UA', 10, 0, {_day(-1): 10})])
+    assert userinfo.list_users()[0]['total_messages'] == 10
+
+    # 模拟框架跑完当日聚合:同一行的累计值往上加
+    conn = sqlite3.connect(os.path.join(base, 'statistics.db'))
+    conn.execute('UPDATE user_stats SET total_messages = 37 WHERE userid = ?', ('UA',))
+    conn.commit()
+    conn.close()
+
+    assert userinfo.list_users()[0]['total_messages'] == 37
