@@ -68,8 +68,7 @@
   </section>
 
   <!-- ──── 运行环境自检 ──── -->
-  <!-- body 默认带 collapsed(无异常常态即折叠,避免加载瞬间闪一下再收起);
-       JS 拿到 self_check 后:有红色异常→展开,否则保持折叠。 -->
+  <!-- body 默认带 collapsed(无异常常态即折叠,避免加载瞬间闪一下再收起);JS 拿到 self_check 后:有红色异常→展开,否则保持折叠。 -->
   <section class="dash-section" id="dash-selfcheck-section">
     <div class="dash-section-header">
       <h2 class="dash-section-title dash-selfcheck-title" id="dash-selfcheck-toggle"
@@ -109,7 +108,11 @@
   <section class="dash-section">
     <div class="dash-section-header">
       <h2 class="dash-section-title">🧹 缓存清理</h2>
-      <button id="dash-cache-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
+      <!-- 操作结果紧挨着按钮左侧 -->
+      <div class="dash-section-meta dash-cache-head">
+        <span id="dash-cache-msg" class="dash-cache-msg"></span>
+        <button id="dash-cache-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
+      </div>
     </div>
     <div class="dash-cache-grid">
       <div class="dash-cache-card">
@@ -149,6 +152,5 @@
         </div>
       </div>
     </div>
-    <div id="dash-cache-msg" class="dash-cache-msg"></div>
   </section>
 </div>

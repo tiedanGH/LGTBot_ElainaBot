@@ -88,7 +88,12 @@
 .dash-cache-actions {
   margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;
 }
-.dash-cache-msg { margin-top: 12px; font-size: 12px; min-height: 16px; }
+/* 操作结果落在标题栏右侧;过长的失败原因省略号收尾,免得把按钮挤出标题栏。 */
+.dash-cache-head { gap: 10px; flex-wrap: wrap; }
+.dash-cache-msg {
+  font-size: 12px;
+  max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .dash-cache-msg:empty { display: none; }
 
 /* ──── 进行中的对局 ──── */
