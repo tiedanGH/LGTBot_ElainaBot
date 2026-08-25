@@ -9,6 +9,14 @@
   · ``message.db``    精确时间戳,仅日志留存期(默认 5 天)内可查
 头像不落库 —— QQ 官方头像直链按 appid+openid 即时推导。
 
+★ 消息数口径 ★
+  框架聚合只计 ``at_bot != 0`` 的接收消息(``core/storage/statistics.py`` 的
+  ``COALESCE(at_bot, 1) != 0``;写入见 ``core/bot/event.py``:
+  ``at_bot = is_at_self if event_type == GROUP_MESSAGE_CREATE else True``)。
+  于是私信与「@机器人」的群消息都计入,**全量群里没 @ 机器人的消息不计**。
+  这是框架的既定口径(全量群闲聊与 bot 无关,计入会撑爆统计),本模块只如实透出。
+  最后活跃日期不受影响 —— 用户追踪(``_enqueue_track``)不过 at_bot 闸。
+
 ★ 昵称语义 ★
   框架 ``users.name`` 首见即定(core/bot/event.py 的 upsert 带 ``WHERE name=''``
   守卫,之后不再更新;原作者确认为刻意设计)。本插件用 ``note_username`` 写回
