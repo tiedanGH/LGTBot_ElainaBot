@@ -803,12 +803,15 @@ def test_force_interrupt_hint_expires():
 
 
 def test_force_interrupt_button_shape():
-    """按钮契约:data=%中断 / style=3 / 仅管理员可点。"""
+    """按钮契约:data=%中断 / style=3 / 仅管理员可点。
+
+    文案只要求点明「强制中断」—— 前缀 emoji 之类属于文案微调,不写死。
+    """
     b = callbacks.buttons.BTN_FORCE_INTERRUPT
     assert b['data'] == '%中断'
     assert b['style'] == 3
     assert b.get('admin') is True             # 框架 keyboard.py → permission type=1
-    assert b['text'] == '强制中断游戏'
+    assert '强制中断' in b['text']
 
 
 async def test_force_interrupt_does_not_steal_engine_buttons(monkeypatch):
