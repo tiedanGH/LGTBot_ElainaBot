@@ -426,21 +426,30 @@ async def test_panel_restart_passes_reason_and_notifies_rooms(monkeypatch):
     并把更新内容原样交给房间通知;面板不在任何群里 → 不排除任何群。"""
     wm = _main()
     from plugins.LGTBot_ElainaBot.mod import dispatcher
-    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
-                        lambda: (True, '🔁 正在重启'))
+    from plugins.LGTBot_ElainaBot.mod import state as _st
+    _st.waiting_rooms['g:GWAIT'] = {'target_id': 'GWAIT', 'is_uid': False,
+                                    'game': 'X', 'since': 0}
+
+    def fake_check():
+        _st.waiting_rooms.clear()        # 释放引擎会解散等待中房间(真实副作用)
+        return True, '🔁 正在重启'
+
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart', fake_check)
     monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda *a, **k: None)
     monkeypatch.setattr(wm.metrics, 'record_restart', lambda: None)
     monkeypatch.setattr(wm.audit, 'record', lambda *a, **k: None)
     seen = {}
 
-    async def fake_notify(reason='', *, skip_keys=frozenset()):
-        seen.update(reason=reason, skip=set(skip_keys))
+    async def fake_notify(reason='', *, skip_keys=frozenset(), rooms=None):
+        seen.update(reason=reason, skip=set(skip_keys), rooms=rooms)
         return 0
 
     monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_notify)
     frag = await wm._render_restart('新版本上线')
     assert '正在重启' in frag
-    assert seen == {'reason': '新版本上线', 'skip': set()}
+    assert seen['reason'] == '新版本上线' and seen['skip'] == set()
+    # ★ 快照在释放引擎之前取到了那个房间
+    assert [r['target_id'] for r in seen['rooms']] == ['GWAIT']
 
 
 async def test_panel_restart_rejected_does_not_notify(monkeypatch):

@@ -1369,16 +1369,26 @@ def test_restart_pattern_captures_optional_reason(cmd, want):
 
 
 async def test_restart_command_notifies_rooms_except_origin(monkeypatch):
-    """★ 指令重启:带上更新内容通知等待中房间,**排除发起群**(回执就在眼前)。"""
+    """★ 指令重启:带上更新内容通知等待中房间,**排除发起群**(回执就在眼前)。
+
+    ``check_and_prepare_restart`` 在这里模拟真实副作用 —— 释放引擎会把等待中房间全部解散(上游 Terminate 后回调清表)。
+    房间必须在这之**前**就被快照下来,否则通知拿到的永远是空表(线上实测症状:只收到游戏解散消息)。
+    """
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
-    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
-                        lambda: (True, '🔁 正在重启'))
+    _state.waiting_rooms['g:GWAIT'] = {'target_id': 'GWAIT', 'is_uid': False,
+                                      'game': 'X', 'since': 0}
+
+    def fake_check():
+        _state.waiting_rooms.clear()          # ← 释放引擎的真实副作用
+        return True, '🔁 正在重启'
+
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart', fake_check)
     monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda *a, **k: None)
     monkeypatch.setattr(dispatcher.metrics, 'record_restart', lambda: None)
     seen = {}
 
-    async def fake_notify(reason='', *, skip_keys=frozenset()):
-        seen.update(reason=reason, skip=set(skip_keys))
+    async def fake_notify(reason='', *, skip_keys=frozenset(), rooms=None):
+        seen.update(reason=reason, skip=set(skip_keys), rooms=rooms)
         return 0
 
     monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_notify)
@@ -1389,6 +1399,8 @@ async def test_restart_command_notifies_rooms_except_origin(monkeypatch):
 
     assert seen['reason'] == '新版本'
     assert seen['skip'] == {'g:GORIGIN'}      # 发起群不再重复收
+    # ★ 快照在释放引擎之前取到了那个房间
+    assert [r['target_id'] for r in seen['rooms']] == ['GWAIT']
 
 
 async def test_restart_command_from_dm_skips_nothing(monkeypatch):
@@ -1400,7 +1412,7 @@ async def test_restart_command_from_dm_skips_nothing(monkeypatch):
     monkeypatch.setattr(dispatcher.metrics, 'record_restart', lambda: None)
     seen = {}
 
-    async def fake_notify(reason='', *, skip_keys=frozenset()):
+    async def fake_notify(reason='', *, skip_keys=frozenset(), rooms=None):
         seen['skip'] = set(skip_keys)
         return 0
 
@@ -1429,8 +1441,11 @@ async def test_restart_command_rejected_sends_nothing(monkeypatch):
 
 def test_auto_restart_skips_already_notified_groups():
     """★ 自动重启:通知群刚收过一条自动重启说明,房间通知要跳过它们,
-    避免同一个群连收两条。手动重启不推通知群,所以那条路径不跳(见指令用例)。"""
+    避免同一个群连收两条。手动重启不推通知群,所以那条路径不跳(见指令用例)。
+
+    行为级断言在 test_restart_api 的 watcher 用例里(那边有驱动 watcher 的夹具);
+    这里只钉住调用顺序:通知群那条**先发**,房间通知随后 —— 反过来的话
+    通知群会先收到"你群有等待中房间"再收到重启说明,顺序读起来是乱的。"""
     import inspect
     src = inspect.getsource(dispatcher._auto_restart_watcher)
-    assert '_notify_auto_restart' in src
-    assert 'skip_keys=' in src and 'NOTIFY_GROUPS' in src
+    assert src.index('_notify_auto_restart') < src.index('_notify_restart_rooms')

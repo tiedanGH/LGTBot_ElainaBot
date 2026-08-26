@@ -1557,6 +1557,7 @@ async def _auto_restart_watcher() -> None:
                 log.info(f'🤖 [自动重启] 对局已全部结束,进入 '
                          f'{_AUTO_RESTART_GRACE:.0f}s 静默期(等待结算消息送达)')
             elif now - empty_since >= _AUTO_RESTART_GRACE:
+                rooms = snapshot_waiting_rooms()      # 必须在释放引擎之前
                 ok, _msg = check_and_prepare_restart()
                 if ok:
                     reason = state.planned_restart_reason()
@@ -1571,7 +1572,7 @@ async def _auto_restart_watcher() -> None:
                     # 再通知还有等待中房间的群;通知群刚收过一条,不重复打扰
                     from . import callbacks as _cb
                     await _notify_restart_rooms(
-                        reason,
+                        reason, rooms=rooms,
                         skip_keys={helpers.target_key(g, False)
                                    for g in _cb.NOTIFY_GROUPS})
                     schedule_exec_after(0.5)
@@ -1584,15 +1585,32 @@ async def _auto_restart_watcher() -> None:
 _RESTART_REASON_MAX = 200
 
 
-async def _notify_restart_rooms(reason: str = '', *, skip_keys=frozenset()) -> int:
+def snapshot_waiting_rooms() -> list:
+    """重启路径在**调 check_and_prepare_restart 之前**先取这一份快照。
+
+    释放引擎会把等待中房间全部解散(理由见 callbacks.snapshot_waiting_rooms),
+    之后再读永远是空的 —— 四条重启路径都必须先快照、后释放。
+    """
+    from . import callbacks as _callbacks
+    try:
+        return _callbacks.snapshot_waiting_rooms()
+    except Exception as e:
+        log.warning(f'快照等待中房间失败: {e}')
+        return []
+
+
+async def _notify_restart_rooms(reason: str = '', *, skip_keys=frozenset(),
+                                rooms=None) -> int:
     """重启前通知「还有等待中房间」的群 —— 四条重启路径(指令 / 面板 / API / 自动)共用这一个入口,
     实现在 ``callbacks.notify_restart_rooms``。
 
+    ``rooms`` 传释放引擎**之前**取的快照(``snapshot_waiting_rooms``)。
     异常一律吞掉:通知只是善后,不能反过来把已经释放引擎的重启流程打断。
     """
     from . import callbacks as _callbacks
     try:
-        return await _callbacks.notify_restart_rooms(reason, skip_keys=skip_keys)
+        return await _callbacks.notify_restart_rooms(
+            reason, skip_keys=skip_keys, rooms=rooms)
     except Exception as e:
         log.warning(f'重启房间通知失败: {e}')
         return 0
@@ -1612,7 +1630,7 @@ async def _notify_auto_restart(reason: str) -> None:
         '> 当前无人正在进行游戏\n'
         '> 计划重启（自动模式）已触发\n'
         '\n'
-        + (f'📌 更新内容：\n- {reason}\n\n' if reason else '') +
+        + (f'📌 更新内容：{reason}\n\n' if reason else '') +
         '⏳ 主进程即将重启\n'
         '预计 10 秒内自动恢复服务...'
     )
@@ -1839,6 +1857,8 @@ async def lgtbot_restart(event, match):
         reason = ((match.group(1) or '').strip() if match else '')[:_RESTART_REASON_MAX]
     except (AttributeError, IndexError):
         reason = ''
+    # ★ 先快照:check_and_prepare_restart 会释放引擎,上游顺手把所有等待中房间 Terminate 掉
+    rooms = snapshot_waiting_rooms()
     ok, msg = check_and_prepare_restart()
     # record 同步写盘,任何 await 前已持久化 —— 重启换进程也不丢这些记录
     audit.record('restart', '重启 LGTBot',
@@ -1853,7 +1873,7 @@ async def lgtbot_restart(event, match):
     # 等待中房间的重启通知(排除发起群);await 保证 HTTP 往返在换进程之前完成
     gid = event.group_id or event.channel_id or ''
     skip = {helpers.target_key(gid, False)} if (event.is_group and gid) else set()
-    await _notify_restart_rooms(reason, skip_keys=skip)
+    await _notify_restart_rooms(reason, skip_keys=skip, rooms=rooms)
 
     async def _on_fail():
         try:

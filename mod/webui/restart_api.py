@@ -64,6 +64,7 @@ async def restart_handler(request: 'web.Request') -> 'web.Response':
     # body 不是合法 JSON 时按无 reason 处理:重启本身不该被一个可选字段挡住。
     body = await _read_json(request) or {}
     reason = str(body.get('reason') or '').strip()[:_REASON_MAX]
+    rooms = dispatcher.snapshot_waiting_rooms()   # ★ 必须在释放引擎之前
     ok, msg = dispatcher.check_and_prepare_restart()
     audit.record('restart', '重启 LGTBot',
                  (f'更新内容：{reason}' if reason else '') if ok else msg,
@@ -72,7 +73,7 @@ async def restart_handler(request: 'web.Request') -> 'web.Response':
         return _err(409, msg, active_matches=len(_plugin_state.active_matches))
     metrics.record_restart()
     # API 重启同属手动重启:不推通知群,但等待中房间照常通知
-    await dispatcher._notify_restart_rooms(reason)
+    await dispatcher._notify_restart_rooms(reason, rooms=rooms)
     dispatcher.schedule_exec_after(0.5)
     return web.json_response({'success': True, 'message': msg,
                               'restarting_in_sec': 0.5})

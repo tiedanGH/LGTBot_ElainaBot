@@ -103,6 +103,38 @@ async def test_restart_success_schedules_exec(tmp_path, monkeypatch):
     assert 0.5 in calls and 'metric' in calls
 
 
+async def test_restart_forwards_reason_and_snapshots_before_release(tmp_path, monkeypatch):
+    """★ API 重启同样要在释放引擎**之前**快照等待中房间(理由见 watcher 用例),
+    并把可选的 ``{"reason"}`` 一起带给房间通知。"""
+    build_api, restart_api = _apis()
+    token = _token(monkeypatch, build_api, tmp_path)
+    state.waiting_rooms['g:GWAIT'] = {'target_id': 'GWAIT', 'is_uid': False,
+                                      'game': 'X', 'since': 0}
+
+    def fake_check():
+        state.waiting_rooms.clear()          # ← 释放引擎的真实副作用
+        return True, '🔁 LGTBot 正在重启...'
+
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart', fake_check)
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda d=0.5: None)
+    monkeypatch.setattr(restart_api.metrics, 'record_restart', lambda: None)
+    monkeypatch.setattr(restart_api.audit, 'record', lambda *a, **k: None)
+    seen = {}
+
+    async def fake_notify(reason='', *, skip_keys=frozenset(), rooms=None):
+        seen.update(reason=reason, skip=set(skip_keys), rooms=rooms)
+        return 0
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_notify)
+
+    resp = await restart_api.restart_handler(
+        _FakeReq(token=token, body={'reason': '修了个 bug'}))
+
+    assert resp.status == 200
+    assert [r['target_id'] for r in seen['rooms']] == ['GWAIT']
+    assert seen['reason'] == '修了个 bug'
+    assert seen['skip'] == set()             # API 重启不排除任何群
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # POST /planned-restart
 # ─────────────────────────────────────────────────────────────────────────
@@ -201,6 +233,50 @@ async def test_auto_watcher_restarts_after_grace(monkeypatch):
     assert a[1] == '自动重启' and '夜间升级' in a[2] and '静默' in a[2]
     assert kw.get('src') == '自动'
     assert notified == ['夜间升级']                # 通知群推送(带维护原因)
+
+
+async def test_auto_watcher_snapshots_rooms_before_releasing_engine(monkeypatch):
+    """★ 回归:等待中房间必须在 ``check_and_prepare_restart`` **之前**快照。
+
+    释放引擎会让上游把所有 match ``Terminate(true)``(bot_core.cc),等待中房间随之解散、
+    ``terminate`` 回调把它们从 ``state.waiting_rooms`` 里抹掉。
+    先释放后读表 → 永远读到空 → 一条重启通知都发不出去。这里让 fake 预检**真的**清表,通知仍必须拿到那个房间。
+
+    顺带钉住通知群去重:自动重启已经给通知群单独推过一条,房间通知要跳过它们。
+    """
+    from plugins.LGTBot_ElainaBot.mod import callbacks as _cb, helpers
+    monkeypatch.setattr(_cb, 'NOTIFY_GROUPS', ('GNOTIFY',))
+    state.set_planned_restart(True, '夜间升级', auto=True)
+    state.waiting_rooms['g:GWAIT'] = {'target_id': 'GWAIT', 'is_uid': False,
+                                      'game': '某游戏', 'since': 0}
+
+    def fake_check():
+        state.waiting_rooms.clear()          # ← 释放引擎的真实副作用
+        return True, 'ok'
+
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart', fake_check)
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda d=0.5: None)
+    monkeypatch.setattr(dispatcher.metrics, 'record_restart', lambda: None)
+    monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: None)
+    monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_GRACE', 0.02)
+
+    async def fake_auto_notify(reason):
+        pass
+    monkeypatch.setattr(dispatcher, '_notify_auto_restart', fake_auto_notify)
+    seen = {}
+
+    async def fake_rooms_notify(reason='', *, skip_keys=frozenset(), rooms=None):
+        seen.update(reason=reason, skip=set(skip_keys), rooms=rooms)
+        return 0
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_rooms_notify)
+
+    task = asyncio.get_running_loop().create_task(dispatcher._auto_restart_watcher())
+    await asyncio.wait_for(task, timeout=2.0)
+
+    assert [r['target_id'] for r in seen['rooms']] == ['GWAIT']
+    assert seen['reason'] == '夜间升级'
+    assert seen['skip'] == {helpers.target_key('GNOTIFY', False)}
 
 
 async def test_auto_watcher_exits_when_mode_disabled(monkeypatch):

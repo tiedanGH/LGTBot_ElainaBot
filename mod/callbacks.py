@@ -368,8 +368,22 @@ def restart_room_message(reason: str) -> str:
     return '\n'.join(parts)
 
 
-async def notify_restart_rooms(reason: str = '', *, skip_keys=()) -> int:
+def snapshot_waiting_rooms() -> list:
+    """快照当前等待中房间(带 ``key``),供重启路径**在释放引擎之前**取。
+
+    ★ 必须先快照:``check_and_prepare_restart`` → ``release_bot_if_not_processing_games``
+    → 上游 ``LGTBot_ReleaseIfNoProcessingGames`` 会把所有 match ``Terminate(true)`` 等待中房间就此解散,
+    引擎回调 ``terminate`` 又把它们从 ``state.waiting_rooms`` 里清掉。
+    """
+    return [dict(r, key=k) for k, r in state.waiting_rooms.items()]
+
+
+async def notify_restart_rooms(reason: str = '', *, skip_keys=(),
+                               rooms=None) -> int:
     """重启前给所有**等待中房间**所在的群推一条通知,返回送达数。
+
+    ``rooms`` 传 ``snapshot_waiting_rooms()`` 的结果(重启路径必须这么传);
+    省略时读当前的 ``state.waiting_rooms``。
 
     只发**有主动推送权限**的群:重启这一刻多半没有可用的被动引用,没权限的群直接丢弃。
     私信房间不在范围内:私信 ``/新游戏`` 直接开局,不存在「等待中」的房间。
@@ -379,14 +393,15 @@ async def notify_restart_rooms(reason: str = '', *, skip_keys=()) -> int:
 
     并发发送 + 每条独立超时:夹在「引擎已释放」与 ``os.execv`` 之间,不能被某个群的慢请求拖住整个重启。
     """
-    rooms = [r for k, r in state.waiting_rooms.items()
-             if not r.get('is_uid') and r.get('target_id') and k not in skip_keys]
-    if not rooms:
-        return 0
-    targets = [r['target_id'] for r in rooms if helpers.can_push_group(r['target_id'])]
-    dropped = len(rooms) - len(targets)
-    if dropped:
-        log.info(f'🔁 [重启通知] {dropped} 个等待中房间所在群无主动推送权限，已丢弃')
+    if rooms is None:
+        rooms = snapshot_waiting_rooms()
+    picked = [r for r in rooms
+              if not r.get('is_uid') and r.get('target_id')
+              and r.get('key') not in skip_keys]
+    targets = [r['target_id'] for r in picked if helpers.can_push_group(r['target_id'])]
+    log.info(f'🔁 [重启通知] 等待中房间 {len(rooms)} 个，'
+             f'跳过(私信 / 已通知) {len(rooms) - len(picked)} 个，'
+             f'可主动推送 {len(targets)} 个')
     if not targets:
         return 0
     sender = helpers.get_sender('')
@@ -408,8 +423,7 @@ async def notify_restart_rooms(reason: str = '', *, skip_keys=()) -> int:
     results = await asyncio.gather(*(_one(g) for g in targets),
                                    return_exceptions=True)
     ok = sum(1 for r in results if r is True)
-    log.warning(f'🔁 [重启通知] 等待中房间 {len(rooms)} 个，'
-                f'{len(targets)} 个可推送，{ok} 个送达')
+    log.warning(f'🔁 [重启通知] {ok}/{len(targets)} 个群送达')
     return ok
 
 

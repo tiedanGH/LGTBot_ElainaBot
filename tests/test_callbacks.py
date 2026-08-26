@@ -1035,6 +1035,28 @@ async def test_restart_notice_no_rooms_is_noop(monkeypatch):
     assert called == []
 
 
+@pytest.mark.parametrize('setup, kwargs', [
+    (lambda: None, {}),                                   # 压根没有等待中房间
+    (lambda: (callbacks.cb_match_event('GS', False, 'new_game', 'X'),
+              mark_push_group('GS')), {'skip_keys': {'g:GS'}}),   # 全被跳过
+    (lambda: (callbacks.cb_match_event('GN', False, 'new_game', 'X'),
+              mark_push_group('GN', False)), {}),         # 有房间但没推送权限
+])
+async def test_restart_notice_logs_even_when_nothing_sent(monkeypatch, setup, kwargs):
+    """★ 「一条都没发」必须留下日志 —— 这正是线上那次的症状:重启前后一条重启通知日志都没有,分不清是没房间、被跳过,还是没推送权限。
+    静默 return等于把三种原因压成同一种"什么都没发生"。"""
+    lines = []
+    monkeypatch.setattr(callbacks.log, 'info', lambda m, *a, **k: lines.append(m))
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': None)
+    setup()
+
+    assert await callbacks.notify_restart_rooms('x', **kwargs) == 0
+
+    hit = [m for m in lines if '重启通知' in m]
+    assert hit, f'没有留下任何重启通知日志: {lines}'
+    assert '等待中房间' in hit[0] and '可主动推送 0 个' in hit[0]
+
+
 async def test_restart_notice_escapes_reason(monkeypatch):
     """更新内容是管理员可控文本,仍按 markdown 语境转义(同维护提示)。"""
     sender = _fake_sender()

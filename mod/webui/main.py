@@ -263,6 +263,7 @@ async def _render_restart(reason: str = '') -> str:
     """
     # 延迟 import 断开循环依赖(dispatcher 间接 import 本模块)
     from .. import dispatcher
+    rooms = dispatcher.snapshot_waiting_rooms()   # ★ 必须在释放引擎之前
     ok, msg = dispatcher.check_and_prepare_restart()
     # record 同步写盘,返回即已持久化 —— 先落审计与重启计数再调度 execv,换进程后记录仍在
     audit.record('restart', '重启 LGTBot',
@@ -270,7 +271,7 @@ async def _render_restart(reason: str = '') -> str:
                  ok=ok, src=audit.SRC_PANEL)
     if ok:
         metrics.record_restart()
-        await dispatcher._notify_restart_rooms(reason)
+        await dispatcher._notify_restart_rooms(reason, rooms=rooms)
         dispatcher.schedule_exec_after(0.5)
     return f'<div id="msg">{html.escape(msg)}</div>'
 
