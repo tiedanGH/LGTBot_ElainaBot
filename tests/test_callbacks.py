@@ -940,3 +940,106 @@ async def test_image_path_drops_on_expired_ref_too(monkeypatch):
 
     sender.send_to_group.assert_not_called()
     assert waited == []
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 等待中房间 + 重启通知
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_waiting_room_lifecycle():
+    """建房进 waiting_rooms、开局挪去 active_matches、解散两边都清。"""
+    callbacks.cb_match_event('G1', False, 'new_game', '决胜五子')
+    assert 'g:G1' in state.waiting_rooms
+    assert state.waiting_rooms['g:G1']['game'] == '决胜五子'
+    assert 'g:G1' not in state.active_matches      # 还没开局
+
+    callbacks.cb_match_event('G1', False, 'game_started', '')
+    assert 'g:G1' not in state.waiting_rooms       # 开局 = 不再等待
+    assert 'g:G1' in state.active_matches
+
+    callbacks.cb_match_event('G1', False, 'game_over', '')
+    assert 'g:G1' not in state.active_matches
+    assert 'g:G1' not in state.waiting_rooms
+
+
+def test_waiting_room_cleared_on_dissolve():
+    """全员退出 / 解散:房间没开局也要从 waiting_rooms 里消失。"""
+    for kind in ('all_left', 'terminate'):
+        callbacks.cb_match_event('G9', False, 'new_game', '大富翁')
+        assert 'g:G9' in state.waiting_rooms
+        callbacks.cb_match_event('G9', False, kind, '')
+        assert 'g:G9' not in state.waiting_rooms, kind
+
+
+def test_waiting_room_join_keeps_since_and_fills_game():
+    """加入 / 退出广播不重置建房时刻;建房时没拿到 brief 的话由它补游戏名。"""
+    callbacks.cb_match_event('G2', False, 'new_game', '')
+    since = state.waiting_rooms['g:G2']['since']
+    callbacks.cb_match_event('G2', False, 'join_leave', '狼人杀')
+    assert state.waiting_rooms['g:G2']['since'] == since
+    assert state.waiting_rooms['g:G2']['game'] == '狼人杀'
+
+
+async def test_restart_notice_only_to_push_groups(monkeypatch):
+    """★ 只发有主动推送权限的群;没权限的直接丢弃(重启这刻多半没有被动引用)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    for gid in ('GOK1', 'GOK2', 'GNOPUSH'):
+        callbacks.cb_match_event(gid, False, 'new_game', 'X')
+    mark_push_group('GOK1')
+    mark_push_group('GOK2')
+    mark_push_group('GNOPUSH', False)
+
+    ok = await callbacks.notify_restart_rooms('修了个 bug')
+
+    assert ok == 2
+    sent = {c.args[0]: c.args[1] for c in sender.send_to_group.await_args_list}
+    assert set(sent) == {'GOK1', 'GOK2'}
+    assert '即将重启' in sent['GOK1'] and '修了个 bug' in sent['GOK1']
+
+
+async def test_restart_notice_skips_keys_and_started_games(monkeypatch):
+    """skip_keys(如刚收过自动重启通知的通知群)与**已开局**的群都不发。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    callbacks.cb_match_event('GSKIP', False, 'new_game', 'X')
+    callbacks.cb_match_event('GWAIT', False, 'new_game', 'X')
+    callbacks.cb_match_event('GPLAY', False, 'new_game', 'X')
+    callbacks.cb_match_event('GPLAY', False, 'game_started', '')   # 已开局 → 不在等待表
+    for g in ('GSKIP', 'GWAIT', 'GPLAY'):
+        mark_push_group(g)
+
+    await callbacks.notify_restart_rooms('', skip_keys={'g:GSKIP'})
+
+    assert {c.args[0] for c in sender.send_to_group.await_args_list} == {'GWAIT'}
+
+
+async def test_restart_notice_without_reason_has_no_update_block(monkeypatch):
+    """没填更新内容 → 不出现「更新内容」段(不留空标题)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    callbacks.cb_match_event('GA', False, 'new_game', 'X')
+    mark_push_group('GA')
+    await callbacks.notify_restart_rooms('')
+    md = sender.send_to_group.await_args.args[1]
+    assert '更新内容' not in md
+    assert '即将重启' in md
+    assert '计划重启' not in md and '维护' not in md    # 需求:不提计划重启
+
+
+async def test_restart_notice_no_rooms_is_noop(monkeypatch):
+    called = []
+    monkeypatch.setattr(callbacks.helpers, 'get_sender',
+                        lambda appid='': called.append(1))
+    assert await callbacks.notify_restart_rooms('x') == 0
+    assert called == []
+
+
+async def test_restart_notice_escapes_reason(monkeypatch):
+    """更新内容是管理员可控文本,仍按 markdown 语境转义(同维护提示)。"""
+    sender = _fake_sender()
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    callbacks.cb_match_event('GE', False, 'new_game', 'X')
+    mark_push_group('GE')
+    await callbacks.notify_restart_rooms('*紧急*')
+    assert r'\*紧急\*' in sender.send_to_group.await_args.args[1]

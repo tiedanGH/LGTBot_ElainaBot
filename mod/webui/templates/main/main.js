@@ -1,6 +1,7 @@
 /* ──── 主模板提供的全局 ──── */
 const PAGE_KEY = '__PAGE_KEY__';
-const RESTART_KEY = '__RESTART_KEY__';
+/* 重启走真路由(要带 ?reason= 更新内容;隐藏 action 的 provider 不接参数) */
+const RESTART_ROUTE = '__RESTART_ROUTE__';
 /* 计划重启走真路由(要带 ?reason= 维护原因;隐藏 action 的 provider 不接参数) */
 const PLANNED_RESTART_ROUTE = '/api/ext/lgtbot/planned-restart';
 /* 服务端渲染时注入的「计划重启」当前状态(1=维护模式开启) */
@@ -125,13 +126,18 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
 
 /* ──── 重启按钮(整页通用,标题栏右侧)──── */
 document.getElementById('restart-btn').addEventListener('click', async () => {
-  const ok = await dashConfirm(
-    '确认重启 LGTBot？\n\n将以新进程重新加载 C++ 引擎、bridge 与全部游戏插件。\n若存在进行中的对局会自动拒绝重启。',
-    {level: 'warn'}
+  /* prompt 而非 confirm:顺手收一条可选的「更新内容」,会随重启通知发给还有等待中房间的群。 */
+  const input = await dashPrompt(
+    '确认重启 LGTBot？\n\n将以新进程重新加载 C++ 引擎、bridge 与全部游戏插件。\n若存在进行中的对局会自动拒绝重启。\n\n可填写更新内容（将随重启提示发送）：',
+    {defaultValue: '', okText: '重启', level: 'warn'}
   );
-  if (!ok) return;
+  if (input === null) return;
+  const reason = (typeof input === 'string' ? input : (input.value || '')).trim();
   try {
-    const r = await fetch(apiUrl(RESTART_KEY), { cache: 'no-store' });
+    /* TOKEN_QS 可能为空 → 分隔符动态判断(同计划重启) */
+    let url = RESTART_ROUTE + TOKEN_QS;
+    if (reason) url += (TOKEN_QS ? '&' : '?') + 'reason=' + encodeURIComponent(reason);
+    const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const text = await r.text();
     const doc = new DOMParser().parseFromString(text, 'text/html');

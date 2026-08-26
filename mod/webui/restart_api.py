@@ -60,12 +60,19 @@ async def restart_handler(request: 'web.Request') -> 'web.Response':
     if not _check_auth(request):
         return _err(401, 'token 缺失或错误')
     from .. import dispatcher   # 延迟 import,断开 webui ← dispatcher 循环
+    # 可选 body {"reason": "更新内容"} —— 随重启通知发给还有等待中房间的群。
+    # body 不是合法 JSON 时按无 reason 处理:重启本身不该被一个可选字段挡住。
+    body = await _read_json(request) or {}
+    reason = str(body.get('reason') or '').strip()[:_REASON_MAX]
     ok, msg = dispatcher.check_and_prepare_restart()
-    audit.record('restart', '重启 LGTBot', '' if ok else msg,
+    audit.record('restart', '重启 LGTBot',
+                 (f'更新内容：{reason}' if reason else '') if ok else msg,
                  ok=ok, src=audit.SRC_API)
     if not ok:
         return _err(409, msg, active_matches=len(_plugin_state.active_matches))
     metrics.record_restart()
+    # API 重启同属手动重启:不推通知群,但等待中房间照常通知
+    await dispatcher._notify_restart_rooms(reason)
     dispatcher.schedule_exec_after(0.5)
     return web.json_response({'success': True, 'message': msg,
                               'restarting_in_sec': 0.5})

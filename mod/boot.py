@@ -243,6 +243,7 @@ _PERSIST_DEFAULTS: dict = {
     'log_attribution_ctxvar':  None,
     'mention_rewrites':        {},
     'force_interrupt_hints':   {},
+    'waiting_rooms':           {},
 }
 
 

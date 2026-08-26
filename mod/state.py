@@ -46,6 +46,11 @@ current_game: dict[str, str] = _p['current_game']  # target_key → 游戏名
 # 供仪表盘「进行中的对局」展示 + 引擎崩溃时给受牵连对局 fan-out 中断通知。
 # 跨热重载持久(挂持久字典,与 current_game 同源,重载时活跃对局不丢);进程 execv 重启后引擎所有 match 已失联,空 dict 正是正确态。
 active_matches: dict[str, dict] = _p['active_matches']
+# **等待中**(已建房、未开局)的房间 —— 与 active_matches 同形状,互斥:
+# new_game / join_leave 进这里,game_started 时挪去 active_matches,结算 / 解散移除。
+# 用途:重启前给这些群推一条「即将重启」——他们的房间会随重启清空,而 active_matches 非空时不允许重启,所以只有这一批需要被通知。
+# 跨热重载持久;进程 execv 重启后引擎所有房间已失联,空 dict 正是正确态。
+waiting_rooms: dict[str, dict] = _p['waiting_rooms']
 # 「/新游戏 X …」命令里抓下的游戏名(target_key → 游戏名),由 dispatcher 在派发给引擎前写入,callbacks 的 game_started 消费。
 # 单机局引擎跳过 new_game 广播、game_started 又无 brief,current_game 拿不到名字 → 回退用这里抓的命令名;
 # 多人局仍以引擎 new_game 的 brief 为准,这份只在 current_game 为空时兜底。跨热重载持久。

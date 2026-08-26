@@ -52,6 +52,7 @@ from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
 
 
 PAGE_KEY = 'lgtbot'
+# 重启 / 计划重启的**历史** action key,这里只保留在 _HIDDEN_KEYS 里
 RESTART_KEY = '__lgtbot_restart'
 PLANNED_RESTART_KEY = '__lgtbot_planned_restart'
 
@@ -108,6 +109,10 @@ _BACKUP_DOWNLOAD_ROUTE = '/api/ext/lgtbot/backup/download'
 _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
 # 顶栏「计划重启」切换(要接 ?reason= 维护原因,故走 register_route 而非隐藏 action)
 _PLANNED_RESTART_ROUTE = '/api/ext/lgtbot/planned-restart'
+# 顶栏「重启 LGTBot」(要接 ?reason= 更新内容,同上,故走 register_route)
+_RESTART_PANEL_ROUTE = '/api/ext/lgtbot/panel-restart'
+# 更新内容长度上限 —— 与 dispatcher._RESTART_REASON_MAX 同口径
+_RESTART_REASON_MAX = 200
 # 崩溃转储查看正文 / 下载单个 dump / 删除选中(都接 ?name=,可多个,走 register_route)
 _CRASH_VIEW_ROUTE     = '/api/ext/lgtbot/crash/view'
 _CRASH_DOWNLOAD_ROUTE = '/api/ext/lgtbot/crash/download'
@@ -236,7 +241,7 @@ def _render_html() -> str:
             .replace('__CRASH_JS__', page_crash.TAB_JS)
             .replace('__PREBUILT_JS__', page_prebuilt.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
-            .replace('__RESTART_KEY__', RESTART_KEY)
+            .replace('__RESTART_ROUTE__', _RESTART_PANEL_ROUTE)
             .replace('__PLANNED_ON__', '1' if _plugin_state.is_planned_restart() else '0'))
 
 
@@ -246,24 +251,38 @@ def _render_html() -> str:
 # 预检和「0.5s 后 os.execv 整进程」的换进程动作,确保 C++ 二进制真正被新进程
 # 重新 dlopen。
 
-def _render_restart() -> str:
+async def _render_restart(reason: str = '') -> str:
     """触发重启 + 返回单个 ``<div id="msg">…</div>``。
 
     只用做 JS 的回执片段:主页 main.js 的「🔁 重启 LGTBot」按钮 fetch 后用
     DOMParser 抠 #msg.textContent 显示成顶部横幅，完整 HTML 外壳(DOCTYPE /
     卡片 / hint) 都用不到。这个 key 又被 get_pages 过滤掉，用户也不会以独立
     页面身份打开它，所以连 <html><body> 都省了。
+
+    ``reason`` 是面板弹窗里可填的「更新内容」,随重启通知发给还有等待中房间的群。
     """
     # 延迟 import 断开循环依赖(dispatcher 间接 import 本模块)
     from .. import dispatcher
     ok, msg = dispatcher.check_and_prepare_restart()
     # record 同步写盘,返回即已持久化 —— 先落审计与重启计数再调度 execv,换进程后记录仍在
-    audit.record('restart', '重启 LGTBot', '' if ok else msg,
+    audit.record('restart', '重启 LGTBot',
+                 (f'更新内容：{reason}' if reason else '') if ok else msg,
                  ok=ok, src=audit.SRC_PANEL)
     if ok:
         metrics.record_restart()
+        await dispatcher._notify_restart_rooms(reason)
         dispatcher.schedule_exec_after(0.5)
     return f'<div id="msg">{html.escape(msg)}</div>'
+
+
+async def restart_panel_handler(request: 'web.Request') -> 'web.Response':
+    """``GET /api/ext/lgtbot/panel-restart?reason=<更新内容>`` —— 面板重启按钮。
+
+    走 ``register_route`` 而非隐藏 action:后者的 provider 不接参数,拿不到 ``?reason=``(同「计划重启」的选择)。
+    响应仍是 ``#msg`` 片段,main.js 解析方式不变。
+    """
+    reason = (request.query.get('reason') or '').strip()[:_RESTART_REASON_MAX]
+    return web.Response(text=await _render_restart(reason), content_type='text/html')
 
 
 def _toggle_planned_restart_fragment(reason: str = '', auto: bool = False) -> str:
@@ -398,8 +417,6 @@ def register():
     }
     web_pages._registry[PAGE_KEY] = _LazyHtmlDict(log_base, _render_html)
 
-    # 重启 action 端点
-    _register_hidden_action(RESTART_KEY, _render_restart)
 
     # Dashboard action 端点
     _register_hidden_action(_DASH_CHECK_UPDATE_KEY,      page_dashboard.render_check_update)
@@ -462,6 +479,7 @@ def register():
     web_pages.register_route('GET', _BACKUP_DOWNLOAD_ROUTE, page_backup.download_handler, auth=True)
     web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)
     web_pages.register_route('GET', _PLANNED_RESTART_ROUTE, planned_restart_handler, auth=True)
+    web_pages.register_route('GET', _RESTART_PANEL_ROUTE, restart_panel_handler, auth=True)
     web_pages.register_route('GET', _CRASH_VIEW_ROUTE, page_crash.view_handler, auth=True)
     web_pages.register_route('GET', _CRASH_DOWNLOAD_ROUTE, page_crash.download_handler, auth=True)
     web_pages.register_route('GET', _CRASH_DELETE_ROUTE, page_crash.delete_handler, auth=True)
@@ -496,6 +514,7 @@ def unregister():
     web_pages.unregister_route('GET', _BACKUP_DOWNLOAD_ROUTE)
     web_pages.unregister_route('GET', _BIND_BOT_ROUTE)
     web_pages.unregister_route('GET', _PLANNED_RESTART_ROUTE)
+    web_pages.unregister_route('GET', _RESTART_PANEL_ROUTE)
     web_pages.unregister_route('GET', _CRASH_VIEW_ROUTE)
     web_pages.unregister_route('GET', _CRASH_DOWNLOAD_ROUTE)
     web_pages.unregister_route('GET', _CRASH_DELETE_ROUTE)

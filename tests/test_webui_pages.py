@@ -415,3 +415,99 @@ def test_build_and_restart_apis_registered_without_panel_auth(_clean_registry):
     # 面板侧带参路由一律要登录态
     assert routes[('GET', '/api/ext/lgtbot/backup/restore')]['auth'] is True
     assert routes[('POST', '/api/ext/lgtbot/config/save')]['auth'] is True
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 面板重启:可选「更新内容」+ 等待中房间通知
+# ─────────────────────────────────────────────────────────────────────────
+
+async def test_panel_restart_passes_reason_and_notifies_rooms(monkeypatch):
+    """★ 面板重启走带 ?reason= 的真路由(隐藏 action 的 provider 接不了参数),
+    并把更新内容原样交给房间通知;面板不在任何群里 → 不排除任何群。"""
+    wm = _main()
+    from plugins.LGTBot_ElainaBot.mod import dispatcher
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
+                        lambda: (True, '🔁 正在重启'))
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda *a, **k: None)
+    monkeypatch.setattr(wm.metrics, 'record_restart', lambda: None)
+    monkeypatch.setattr(wm.audit, 'record', lambda *a, **k: None)
+    seen = {}
+
+    async def fake_notify(reason='', *, skip_keys=frozenset()):
+        seen.update(reason=reason, skip=set(skip_keys))
+        return 0
+
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_notify)
+    frag = await wm._render_restart('新版本上线')
+    assert '正在重启' in frag
+    assert seen == {'reason': '新版本上线', 'skip': set()}
+
+
+async def test_panel_restart_rejected_does_not_notify(monkeypatch):
+    """有进行中对局被拒 → 不通知、不调度 exec。"""
+    wm = _main()
+    from plugins.LGTBot_ElainaBot.mod import dispatcher
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
+                        lambda: (False, '⚠️ 有对局'))
+    monkeypatch.setattr(wm.audit, 'record', lambda *a, **k: None)
+    called = []
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after',
+                        lambda *a, **k: called.append('exec'))
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms',
+                        lambda *a, **k: called.append('notify'))
+    await wm._render_restart('x')
+    assert called == []
+
+
+def test_panel_restart_route_registered(_clean_registry):
+    """按钮改走 register_route 后,注册 / 注销都要跟上(漏了按钮直接 404)。"""
+    wm = _main()
+    wm.register()
+    assert ('GET', wm._RESTART_PANEL_ROUTE) in _clean_registry._routes
+    wm.unregister()
+    assert ('GET', wm._RESTART_PANEL_ROUTE) not in _clean_registry._routes
+
+
+def test_main_js_uses_the_restart_route():
+    """模板占位与常量对得上 —— 拼错的话按钮会 fetch 到字面量 __RESTART_ROUTE__。"""
+    wm = _main()
+    html = wm._render_html()
+    assert '__RESTART_ROUTE__' not in html
+    assert wm._RESTART_PANEL_ROUTE in html
+
+
+async def test_panel_restart_handler_forwards_query_reason(monkeypatch):
+    """★ handler 要把 ``?reason=`` 交下去 —— 丢了的话面板输入框填了也白填。"""
+    wm = _main()
+    seen = {}
+
+    async def fake_render(reason=''):
+        seen['reason'] = reason
+        return '<div id="msg">ok</div>'
+
+    monkeypatch.setattr(wm, '_render_restart', fake_render)
+
+    class _Req:
+        query = {'reason': '  修复图床  '}
+
+    resp = await wm.restart_panel_handler(_Req())
+    assert seen['reason'] == '修复图床'          # strip 过
+    assert 'ok' in resp.text
+
+
+async def test_panel_restart_handler_truncates_long_reason(monkeypatch):
+    """超长更新内容截断,别把推送撑爆(与指令 / API 同一上限)。"""
+    wm = _main()
+    seen = {}
+
+    async def fake_render(reason=''):
+        seen['reason'] = reason
+        return '<div id="msg">ok</div>'
+
+    monkeypatch.setattr(wm, '_render_restart', fake_render)
+
+    class _Req:
+        query = {'reason': 'x' * 500}
+
+    await wm.restart_panel_handler(_Req())
+    assert len(seen['reason']) == wm._RESTART_REASON_MAX

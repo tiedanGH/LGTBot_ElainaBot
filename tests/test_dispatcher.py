@@ -1350,3 +1350,87 @@ def test_interrupt_hint_ignores_other_commands(content):
 def test_interrupt_hint_group_only():
     """私信没有群管概念,也没有「强制中断」这条授权路径。"""
     assert _mark('/中断', role='owner', is_group=False) is False
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 重启:可选更新内容 + 等待中房间通知的四条路径
+# ─────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize('cmd,want', [
+    ('重启', ''),
+    ('重启 修复了图床', '修复了图床'),
+    ('重启   前后空格  ', '前后空格'),
+])
+def test_restart_pattern_captures_optional_reason(cmd, want):
+    import re as _re
+    m = _re.match(dispatcher._P_RESTART, cmd)
+    assert m is not None, cmd
+    assert ((m.group(1) or '').strip()) == want
+
+
+async def test_restart_command_notifies_rooms_except_origin(monkeypatch):
+    """★ 指令重启:带上更新内容通知等待中房间,**排除发起群**(回执就在眼前)。"""
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
+                        lambda: (True, '🔁 正在重启'))
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda *a, **k: None)
+    monkeypatch.setattr(dispatcher.metrics, 'record_restart', lambda: None)
+    seen = {}
+
+    async def fake_notify(reason='', *, skip_keys=frozenset()):
+        seen.update(reason=reason, skip=set(skip_keys))
+        return 0
+
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_notify)
+    import re as _re
+    ev = _mock_event(is_group=True, group_id='GORIGIN', user_id='U1', content='重启 新版本')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_restart(ev, _re.match(dispatcher._P_RESTART, '重启 新版本'))
+
+    assert seen['reason'] == '新版本'
+    assert seen['skip'] == {'g:GORIGIN'}      # 发起群不再重复收
+
+
+async def test_restart_command_from_dm_skips_nothing(monkeypatch):
+    """私信里发起重启:没有「发起群」可排除,全部等待中房间照常通知。"""
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
+                        lambda: (True, 'ok'))
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda *a, **k: None)
+    monkeypatch.setattr(dispatcher.metrics, 'record_restart', lambda: None)
+    seen = {}
+
+    async def fake_notify(reason='', *, skip_keys=frozenset()):
+        seen['skip'] = set(skip_keys)
+        return 0
+
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_notify)
+    import re as _re
+    ev = _mock_event(is_direct=True, user_id='U1', content='重启')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_restart(ev, _re.match(dispatcher._P_RESTART, '重启'))
+    assert seen['skip'] == set()
+
+
+async def test_restart_command_rejected_sends_nothing(monkeypatch):
+    """有进行中对局被拒 → 不通知任何房间(压根没重启)。"""
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
+                        lambda: (False, '⚠️ 有对局'))
+    called = []
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms',
+                        lambda *a, **k: called.append(1))
+    import re as _re
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='重启')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_restart(ev, _re.match(dispatcher._P_RESTART, '重启'))
+    assert called == []
+
+
+def test_auto_restart_skips_already_notified_groups():
+    """★ 自动重启:通知群刚收过一条自动重启说明,房间通知要跳过它们,
+    避免同一个群连收两条。手动重启不推通知群,所以那条路径不跳(见指令用例)。"""
+    import inspect
+    src = inspect.getsource(dispatcher._auto_restart_watcher)
+    assert '_notify_auto_restart' in src
+    assert 'skip_keys=' in src and 'NOTIFY_GROUPS' in src

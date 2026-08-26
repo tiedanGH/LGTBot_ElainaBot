@@ -353,22 +353,79 @@ async def broadcast_notify(md: str, label: str, *, timeout: float = 8.0) -> int:
     return ok
 
 
+def restart_room_message(reason: str) -> str:
+    """重启前发给「等待中房间」的简要通知。
+
+    只讲两件事:马上要重启(房间会没)、这次更新了什么。**不提计划重启** ——
+    收到这条的是正在等人开局的玩家,维护模式怎么开的与他们无关。
+    ``reason`` 由主人 / 面板填写,仍按 markdown 语境转义(同维护提示)。
+    """
+    parts = ['## 🔁 LGT-Bot 即将重启', '',
+             '> 本群有**尚未开始**的房间，重启后会被清空']
+    if reason:
+        parts += ['', f'📌 更新内容：{helpers.sanitize_md_name(reason)}']
+    parts += ['', '⏳ 预计 10 秒内恢复服务...']
+    return '\n'.join(parts)
+
+
+async def notify_restart_rooms(reason: str = '', *, skip_keys=()) -> int:
+    """重启前给所有**等待中房间**所在的群推一条通知,返回送达数。
+
+    只发**有主动推送权限**的群:重启这一刻多半没有可用的被动引用,没权限的群直接丢弃。
+    私信房间不在范围内:私信 ``/新游戏`` 直接开局,不存在「等待中」的房间。
+
+    ``skip_keys`` 用来去重:自动重启已经给通知群推过一条了,那些群不必再收一条
+    (手动重启不推通知群,所以那条路径下通知群里有房间照样通知)。
+
+    并发发送 + 每条独立超时:夹在「引擎已释放」与 ``os.execv`` 之间,不能被某个群的慢请求拖住整个重启。
+    """
+    rooms = [r for k, r in state.waiting_rooms.items()
+             if not r.get('is_uid') and r.get('target_id') and k not in skip_keys]
+    if not rooms:
+        return 0
+    targets = [r['target_id'] for r in rooms if helpers.can_push_group(r['target_id'])]
+    dropped = len(rooms) - len(targets)
+    if dropped:
+        log.info(f'🔁 [重启通知] {dropped} 个等待中房间所在群无主动推送权限，已丢弃')
+    if not targets:
+        return 0
+    sender = helpers.get_sender('')
+    if sender is None:
+        log.warning('无可用 sender，跳过重启房间通知')
+        return 0
+    md = restart_room_message(reason)
+
+    async def _one(gid: str) -> bool:
+        page_logs.log_outgoing(gid, False, md)
+        try:
+            with log_attribution.mark_outbound():
+                await asyncio.wait_for(sender.send_to_group(gid, md), timeout=5.0)
+            return True
+        except Exception as e:
+            log.warning(f'重启通知推送失败 ({gid}): {e}')
+            return False
+
+    results = await asyncio.gather(*(_one(g) for g in targets),
+                                   return_exceptions=True)
+    ok = sum(1 for r in results if r is True)
+    log.warning(f'🔁 [重启通知] 等待中房间 {len(rooms)} 个，'
+                f'{len(targets)} 个可推送，{ok} 个送达')
+    return ok
+
+
 async def _try_send_crash_notification(sig_name: str, uid: str, gid: str,
                                        is_uid: bool, msg_len: int,
                                        *, is_belated: bool = False) -> None:
     """向全部通知群推送一条**主动消息**汇报崩溃(发送细节见 broadcast_notify)。
 
-    ``is_belated=True`` 走补发路径(OnCxxTerminate marker):此时进程已经重启
-    完成,把「进程将在 N 秒后自动重启」这行替换为「机器人已自动重启恢复服务」,
-    避免管理员误以为还在等。SIGSEGV 路径默认 False,文案不变。
+    ``is_belated=True`` 走补发路径(OnCxxTerminate marker):此时进程已经重启完成,
+    把「进程将在 N 秒后自动重启」这行替换为「机器人已自动重启恢复服务」,SIGSEGV 路径默认 False,文案不变。
 
-    **安全约束:** 本消息走 bot 自己的 appid 发出,QQ 风控同样适用 —— 因此
-    **不把触发崩溃的用户原文(preview)拼进 markdown**,避免用户故意发违规/
-    敏感内容借崩溃路径让 bot 转发,触发风控扣分甚至封号。只展示机械生成、
-    bot 完全可控的字段(信号名 / openid / 长度数字),全部塞进单个代码块里,
-    QQ markdown 不会把里面的内容当指令解析。完整 preview 在服务端
-    ``log.error`` 里,管理员凭 target + 时间戳去 WebUI「消息日志」或
-    framework 全局日志反查即可,本地查完全无风险。
+    **安全约束:** 本消息走 bot 自己的 appid 发出,QQ 风控同样适用
+    因此**不把触发崩溃的用户原文(preview)拼进 markdown**,避免用户故意发违规/敏感内容借崩溃路径让 bot 转发,
+    触发风控扣分甚至封号。只展示机械生成、bot 完全可控的字段(信号名 / openid / 长度数字),全部塞进单个代码块里,
+    QQ markdown 不会把里面的内容当指令解析。完整 preview 在服务端 ``log.error`` 里,
+    管理员凭 target + 时间戳去 WebUI「消息日志」或 framework 全局日志反查即可,本地查完全无风险。
     """
     # 触发源块:私聊单行,群聊两行(群号 + 用户号各占一行,提升可读性)
     if is_uid:
@@ -964,9 +1021,20 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
             'game': game,
             'since': time.time(),
         }
+        state.waiting_rooms.pop(key, None)     # 开局 = 离开「等待中」
+    elif kind in ('new_game', 'join_leave'):
+        # 等待中的房间(已建房、未开局)。join_leave 也写:建房广播偶尔拿不到 brief 时,后续加入/退出广播能把游戏名补上;since 保留首次建房时刻。
+        prev = state.waiting_rooms.get(key) or {}
+        state.waiting_rooms[key] = {
+            'target_id': target_id,
+            'is_uid': is_uid,
+            'game': game_name or prev.get('game') or state.current_game.get(key, ''),
+            'since': prev.get('since') or time.time(),
+        }
     elif kind in ('game_over', 'game_over_unrecorded', 'all_left', 'terminate') \
             or (kind == 'mid_quit' and is_uid):
         state.active_matches.pop(key, None)
+        state.waiting_rooms.pop(key, None)
 
     # 按钮挂载 —— new_game / join_leave 都挂同样一组:
     #   · 群聊:  「加入 / 退出」+ 「📖《X》规则」 两行

@@ -116,7 +116,7 @@ _P_MORE     = r'^/?更多功能$'
 _P_NOTICE   = r'^/?更新公告$'
 _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
-_P_RESTART  = r'^重启$'
+_P_RESTART  = r'^重启(?:\s+(.+))?$'
 _P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
 _P_STATS    = r'^/?数据统计\s*(总|\d{8}|\d{6}|\d{4}|\d{2})?$'
 _P_MATCHLIST = r'^/?赛事列表$'
@@ -1568,10 +1568,34 @@ async def _auto_restart_watcher() -> None:
                     log.warning('🤖 [自动重启] 静默期结束，执行计划重启')
                     # 先把通知推到严重问题通知群(带维护原因;仅自动重启),await 保证 HTTP 往返在换进程之前完成。
                     await _notify_auto_restart(reason)
+                    # 再通知还有等待中房间的群;通知群刚收过一条,不重复打扰
+                    from . import callbacks as _cb
+                    await _notify_restart_rooms(
+                        reason,
+                        skip_keys={helpers.target_key(g, False)
+                                   for g in _cb.NOTIFY_GROUPS})
                     schedule_exec_after(0.5)
                     return
                 empty_since = None          # 预检被拒(race 新开局)→ 重新计时
         await asyncio.sleep(_AUTO_WATCH_INTERVAL)
+
+
+# 重启更新内容的长度上限(指令 / 面板 / API 共用);超长截断
+_RESTART_REASON_MAX = 200
+
+
+async def _notify_restart_rooms(reason: str = '', *, skip_keys=frozenset()) -> int:
+    """重启前通知「还有等待中房间」的群 —— 四条重启路径(指令 / 面板 / API / 自动)共用这一个入口,
+    实现在 ``callbacks.notify_restart_rooms``。
+
+    异常一律吞掉:通知只是善后,不能反过来把已经释放引擎的重启流程打断。
+    """
+    from . import callbacks as _callbacks
+    try:
+        return await _callbacks.notify_restart_rooms(reason, skip_keys=skip_keys)
+    except Exception as e:
+        log.warning(f'重启房间通知失败: {e}')
+        return 0
 
 
 async def _notify_auto_restart(reason: str) -> None:
@@ -1805,18 +1829,31 @@ async def lgtbot_restart(event, match):
     """主人发起的本插件「全套」重启 —— exec 整个 Python 进程,把 bridge .so /
     libbot_core.so / 全部 libgame.so 重新 dlopen,等价于让 build.sh 重编后的
     C++ 二进制即刻生效。
+
+    ``/重启 <更新内容>`` 可选:该文案会随重启通知发给还有等待中房间的群。
+    **手动重启不推通知群**(那是自动重启的语义),但发起指令的这个群要排除掉。
     """
     if helpers.is_foreign_event(event):
         return
+    try:
+        reason = ((match.group(1) or '').strip() if match else '')[:_RESTART_REASON_MAX]
+    except (AttributeError, IndexError):
+        reason = ''
     ok, msg = check_and_prepare_restart()
     # record 同步写盘,任何 await 前已持久化 —— 重启换进程也不丢这些记录
-    audit.record('restart', '重启 LGTBot', '' if ok else msg,
+    audit.record('restart', '重启 LGTBot',
+                 (f'更新内容：{reason}' if reason else '') if ok else msg,
                  ok=ok, src=audit.SRC_CMD)
     if ok:
         metrics.record_restart()
     await event.reply(msg)
     if not ok:
         return
+
+    # 等待中房间的重启通知(排除发起群);await 保证 HTTP 往返在换进程之前完成
+    gid = event.group_id or event.channel_id or ''
+    skip = {helpers.target_key(gid, False)} if (event.is_group and gid) else set()
+    await _notify_restart_rooms(reason, skip_keys=skip)
 
     async def _on_fail():
         try:
