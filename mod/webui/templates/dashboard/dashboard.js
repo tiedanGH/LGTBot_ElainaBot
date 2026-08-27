@@ -408,12 +408,16 @@ function dashApplyData(data) {
 
   /* 缓存尺寸 */
   const cache = data.cache || {};
+  let cacheTotal = 0;
   ['avatar', 'gen', 'match'].forEach(k => {
     const c = cache[k] || {};
+    cacheTotal += c.bytes || 0;
     document.getElementById('dash-cache-' + k + '-size').textContent = dashFmtBytes(c.bytes || 0);
     const countEl = document.getElementById('dash-cache-' + k + '-count');
     countEl.textContent = c.exists ? '(' + (c.count || 0) + ' 文件)' : '(目录不存在)';
   });
+  /* 三类图片缓存合计超阈值 → 本标签亮「清理」 */
+  setTabCleanBadge('dash-clean-badge', cacheTotal);
 }
 
 function dashLoadInline() {

@@ -70,6 +70,16 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && themeMode === 'auto') applyTheme('auto');
 });
 
+/* ──── 标签「清理」标记 ────
+   某个标签下的文件占用超过阈值时,在该标签上亮一枚橙色「清理」提示去清理;清到阈值以下再刷新数据自动消失。
+   各标签在自己的 apply 数据函数里调用,所以清理完成后的那次刷新就会同步。 */
+const TAB_CLEAN_THRESHOLD = 256 * 1024 * 1024;      // 256 MB
+
+function setTabCleanBadge(id, bytes) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('on', (bytes || 0) > TAB_CLEAN_THRESHOLD);
+}
+
 /* ──── 全屏按钮──── 在新窗口打开本页面的独立全屏视图。
    脱离侧边栏 iframe 外壳整页铺满;token 透传保证新窗口里各 action fetch 仍鉴权通过。 */
 const _fullscreenBtn = document.getElementById('fullscreen-btn');

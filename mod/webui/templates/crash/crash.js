@@ -156,6 +156,8 @@ function coreApplyData(data) {
   if (cnt) cnt.textContent = (data.core_count != null) ? data.core_count : '—';
   const sz = document.getElementById('crash-core-size');
   if (sz) sz.textContent = crashFmtBytes(data.core_bytes);
+  /* core 文件合计超阈值 → 本标签亮「清理」(core 动辄上百 MB,是这里的占用大头) */
+  setTabCleanBadge('crash-clean-badge', data.core_bytes);
   const badge = document.getElementById('crash-core-badge');
   if (badge) badge.textContent = cores.length ? ' (' + cores.length + ')' : '';
   const body = document.getElementById('crash-core-body');

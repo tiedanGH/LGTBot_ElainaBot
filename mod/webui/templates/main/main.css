@@ -13,6 +13,7 @@
   --in: #1f9d55;
   --out: #1d6fdc;
   --img: #e08600;
+  --warn: #d97706;
   --tag-bg: #eef0f7;
   --tag-text: #4a5160;
   --hover: #eef1f9;
@@ -34,6 +35,7 @@
   --in: #4caf50;
   --out: #2196f3;
   --img: #ff9800;
+  --warn: #ffa726;
   --tag-bg: #2a2a3e;
   --tag-text: #aab0c4;
   --hover: #22223e;
@@ -98,6 +100,14 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   color: var(--in); vertical-align: middle;
 }
 .tabs .tab.active .tab-live-badge { display: inline-block; }
+/* 「清理」标记 —— 该标签下的文件占用过大时亮起,清到阈值以下后随下一次数据刷新自动消失。 */
+.tabs .tab .tab-clean-badge {
+  display: none;
+  margin-left: 6px; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 500;
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn); vertical-align: middle;
+}
+.tabs .tab .tab-clean-badge.on { display: inline-block; }
 .restart-btn {
   background: var(--panel); color: var(--text);
   border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px;

@@ -541,6 +541,40 @@ def test_theme_resolved_in_head_before_first_paint():
     assert "|| 'auto'" in head                          # 首屏默认也是自动
 
 
+def test_clean_badge_threshold_and_wiring():
+    """★ 「清理」标记:仪表盘图片缓存 / 崩溃转储 core 文件超 256MB 时亮橙色。
+
+    两处都挂在各自的 apply 数据函数里 —— 清理动作结束会重新拉一次 payload 并
+    apply,标记因此在清干净的那一刻自动消失,不需要额外通知谁。
+    """
+    wm = _main()
+    html = wm._render_html()
+    assert 'const TAB_CLEAN_THRESHOLD = 256 * 1024 * 1024;' in html
+    # 阈值判定是「严格大于」,恰好等于阈值不算超
+    assert "classList.toggle('on', (bytes || 0) > TAB_CLEAN_THRESHOLD)" in html
+    # 两个标签各挂一枚,id 与调用处对得上
+    for tab, badge in (('dashboard', 'dash-clean-badge'), ('crash', 'crash-clean-badge')):
+        assert re.search(r'data-tab="%s"[^<]*<span class="tab-clean-badge" id="%s">清理</span>'
+                         % (tab, badge), html), badge
+        assert f"setTabCleanBadge('{badge}'" in html
+    # 仪表盘算的是三类图片缓存的**合计**,崩溃转储算 core 文件总占用
+    assert "setTabCleanBadge('dash-clean-badge', cacheTotal)" in html
+    assert "setTabCleanBadge('crash-clean-badge', data.core_bytes)" in html
+
+
+def test_clean_badge_shows_on_every_tab_and_is_orange():
+    """★ 标记要一直看得见:它的作用是在别的标签上提醒去清理,只在自己标签聚焦时显示就等于没提醒。"""
+    wm = _main()
+    html = wm._render_html()
+    css = html[:html.index('</style>')]
+    # 显示条件只看 .on,不带 .tab.active 限定
+    assert '.tabs .tab .tab-clean-badge.on { display: inline-block; }' in css
+    assert not re.search(r'\.tabs \.tab\.active \.tab-clean-badge', css)
+    assert 'color: var(--warn)' in css
+    # 浅 / 深两套变量都定义了,否则一套主题下会取不到色
+    assert len(re.findall(r'--warn:\s*#[0-9a-f]{6};', css)) == 2
+
+
 async def test_panel_restart_handler_forwards_query_reason(monkeypatch):
     """★ handler 要把 ``?reason=`` 交下去 —— 丢了的话面板输入框填了也白填。"""
     wm = _main()
