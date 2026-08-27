@@ -69,7 +69,8 @@ function usersRowHtml(u, serial) {
   return '<div class="user-row">' +
     '<div class="col-idx">' + serial + '</div>' +
     '<div class="col-user">' + avatar + '<span class="user-name">' + name + '</span></div>' +
-    '<div class="col-openid">' + escapeHtml(u.openid || '') + '</div>' +
+    '<div class="col-openid"><span class="user-openid">' +
+      escapeHtml(u.openid || '') + '</span></div>' +
     '<div class="col-msgs">' + msgs + '</div>' +
     '<div class="col-seen">' + seen + '</div>' +
   '</div>';

@@ -80,6 +80,18 @@ def test_audit_module_exposes_no_mutation_endpoint():
                 if re.search(r'clear|delete|remove|purge|reset', n, re.I)}
 
 
+def test_audit_detail_column_is_fixed_width_on_mobile():
+    """★ 窄屏下详情列给定宽。"""
+    page_audit, _m, _l = _pages()
+    css = page_audit.TAB_CSS
+    blocks = re.findall(r'@media \(max-width: 600px\) \{(.*?)\n\}', css, re.S)
+    assert blocks, '没找到窄屏 @media 块'
+    m = '\n'.join(blocks)
+    assert '.audit-col-detail { width: 100%; max-width: 0; }' in css.replace(m, '')
+    assert re.search(r'\.audit-col-detail \{ width: (\d+)px; min-width: \1px; \}', m)
+    assert '.audit-table { width: max-content; min-width: 100%; }' in m
+
+
 def test_audit_get_data_escapes_script_close(tmp_path, monkeypatch):
     """审计 detail 是人工输入(如计划重启原因),可能含 </script>。"""
     page_audit, _m, _l = _pages()

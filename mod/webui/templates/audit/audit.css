@@ -129,6 +129,7 @@
   .audit-status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .audit-status-card { padding: 10px 12px; }
   .audit-status-value { font-size: 15px; }
-  .audit-table { min-width: 600px; }
+  .audit-table { width: max-content; min-width: 100%; }
   .audit-table th, .audit-table td { padding: 7px 8px; font-size: 12px; }
+  .audit-col-detail { width: 320px; min-width: 320px; }
 }

@@ -134,3 +134,14 @@
   font-size: 12px; line-height: 1.55; color: var(--text);
   white-space: pre; tab-size: 2;
 }
+
+
+/* ── 移动端:两张表的列宽按内容自适应 */
+@media (max-width: 600px) {
+  .crash-table { table-layout: auto; width: max-content; min-width: 100%; }
+  .crash-col-chk, .crash-col-time, .crash-col-sig, .crash-col-size,
+  .crash-col-name, .crash-col-act { width: auto; }
+  .crash-col-uid, .crash-col-gid { white-space: nowrap; word-break: normal; }
+  .crash-col-name .dash-mono { overflow: visible; text-overflow: clip; }
+  .crash-col-mod, .crash-col-game { overflow: visible; text-overflow: clip; }
+}

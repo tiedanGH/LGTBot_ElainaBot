@@ -95,4 +95,9 @@
   .backup-status-card { padding: 10px 12px; }
   .backup-status-value { font-size: 15px; }
   .backup-table th, .backup-table td { padding: 8px 10px; font-size: 12px; }
+  .backup-table { width: max-content; min-width: 100%; }
+  .backup-col-name, .backup-col-time, .backup-col-size, .backup-col-ops {
+    width: auto; white-space: nowrap;
+  }
+  .backup-col-name { word-break: normal; }
 }

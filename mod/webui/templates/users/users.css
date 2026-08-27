@@ -136,3 +136,31 @@
 .users-note {
   margin-top: 12px; font-size: 12px; color: var(--text-muted); line-height: 1.6;
 }
+
+
+/* ── 移动端:列表定宽列 + 横向滚动 */
+@media (max-width: 600px) {
+  .users-section { overflow-x: auto; }
+  .users-header .header-row,
+  .user-row {
+    grid-template-columns: 44px 130px 140px 72px 92px;
+    width: max-content; min-width: 100%;
+  }
+  .users-header .header-row > div { white-space: nowrap; padding: 8px 6px; }
+  .user-row > div { padding: 4px 6px; }
+  .user-row .col-user { gap: 6px; }
+  .user-row .avatar-img { width: 28px; height: 28px; }
+  /* OpenID 是 32 位定长串:内层块宽 16 个字符,正好断成上下两行 */
+  .user-row .user-openid {
+    display: block; width: 16ch; margin: 0 auto;
+    word-break: break-all; text-align: left;
+  }
+  /* 消息数与最后活跃日期不允许断行 */
+  .user-row .col-msgs, .user-row .col-seen { white-space: nowrap; }
+  .user-row.empty { grid-template-columns: 1fr; width: auto; }
+  .users-toolbar .spacer { display: none; }
+  .users-toolbar #users-search {
+    flex: 1 0 100%; min-width: 0; max-width: none;
+  }
+  .users-toolbar .pagination { margin-right: auto; }
+}

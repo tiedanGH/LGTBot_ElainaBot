@@ -175,6 +175,8 @@
   border-radius: 8px; font-size: 13px;
 }
 .dash-bot-row.bound { border-color: var(--accent); }
+/* 分行容器:宽屏下不参与布局,窄屏的 @media 里才各自成行 */
+.dash-bot-idline, .dash-bot-permline { display: contents; }
 .dash-bot-qq { color: var(--text-muted); }
 /* 全量群数量,紧跟 QQ 右侧 */
 .dash-bot-vol { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
@@ -241,3 +243,25 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (min-width: 720px)  { .dash-check-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (min-width: 1200px) { .dash-check-grid { grid-template-columns: repeat(3, 1fr); } }
+
+
+/* ── 移动端:机器人绑定逐行排布 */
+@media (max-width: 600px) {
+  #dash-bot-section .dash-section-header {
+    display: grid; grid-template-columns: auto 1fr;
+    column-gap: 10px; row-gap: 2px; align-items: center;
+  }
+  #dash-bot-section.is-collapsed .dash-bot-summary { display: contents; }
+  .dash-bot-summary > .dash-badge { justify-self: start; }
+  .dash-bot-summary > .dash-bot-idline,
+  .dash-bot-summary > .dash-bot-permline {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+
+  .dash-bot-row { display: block; }
+  .dash-bot-idline, .dash-bot-permline {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .dash-bot-row .dash-bot-permline { margin-top: 4px; }
+}

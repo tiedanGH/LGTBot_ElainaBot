@@ -443,3 +443,24 @@ def test_core_section_frontend_contract():
     assert 'core-download' in js and 'core-delete' in js
     assert "'&d=' + encodeURIComponent" in js             # 删除 / 下载都带目录下标
     assert '.crash-core-unknown' in css
+
+
+def _mobile_css(css: str) -> str:
+    """把文件里所有窄屏 @media 块的正文拼起来(块尾的 ``}`` 顶格,规则缩进)。"""
+    import re
+    blocks = re.findall(r'@media \(max-width: 600px\) \{(.*?)\n\}', css, re.S)
+    assert blocks, '没找到窄屏 @media 块'
+    return '\n'.join(blocks)
+
+
+def test_tables_size_columns_to_content_on_mobile():
+    """★ 窄屏下两张表的列宽按内容算,不再用宽屏那套固定像素。"""
+    css = _crash().TAB_CSS
+    m = _mobile_css(css)
+    assert re.search(r'\.crash-table\s*\{[^}]*table-layout:\s*fixed', css)
+    assert re.search(r'\.crash-col-name\s*\{\s*width:\s*\d+px', css)
+    assert 'table-layout: auto;' in m and 'width: max-content;' in m
+    assert '.crash-col-uid, .crash-col-gid { white-space: nowrap; word-break: normal; }' in m
+    assert m.count('overflow: visible; text-overflow: clip;') == 2
+    for col in ('.crash-col-name', '.crash-col-mod', '.crash-col-game'):
+        assert col in m, col

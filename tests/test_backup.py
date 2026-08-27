@@ -434,3 +434,21 @@ async def test_download_handler_rejects_bad_name_and_missing():
         assert getattr(resp, 'status', None) == 400
     resp = await pb.download_handler(_FakeReq('LGTBot_9999-99-99_000000.zip'))
     assert getattr(resp, 'status', None) == 404
+
+
+def _mobile_css(css: str) -> str:
+    """把文件里所有窄屏 @media 块的正文拼起来(块尾的 ``}`` 顶格,规则缩进)。"""
+    import re
+    blocks = re.findall(r'@media \(max-width: 600px\) \{(.*?)\n\}', css, re.S)
+    assert blocks, '没找到窄屏 @media 块'
+    return '\n'.join(blocks)
+
+
+def test_backup_row_keeps_name_time_size_on_one_line_on_mobile():
+    """★ 窄屏下备份名 / 时间 / 大小各占一行内。"""
+    m = _mobile_css(_page_backup().TAB_CSS)
+    assert '.backup-table { width: max-content; min-width: 100%; }' in m
+    for col in ('.backup-col-name', '.backup-col-time', '.backup-col-size'):
+        assert col in m, col
+    assert 'white-space: nowrap;' in m
+    assert '.backup-col-name { word-break: normal; }' in m

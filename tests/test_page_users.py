@@ -9,6 +9,7 @@ page_users 顶部 import aiohttp,dev 机常无 → importorskip 守卫(CI 有 ai
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -78,3 +79,44 @@ async def test_page_handler_rejects_bad_offset():
     pu = _page_users()
     resp = await pu.page_handler(_FakeReq('abc'))
     assert getattr(resp, 'status', None) == 400
+
+
+def _mobile_css(css: str) -> str:
+    """把文件里所有窄屏 @media 块的正文拼起来(块尾的 ``}`` 顶格,规则缩进)。"""
+    import re
+    blocks = re.findall(r'@media \(max-width: 600px\) \{(.*?)\n\}', css, re.S)
+    assert blocks, '没找到窄屏 @media 块'
+    return '\n'.join(blocks)
+
+
+def test_user_list_uses_fixed_columns_and_scrolls_on_mobile():
+    """★ 窄屏下列表改成定宽列 + 横向滚动。"""
+    css = _page_users().TAB_CSS
+    m = _mobile_css(css)
+    assert '.users-section { overflow-x: auto; }' in m
+    tracks = re.findall(r'grid-template-columns:\s*([\d\w ]+px[\d\w ]*);', m)
+    assert tracks and len(set(tracks)) == 1, f'表头与数据行轨道不一致: {tracks}'
+    assert len(tracks[0].split()) == 5                 # 序号 / 用户 / OpenID / 消息数 / 最后活跃
+    # 表头必须一行放完,否则两行表头与数据行错位
+    assert '.users-header .header-row > div { white-space: nowrap;' in m
+    # 消息数与最后活跃日期不允许断行
+    assert '.user-row .col-msgs, .user-row .col-seen { white-space: nowrap; }' in m
+
+
+def test_openid_splits_into_two_lines_of_sixteen_on_mobile():
+    """★ OpenID 是 32 位定长串:内层块宽 16 个字符,正好上下两行。"""
+    pu = _page_users()
+    assert '<span class="user-openid">' in pu.TAB_JS
+    m = _mobile_css(pu.TAB_CSS)
+    assert 'display: block; width: 16ch;' in m
+    assert 'word-break: break-all;' in m
+    # 宽屏区不给这个 span 任何规则(否则会连带改宽屏)
+    assert '.user-openid' not in pu.TAB_CSS.replace(m, '')
+
+
+def test_toolbar_search_is_full_width_with_paging_and_refresh_split():
+    """★ 窄屏工具栏:搜索框独占一行、左右都顶到边;下一行左页码、右刷新。"""
+    m = _mobile_css(_page_users().TAB_CSS)
+    assert '.users-toolbar .spacer { display: none; }' in m
+    assert 'flex: 1 0 100%;' in m and 'max-width: none;' in m    # 搜索框整行铺满
+    assert '.users-toolbar .pagination { margin-right: auto; }' in m

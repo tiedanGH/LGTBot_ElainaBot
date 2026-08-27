@@ -156,9 +156,11 @@ function dashRenderBotSummary(bot) {
   const qq = bot.qq ? ('QQ：' + bot.qq) : 'QQ 未配置';
   el.innerHTML =
     '<span class="dash-badge dash-badge-ok">已绑定</span>' +
-    '<span class="dash-mono">' + escapeHtml(bot.appid) + '</span>' +
-    '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
-    dashBotPermHtml(bot);
+    '<span class="dash-bot-idline">' +
+      '<span class="dash-mono">' + escapeHtml(bot.appid) + '</span>' +
+      '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
+    '</span>' +
+    '<span class="dash-bot-permline">' + dashBotPermHtml(bot) + '</span>';
 }
 
 function dashRenderBots(data) {
@@ -181,13 +183,17 @@ function dashRenderBots(data) {
     const isBound = b.appid === bound;
     const qq = b.qq ? ('QQ：' + b.qq) : 'QQ 未配置';
     return '<div class="dash-bot-row' + (isBound ? ' bound' : '') + '">' +
-      '<span class="dash-mono">' + escapeHtml(b.appid) + '</span>' +
-      '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
-      dashBotPermHtml(b) +
-      (isBound
-        ? '<span class="dash-badge dash-badge-ok">当前绑定</span>'
-        : '<button class="dash-btn dash-btn-small" data-bind-appid="' +
-          escapeHtml(b.appid) + '">绑定</button>') +
+      '<span class="dash-bot-idline">' +
+        '<span class="dash-mono">' + escapeHtml(b.appid) + '</span>' +
+        '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
+      '</span>' +
+      '<span class="dash-bot-permline">' +
+        dashBotPermHtml(b) +
+        (isBound
+          ? '<span class="dash-badge dash-badge-ok">当前绑定</span>'
+          : '<button class="dash-btn dash-btn-small" data-bind-appid="' +
+            escapeHtml(b.appid) + '">绑定</button>') +
+      '</span>' +
       '</div>';
   }).join('');
   wrap.querySelectorAll('[data-bind-appid]').forEach(btn => {

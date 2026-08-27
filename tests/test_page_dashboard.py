@@ -9,6 +9,8 @@ page_dashboard 顶部 import aiohttp,dev 机常无 → importorskip 守卫。
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from plugins.LGTBot_ElainaBot.mod import boot
@@ -166,3 +168,50 @@ def test_bot_rows_show_both_group_permissions():
     assert 'bot.proactive' in js or '.proactive' in js
     # 两处调用同一函数 —— 1 处定义 + 摘要 + 列表行
     assert js.count('dashBotPermHtml') >= 3
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 机器人绑定的窄屏排布
+# ─────────────────────────────────────────────────────────────────────────
+
+def _mobile_css(css: str) -> str:
+    """把文件里所有窄屏 @media 块的正文拼起来(块尾的 ``}`` 顶格,规则缩进)。"""
+    import re
+    blocks = re.findall(r'@media \(max-width: 600px\) \{(.*?)\n\}', css, re.S)
+    assert blocks, '没找到窄屏 @media 块'
+    return '\n'.join(blocks)
+
+
+def test_bot_lines_are_transparent_on_desktop():
+    """宽屏下 ``display: contents``,不生成盒子,布局与没有这层包裹时完全一样。"""
+    pd = _pd()
+    css, js = pd.TAB_CSS, pd.TAB_JS
+    assert '.dash-bot-idline, .dash-bot-permline { display: contents; }' in css
+    assert js.count('class="dash-bot-idline"') == 2
+    assert js.count('class="dash-bot-permline"') == 2
+    outside = css.replace(_mobile_css(css), '')
+    for cls in ('.dash-bot-idline', '.dash-bot-permline'):
+        # 宽屏区只允许那一条 display: contents
+        assert outside.count(cls) == 1, cls
+
+
+def test_bot_binding_stacks_into_lines_on_mobile():
+    """★ 窄屏排布:折叠态「标题 + 已绑定」一行、appid + QQ 一行、权限数一行;
+    展开态每张卡「appid + QQ」一行,「权限数 | 绑定按钮」一行。"""
+    m = _mobile_css(_pd().TAB_CSS)
+    assert 'grid-template-columns: auto 1fr;' in m
+    assert '#dash-bot-section.is-collapsed .dash-bot-summary { display: contents; }' in m
+    assert 'grid-column: 1 / -1;' in m                 # 两个子块各自整行
+    assert '.dash-bot-row { display: block; }' in m    # 展开态卡片按行堆叠
+
+
+def test_bot_line_spacing_is_even_and_scoped_to_cards():
+    """★ 卡片的行距只能作用在卡片里。"""
+    m = _mobile_css(_pd().TAB_CSS)
+    gap = re.search(r'column-gap: 10px; row-gap: (\d+)px;', m)
+    card = re.search(r'\.dash-bot-row \.dash-bot-permline \{ margin-top: (\d+)px; \}', m)
+    assert gap and card, '没找到摘要 / 卡片的行距声明'
+    assert gap.group(1) == card.group(1), \
+        f'摘要行距 {gap.group(1)}px 与卡片行距 {card.group(1)}px 不一致'
+    # 卡片那条必须带 .dash-bot-row 前缀(否则会漏到摘要上)
+    assert '  .dash-bot-permline { margin-top:' not in m
