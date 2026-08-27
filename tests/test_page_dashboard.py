@@ -205,13 +205,9 @@ def test_bot_binding_stacks_into_lines_on_mobile():
     assert '.dash-bot-row { display: block; }' in m    # 展开态卡片按行堆叠
 
 
-def test_bot_line_spacing_is_even_and_scoped_to_cards():
-    """★ 卡片的行距只能作用在卡片里。"""
+def test_bot_line_spacing_is_scoped_to_cards():
+    """★ 卡片的行距只能作用在卡片里。两处的具体取值各自调,不互相约束。"""
     m = _mobile_css(_pd().TAB_CSS)
-    gap = re.search(r'column-gap: 10px; row-gap: (\d+)px;', m)
-    card = re.search(r'\.dash-bot-row \.dash-bot-permline \{ margin-top: (\d+)px; \}', m)
-    assert gap and card, '没找到摘要 / 卡片的行距声明'
-    assert gap.group(1) == card.group(1), \
-        f'摘要行距 {gap.group(1)}px 与卡片行距 {card.group(1)}px 不一致'
-    # 卡片那条必须带 .dash-bot-row 前缀(否则会漏到摘要上)
+    assert re.search(r'column-gap: 10px; row-gap: \d+px;', m)          # 摘要靠网格行距
+    assert re.search(r'\.dash-bot-row \.dash-bot-permline \{ margin-top: \d+px; \}', m)
     assert '  .dash-bot-permline { margin-top:' not in m
