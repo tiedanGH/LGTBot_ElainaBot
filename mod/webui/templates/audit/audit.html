@@ -29,15 +29,19 @@
     </div>
 
     <div class="audit-actions-bar">
-      <button id="audit-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新</button>
       <div id="audit-filter-chips" class="audit-filter-chips"></div>
-      <span id="audit-action-msg" class="audit-action-msg"></span>
     </div>
   </section>
 
   <!-- ──── 记录表 ──── -->
   <section class="dash-section">
-    <h2 class="dash-section-title">📋 审计记录</h2>
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📋 审计记录</h2>
+      <div class="dash-section-meta audit-list-actions">
+        <span id="audit-action-msg" class="audit-action-msg"></span>
+        <button id="audit-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新</button>
+      </div>
+    </div>
     <div class="audit-table-wrap">
       <table class="audit-table">
         <thead>

@@ -24,13 +24,16 @@
   font-size: 11px; color: var(--text-faint);
 }
 
-/* ── 「刷新 + 类别筛选」操作条 ── */
+/* ── 类别筛选操作条 ── */
 .audit-actions-bar {
   margin-top: 14px;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
+/* 刷新按钮在「审计记录」标题右侧 */
+.audit-list-actions { gap: 10px; flex-wrap: wrap; }
 .audit-action-msg {
-  font-size: 12px; flex: 1; min-width: 120px;
+  font-size: 12px;
+  max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .audit-action-msg:empty { display: none; }
 

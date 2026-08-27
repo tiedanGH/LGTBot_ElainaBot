@@ -485,6 +485,62 @@ def test_main_js_uses_the_restart_route():
     assert wm._RESTART_PANEL_ROUTE in html
 
 
+def test_theme_toggle_is_tri_state_and_defaults_to_auto():
+    """★ 主题三态:自动 → 浅色 → 深色 → 自动,默认自动。
+
+    「自动」= 跟随主框架面板的夜间模式。框架把开关写在同源 localStorage 的
+    ``elaina_dark``('1' = 夜间),本页是框架面板 iframe 里的一块,只能靠这个键跟随
+    键名写错的话自动模式永远停在浅色,而且不会报任何错。
+    """
+    wm = _main()
+    html = wm._render_html()
+    assert "const THEME_MODES = ['auto', 'light', 'dark']" in html
+    # 自动态由框架开关解析,不是跟随系统 prefers-color-scheme
+    assert "localStorage.getItem(FRAMEWORK_DARK_KEY) === '1'" in html
+    assert "return frameworkDark() ? 'dark' : 'light';" in html
+    # 默认自动:没存过 / 存的是旧值都落到 auto
+    assert "applyTheme(saved || 'auto')" in html
+    # 首屏按钮就是自动态图标,不能还是原来的 ☀
+    assert re.search(r'id="theme-toggle"[^>]*>🌗<', html)
+    # 点击按 THEME_MODES 轮转,原来的「明暗对翻」写法必须消失
+    assert 'THEME_MODES.indexOf(themeMode) + 1' in html
+    assert "cur === 'dark' ? 'light' : 'dark'" not in html
+
+
+def test_theme_auto_follows_framework_toggle_live():
+    """★ 框架切夜间模式时本页要实时跟随:同源跨 document 的 storage 事件。
+
+    只在自动模式下跟 —— 用户手动选过浅色 / 深色是显式覆盖,再跟就是把人家的
+    选择改掉了。
+    """
+    wm = _main()
+    html = wm._render_html()
+    i = html.index("addEventListener('storage'")
+    # 只截这个 listener 自己的函数体 —— 放宽窗口会串到下面那个
+    # visibilitychange listener(它也写了 themeMode === 'auto'),漏判就无声无息
+    body = html[i:html.index('});', i)]
+    assert 'FRAMEWORK_DARK_KEY' in body
+    assert "themeMode === 'auto'" in body
+
+
+def test_theme_resolved_in_head_before_first_paint():
+    """★ 首屏就要定主题:main.js 等 DOMContentLoaded,那之前整页按
+    ``data-theme="light"`` 画一遍 —— 夜间模式下就是一记白闪。
+
+    首屏脚本必然与 main.js 重复一份取值逻辑,那就把「键名一致」钉死:
+    任一处改键名而另一处没跟上,首屏与稳定态就会是两个主题。
+    """
+    wm = _main()
+    html = wm._render_html()
+    head = html[:html.index('<style>')]
+    assert '<script>' in head and 'data-theme' in head
+    for const, key in (('STORAGE_THEME', 'lgtbot-page-theme'),
+                       ('FRAMEWORK_DARK_KEY', 'elaina_dark')):
+        assert f"const {const} = '{key}';" in html      # main.js 的常量
+        assert f"'{key}'" in head                       # 首屏脚本用同一个键
+    assert "|| 'auto'" in head                          # 首屏默认也是自动
+
+
 async def test_panel_restart_handler_forwards_query_reason(monkeypatch):
     """★ handler 要把 ``?reason=`` 交下去 —— 丢了的话面板输入框填了也白填。"""
     wm = _main()

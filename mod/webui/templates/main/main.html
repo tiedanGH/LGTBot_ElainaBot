@@ -3,6 +3,16 @@
 <head>
   <meta charset="utf-8">
   <title>LGTBot 机器人</title>
+  <script>
+    (function () {
+      try {
+        var m = localStorage.getItem('lgtbot-page-theme') || 'auto';
+        var dark = (m === 'dark') ||
+                   (m !== 'light' && localStorage.getItem('elaina_dark') === '1');
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      } catch (e) {}
+    })();
+  </script>
   <style>
 __MAIN_CSS__
 
@@ -34,7 +44,7 @@ __PREBUILT_CSS__
       <h1>LGTBot 机器人</h1>
       <div class="topbar-actions">
         <button id="fullscreen-btn" class="icon-btn" title="新窗口全屏打开">⛶</button>
-        <button id="theme-toggle" class="icon-btn" title="切换主题">☀</button>
+        <button id="theme-toggle" class="icon-btn" title="主题：自动（跟随主面板）">🌗</button>
         <button id="planned-restart-btn" class="restart-btn planned-btn" title="切换维护模式：暂停创建新游戏">🚧 计划重启</button>
         <button id="restart-btn" class="restart-btn" title="重启 LGTBot 引擎 (整进程重载 C++)">🔁 重启 LGTBot</button>
       </div>

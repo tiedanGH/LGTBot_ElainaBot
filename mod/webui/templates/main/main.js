@@ -8,6 +8,8 @@ const PLANNED_RESTART_ROUTE = '/api/ext/lgtbot/planned-restart';
 const PLANNED_RESTART_ON = '__PLANNED_ON__' === '1';
 const REFRESH_MS = 3000;
 const STORAGE_THEME = 'lgtbot-page-theme';
+/* 主框架面板的夜间模式开关(web/dist 里写的同源 localStorage 键) */
+const FRAMEWORK_DARK_KEY = 'elaina_dark';
 
 /* iframe 的 src 里带 ?token=... (auth.require_auth 只认 Bearer / ?token);
  * 内部 fetch 默认不带,要从 location.search 抠出来再拼回去。 */
@@ -23,22 +25,49 @@ function escapeHtml(s) {
 }
 
 /* ──── 主题(顶部标题栏右侧的 #theme-toggle,整页通用)────
-   图标显示「当前主题」: 浅色 ☀,深色 🌙(展示当前态而非目标态)。
-   默认 light;localStorage 持久化用户选择。 */
-function applyTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
+   三态循环:自动 → 浅色 → 深色 → 自动,默认自动。「自动」跟随主框架面板的夜间模式。
+   图标显示「当前实际主题」:自动 🌗,浅色 ☀,深色 🌙(自动态用半月区分,具体是明是暗看页面本身)。 */
+const THEME_MODES = ['auto', 'light', 'dark'];
+const THEME_ICON = {auto: '🌗', light: '☀', dark: '🌙'};
+const THEME_TITLE = {
+  auto: '主题：自动（跟随主面板）',
+  light: '主题：浅色',
+  dark: '主题：深色',
+};
+let themeMode = 'auto';
+
+function frameworkDark() {
+  try { return localStorage.getItem(FRAMEWORK_DARK_KEY) === '1'; } catch (e) { return false; }
+}
+function resolveTheme(mode) {
+  if (mode === 'light' || mode === 'dark') return mode;
+  return frameworkDark() ? 'dark' : 'light';
+}
+function applyTheme(mode) {
+  themeMode = (THEME_MODES.indexOf(mode) >= 0) ? mode : 'auto';
+  document.documentElement.setAttribute('data-theme', resolveTheme(themeMode));
   const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = (theme === 'dark') ? '🌙' : '☀';
-  try { localStorage.setItem(STORAGE_THEME, theme); } catch (e) {}
+  if (btn) {
+    btn.textContent = THEME_ICON[themeMode];
+    btn.title = THEME_TITLE[themeMode];
+  }
+  try { localStorage.setItem(STORAGE_THEME, themeMode); } catch (e) {}
 }
 function initTheme() {
-  let saved = 'light';
-  try { saved = localStorage.getItem(STORAGE_THEME) || 'light'; } catch (e) {}
-  applyTheme(saved);
+  let saved = '';
+  try { saved = localStorage.getItem(STORAGE_THEME) || ''; } catch (e) {}
+  applyTheme(saved || 'auto');       // 没存过 / 存了旧值 → 自动
 }
 document.getElementById('theme-toggle').addEventListener('click', () => {
-  const cur = document.documentElement.getAttribute('data-theme');
-  applyTheme(cur === 'dark' ? 'light' : 'dark');
+  applyTheme(THEME_MODES[(THEME_MODES.indexOf(themeMode) + 1) % THEME_MODES.length]);
+});
+/* 框架面板切夜间模式 → 本 document 收到 storage 事件。自动模式下立刻跟着变。 */
+window.addEventListener('storage', (e) => {
+  if (e.key === FRAMEWORK_DARK_KEY && themeMode === 'auto') applyTheme('auto');
+});
+/* 兜底:页面被切回前台时对一次(极端情况下 storage 事件可能没送到) */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && themeMode === 'auto') applyTheme('auto');
 });
 
 /* ──── 全屏按钮──── 在新窗口打开本页面的独立全屏视图。
