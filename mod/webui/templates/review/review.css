@@ -83,6 +83,7 @@
 /* ── 记录列表 ── */
 .review-list { display: grid; gap: 8px; grid-template-columns: 1fr; }
 @media (min-width: 1100px) { .review-list { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1600px) { .review-list { grid-template-columns: repeat(3, 1fr); } }
 .review-row {
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
   padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
@@ -99,24 +100,33 @@
 .review-time {
   flex: 0 0 auto; font-size: 11px; color: var(--text-faint); white-space: nowrap;
 }
-.review-row-acts { flex: 0 0 auto; display: flex; gap: 6px; }
+/* 按钮不参与收缩,否则长昵称行会把「翻案」压成竖排 */
+.review-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
 .review-empty-row {
   grid-column: 1 / -1;
   text-align: center; padding: 24px 16px; color: var(--text-faint); font-size: 13px;
   border: 1px dashed var(--border); border-radius: 8px;
 }
-.review-badge {
-  display: inline-block; padding: 2px 8px; border-radius: 10px;
-  font-size: 11px; font-weight: 600; white-space: nowrap; flex: 0 0 auto;
-}
-.review-badge-pending {
-  background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn);
-}
-.review-badge-done {
-  background: color-mix(in srgb, var(--in) 18%, transparent); color: var(--in);
-}
 /* 「展开已处理」按下去后是状态而不是动作 */
 #review-toggle-handled.active { border-color: var(--warn); color: var(--warn); }
+
+/* 白名单里的「判定违规」只留边框 */
+.review-btn-quiet {
+  background: var(--panel); border-color: var(--warn); color: var(--warn);
+}
+.review-btn-quiet:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warn) 12%, var(--panel));
+  border-color: var(--warn);
+}
+
+.review-pop {
+  position: fixed; z-index: 1200; max-width: min(420px, calc(100vw - 24px));
+  padding: 7px 11px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--border-2);
+  box-shadow: var(--shadow);
+  font-family: 'Consolas', 'Menlo', monospace; font-size: 12px; line-height: 1.5;
+  color: var(--text); white-space: pre-wrap; word-break: break-all;
+}
 
 .review-note {
   margin-top: 10px; padding: 10px 14px;

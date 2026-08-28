@@ -217,7 +217,7 @@ function reviewApplyEntries(entries) {
   } else {
     body.innerHTML = shown.map(e => reviewRow(e, e.handled
       ? [{op: 'acquit', cls: '', text: '↩ 翻案'},
-         {op: 'reopen', cls: '', text: '↺ 撤销处理'}]
+         {op: 'reopen', cls: 'dash-btn-success', text: '↺ 撤销处理'}]
       : [{op: 'acquit', cls: '', text: '↩ 翻案'},
          {op: 'handled', cls: '', text: '✓ 已处理'}],
       e.handled ? 'handled' : '')).join('');
@@ -231,7 +231,7 @@ function reviewApplyAllowed(allowed) {
   body.innerHTML = allowed.length
     ? allowed.map(e => reviewRow(e, [
         {op: 'revoke', cls: '', text: '↩ 撤销白名单'},
-        {op: 'condemn', cls: 'dash-btn-warn', text: '⚠️ 判定违规'},
+        {op: 'condemn', cls: 'review-btn-quiet', text: '⚠️ 判定违规'},
       ])).join('')
     : '<div class="review-empty-row">暂无白名单记录</div>';
   reviewBindRow(body);
@@ -239,9 +239,24 @@ function reviewApplyAllowed(allowed) {
 
 function reviewBindRow(root) {
   root.querySelectorAll('.review-name').forEach(el =>
-    el.addEventListener('click', () => dashAlert(el.dataset.name, {compact: true})));
+    el.addEventListener('click', ev => reviewPopName(ev, el.dataset.name)));
   root.querySelectorAll('button[data-op]').forEach(b =>
-    b.addEventListener('click', () => reviewVerdict(b.dataset.key, b.dataset.op)));
+    b.addEventListener('click', () => reviewVerdict(
+      b.dataset.key, b.dataset.op,
+      b.closest('.review-row').querySelector('.review-name').dataset.name)));
+}
+
+/* 气泡贴着点击位置浮在上方,不锁整页 */
+function reviewPopName(ev, name) {
+  const el = document.getElementById('review-pop');
+  if (!el) return;
+  el.textContent = name || '';
+  el.hidden = false;
+  const left = Math.min(Math.max(8, ev.clientX - el.offsetWidth / 2),
+                        window.innerWidth - el.offsetWidth - 8);
+  const above = ev.clientY - el.offsetHeight - 10;
+  el.style.left = left + 'px';
+  el.style.top = (above >= 8 ? above : ev.clientY + 16) + 'px';
 }
 
 /* 有未处理的违规就亮角标,不论当前停在哪个标签 */
@@ -253,13 +268,15 @@ function reviewSyncBadge(pending, enabled) {
   el.classList.toggle('on', on);
 }
 
-async function reviewVerdict(key, op) {
+async function reviewVerdict(key, op, name) {
   const ask = {
-    acquit: '确认翻案？\n\n该昵称会立即恢复真名显示，并转入白名单 —— 后续批量重扫不会再把它判为违规。',
-    revoke: '确认撤销白名单？\n\n该昵称会退回违规记录的待处理，并重新按匿名显示。',
-    condemn: '确认判定违规？\n\n该昵称会立即按匿名显示，并直接标记为已处理。',
+    acquit: '确认翻案？\n\n昵称：%s\n\n该昵称会立即恢复真名显示，并转入白名单 —— 后续批量重扫不会再把它判为违规。',
+    revoke: '确认撤销白名单？\n\n昵称：%s\n\n该昵称会退回违规记录的待处理，并重新按匿名显示。',
+    condemn: '确认判定违规？\n\n昵称：%s\n\n该昵称会立即按匿名显示，并直接标记为已处理。',
   }[op];
-  if (ask && !await dashConfirm(ask, {level: 'warn'})) return;
+  /* 替换值走函数形式:昵称是用户可控文本,字符串形式会把里面的 $& 当成替换模式 */
+  if (ask && !await dashConfirm(ask.replace('%s', () => name || key),
+                                {level: 'warn'})) return;
   try {
     const url = REVIEW_VERDICT_ROUTE + TOKEN_QS + (TOKEN_QS ? '&' : '?') +
                 'key=' + encodeURIComponent(key) + '&op=' + encodeURIComponent(op);
@@ -337,6 +354,16 @@ window.addEventListener('DOMContentLoaded', () => {
       reviewShowHandled = !reviewShowHandled;
       reviewApplyEntries((reviewData || {}).entries || []);
     });
+  }
+  const pop = document.getElementById('review-pop');
+  if (pop) {
+    const hide = () => { pop.hidden = true; };
+    /* 捕获阶段:点另一个昵称时先于它自己的 handler 跑,别把刚要重定位的气泡关掉 */
+    document.addEventListener('click', ev => {
+      if (!ev.target.classList.contains('review-name')) hide();
+    }, true);
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape') hide(); });
+    window.addEventListener('scroll', hide, true);
   }
   bind('review-refresh', REVIEW_REFRESH_KEY);
   bind('review-scan-start', REVIEW_SCAN_START_KEY);

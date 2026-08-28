@@ -213,8 +213,7 @@ let _dashModalHasCheckbox = false;
 const _DASH_OK_TEXT = { confirm: '确定', alert: '我知道了', prompt: '确认' };
 
 function _dashOpenModal(opts) {
-  const { message, level, kind, defaultValue, okText, cancelText, checkbox,
-          compact } = opts;
+  const { message, level, kind, defaultValue, okText, cancelText, checkbox } = opts;
   return new Promise(resolve => {
     /* 上一个 modal 还未结算就被新的覆盖时,旧 promise resolve 取消值,防止上层 await 永远 stuck */
     if (_dashModalResolve) {
@@ -236,9 +235,7 @@ function _dashOpenModal(opts) {
     const cbLabel  = document.getElementById('dash-modal-checkbox-label');
 
     msgEl.textContent = message || '';
-    /* compact:只放一小段文本(如展开一个被省略的昵称),不撑到默认最小宽度 */
-    modal.className = 'dash-modal level-' + (level || 'info') +
-                      (compact ? ' compact' : '');
+    modal.className = 'dash-modal level-' + (level || 'info');
 
     if (kind === 'prompt') {
       inputEl.style.display = '';
@@ -293,7 +290,7 @@ function dashConfirm(message, opts) {
 function dashAlert(message, opts) {
   const o = opts || {};
   return _dashOpenModal({
-    message, kind: 'alert', level: o.level, okText: o.okText, compact: o.compact,
+    message, kind: 'alert', level: o.level, okText: o.okText,
   });
 }
 function dashPrompt(message, opts) {

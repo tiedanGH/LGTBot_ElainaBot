@@ -842,25 +842,40 @@ def test_review_records_split_into_violations_and_whitelist():
     assert "op: 'revoke'" in html and "op: 'condemn'" in html
 
 
-def test_review_records_go_two_columns_on_a_wide_screen():
+def test_review_records_widen_from_one_to_three_columns():
+    """★ 断点必须递增 —— 三列的 min-width 若不大于两列的,两列规则会因为源序在后而反过来赢,超宽屏永远只有两列。"""
     wm = _main()
     css = wm._render_html()
     css = css[:css.index('</style>')]
     assert '.review-list { display: grid; gap: 8px; grid-template-columns: 1fr; }' in css
-    assert re.search(r'@media \(min-width: \d+px\) \{ \.review-list \{ '
-                     r'grid-template-columns: repeat\(2, 1fr\); \} \}', css)
+    bps = [(int(w), int(n)) for w, n in re.findall(
+        r'@media \(min-width: (\d+)px\) \{ \.review-list \{ '
+        r'grid-template-columns: repeat\((\d+), 1fr\); \} \}', css)]
+    assert [n for _, n in bps] == [2, 3]
+    assert bps[0][0] < bps[1][0]
 
 
-def test_long_nickname_is_clipped_and_opens_a_compact_popup():
-    """★ 昵称绝不换行 —— 违规昵称常常又长又乱,换行会把整列排版毁掉;
-    点开用紧凑弹窗看全名。"""
+def test_nickname_popup_closes_but_survives_hopping_between_names():
+    """★ 关闭监听挂在捕获阶段:点另一个昵称时它先于该昵称自己的 handler 跑,
+    必须放行,否则气泡刚重定位就被关掉。"""
     wm = _main()
     html = wm._render_html()
-    css = html[:html.index('</style>')]
-    assert re.search(r'\.review-name \{[^}]*white-space: nowrap', css, re.S)
-    assert re.search(r'\.review-name \{[^}]*text-overflow: ellipsis', css, re.S)
-    assert "dashAlert(el.dataset.name, {compact: true})" in html
-    assert '.dash-modal.compact { min-width: 0;' in css
+    assert re.search(r"document\.addEventListener\('click', ev => \{\s*"
+                     r"if \(!ev\.target\.classList\.contains\('review-name'\)\) hide\(\);\s*"
+                     r"\}, true\);", html)
+    assert "if (ev.key === 'Escape') hide();" in html
+    assert "window.addEventListener('scroll', hide, true);" in html
+
+
+def test_verdict_prompts_name_the_nickname_being_acted_on():
+    """★ 昵称是用户可控文本 —— 必须走函数形式的 replace,否则名字里的 $& 会被当成替换模式,弹窗显示的就不是真名。"""
+    wm = _main()
+    html = wm._render_html()
+    for op in ('acquit', 'revoke', 'condemn'):
+        assert re.search(r"\n    %s: '确认[^']*昵称：%%s" % op, html), op
+    assert "ask.replace('%s', () => name || key)" in html
+    # 名字从同一行的昵称元素上取,按钮不重复挂一份
+    assert ("b.closest('.review-row').querySelector('.review-name').dataset.name" in html)
 
 
 def test_handled_records_are_collapsed_by_default():

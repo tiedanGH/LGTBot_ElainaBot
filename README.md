@@ -204,7 +204,7 @@ plugins/LGTBot_ElainaBot/
 │       ├── page_backup.py   「数据备份」标签：列出 / 创建 / 恢复 / 下载 / 删除备份 zip
 │       ├── page_logs.py     「消息日志」标签 + 日志缓冲数据层（log_incoming / log_outgoing / get_logs / clear_logs）
 │       ├── page_audit.py    「操作审计」标签：只读展示审计记录
-│       ├── page_review.py   「昵称审核」标签：总开关 / 存量批量扫描 / 违规记录翻案
+│       ├── page_review.py   「昵称审核」标签：总开关 / 存量批量扫描 / 违规记录与白名单
 │       ├── page_crash.py    「崩溃转储」标签：崩溃重启概况 + dump 列表 + 游戏 core 列表（下载 / 批量删除）
 │       ├── page_users.py    「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
 │       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
