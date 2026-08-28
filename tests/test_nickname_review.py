@@ -518,13 +518,12 @@ def test_every_display_exit_goes_through_display_name():
     assert 'userinfo.display_name(tid)' in inspect.getsource(page_dashboard)
 
 
-def test_user_list_masks_after_slicing(monkeypatch):
-    """面板用户列表的遮蔽在切片之后做 —— 只对真正要返回的行算,不为整表白算一遍。"""
+def test_user_list_keeps_the_real_nickname():
+    """★ 「用户数据」列表不遮蔽:面板只有管理员能登录,而处理违规昵称正需要看见原文。遮蔽只针对会流向玩家的出口。"""
     import inspect
     from plugins.LGTBot_ElainaBot.mod import userinfo
     src = inspect.getsource(userinfo.list_users)
-    assert src.index('out = out[:limit]') < src.index('nickname_review')
-    assert 'masked_name' in src
+    assert 'nickname_review' not in src and 'display_name' not in src
 
 
 def test_note_username_enqueues_only_on_real_change(monkeypatch):

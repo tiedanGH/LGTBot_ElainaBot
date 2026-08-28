@@ -372,6 +372,9 @@ def list_users(limit: int | None = None, offset: int = 0) -> list[dict]:
     无法下推 SQL,**每次调用仍全量合并排序**后切片 —— 分块的收益在 payload
     体积与前端解析,不在服务端查询量。切片后才补 avatar(只为返回行拼 URL)。
 
+    ``name`` 是**真名**,不过昵称审核的遮蔽:面板只有管理员能登录,而处理违规
+    昵称正需要看见原文。遮蔽只针对会流向玩家的出口(引擎 / 播报 / 排行榜)。
+
     返回元素:``{'openid','name','avatar','total_messages','private_messages',
     'last_active_date'}``;total/private 无统计行时为 None(前端显 —)。
     无 bot 时返回 []。
@@ -424,13 +427,6 @@ def list_users(limit: int | None = None, offset: int = 0) -> list[dict]:
         out = out[:limit]
     for r in out:
         r['avatar'] = avatar_url(r['openid'])
-        if r['name']:
-            try:
-                from . import nickname_review
-                if nickname_review.should_mask(r['name']):
-                    r['name'] = nickname_review.masked_name(r['openid'])
-            except Exception:
-                pass
     return out
 
 
