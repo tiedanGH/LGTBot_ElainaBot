@@ -495,12 +495,7 @@ async def _review_and_store(batch: dict) -> bool:
 
 
 async def _review_chunk(batch: dict) -> bool:
-    """送审一批并落库;整批失败时对半拆开重试。
-
-    中转站对大请求的报错常常与请求内容无关(甚至谎报成模型不存在),同一个模型
-    小批量却能过。拆到单条仍失败才是真的不可用 —— 那时错误已被判为永久性,
-    不再往下拆。
-    """
+    """送审一批并落库;整批失败时对半拆开重试。"""
     keys = list(batch)
     if not keys:
         return True
@@ -725,6 +720,9 @@ async def review_names(names: list) -> list | None:
 # 存量批量扫描
 # ─────────────────────────────────────────────────────────────────────────
 
+# 每页的玩家数。面板按落盘的计数画进度条,一页只落一次盘。
+_SCAN_PAGE = 200
+
 _CURSOR_KEY = 'scan_cursor'
 _SCANNED_KEY = 'scan_scanned'
 _RESOLVED_KEY = 'scan_resolved'
@@ -760,7 +758,7 @@ def scan_total() -> int:
     return total
 
 
-def _scan_page(after: int, limit: int = 500) -> list:
+def _scan_page(after: int, limit: int = _SCAN_PAGE) -> list:
     """取一页玩家 (rowid, user_id)。
 
     keyset 分页:OFFSET 要逐行跳过前面全部,千万行上后半程越翻越慢。
@@ -883,6 +881,7 @@ async def _scan_loop() -> None:
                 return
             counters[_SCANNED_KEY] += count
             counters[_RESOLVED_KEY] += resolved
+            _flush_counters()          # 取完就落盘
             # 一页里没有结论的昵称可能多于一批
             keys = list(batch)
             for i in range(0, len(keys), max(1, BATCH_SIZE)):
@@ -893,7 +892,7 @@ async def _scan_loop() -> None:
                     log.info(f'[昵称审核] 批量扫描暂停：{err}')
                     return
                 counters[_QUEUED_KEY] += len(chunk)
-            _flush_counters()
+                _flush_counters()
     except asyncio.CancelledError:
         raise
     except Exception as e:

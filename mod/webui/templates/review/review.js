@@ -163,8 +163,6 @@ function reviewApplyScan(scan) {
     '　取到昵称 ' + (scan.resolved || 0) +
     '　新送审 ' + (scan.queued || 0);
 
-  /* 最近一次送审失败原样显示:400 / 模型不存在这类错误重试多少次都一样,
-     只报「中央 AI 不可用」的话看不出要去改模型选择 */
   const errEl = document.getElementById('review-scan-error');
   const err = scan.last_error || {};
   /* 指定了模型时中央不做故障切换,这类错误只能靠改选择解决,把话说到位 */

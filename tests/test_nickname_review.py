@@ -749,3 +749,84 @@ async def test_requeue_drops_names_the_split_already_settled(monkeypatch):
     nr._queue.update({f'k{i}': f'名字{i}' for i in range(4)})
     await nr._flush_loop(0.0)
     assert not nr._queue                       # 四条最终都拆到单条审掉了
+
+
+async def test_progress_is_written_as_it_goes_not_only_at_the_end(monkeypatch):
+    """★ 计数要随扫随落盘。只在整页跑完写一次的话,玩家数少于一页的部署会看到进度条全程不动、结束才跳满。"""
+    from plugins.LGTBot_ElainaBot.mod import userinfo
+    snapshots = []
+    pages = {0: [(i, f'u{i}') for i in range(1, 5)]}
+    monkeypatch.setattr(nr, '_scan_page',
+                        lambda after, limit=nr._SCAN_PAGE: pages.get(after, []))
+    monkeypatch.setattr(userinfo, 'get_name', lambda uid: f'名字{uid}')
+    monkeypatch.setattr(nr, 'BATCH_SIZE', 2)
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+
+    async def watched(names):
+        # 每一批送审之前,前面的进度都必须已经落盘可读
+        snapshots.append((nr._meta_int(nr._SCANNED_KEY), nr._meta_int(nr._QUEUED_KEY)))
+        return [False] * len(names)
+
+    monkeypatch.setattr(nr, 'review_names', watched)
+    await nr._scan_loop()
+    assert snapshots[0] == (4, 0)      # 取完页就落盘,不等送审
+    assert snapshots[1] == (4, 2)      # 第一批审完立刻落盘
+
+
+def test_scan_page_is_small_enough_to_move_the_bar():
+    """一页 = 进度条的一格。页太大就会出现「整程不动、结束跳满」。"""
+    assert nr._SCAN_PAGE <= 200
+
+
+async def test_requeue_keeps_only_the_names_still_without_a_verdict(monkeypatch):
+    """★ 拆批已经审掉的名字不能退回队列 —— 否则下一轮又对它们花一次调用。"""
+    async def fail_on_k3(names):
+        if len(names) > 1 or '名字3' in names:
+            return None
+        return [False] * len(names)
+
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'review_names', fail_on_k3)
+    monkeypatch.setattr(nr, 'BATCH_SIZE', 4)
+    nr._queue.update({f'k{i}': f'名字{i}' for i in range(4)})
+    await nr._flush_loop(0.0)
+    assert set(nr._queue) == {'k3'}            # 只有真没结论的那个回来
+    for k in ('k0', 'k1', 'k2'):
+        assert nr.get_verdict(k) is not None
+
+
+async def test_last_error_is_recorded_and_cleared(monkeypatch):
+    """★ 失败原因要留下来给面板看 —— 只报一句「中央 AI 不可用」的话,用户看不出
+    要去改模型选择还是等一等。成功之后必须清掉,不然旧错误一直挂着。"""
+    monkeypatch.setattr(nr, 'get_service',
+                        lambda: _FakeService(raise_exc=RuntimeError(
+                            'HTTP 400: {"error":{"code":"model_not_found"}}')))
+    assert await nr.review_names(['x']) is None
+    err = nr.last_error()
+    assert 'model_not_found' in err['message']
+    assert err['permanent'] is True            # 重试多少次都一样,得改选择
+
+    monkeypatch.setattr(nr, 'get_service', lambda: _FakeService('[0]'))
+    assert await nr.review_names(['x']) == [False]
+    assert nr.last_error() == {}
+
+
+async def test_transient_errors_are_not_marked_permanent(monkeypatch):
+    monkeypatch.setattr(nr, 'get_service',
+                        lambda: _FakeService(raise_exc=RuntimeError('HTTP 502: bad gateway')))
+    assert await nr.review_names(['x']) is None
+    assert nr.last_error()['permanent'] is False
+
+
+async def test_malformed_reply_is_recorded_as_an_error(monkeypatch):
+    monkeypatch.setattr(nr, 'get_service', lambda: _FakeService('[1, 0]'))
+    assert await nr.review_names(['a', 'b', 'c']) is None
+    assert '期望 3 项' in nr.last_error()['message']
+
+
+def test_scan_status_carries_the_last_error(monkeypatch):
+    nr._note_error('HTTP 401: unauthorized')
+    st = nr.scan_status()
+    assert st['last_error']['permanent'] is True
+    nr._note_error('')
+    assert nr.scan_status()['last_error'] == {}

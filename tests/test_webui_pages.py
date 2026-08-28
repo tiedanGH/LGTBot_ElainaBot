@@ -813,3 +813,16 @@ def test_review_progress_shows_resolved_and_queued_not_calls():
     body = html[i:i + 320]
     assert '取到昵称' in body and '新送审' in body
     assert '今日调用' not in body
+
+
+def test_review_panel_shows_the_last_review_error():
+    """★ 送审失败的原因要显示在面板上,不能只进日志。"""
+    wm = _main()
+    html = wm._render_html()
+    assert 'id="review-scan-error"' in html
+    i = html.index("getElementById('review-scan-error')")
+    body = html[i:i + 420]
+    # 断言真的把错误文本写进去了 —— 只查 last_error / permanent 出现过的话,
+    # 把赋值改成空串照样能过(周围的取值代码里也有这两个词)
+    assert 'errEl.textContent = err.message' in body
+    assert "scan.last_error" in body and 'err.permanent' in body
