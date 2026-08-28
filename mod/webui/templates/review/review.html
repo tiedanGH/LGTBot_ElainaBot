@@ -104,30 +104,33 @@
   <!-- ──── 违规记录 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">⚠️ 违规记录<span id="review-count-badge" class="review-title-badge"></span></h2>
+      <h2 class="dash-section-title">⚠️ 违规记录</h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">未处理</span>
         <span id="review-pending" class="dash-meta-value">—</span>
+        <button id="review-toggle-handled" class="dash-btn dash-btn-small">展开已处理</button>
       </div>
     </div>
-    <div class="review-table-wrap">
-      <table class="review-table">
-        <thead>
-          <tr>
-            <th class="review-col-time">判定时间</th>
-            <th class="review-col-name">昵称</th>
-            <th class="review-col-src">来源</th>
-            <th class="review-col-state">状态</th>
-            <th class="review-col-act">操作</th>
-          </tr>
-        </thead>
-        <tbody id="review-table-body">
-          <tr class="review-empty"><td colspan="5">暂无违规记录</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <div id="review-list" class="review-list"></div>
     <p class="review-note">
-      「翻案」把该昵称转为<b>人工白名单</b>：立即恢复真名显示，且后续批量重扫<b>不会</b>再把它标回违规。「已处理」用于忽略提醒，不改变判定。
+      「翻案」把昵称转入下方白名单：立即恢复真名显示，且批量重扫<b>不会</b>再标回违规。
+      「已处理」只是消掉标签角标的提醒，不改变判定。误杀请用翻案。
+    </p>
+  </section>
+
+  <!-- ──── 白名单记录 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">✅ 白名单记录</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">共</span>
+        <span id="review-allowed-count" class="dash-meta-value">—</span>
+      </div>
+    </div>
+    <div id="review-allow-list" class="review-list"></div>
+    <p class="review-note">
+      白名单里的昵称按真名显示，批量重扫不会改动它们。
+      「撤销白名单」把它退回违规记录的待处理；「判定违规」直接认定违规并标记为已处理。
     </p>
   </section>
 

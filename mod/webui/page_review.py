@@ -61,6 +61,7 @@ def _payload() -> dict:
         'stats': review.stats(),
         'scan': review.scan_status(),
         'entries': review.list_flagged(limit=LIST_LIMIT),
+        'allowed': review.list_allowed(limit=LIST_LIMIT),
         'list_limit': LIST_LIMIT,
         'db_path': review.DB_PATH,
         'query_time': int(time.time()),
@@ -126,29 +127,34 @@ def render_scan_reset() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 
 async def verdict_handler(request) -> 'object':
-    """``GET /api/ext/lgtbot/review/verdict?key=<归一化键>&op=acquit|handled|reopen``
+    """``GET /api/ext/lgtbot/review/verdict?key=<归一化键>&op=<动作>``
 
     · ``acquit``   转人工白名单(安全 + 已处理),批量重扫不会再标回违规
-    · ``handled``  只标记已处理,判定不变
-    · ``reopen``   取消已处理标记,重新计入角标
+    · ``revoke``   撤销白名单,回到待处理的违规记录
+    · ``condemn``  从白名单直接判违规并标记已处理
+    · ``handled`` / ``reopen``   只改「已处理」标记,判定不变
     """
     from aiohttp import web
 
     key = str(request.query.get('key') or '').strip()
     op = str(request.query.get('op') or '').strip()
-    if not key or op not in ('acquit', 'handled', 'reopen'):
+    if not key or op not in ('acquit', 'handled', 'reopen', 'revoke', 'condemn'):
         return web.json_response({'success': False, 'message': '参数缺失或非法'},
                                  status=400)
     cur = review.get_verdict(key)
     if cur is None:
         return web.json_response({'success': False, 'message': '记录不存在'},
                                  status=404)
-    if op == 'acquit':
-        ok = review.acquit(key)
-        detail = f'翻案（{cur["sample"]!r} 转白名单）'
-    else:
-        ok = review.set_handled(key, op == 'handled')
-        detail = f'{"标记已处理" if op == "handled" else "取消已处理"}（{cur["sample"]!r}）'
+    ops = {
+        'acquit': (review.acquit, '翻案转白名单'),
+        'revoke': (review.revoke, '撤销白名单，回到待处理'),
+        'condemn': (review.condemn, '从白名单判为违规'),
+        'handled': (lambda k: review.set_handled(k, True), '标记已处理'),
+        'reopen': (lambda k: review.set_handled(k, False), '撤销处理'),
+    }
+    fn, label = ops[op]
+    ok = fn(key)
+    detail = f'{label}（{cur["sample"]!r}）'
     audit.record('config', '昵称审核处置', detail, ok=ok)
     if not ok:
         return web.json_response({'success': False, 'message': '写入结论库失败'},

@@ -80,44 +80,34 @@
 .review-scan-error.permanent { color: var(--warn); }
 #review-scan-section.disabled { opacity: .5; pointer-events: none; }
 
-/* ── 违规记录表 ── */
-.review-title-badge { color: var(--text-muted); font-weight: 400; font-size: 13px; }
-.review-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border); border-radius: 8px;
-  background: var(--panel);
+/* ── 记录列表 ── */
+.review-list { display: grid; gap: 8px; grid-template-columns: 1fr; }
+@media (min-width: 1100px) { .review-list { grid-template-columns: repeat(2, 1fr); } }
+.review-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; background: var(--panel-2); min-width: 0;
 }
-.review-table {
-  width: 100%; border-collapse: collapse; font-size: 13px;
-  min-width: 620px;     /* 列再窄就触发水平滚动而不是挤压 */
+.review-row.handled { opacity: .72; }
+/* 昵称绝不换行,超出用省略号,点开看全名 */
+.review-name {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: 'Consolas', 'Menlo', monospace; cursor: pointer;
 }
-.review-table thead {
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--border);
+.review-name:hover { color: var(--accent); }
+.review-time {
+  flex: 0 0 auto; font-size: 11px; color: var(--text-faint); white-space: nowrap;
 }
-.review-table th {
-  text-align: left; padding: 10px 12px;
-  font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap;
-}
-.review-table td {
-  padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text);
-}
-.review-table tbody tr:last-child td { border-bottom: none; }
-.review-table tbody tr:hover { background: var(--hover); }
-
-.review-col-time  { width: 1px; white-space: nowrap; color: var(--text-muted); font-size: 12px; }
-.review-col-src   { width: 1px; white-space: nowrap; }
-.review-col-state { width: 1px; white-space: nowrap; }
-.review-col-act   { width: 1px; white-space: nowrap; }
-/* 昵称吃掉剩余宽度;max-width:0 是 auto 布局下让内部 ellipsis 生效的关键 */
-.review-col-name  { width: 100%; max-width: 0; }
-.review-col-name .review-sample {
-  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: 'Consolas', 'Menlo', monospace;
+.review-row-acts { flex: 0 0 auto; display: flex; gap: 6px; }
+.review-empty-row {
+  grid-column: 1 / -1;
+  text-align: center; padding: 24px 16px; color: var(--text-faint); font-size: 13px;
+  border: 1px dashed var(--border); border-radius: 8px;
 }
 .review-badge {
   display: inline-block; padding: 2px 8px; border-radius: 10px;
-  font-size: 11px; font-weight: 600; white-space: nowrap;
+  font-size: 11px; font-weight: 600; white-space: nowrap; flex: 0 0 auto;
 }
 .review-badge-pending {
   background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn);
@@ -125,13 +115,8 @@
 .review-badge-done {
   background: color-mix(in srgb, var(--in) 18%, transparent); color: var(--in);
 }
-.review-badge-allow {
-  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
-}
-.review-empty td {
-  text-align: center; padding: 32px 16px;
-  color: var(--text-faint); font-size: 13px;
-}
+/* 「展开已处理」按下去后是状态而不是动作 */
+#review-toggle-handled.active { border-color: var(--warn); color: var(--warn); }
 
 .review-note {
   margin-top: 10px; padding: 10px 14px;
@@ -144,7 +129,5 @@
   .review-status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .review-status-card { padding: 10px 12px; }
   .review-status-value { font-size: 15px; }
-  .review-table th, .review-table td { padding: 7px 8px; font-size: 12px; }
-  .review-table { width: max-content; min-width: 100%; }
-  .review-col-name { width: 220px; min-width: 220px; }
+  .review-row { padding: 7px 10px; gap: 8px; font-size: 12px; }
 }

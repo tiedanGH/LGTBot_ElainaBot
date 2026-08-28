@@ -729,10 +729,12 @@ async def test_review_verdict_handler_validates_and_dispatches(monkeypatch):
     monkeypatch.setattr(nr, 'set_handled',
                         lambda k, v: calls.append(('handled', k, v)) or True)
     monkeypatch.setattr(nr, 'pending_count', lambda: 0)
-    assert (await pr.verdict_handler(_Req(key='k', op='acquit'))).status == 200
-    assert (await pr.verdict_handler(_Req(key='k', op='handled'))).status == 200
-    assert (await pr.verdict_handler(_Req(key='k', op='reopen'))).status == 200
-    assert calls == [('acquit', 'k'), ('handled', 'k', True), ('handled', 'k', False)]
+    monkeypatch.setattr(nr, 'revoke', lambda k: calls.append(('revoke', k)) or True)
+    monkeypatch.setattr(nr, 'condemn', lambda k: calls.append(('condemn', k)) or True)
+    for op in ('acquit', 'handled', 'reopen', 'revoke', 'condemn'):
+        assert (await pr.verdict_handler(_Req(key='k', op=op))).status == 200
+    assert calls == [('acquit', 'k'), ('handled', 'k', True), ('handled', 'k', False),
+                     ('revoke', 'k'), ('condemn', 'k')]
 
 
 def test_review_scan_section_needs_both_switch_and_llm():
@@ -803,6 +805,7 @@ def test_review_payload_carries_provider_options(monkeypatch):
     p = pr._payload()
     assert p['providers'] == [{'id': 'p1', 'name': 'P1', 'models': ['m1']}]
     assert {'provider_id', 'model', 'batch_size', 'fail_closed', 'enabled'} <= set(p)
+    assert 'entries' in p and 'allowed' in p
 
 
 def test_review_progress_shows_resolved_and_queued_not_calls():
@@ -826,3 +829,59 @@ def test_review_panel_shows_the_last_review_error():
     # 把赋值改成空串照样能过(周围的取值代码里也有这两个词)
     assert 'errEl.textContent = err.message' in body
     assert "scan.last_error" in body and 'err.permanent' in body
+
+
+def test_review_records_split_into_violations_and_whitelist():
+    """★ 两个大区:违规记录与白名单记录各管各的动作。"""
+    wm = _main()
+    html = wm._render_html()
+    for frag in ('id="review-list"', 'id="review-allow-list"',
+                 'id="review-toggle-handled"', 'id="review-allowed-count"',
+                 '⚠️ 违规记录', '✅ 白名单记录'):
+        assert frag in html, frag
+    assert "op: 'revoke'" in html and "op: 'condemn'" in html
+
+
+def test_review_records_go_two_columns_on_a_wide_screen():
+    wm = _main()
+    css = wm._render_html()
+    css = css[:css.index('</style>')]
+    assert '.review-list { display: grid; gap: 8px; grid-template-columns: 1fr; }' in css
+    assert re.search(r'@media \(min-width: \d+px\) \{ \.review-list \{ '
+                     r'grid-template-columns: repeat\(2, 1fr\); \} \}', css)
+
+
+def test_long_nickname_is_clipped_and_opens_a_compact_popup():
+    """★ 昵称绝不换行 —— 违规昵称常常又长又乱,换行会把整列排版毁掉;
+    点开用紧凑弹窗看全名。"""
+    wm = _main()
+    html = wm._render_html()
+    css = html[:html.index('</style>')]
+    assert re.search(r'\.review-name \{[^}]*white-space: nowrap', css, re.S)
+    assert re.search(r'\.review-name \{[^}]*text-overflow: ellipsis', css, re.S)
+    assert "dashAlert(el.dataset.name, {compact: true})" in html
+    assert '.dash-modal.compact { min-width: 0;' in css
+
+
+def test_handled_records_are_collapsed_by_default():
+    """★ 已处理默认折叠,靠标题右侧的按钮展开;按钮自身要体现当前是展开还是收起。"""
+    wm = _main()
+    html = wm._render_html()
+    assert 'let reviewShowHandled = false;' in html
+    assert "reviewShowHandled ? '隐藏已处理' : '展开已处理'" in html
+    # 折叠时已处理的行根本不渲染
+    assert 'const shown = reviewShowHandled ? pending.concat(handled) : pending;' in html
+    assert "btn.classList.toggle('active', reviewShowHandled)" in html
+    css = html[:html.index('</style>')]
+    assert '#review-toggle-handled.active' in css
+
+
+def test_tab_alert_badge_is_vertically_centred():
+    """★ 角标要和标签文字垂直居中 —— vertical-align: middle 对齐的是小写 x 高的
+    中线,在中文标题里会目视下沉。"""
+    wm = _main()
+    css = wm._render_html()
+    css = css[:css.index('</style>')]
+    rule = re.search(r'\.tabs \.tab \.tab-alert-badge \{(.*?)\}', css, re.S).group(1)
+    assert 'vertical-align: middle' in rule
+    assert 'position: relative' in rule and 'top: -1px' in rule

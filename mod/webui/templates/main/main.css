@@ -113,7 +113,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   display: none;
   margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600;
   background: color-mix(in srgb, var(--warn) 20%, transparent);
-  color: var(--warn); vertical-align: middle;
+  color: var(--warn); vertical-align: middle; position: relative; top: -1px;
 }
 .tabs .tab .tab-alert-badge.on { display: inline-block; }
 .restart-btn {
@@ -312,6 +312,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   border-top: 4px solid transparent;
   animation: dash-modal-pop 0.15s cubic-bezier(.2,.9,.3,1.2);
 }
+/* 只放一小段文本时收窄,不占默认的 360px 起步宽度 */
+.dash-modal.compact { min-width: 0; max-width: 360px; width: auto; }
 @keyframes dash-modal-pop {
   from { transform: translateY(-8px) scale(.97); opacity: 0; }
   to   { transform: translateY(0) scale(1); opacity: 1; }

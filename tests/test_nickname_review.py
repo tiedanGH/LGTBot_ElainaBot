@@ -148,7 +148,7 @@ def test_store_failures_never_raise(monkeypatch):
     assert nr.put_verdict('k', 's', True, nr.SRC_LLM) is False
     assert nr.pending_count() == 0
     assert nr.list_flagged() == []
-    assert nr.stats() == {'total': 0, 'flagged': 0, 'pending': 0}
+    assert nr.stats() == {'total': 0, 'flagged': 0, 'pending': 0, 'allowed': 0}
     assert nr.is_flagged('anything') is False
 
 
@@ -704,53 +704,6 @@ async def test_queued_counts_only_batches_that_were_actually_reviewed(monkeypatc
     assert st['queued'] == 2                   # 只有第一批真的审过
 
 
-async def test_failed_batch_splits_in_half_until_it_goes_through(monkeypatch):
-    """★ 大批失败、小批能过是中转站的常态(报错甚至与请求内容无关)。整批失败时
-    对半拆重试,能过的部分不该被一个坏的大请求拖着一起丢。"""
-    seen = []
-
-    async def only_small(names):
-        seen.append(len(names))
-        return None if len(names) > 2 else [False] * len(names)
-
-    monkeypatch.setattr(nr, 'get_service', lambda: object())
-    monkeypatch.setattr(nr, 'review_names', only_small)
-    batch = {f'k{i}': f'名字{i}' for i in range(8)}
-    assert await nr._review_and_store(batch) is True
-    assert seen[0] == 8                          # 先整批试
-    assert max(seen[1:]) <= 4                    # 失败后往下拆
-    for k in batch:
-        assert nr.get_verdict(k) is not None     # 八条全部落库
-
-
-async def test_split_stops_at_a_single_name(monkeypatch):
-    """拆到单条仍失败就是真的不可用,不再往下拆(也没得拆)。"""
-    seen = []
-
-    async def always_fail(names):
-        seen.append(len(names))
-        return None
-
-    monkeypatch.setattr(nr, 'get_service', lambda: object())
-    monkeypatch.setattr(nr, 'review_names', always_fail)
-    assert await nr._review_and_store({'a': 'A', 'b': 'B'}) is False
-    assert seen == [2, 1, 1]
-    assert nr.get_verdict('a') is None and nr.get_verdict('b') is None
-
-
-async def test_requeue_drops_names_the_split_already_settled(monkeypatch):
-    """拆批重试审掉的那部分不该被退回队列 —— 否则下一轮又白花一次调用。"""
-    async def only_small(names):
-        return None if len(names) > 1 else [False] * len(names)
-
-    monkeypatch.setattr(nr, 'get_service', lambda: object())
-    monkeypatch.setattr(nr, 'review_names', only_small)
-    monkeypatch.setattr(nr, 'BATCH_SIZE', 4)
-    nr._queue.update({f'k{i}': f'名字{i}' for i in range(4)})
-    await nr._flush_loop(0.0)
-    assert not nr._queue                       # 四条最终都拆到单条审掉了
-
-
 async def test_progress_is_written_as_it_goes_not_only_at_the_end(monkeypatch):
     """★ 计数要随扫随落盘。只在整页跑完写一次的话,玩家数少于一页的部署会看到进度条全程不动、结束才跳满。"""
     from plugins.LGTBot_ElainaBot.mod import userinfo
@@ -776,23 +729,6 @@ async def test_progress_is_written_as_it_goes_not_only_at_the_end(monkeypatch):
 def test_scan_page_is_small_enough_to_move_the_bar():
     """一页 = 进度条的一格。页太大就会出现「整程不动、结束跳满」。"""
     assert nr._SCAN_PAGE <= 200
-
-
-async def test_requeue_keeps_only_the_names_still_without_a_verdict(monkeypatch):
-    """★ 拆批已经审掉的名字不能退回队列 —— 否则下一轮又对它们花一次调用。"""
-    async def fail_on_k3(names):
-        if len(names) > 1 or '名字3' in names:
-            return None
-        return [False] * len(names)
-
-    monkeypatch.setattr(nr, 'get_service', lambda: object())
-    monkeypatch.setattr(nr, 'review_names', fail_on_k3)
-    monkeypatch.setattr(nr, 'BATCH_SIZE', 4)
-    nr._queue.update({f'k{i}': f'名字{i}' for i in range(4)})
-    await nr._flush_loop(0.0)
-    assert set(nr._queue) == {'k3'}            # 只有真没结论的那个回来
-    for k in ('k0', 'k1', 'k2'):
-        assert nr.get_verdict(k) is not None
 
 
 async def test_last_error_is_recorded_and_cleared(monkeypatch):
@@ -830,3 +766,91 @@ def test_scan_status_carries_the_last_error(monkeypatch):
     assert st['last_error']['permanent'] is True
     nr._note_error('')
     assert nr.scan_status()['last_error'] == {}
+
+
+async def test_failed_batch_is_retried_whole(monkeypatch):
+    """★ 中转站不稳定时同一批原样重发即可 —— 不拆小,批量的省钱效果才保得住。"""
+    seen = []
+
+    async def flaky(names):
+        seen.append(len(names))
+        return [False] * len(names) if len(seen) >= 3 else None
+
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'review_names', flaky)
+    monkeypatch.setattr(nr, '_RETRY_DELAY_S', 0)
+    batch = {f'k{i}': f'名字{i}' for i in range(8)}
+    assert await nr._review_and_store(batch) is True
+    assert seen == [8, 8, 8]                   # 三次都是整批,没拆过
+    for k in batch:
+        assert nr.get_verdict(k) is not None
+
+
+async def test_retry_gives_up_after_the_configured_attempts(monkeypatch):
+    seen = []
+
+    async def always_fail(names):
+        seen.append(len(names))
+        return None
+
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'review_names', always_fail)
+    monkeypatch.setattr(nr, '_RETRY_DELAY_S', 0)
+    assert await nr._review_and_store({'a': 'A', 'b': 'B'}) is False
+    assert seen == [2] * nr._RETRY_ATTEMPTS
+    assert nr.get_verdict('a') is None and nr.get_verdict('b') is None
+
+
+async def test_failed_batch_returns_to_the_queue(monkeypatch):
+    """整批失败后名字退回队列,下次再来,不当成审过。"""
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'review_names', lambda names: _none())
+    monkeypatch.setattr(nr, '_RETRY_DELAY_S', 0)
+    nr._queue.update({'a': 'A', 'b': 'B'})
+    await nr._flush_loop(0.0)
+    assert set(nr._queue) == {'a', 'b'}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 白名单
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_whitelist_is_listed_separately_from_violations():
+    nr.put_verdict('bad', '违规名', True, nr.SRC_LLM)
+    nr.put_verdict('ok', '误杀名', True, nr.SRC_LLM)
+    nr.acquit('ok')
+    assert [r['key'] for r in nr.list_flagged()] == ['bad']
+    assert [r['key'] for r in nr.list_allowed()] == ['ok']
+    assert nr.stats()['allowed'] == 1
+
+
+def test_revoke_sends_a_whitelisted_name_back_to_pending():
+    """撤销白名单 = 回到待处理的违规记录,重新计入角标。"""
+    nr.put_verdict('k', '名字', True, nr.SRC_LLM)
+    nr.acquit('k')
+    assert nr.pending_count() == 0
+    assert nr.revoke('k')
+    v = nr.get_verdict('k')
+    assert (v['flagged'], v['handled']) == (True, False)
+    assert 'k' in nr._flagged and nr.pending_count() == 1
+    assert nr.list_allowed() == []
+
+
+def test_condemn_marks_a_whitelisted_name_violating_and_handled():
+    nr.put_verdict('k', '名字', True, nr.SRC_LLM)
+    nr.acquit('k')
+    assert nr.condemn('k')
+    v = nr.get_verdict('k')
+    assert (v['flagged'], v['handled']) == (True, True)
+    assert 'k' in nr._flagged
+    assert nr.pending_count() == 0              # 已处理,不再进角标
+
+
+def test_manual_action_overrides_the_whitelist_but_ai_never_does():
+    """★ 白名单挡的是批量重扫(AI 结论),不该把人工动作也挡在外面。"""
+    nr.put_verdict('k', '名字', True, nr.SRC_LLM)
+    nr.acquit('k')
+    nr.put_verdict('k', '名字', True, nr.SRC_LLM)          # 重扫:挡掉
+    assert nr.get_verdict('k')['flagged'] is False
+    nr.put_verdict('k', '名字', True, nr.SRC_MANUAL)       # 人工:生效
+    assert nr.get_verdict('k')['flagged'] is True

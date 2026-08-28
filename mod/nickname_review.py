@@ -60,6 +60,10 @@ PROVIDER_ID = ''             # 留空 = 交给中央按接口优先级自动选
 MODEL = ''
 BATCH_SIZE = 40
 
+# 送审失败的重试次数与线性退避基数
+_RETRY_ATTEMPTS = 3
+_RETRY_DELAY_S = 2.0
+
 # 去抖:攒够 BATCH_SIZE 或等满这么久就发一批
 _FLUSH_DELAY_S = 8.0
 # fail-closed 模式下「审过没有」的有界缓存
@@ -264,7 +268,7 @@ def put_verdict(key: str, sample: str, flagged: bool, source: str) -> bool:
         if conn is None:
             return False
         try:
-            if source != SRC_ALLOW:
+            if source == SRC_LLM:
                 row = conn.execute(
                     'SELECT source FROM verdict WHERE key=?', (key,)).fetchone()
                 if row is not None and str(row[0]) == SRC_ALLOW:
@@ -313,6 +317,18 @@ def acquit(key: str) -> bool:
     return set_handled(key, True)
 
 
+def revoke(key: str) -> bool:
+    """撤销白名单:回到待处理的违规记录。"""
+    ok = put_verdict(key, (get_verdict(key) or {}).get('sample', ''),
+                     True, SRC_MANUAL)
+    return ok and set_handled(key, False)
+
+
+def condemn(key: str) -> bool:
+    """从白名单直接判违规,并标记为已处理。"""
+    return revoke(key) and set_handled(key, True)
+
+
 def pending_count() -> int:
     """未处理的违规条数 —— 驱动标签角标。总开关关闭时恒为 0。"""
     if not ENABLED:
@@ -329,8 +345,7 @@ def pending_count() -> int:
     return int(row[0]) if row else 0
 
 
-def list_flagged(limit: int = 100, offset: int = 0) -> list:
-    """违规记录列表(未处理在前,同组内新的在前),供面板分页。"""
+def _list(where: str, params: tuple, limit: int, offset: int) -> list:
     with _conn_lock:
         conn = _db()
         if conn is None:
@@ -338,18 +353,28 @@ def list_flagged(limit: int = 100, offset: int = 0) -> list:
         try:
             rows = conn.execute(
                 'SELECT key, sample, source, handled, ts FROM verdict '
-                'WHERE flagged=1 ORDER BY handled ASC, ts DESC LIMIT ? OFFSET ?',
-                (max(1, int(limit)), max(0, int(offset)))).fetchall()
+                f'WHERE {where} ORDER BY handled ASC, ts DESC LIMIT ? OFFSET ?',
+                params + (max(1, int(limit)), max(0, int(offset)))).fetchall()
         except Exception as e:
-            log.warning(f'[昵称审核] 列违规记录失败: {e}')
+            log.warning(f'[昵称审核] 列记录失败: {e}')
             return []
     return [{'key': str(r[0]), 'sample': str(r[1]), 'source': str(r[2]),
              'handled': bool(r[3]), 'ts': int(r[4])} for r in rows]
 
 
+def list_allowed(limit: int = 100, offset: int = 0) -> list:
+    """白名单记录 —— 人工翻案过的昵称,批量重扫不会再动它们。"""
+    return _list('source=?', (SRC_ALLOW,), limit, offset)
+
+
+def list_flagged(limit: int = 100, offset: int = 0) -> list:
+    """违规记录(未处理在前,同组内新的在前)。"""
+    return _list('flagged=1', (), limit, offset)
+
+
 def stats() -> dict:
     """结论库概况(总条数 / 违规 / 未处理),面板顶部状态卡用。"""
-    out = {'total': 0, 'flagged': 0, 'pending': 0}
+    out = {'total': 0, 'flagged': 0, 'pending': 0, 'allowed': 0}
     with _conn_lock:
         conn = _db()
         if conn is None:
@@ -361,6 +386,9 @@ def stats() -> dict:
                 'SELECT COUNT(*) FROM verdict WHERE flagged=1').fetchone()[0])
             out['pending'] = int(conn.execute(
                 'SELECT COUNT(*) FROM verdict WHERE flagged=1 AND handled=0'
+            ).fetchone()[0])
+            out['allowed'] = int(conn.execute(
+                'SELECT COUNT(*) FROM verdict WHERE source=?', (SRC_ALLOW,)
             ).fetchone()[0])
         except Exception:
             pass
@@ -491,29 +519,22 @@ async def _review_and_store(batch: dict) -> bool:
         _note_error(llm_status()['message'])
         log.info(f'[昵称审核] 中央 AI 不可用，{len(batch)} 条顺延')
         return False
-    return await _review_chunk(batch)
-
-
-async def _review_chunk(batch: dict) -> bool:
-    """送审一批并落库;整批失败时对半拆开重试。"""
     keys = list(batch)
-    if not keys:
-        return True
-    _count_call()
-    verdicts = await review_names([batch[k] for k in keys])
-    if verdicts is not None:
-        for key, flagged in zip(keys, verdicts):
-            put_verdict(key, batch[key], flagged, SRC_LLM)
-        hit = sum(1 for v in verdicts if v)
-        log.info(f'[昵称审核] 审完 {len(keys)} 个昵称,命中 {hit} 个')
-        return True
-    if len(keys) <= 1:
-        return False
-    half = len(keys) // 2
-    log.info(f'[昵称审核] {len(keys)} 条整批失败，拆成 {half} + {len(keys) - half} 重试')
-    first = await _review_chunk({k: batch[k] for k in keys[:half]})
-    second = await _review_chunk({k: batch[k] for k in keys[half:]})
-    return first and second
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        _count_call()
+        verdicts = await review_names([batch[k] for k in keys])
+        if verdicts is not None:
+            for key, flagged in zip(keys, verdicts):
+                put_verdict(key, batch[key], flagged, SRC_LLM)
+            hit = sum(1 for v in verdicts if v)
+            log.info(f'[昵称审核] 审完 {len(keys)} 个昵称,命中 {hit} 个')
+            return True
+        if attempt < _RETRY_ATTEMPTS:
+            # 中转站的报错常与请求内容无关(同一模型时好时坏),原样重发即可
+            log.info(f'[昵称审核] 第 {attempt}/{_RETRY_ATTEMPTS} 次送审失败，'
+                     f'{_RETRY_DELAY_S * attempt:.0f}s 后重试')
+            await asyncio.sleep(_RETRY_DELAY_S * attempt)
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────

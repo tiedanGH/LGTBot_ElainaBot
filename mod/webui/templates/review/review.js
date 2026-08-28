@@ -92,6 +92,7 @@ function reviewApplyData(d) {
   reviewApplySettings(d);
   reviewApplyScan(scan);
   reviewApplyEntries(d.entries || []);
+  reviewApplyAllowed(d.allowed || []);
   reviewSyncBadge(st.pending || 0, !!d.enabled);
 }
 
@@ -182,45 +183,65 @@ function reviewApplyScan(scan) {
   }
 }
 
-function reviewSrcBadge(src) {
-  if (src === 'allow') return '<span class="review-badge review-badge-allow">白名单</span>';
-  if (src === 'manual') return '<span class="review-badge">人工</span>';
-  return '<span class="review-badge">AI</span>';
+let reviewShowHandled = false;
+
+/* 一行记录。昵称绝不换行,点开才看全名。 */
+function reviewRow(e, acts, extraClass) {
+  const key = escapeHtml(e.key || '');
+  const name = escapeHtml(e.sample || '');
+  return '<div class="review-row' + (extraClass ? ' ' + extraClass : '') + '">' +
+    '<span class="review-name" data-name="' + name + '" title="点击查看完整昵称">' +
+      name + '</span>' +
+    '<span class="review-time">' + escapeHtml(reviewFmtTime(e.ts)) + '</span>' +
+    acts.map(a =>
+      '<button class="dash-btn dash-btn-small ' + a.cls + '" data-key="' + key +
+      '" data-op="' + a.op + '">' + a.text + '</button>').join('') +
+    '</div>';
 }
 
 function reviewApplyEntries(entries) {
-  const body = document.getElementById('review-table-body');
-  const badge = document.getElementById('review-count-badge');
-  badge.textContent = entries.length ? ' (' + entries.length + ')' : '';
-  if (!entries.length) {
-    body.innerHTML = '<tr class="review-empty"><td colspan="5">暂无违规记录</td></tr>';
-    return;
+  const pending = entries.filter(e => !e.handled);
+  const handled = entries.filter(e => e.handled);
+  const shown = reviewShowHandled ? pending.concat(handled) : pending;
+
+  const btn = document.getElementById('review-toggle-handled');
+  btn.textContent = (reviewShowHandled ? '隐藏已处理' : '展开已处理') +
+                    (handled.length ? '（' + handled.length + '）' : '');
+  btn.classList.toggle('active', reviewShowHandled);
+  btn.disabled = !handled.length;
+
+  const body = document.getElementById('review-list');
+  if (!shown.length) {
+    body.innerHTML = '<div class="review-empty-row">' +
+      (handled.length ? '没有待处理的违规记录' : '暂无违规记录') + '</div>';
+  } else {
+    body.innerHTML = shown.map(e => reviewRow(e, e.handled
+      ? [{op: 'acquit', cls: '', text: '↩ 翻案'},
+         {op: 'reopen', cls: '', text: '↺ 撤销处理'}]
+      : [{op: 'acquit', cls: '', text: '↩ 翻案'},
+         {op: 'handled', cls: '', text: '✓ 已处理'}],
+      e.handled ? 'handled' : '')).join('');
   }
-  body.innerHTML = entries.map(e => {
-    const key = escapeHtml(e.key || '');
-    const state = e.handled
-      ? '<span class="review-badge review-badge-done">已处理</span>'
-      : '<span class="review-badge review-badge-pending">待处理</span>';
-    const acts =
-      '<button class="dash-btn dash-btn-small review-acquit" data-key="' + key + '">↩ 翻案</button>' +
-      (e.handled
-        ? '<button class="dash-btn dash-btn-small review-reopen" data-key="' + key + '">↺ 取消已处理</button>'
-        : '<button class="dash-btn dash-btn-small review-handled" data-key="' + key + '">✓ 已处理</button>');
-    return '<tr>' +
-      '<td class="review-col-time">' + escapeHtml(reviewFmtTime(e.ts)) + '</td>' +
-      '<td class="review-col-name"><span class="review-sample" title="' + escapeHtml(e.sample || '') +
-        '">' + escapeHtml(e.sample || '') + '</span></td>' +
-      '<td class="review-col-src">' + reviewSrcBadge(e.source) + '</td>' +
-      '<td class="review-col-state">' + state + '</td>' +
-      '<td class="review-col-act"><span class="crash-act-btns">' + acts + '</span></td>' +
-      '</tr>';
-  }).join('');
-  body.querySelectorAll('.review-acquit').forEach(b =>
-    b.addEventListener('click', () => reviewVerdict(b.dataset.key, 'acquit')));
-  body.querySelectorAll('.review-handled').forEach(b =>
-    b.addEventListener('click', () => reviewVerdict(b.dataset.key, 'handled')));
-  body.querySelectorAll('.review-reopen').forEach(b =>
-    b.addEventListener('click', () => reviewVerdict(b.dataset.key, 'reopen')));
+  reviewBindRow(body);
+}
+
+function reviewApplyAllowed(allowed) {
+  document.getElementById('review-allowed-count').textContent = allowed.length;
+  const body = document.getElementById('review-allow-list');
+  body.innerHTML = allowed.length
+    ? allowed.map(e => reviewRow(e, [
+        {op: 'revoke', cls: '', text: '↩ 撤销白名单'},
+        {op: 'condemn', cls: 'dash-btn-warn', text: '⚠️ 判定违规'},
+      ])).join('')
+    : '<div class="review-empty-row">暂无白名单记录</div>';
+  reviewBindRow(body);
+}
+
+function reviewBindRow(root) {
+  root.querySelectorAll('.review-name').forEach(el =>
+    el.addEventListener('click', () => dashAlert(el.dataset.name, {compact: true})));
+  root.querySelectorAll('button[data-op]').forEach(b =>
+    b.addEventListener('click', () => reviewVerdict(b.dataset.key, b.dataset.op)));
 }
 
 /* 有未处理的违规就亮角标,不论当前停在哪个标签 */
@@ -233,11 +254,12 @@ function reviewSyncBadge(pending, enabled) {
 }
 
 async function reviewVerdict(key, op) {
-  if (op === 'acquit' && !await dashConfirm(
-      '确认翻案？\n\n该昵称会立即恢复真名显示，并转为人工白名单 —— '
-      + '后续批量重扫不会再把它判为违规。', {level: 'warn'})) {
-    return;
-  }
+  const ask = {
+    acquit: '确认翻案？\n\n该昵称会立即恢复真名显示，并转入白名单 —— 后续批量重扫不会再把它判为违规。',
+    revoke: '确认撤销白名单？\n\n该昵称会退回违规记录的待处理，并重新按匿名显示。',
+    condemn: '确认判定违规？\n\n该昵称会立即按匿名显示，并直接标记为已处理。',
+  }[op];
+  if (ask && !await dashConfirm(ask, {level: 'warn'})) return;
   try {
     const url = REVIEW_VERDICT_ROUTE + TOKEN_QS + (TOKEN_QS ? '&' : '?') +
                 'key=' + encodeURIComponent(key) + '&op=' + encodeURIComponent(op);
@@ -309,6 +331,13 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   const save = document.getElementById('review-save');
   if (save) save.addEventListener('click', () => reviewSaveSettings(save));
+  const handledBtn = document.getElementById('review-toggle-handled');
+  if (handledBtn) {
+    handledBtn.addEventListener('click', () => {
+      reviewShowHandled = !reviewShowHandled;
+      reviewApplyEntries((reviewData || {}).entries || []);
+    });
+  }
   bind('review-refresh', REVIEW_REFRESH_KEY);
   bind('review-scan-start', REVIEW_SCAN_START_KEY);
   bind('review-scan-pause', REVIEW_SCAN_PAUSE_KEY);
