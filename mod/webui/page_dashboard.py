@@ -647,7 +647,7 @@ def _active_matches_view() -> list:
         is_uid = bool(rec.get('is_uid'))
         tid = str(rec.get('target_id', ''))
         if is_uid:
-            name, src = (userinfo.get_name(tid) or ''), 'user'
+            name, src = (userinfo.display_name(tid) or ''), 'user'
         else:
             name, src = _remark_name(remarks.get(tid)), 'remark'
             if not name:

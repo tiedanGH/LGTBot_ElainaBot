@@ -48,6 +48,7 @@ from .. import audit, metrics
 from .. import state as _plugin_state
 from . import build_api, page_crash, restart_api
 from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
+               page_review,
                page_logs, page_metrics, page_prebuilt, page_users)
 
 
@@ -93,6 +94,12 @@ _BACKUP_LIST_KEY    = '__lgtbot_backup_list'
 # 操作审计标签的唯一 action 端点(只读刷新)
 _AUDIT_LIST_KEY     = '__lgtbot_audit_list'
 _CRASH_LIST_KEY     = '__lgtbot_crash_list'       # 崩溃转储列表刷新(只读 fragment)
+# 昵称审核标签的无参 action(JS 侧 REVIEW_*_KEY 与此一一对应)
+_REVIEW_REFRESH_KEY    = '__lgtbot_review_refresh'
+_REVIEW_TOGGLE_KEY     = '__lgtbot_review_toggle'
+_REVIEW_SCAN_START_KEY = '__lgtbot_review_scan_start'
+_REVIEW_SCAN_PAUSE_KEY = '__lgtbot_review_scan_pause'
+_REVIEW_SCAN_RESET_KEY = '__lgtbot_review_scan_reset'
 # 指标面板标签的唯一 action 端点(统一刷新:数据统计 + 运行指标 + 游戏数据)
 _METRICS_REFRESH_KEY = '__lgtbot_metrics_refresh'
 # 预编译部署标签的无参 action 端点(JS 侧 PREBUILT_KEYS 与此一一对应)
@@ -122,6 +129,9 @@ _CORE_DOWNLOAD_ROUTE  = '/api/ext/lgtbot/crash/core-download'
 _CORE_DELETE_ROUTE    = '/api/ext/lgtbot/crash/core-delete'
 # 用户数据懒加载(?offset=,首屏只内嵌前 1000 条,深翻页/搜索时一次取剩余全部)
 _USERS_PAGE_ROUTE     = '/api/ext/lgtbot/users/page'
+# 昵称审核单条处置(要接 ?key= 与 ?op=,隐藏 action 的 provider 不接参数)
+_REVIEW_VERDICT_ROUTE = '/api/ext/lgtbot/review/verdict'
+_REVIEW_SETTINGS_ROUTE = '/api/ext/lgtbot/review/settings'
 # 带 schema 校验的配置保存(config.yaml / lgtbot.json),POST body 传内容
 _CONFIG_SAVE_ROUTE    = '/api/ext/lgtbot/config/save'
 # 预编译下载(POST {name,mirror?},后台起 task)/ 镜像测速(POST {customs?})/ 记住下载镜像(POST {mirror})
@@ -170,6 +180,11 @@ _HIDDEN_KEYS = frozenset({
     _BACKUP_CREATE_KEY,
     _BACKUP_LIST_KEY,
     _AUDIT_LIST_KEY,
+    _REVIEW_REFRESH_KEY,
+    _REVIEW_TOGGLE_KEY,
+    _REVIEW_SCAN_START_KEY,
+    _REVIEW_SCAN_PAUSE_KEY,
+    _REVIEW_SCAN_RESET_KEY,
     _CRASH_LIST_KEY,
     _METRICS_REFRESH_KEY,
     _PREBUILT_LIST_KEY,
@@ -207,6 +222,7 @@ def _render_html() -> str:
             .replace('__USERS_CSS__', page_users.TAB_CSS)
             .replace('__BACKUP_CSS__', page_backup.TAB_CSS)
             .replace('__AUDIT_CSS__', page_audit.TAB_CSS)
+            .replace('__REVIEW_CSS__', page_review.TAB_CSS)
             .replace('__CRASH_CSS__', page_crash.TAB_CSS)
             .replace('__PREBUILT_CSS__', page_prebuilt.TAB_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
@@ -217,6 +233,7 @@ def _render_html() -> str:
             .replace('__USERS_HTML__', page_users.TAB_HTML)
             .replace('__BACKUP_HTML__', page_backup.TAB_HTML)
             .replace('__AUDIT_HTML__', page_audit.TAB_HTML)
+            .replace('__REVIEW_HTML__', page_review.TAB_HTML)
             .replace('__CRASH_HTML__', page_crash.TAB_HTML)
             .replace('__PREBUILT_HTML__', page_prebuilt.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
@@ -227,6 +244,7 @@ def _render_html() -> str:
             .replace('__USER_DATA__', page_users.get_data())
             .replace('__BACKUP_DATA__', page_backup.get_data())
             .replace('__AUDIT_DATA__', page_audit.get_data())
+            .replace('__REVIEW_DATA__', page_review.get_data())
             .replace('__CRASH_DATA__', page_crash.get_data())
             .replace('__PREBUILT_DATA__', page_prebuilt.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
@@ -238,6 +256,14 @@ def _render_html() -> str:
             .replace('__USERS_JS__', page_users.TAB_JS)
             .replace('__BACKUP_JS__', page_backup.TAB_JS)
             .replace('__AUDIT_JS__', page_audit.TAB_JS)
+            .replace('__REVIEW_JS__', page_review.TAB_JS
+                     .replace('__REVIEW_REFRESH_KEY__', _REVIEW_REFRESH_KEY)
+                     .replace('__REVIEW_TOGGLE_KEY__', _REVIEW_TOGGLE_KEY)
+                     .replace('__REVIEW_SCAN_START_KEY__', _REVIEW_SCAN_START_KEY)
+                     .replace('__REVIEW_SCAN_PAUSE_KEY__', _REVIEW_SCAN_PAUSE_KEY)
+                     .replace('__REVIEW_SCAN_RESET_KEY__', _REVIEW_SCAN_RESET_KEY)
+                     .replace('__REVIEW_VERDICT_ROUTE__', _REVIEW_VERDICT_ROUTE)
+                     .replace('__REVIEW_SETTINGS_ROUTE__', _REVIEW_SETTINGS_ROUTE))
             .replace('__CRASH_JS__', page_crash.TAB_JS)
             .replace('__PREBUILT_JS__', page_prebuilt.TAB_JS)
             .replace('__PAGE_KEY__', PAGE_KEY)
@@ -462,6 +488,13 @@ def register():
     # 操作审计 action 端点(只读刷新;审计流不设清空 / 删除端点)
     _register_hidden_action(_AUDIT_LIST_KEY, page_audit.render_list)
 
+    # 昵称审核 action 端点(总开关 + 批量扫描控制;单条处置走下方带 ?key= 的真路由)
+    _register_hidden_action(_REVIEW_REFRESH_KEY, page_review.render_refresh)
+    _register_hidden_action(_REVIEW_TOGGLE_KEY, page_review.render_toggle)
+    _register_hidden_action(_REVIEW_SCAN_START_KEY, page_review.render_scan_start)
+    _register_hidden_action(_REVIEW_SCAN_PAUSE_KEY, page_review.render_scan_pause)
+    _register_hidden_action(_REVIEW_SCAN_RESET_KEY, page_review.render_scan_reset)
+
     # 崩溃转储 action 端点(只读刷新;查看正文 / 下载走下方带 ?name= 的真路由)
     _register_hidden_action(_CRASH_LIST_KEY, page_crash.render_list)
 
@@ -487,6 +520,8 @@ def register():
     web_pages.register_route('GET', _CORE_DOWNLOAD_ROUTE, page_crash.core_download_handler, auth=True)
     web_pages.register_route('GET', _CORE_DELETE_ROUTE, page_crash.core_delete_handler, auth=True)
     web_pages.register_route('GET', _USERS_PAGE_ROUTE, page_users.page_handler, auth=True)
+    web_pages.register_route('GET', _REVIEW_VERDICT_ROUTE, page_review.verdict_handler, auth=True)
+    web_pages.register_route('GET', _REVIEW_SETTINGS_ROUTE, page_review.settings_handler, auth=True)
     web_pages.register_route('POST', _CONFIG_SAVE_ROUTE, page_config.save_config_handler, auth=True)
     # 预编译:下载 / 镜像测速 / 记住下载镜像(均 POST)
     web_pages.register_route('POST', _PREBUILT_DOWNLOAD_ROUTE, page_prebuilt.download_handler, auth=True)
@@ -522,6 +557,8 @@ def unregister():
     web_pages.unregister_route('GET', _CORE_DOWNLOAD_ROUTE)
     web_pages.unregister_route('GET', _CORE_DELETE_ROUTE)
     web_pages.unregister_route('GET', _USERS_PAGE_ROUTE)
+    web_pages.unregister_route('GET', _REVIEW_VERDICT_ROUTE)
+    web_pages.unregister_route('GET', _REVIEW_SETTINGS_ROUTE)
     web_pages.unregister_route('POST', _CONFIG_SAVE_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_DOWNLOAD_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_TESTMIRRORS_ROUTE)

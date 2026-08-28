@@ -1,0 +1,133 @@
+<div class="review">
+
+  <!-- ──── 状态与总开关 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🏷️ 昵称审核</h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">结论库</span>
+        <span id="review-db" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+
+    <p class="review-desc">
+      引擎会把用户昵称直接嵌进<b>对局图片</b>与<b>文字播报</b>。启用后，判定为违规的昵称会统一替换为匿名（如 <code>玩家A1B2</code>）。
+      结论按<b>昵称文本</b>缓存且永久有效，同一个昵称只审一次。
+    </p>
+
+    <div class="review-status-grid">
+      <div class="review-status-card">
+        <div class="review-status-label">当前状态</div>
+        <div id="review-state" class="review-status-value">—</div>
+        <div id="review-state-sub" class="review-status-sub">—</div>
+      </div>
+      <div class="review-status-card">
+        <div class="review-status-label">已有结论</div>
+        <div id="review-total" class="review-status-value">—</div>
+        <div id="review-total-sub" class="review-status-sub">—</div>
+      </div>
+      <div class="review-status-card">
+        <div class="review-status-label">违规昵称</div>
+        <div id="review-flagged" class="review-status-value">—</div>
+        <div id="review-flagged-sub" class="review-status-sub">—</div>
+      </div>
+      <div class="review-status-card">
+        <div class="review-status-label">今日调用</div>
+        <div id="review-calls" class="review-status-value">—</div>
+        <div id="review-calls-sub" class="review-status-sub">—</div>
+      </div>
+    </div>
+
+    <div class="review-actions-bar">
+      <button id="review-toggle" class="dash-btn dash-btn-small">🏷️ 启用昵称审核</button>
+      <button id="review-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
+      <span id="review-msg" class="review-msg"></span>
+    </div>
+  </section>
+
+  <!-- ──── 审核模型 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">🤖 审核模型</h2>
+      <div class="dash-section-meta">
+        <span id="review-llm-state" class="dash-meta-value">—</span>
+      </div>
+    </div>
+
+    <div class="review-form">
+      <label class="review-field">
+        <span class="review-field-label">接口</span>
+        <select id="review-provider"></select>
+      </label>
+      <label class="review-field">
+        <span class="review-field-label">模型</span>
+        <select id="review-model"></select>
+      </label>
+      <label class="review-field review-field-narrow">
+        <span class="review-field-label">单批条数</span>
+        <input id="review-batch" type="number" min="1" max="100" step="1">
+      </label>
+      <label class="review-field review-field-narrow">
+        <span class="review-field-label">未审昵称</span>
+        <select id="review-failmode">
+          <option value="0">先显示真名</option>
+          <option value="1">先显示匿名</option>
+        </select>
+      </label>
+      <button id="review-save" class="dash-btn dash-btn-small dash-btn-primary">💾 保存</button>
+    </div>
+  </section>
+
+  <!-- ──── 存量批量扫描 ──── -->
+  <section class="dash-section" id="review-scan-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">📋 存量批量审核</h2>
+      <div class="dash-section-meta review-scan-actions">
+        <button id="review-scan-start" class="dash-btn dash-btn-small">▶ 开始 / 继续</button>
+        <button id="review-scan-pause" class="dash-btn dash-btn-small">⏸ 暂停</button>
+        <button id="review-scan-reset" class="dash-btn dash-btn-small dash-btn-warn">↺ 重置游标</button>
+      </div>
+    </div>
+
+    <div class="review-scan-bar">
+      <div class="review-scan-track"><div id="review-scan-fill" class="review-scan-fill"></div></div>
+      <span id="review-scan-text" class="review-scan-text">—</span>
+    </div>
+
+    <p class="review-note">
+      扫描范围是<b>引擎数据库里真正玩过游戏的玩家</b>，非框架的全部用户。
+      已有结论的昵称会被跳过，不重复调用。进度按游标保存，<b>暂停 / 重启后可续跑</b>。
+    </p>
+  </section>
+
+  <!-- ──── 违规记录 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title">⚠️ 违规记录<span id="review-count-badge" class="review-title-badge"></span></h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">未处理</span>
+        <span id="review-pending" class="dash-meta-value">—</span>
+      </div>
+    </div>
+    <div class="review-table-wrap">
+      <table class="review-table">
+        <thead>
+          <tr>
+            <th class="review-col-time">判定时间</th>
+            <th class="review-col-name">昵称</th>
+            <th class="review-col-src">来源</th>
+            <th class="review-col-state">状态</th>
+            <th class="review-col-act">操作</th>
+          </tr>
+        </thead>
+        <tbody id="review-table-body">
+          <tr class="review-empty"><td colspan="5">暂无违规记录</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="review-note">
+      「翻案」把该昵称转为<b>人工白名单</b>：立即恢复真名显示，且后续批量重扫<b>不会</b>再把它标回违规。「已处理」用于忽略提醒，不改变判定。
+    </p>
+  </section>
+
+</div>

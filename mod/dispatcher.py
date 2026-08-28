@@ -24,7 +24,7 @@ from core.message.event import (
 )
 
 from . import (state, quota, helpers, boot, buttons, uploader, userinfo, audit,
-               metrics, stats_image, urgent)
+               metrics, stats_image, urgent, nickname_review)
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -184,6 +184,24 @@ def _mark_force_interrupt_hint(event, content: str, gid: str) -> None:
         return
     state.force_interrupt_hints[helpers.target_key(gid, False)] = (
         time.time() + _FORCE_INTERRUPT_HINT_TTL)
+
+
+# 「加入游戏」类命令:昵称即将被引擎写进对局图片
+_JOIN_GAME_RE = re.compile(r'^[/#]?(新游戏|随机游戏|加入)')
+
+
+def _prewarm_nickname(content: str, uid: str) -> None:
+    """要进游戏了,把这位玩家的昵称插队送审。
+
+    引擎在开局那一刻就把 display_name 快照进 match_game_runner 子进程
+    (lgtbot/bot_core/match.cc),晚于开局的结论救不回这一局的图片。
+    """
+    if not uid or not _JOIN_GAME_RE.match(content or ''):
+        return
+    try:
+        nickname_review.enqueue(userinfo.get_name(uid), urgent=True)
+    except Exception as e:
+        log.debug(f'昵称预热送审失败 ({uid}): {e}')
 
 
 async def _maybe_notify_urgent(event, content: str, gid: str) -> None:
@@ -1227,6 +1245,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     _capture_pending_game_name(content, event, gid, uid)
 
     # 新群首次建房 → 额外推一条紧急公告(公告已启用且该群没通知过时才发)
+    _prewarm_nickname(content, uid)
     await _maybe_notify_urgent(event, content, gid)
 
     # 群管发的 /中断:给随后那条中断投票广播预约「强制中断游戏」按钮
@@ -1374,6 +1393,7 @@ async def lgtbot_interaction_dispatch(event, match):
     _capture_pending_game_name(content, event, gid, uid)
 
     # 紧急公告通知:菜单「游戏快捷开局」按钮的 data 也是建房命令,与消息路径对称
+    _prewarm_nickname(content, uid)
     await _maybe_notify_urgent(event, content, gid)
 
     try:

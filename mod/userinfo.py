@@ -114,6 +114,20 @@ def get_name(openid: str) -> str:
     return name
 
 
+def display_name(openid: str) -> str:
+    """展示用昵称:判为违规时换成匿名。同步且线程安全,可从 C++ 引擎线程直调。"""
+    name = get_name(openid)
+    if not name:
+        return name
+    try:
+        from . import nickname_review
+        if nickname_review.should_mask(name):
+            return nickname_review.masked_name(openid)
+    except Exception as e:                  # 审核出问题就退回真名,绝不影响发消息
+        log.debug(f'userinfo.display_name 审核查询失败 ({openid}): {e}')
+    return name
+
+
 def avatar_url(openid: str, size: int = 100) -> str:
     """按绑定 bot 的 appid 推导头像直链;无 appid / openid 返回 ''。"""
     if not openid:
@@ -260,6 +274,12 @@ def note_username(openid: str, username: str) -> None:
         if get_name(openid) == username:
             return                          # 库里已是最新,get_name 已填缓存
     _cache_put(openid, username)            # 本地立即生效(引擎 / 面板读到最新)
+    # 走到这一层 = 这个昵称本进程第一次见(新用户或刚改名)
+    try:
+        from . import nickname_review
+        nickname_review.enqueue(username)
+    except Exception as e:                  # 审核绝不能影响昵称写回本身
+        log.debug(f'userinfo.note_username 送审入队失败 ({openid}): {e}')
     # 冷却判定:「从未写过」必须与「时刻 0 写过」区分 —— monotonic 起点是系统启动,
     # 刚开机的主机(如 CI runner)now 本身 < 冷却窗,用 0.0 兜底会把首次写回误判为冷却中。
     now = time.monotonic()
@@ -404,6 +424,13 @@ def list_users(limit: int | None = None, offset: int = 0) -> list[dict]:
         out = out[:limit]
     for r in out:
         r['avatar'] = avatar_url(r['openid'])
+        if r['name']:
+            try:
+                from . import nickname_review
+                if nickname_review.should_mask(r['name']):
+                    r['name'] = nickname_review.masked_name(r['openid'])
+            except Exception:
+                pass
     return out
 
 

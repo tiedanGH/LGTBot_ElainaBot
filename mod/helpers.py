@@ -103,7 +103,7 @@ def humanize_mentions(text: str) -> str:
 
     def _repl(m):
         uid = m.group(1)
-        name = userinfo.get_name(uid)
+        name = userinfo.display_name(uid)
         if name:
             # 输出只用于纯文本语境(媒体 caption / 日志),不做 md 转义
             return f'@{name}'

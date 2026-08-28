@@ -430,7 +430,7 @@ def query_game_stats() -> dict:
             return [{'game_name': str(g), 'count': int(c)} for g, c in _rows(sql, tag)]
 
         def _players(sql: str, tag: str) -> list:
-            return [{'display': userinfo.get_name(str(uid)) or mask_id(str(uid)),
+            return [{'display': userinfo.display_name(str(uid)) or mask_id(str(uid)),
                      'count': int(c)} for uid, c in _rows(sql, tag)]
 
         out['top_games_all'] = _games(_TOP_GAMES_ALL_SQL, 'top_games_all')
@@ -534,7 +534,7 @@ def _span_stats(start: str | None, end: str | None) -> dict:
                 f'SELECT game_name, COUNT(*) c FROM match{w_m} '
                 'GROUP BY game_name ORDER BY c DESC LIMIT 10', 'top_games')]
         out['top_players'] = [
-            {'display': userinfo.get_name(str(uid)) or mask_id(str(uid)),
+            {'display': userinfo.display_name(str(uid)) or mask_id(str(uid)),
              'count': int(c)} for uid, c in _rows(
                 f'SELECT uwm.user_id, COUNT(*) c {join}{w_j} '
                 'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10', 'top_players')]

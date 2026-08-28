@@ -64,6 +64,8 @@ _persistent: dict = {
     'mention_rewrites': {},
     'force_interrupt_hints': {},
     'waiting_rooms': {},
+    'nickname_review_queue': {},
+    'nickname_review_flagged': set(),
 }
 
 
@@ -129,6 +131,8 @@ def _clean_runtime_state():
     _persistent['mention_rewrites'].clear()
     _persistent['force_interrupt_hints'].clear()
     _persistent['waiting_rooms'].clear()
+    _persistent['nickname_review_queue'].clear()
+    _persistent['nickname_review_flagged'].clear()
 
     # 清 uploader 模块状态(若已被 import)
     try:

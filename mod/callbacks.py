@@ -1112,7 +1112,7 @@ def cb_get_user_name(uid: str) -> str:
     用 ``helpers.strip_md_escapes`` 还原,不会露出反斜杠。已知残留:引擎自渲
     的对局图片(HTML)里带特殊字符的昵称会显示 ``\\`` 前缀,暂无干净解法。
     """
-    return helpers.sanitize_md_name(userinfo.get_name(uid) or uid)
+    return helpers.sanitize_md_name(userinfo.display_name(uid) or uid)
 
 
 def cb_get_user_avatar_url(uid: str) -> str:

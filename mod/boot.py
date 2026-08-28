@@ -244,6 +244,8 @@ _PERSIST_DEFAULTS: dict = {
     'mention_rewrites':        {},
     'force_interrupt_hints':   {},
     'waiting_rooms':           {},
+    'nickname_review_queue':   {},
+    'nickname_review_flagged': set(),
 }
 
 

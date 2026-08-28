@@ -120,12 +120,13 @@ cd ../.. && python3 main.py
 ### 🖥️ Web 面板与运维
 
 - **Web 面板拓展页** —— 侧边栏「LGTBot 机器人」单页多标签
-  - 仪表盘 / 指标面板 / 配置管理 / 预编译部署 / 引擎编译 / 数据备份 / 消息日志 / 操作审计 / 崩溃转储 / 用户数据
+  - 仪表盘 / 指标面板 / 配置管理 / 预编译部署 / 引擎编译 / 数据备份 / 消息日志 / 操作审计 / 昵称审核 / 崩溃转储 / 用户数据
   - 含一键更新（tag + 子模块双重对比）、缓存清理、运行环境自检、在线编辑配置与整进程重启
   - 明暗主题：**自动**（默认跟随主框架面板的夜间模式）/ 浅色 / 深色
 - **运维观测** —— 指标 / 审计 / 崩溃三条观测线
   - **指标面板**：数据统计、图床上传成功率、崩溃与重启累计、配额压力、今日主动消息、排行榜、10 日趋势
   - **操作审计**：编译 / 备份 / 清缓存 / 更新 / 配置 / 重启 / 换绑等状态变更
+  - **昵称审核**：连接「AI LLM 服务」判定用户昵称是否违规，违规昵称统一显示为匿名（默认关闭，接口与模型在该标签页选择）
   - **崩溃转储**：查看引擎 SIGSEGV / SIGBUS / SIGABRT 的 backtrace dump；另列**游戏子进程 core 文件**（游戏崩溃不影响主进程），读 ELF note 解析出信号 / 出错地址 / 是哪个游戏 / 崩溃模块
 - **机器人绑定** —— 多 bot 部署时在仪表盘可视化选择本插件服务的机器人（默认第一个）
   - 消息收发、全量群数据、邀请链接、错误推送均固定走绑定 bot，其他 bot 的事件静默忽略
@@ -179,6 +180,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── dispatcher.py        @handler 注册（消息派发 + INTERACTION 处理）
 │   ├── config.py            data/config.yaml 读写
 │   ├── urgent.py            紧急公告：文案 + 总开关 / 已通知群记录（落盘，重启仍生效）
+│   ├── nickname_review.py   昵称 AI 审核：结论库（SQLite，按昵称文本永久缓存）+ 送审队列 + 存量批量扫描
 │   ├── userinfo.py          主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
 │   ├── corefile.py          游戏子进程 core 文件的 ELF note 解析（信号 / 游戏名 / 崩溃模块）
 │   ├── stats_image.py       「数据统计」指令的统计卡片渲染（PIL，缺字体自动回退文本）
@@ -202,6 +204,7 @@ plugins/LGTBot_ElainaBot/
 │       ├── page_backup.py   「数据备份」标签：列出 / 创建 / 恢复 / 下载 / 删除备份 zip
 │       ├── page_logs.py     「消息日志」标签 + 日志缓冲数据层（log_incoming / log_outgoing / get_logs / clear_logs）
 │       ├── page_audit.py    「操作审计」标签：只读展示审计记录
+│       ├── page_review.py   「昵称审核」标签：总开关 / 存量批量扫描 / 违规记录翻案
 │       ├── page_crash.py    「崩溃转储」标签：崩溃重启概况 + dump 列表 + 游戏 core 列表（下载 / 批量删除）
 │       ├── page_users.py    「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
 │       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
@@ -214,6 +217,7 @@ plugins/LGTBot_ElainaBot/
 │           ├── backup/      「数据备份」标签 HTML / CSS / JS
 │           ├── logs/        「消息日志」标签 HTML / CSS / JS
 │           ├── audit/       「操作审计」标签 HTML / CSS / JS
+│           ├── review/      「昵称审核」标签 HTML / CSS / JS
 │           ├── crash/       「崩溃转储」标签 HTML / CSS / JS
 │           └── users/       「用户数据」标签 HTML / CSS / JS
 │
@@ -255,6 +259,9 @@ plugins/LGTBot_ElainaBot/
     │   └── audit.json       最近 500 条状态变更记录
     ├── metrics/             运行指标（WebUI「指标面板」标签使用）
     │   └── metrics.json     上传 / 崩溃 / 配额计数器
+    ├── review/              昵称审核（WebUI「昵称审核」标签使用）
+    │   ├── settings.json    总开关 + 接口 / 模型选择 + 批量条数（面板里改）
+    │   └── nickname.db      SQLite：昵称文本 → 审核结论（永久缓存，同一昵称只审一次）
     ├── prebuilt/            预编译部署状态（WebUI「预编译部署」标签使用）
     │   ├── active           构建来源开关：build | build_prebuilt（boot 启动时读）
     │   └── state.json       下载进度（前端轮询）

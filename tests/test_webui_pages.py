@@ -622,3 +622,194 @@ async def test_panel_restart_handler_truncates_long_reason(monkeypatch):
 
     await wm.restart_panel_handler(_Req())
     assert len(seen['reason']) == wm._RESTART_REASON_MAX
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# page_review —— 昵称审核标签
+# ─────────────────────────────────────────────────────────────────────────
+
+def _page_review():
+    pytest.importorskip('aiohttp')
+    from plugins.LGTBot_ElainaBot.mod.webui import page_review
+    return page_review
+
+
+def test_review_badge_counts_unhandled_and_shows_anywhere():
+    """★ 未处理违规的角标要在**任何**标签下都看得见。"""
+    wm = _main()
+    html = wm._render_html()
+    css = html[:html.index('</style>')]
+    assert '<span class="tab-alert-badge" id="review-pending-badge">' in html
+    assert '.tabs .tab .tab-alert-badge.on { display: inline-block; }' in css
+    assert not re.search(r'\.tabs \.tab\.active \.tab-alert-badge', css)
+    assert 'color: var(--warn)' in css
+    # 计数来自「违规且未处理」,总开关关闭时不亮
+    assert "reviewSyncBadge(st.pending || 0, !!d.enabled)" in html
+
+
+def test_review_js_placeholders_are_all_substituted():
+    """模板占位与常量对得上 —— 拼错的话按钮会 fetch 到字面量 __REVIEW_*__。"""
+    wm = _main()
+    html = wm._render_html()
+    assert '__REVIEW_' not in html
+    for const in (wm._REVIEW_REFRESH_KEY, wm._REVIEW_TOGGLE_KEY,
+                  wm._REVIEW_SCAN_START_KEY, wm._REVIEW_SCAN_PAUSE_KEY,
+                  wm._REVIEW_SCAN_RESET_KEY, wm._REVIEW_VERDICT_ROUTE):
+        assert const in html, const
+
+
+def test_review_actions_are_hidden_and_route_is_symmetric(_clean_registry):
+    """五个无参 action 都要进 _HIDDEN_KEYS(否则漏进侧边栏);带参端点走真路由,
+    注册 / 注销必须对称(漏了 unregister 会在插件卸载后留下野路由)。"""
+    wm = _main()
+    for key in (wm._REVIEW_REFRESH_KEY, wm._REVIEW_TOGGLE_KEY,
+                wm._REVIEW_SCAN_START_KEY, wm._REVIEW_SCAN_PAUSE_KEY,
+                wm._REVIEW_SCAN_RESET_KEY):
+        assert key in wm._HIDDEN_KEYS, key
+    wm.register()
+    assert ('GET', wm._REVIEW_VERDICT_ROUTE) in _clean_registry._routes
+    wm.unregister()
+    assert ('GET', wm._REVIEW_VERDICT_ROUTE) not in _clean_registry._routes
+
+
+def test_review_toggle_refuses_to_enable_without_the_llm(monkeypatch):
+    """★ 中央 LLM 不可用时不许开启 —— 开一个只会报错的功能没有意义。
+    关闭方向永远放行:关掉一个坏掉的功能不该被任何前置条件挡住。"""
+    pr = _page_review()
+    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    monkeypatch.setattr(nr, 'ENABLED', False)
+    monkeypatch.setattr(nr, 'llm_status',
+                        lambda: {'available': False, 'message': '没有可用接口'})
+    saved = []
+    monkeypatch.setattr(nr, 'save_settings',
+                        lambda **kw: saved.append(kw) or (True, ''))
+    body = _fragment_payload(pr.render_toggle())
+    assert body['success'] is False and '没有可用接口' in body['message']
+    assert saved == []                           # 连设置都不该落盘
+
+    # 已开启 + LLM 掉线 → 允许关闭
+    monkeypatch.setattr(nr, 'ENABLED', True)
+    monkeypatch.setattr(pr.audit, 'record', lambda *a, **k: None)
+    body = _fragment_payload(pr.render_toggle())
+    assert body['success'] is True
+    assert saved == [{'enabled': False}]
+
+
+def test_review_payload_reports_the_three_states(monkeypatch):
+    """未启用 / 已启用 / 已启用但 LLM 掉线 —— 前端据 enabled + llm_available 两个字段区分,payload 必须两个都给。"""
+    pr = _page_review()
+    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    monkeypatch.setattr(nr, 'llm_status', lambda: {'available': False, 'message': 'x'})
+    monkeypatch.setattr(nr, 'ENABLED', True)
+    p = pr._payload()
+    assert p['enabled'] is True and p['llm_available'] is False and p['llm_message'] == 'x'
+    assert {'stats', 'scan', 'entries', 'fail_closed'} <= set(p)
+
+
+async def test_review_verdict_handler_validates_and_dispatches(monkeypatch):
+    """带参端点:非法 op / 缺 key → 400,记录不存在 → 404。"""
+    pr = _page_review()
+    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    monkeypatch.setattr(pr.audit, 'record', lambda *a, **k: None)
+
+    class _Req:
+        def __init__(self, **q):
+            self.query = q
+
+    assert (await pr.verdict_handler(_Req(op='acquit'))).status == 400
+    assert (await pr.verdict_handler(_Req(key='k', op='drop'))).status == 400
+    monkeypatch.setattr(nr, 'get_verdict', lambda k: None)
+    assert (await pr.verdict_handler(_Req(key='k', op='acquit'))).status == 404
+
+    monkeypatch.setattr(nr, 'get_verdict',
+                        lambda k: {'sample': 's', 'flagged': True,
+                                   'source': 'llm', 'handled': False, 'ts': 0})
+    calls = []
+    monkeypatch.setattr(nr, 'acquit', lambda k: calls.append(('acquit', k)) or True)
+    monkeypatch.setattr(nr, 'set_handled',
+                        lambda k, v: calls.append(('handled', k, v)) or True)
+    monkeypatch.setattr(nr, 'pending_count', lambda: 0)
+    assert (await pr.verdict_handler(_Req(key='k', op='acquit'))).status == 200
+    assert (await pr.verdict_handler(_Req(key='k', op='handled'))).status == 200
+    assert (await pr.verdict_handler(_Req(key='k', op='reopen'))).status == 200
+    assert calls == [('acquit', 'k'), ('handled', 'k', True), ('handled', 'k', False)]
+
+
+def test_review_scan_section_needs_both_switch_and_llm():
+    """批量扫描的两个前置条件都要在界面上体现 —— 服务端已经会拒,界面同步灰掉才不会让人白点一次。"""
+    wm = _main()
+    html = wm._render_html()
+    assert "classList.toggle('disabled', !(d.enabled && d.llm_available))" in html
+
+
+def test_review_tab_sits_between_crash_and_audit():
+    wm = _main()
+    html = wm._render_html()
+    order = re.findall(r'data-tab="(\w+)"', html)
+    i = order.index('review')
+    assert order[i - 1] == 'crash' and order[i + 1] == 'audit'
+
+
+def test_review_sections_use_the_shared_section_gap():
+    """四个区块之间的间距走仪表盘那套 —— .review 漏进那条规则就会挤成一坨。"""
+    wm = _main()
+    css = wm._render_html()
+    css = css[:css.index('</style>')]
+    rule = re.search(r'((?:\.[\w-]+,\s*)+)\.prebuilt \{ display: flex; flex-direction: column; gap: 14px;',
+                     css)
+    assert rule and '.review,' in rule.group(1)
+
+
+async def test_review_settings_handler_saves_only_selections(monkeypatch):
+    """★ 面板只保存「选了哪个接口 / 哪个模型」;接口地址与 API Key 归中央模块。"""
+    pr = _page_review()
+    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    monkeypatch.setattr(pr.audit, 'record', lambda *a, **k: None)
+    saved = []
+    monkeypatch.setattr(nr, 'save_settings',
+                        lambda **kw: saved.append(kw) or (True, ''))
+
+    class _Req:
+        def __init__(self, **q):
+            self.query = q
+
+    assert (await pr.settings_handler(_Req())).status == 400
+    # 必须带上另一个合法项:只传坏 batch_size 的话,会先撞上「没有要保存的项」
+    assert (await pr.settings_handler(_Req(model='m', batch_size='abc'))).status == 400
+    r = await pr.settings_handler(
+        _Req(provider_id='p1', model='m1', batch_size='999', fail_closed='1'))
+    assert r.status == 200
+    assert saved == [{'provider_id': 'p1', 'model': 'm1',
+                      'batch_size': 100, 'fail_closed': True}]
+
+
+def test_review_call_card_shows_the_cumulative_total():
+    """今日调用下面那行小字是累计调用。"""
+    wm = _main()
+    html = wm._render_html()
+    assert "'累计调用 ' + (scan.calls_total || 0)" in html
+    assert 'daily_limit' not in html
+
+
+def test_review_payload_carries_provider_options(monkeypatch):
+    """两个下拉的选项来自中央的公开配置,payload 得把它带下去。"""
+    pr = _page_review()
+    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    monkeypatch.setattr(nr, 'public_config', lambda: {'providers': [
+        {'id': 'p1', 'name': 'P1', 'enabled': True, 'models': ['m1', 'm2'],
+         'model_priority': [], 'disabled_models': ['m2']},
+        {'id': 'p2', 'name': 'P2', 'enabled': False, 'models': ['m9']},
+    ]})
+    p = pr._payload()
+    assert p['providers'] == [{'id': 'p1', 'name': 'P1', 'models': ['m1']}]
+    assert {'provider_id', 'model', 'batch_size', 'fail_closed', 'enabled'} <= set(p)
+
+
+def test_review_progress_shows_resolved_and_queued_not_calls():
+    """★ 进度条要单列「取到昵称 / 新送审」:换绑之后老玩家查不到昵称,进度会跑满却一次都没送审。"""
+    wm = _main()
+    html = wm._render_html()
+    i = html.index("document.getElementById('review-scan-text').textContent")
+    body = html[i:i + 320]
+    assert '取到昵称' in body and '新送审' in body
+    assert '今日调用' not in body
