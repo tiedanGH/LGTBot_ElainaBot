@@ -5,7 +5,7 @@
 ★ 安全准则 ★
   · **纯只读**:唯一 action 端点是「刷新列表」(``render_list``);
     **不提供清空 / 删除端点**(防自毁审计)。容量控制完全由
-    ``audit.MAX_ENTRIES`` 滚动淘汰负责,无任何可干预入口。
+    ``audit.RETENTION_DAYS`` 的到期清理负责,无任何可干预入口。
   · 本模块不产生审计记录,只消费;写入方是各状态变更端点的入口层
     (page_build / page_dashboard / page_config / page_backup /
     dispatcher / webui.main / backup 自动任务)。
@@ -48,7 +48,7 @@ def _fragment(payload: dict) -> str:
 def _payload() -> dict:
     """首屏与刷新共用的完整 payload。
 
-    entries 新 → 旧全量下发(≤ MAX_ENTRIES 条),类别筛选在客户端做;
+    entries 新 → 旧全量下发(保留期内的全部),类别筛选在客户端做;
     categories 把 ``audit.CATEGORIES``(单一真相源)转成 JS 好用的形状。
     """
     st = audit.file_status()
@@ -57,7 +57,7 @@ def _payload() -> dict:
         'count': st['count'],
         'oldest_ts': st['oldest_ts'],
         'size_bytes': st['size_bytes'],
-        'max_entries': audit.MAX_ENTRIES,
+        'retention_days': audit.RETENTION_DAYS,
         'audit_path': audit.AUDIT_PATH,
         'query_time': int(time.time()),
         'categories': {cat: {'emoji': emoji, 'label': label}

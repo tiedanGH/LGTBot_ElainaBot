@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""破坏性 / 状态变更操作审计 —— 持久化最近 500 条到 ``data/audit/audit.json``。
+"""破坏性 / 状态变更操作审计 —— 持久化最近一个月到 ``data/audit/audit.json``。
 
 谁在写:各状态变更端点的**入口层**(webui page_* 按钮端点、dispatcher 的 /重启 与 /计划重启 指令、backup 的自动备份),
 每个入口一行 ``audit.record(cat, action, detail, ok, src)``;共享 helper 保持纯函数不挂钩,
@@ -10,15 +10,15 @@
   · **文件即真相源** —— 热重载后重读文件即可,不走 boot._get_persistent();
     重启(os.execv)不丢:record() 是同步写盘,返回即已持久化。
   · **整文件原子重写**(tmp + os.replace,照 page_config._atomic_write):
-    操作全是人工触发,每次全量重写 ≤500 条(几十 KB)无成本,换来任意时刻
+    操作全是人工触发,一个月的量级(几十 KB)全量重写无成本,换来任意时刻
     (包括 execv 瞬间)读到的都是完整 JSON,没有追加式的撕裂行问题;
-    截断到 MAX_ENTRIES 也顺手完成。
+    过期清理也顺手完成。
   · **record() 永不抛异常** —— 审计失败绝不影响业务动作本身,调用方零负担。
   · 损坏容错:audit.json 解析失败时尽力改名 ``.corrupt_<ts>`` 留证,从空续记。
   · 放 ``data/audit/`` 子目录:框架配置入口非递归扫 data/ 根,子目录不可见
     不污染配置列表;backup 的打包白名单不含此目录 → 恢复旧备份不会把审计
     历史一起回滚(防"恢复备份抹掉审计"的自毁路径)。
-  · **不提供任何清空 API / 端点**(防自毁审计);容量靠 500 条滚动淘汰。
+  · **不提供任何清空 API / 端点**(防自毁审计);容量靠保留期到点清理,不限条数。
 """
 
 from __future__ import annotations
@@ -34,8 +34,9 @@ from . import boot
 
 log = get_logger(PLUGIN, 'LGTBot')
 
-# 滚动保留的最大条数(固定常量)
-MAX_ENTRIES = 500
+# 保留期(固定常量)。不限条数,到点清理
+RETENTION_DAYS = 30
+RETENTION_S = RETENTION_DAYS * 86400
 
 AUDIT_DIR = os.path.join(boot.DATA_DIR, 'audit')
 AUDIT_PATH = os.path.join(AUDIT_DIR, 'audit.json')
@@ -86,6 +87,13 @@ def _load_raw() -> list:
     return []
 
 
+def _prune(entries: list, now: int) -> list:
+    """丢掉超出保留期的记录。"""
+    cutoff = now - RETENTION_S
+    return [e for e in entries
+            if not isinstance(e.get('ts'), (int, float)) or e['ts'] >= cutoff]
+
+
 def _atomic_write(entries: list) -> None:
     """临时文件 + os.replace 原子落盘(同 page_config._atomic_write)。"""
     os.makedirs(AUDIT_DIR, exist_ok=True)
@@ -103,17 +111,18 @@ def record(cat: str, action: str, detail: str = '',
     返回即已持久化(重启入口靠这一点保证 os.execv 前落盘)。
     """
     try:
+        now = int(time.time())
         with _lock:
             entries = _load_raw()
             entries.append({
-                'ts': int(time.time()),
+                'ts': now,
                 'cat': str(cat),
                 'action': str(action),
                 'detail': str(detail)[:500],
                 'ok': bool(ok),
                 'src': str(src),
             })
-            _atomic_write(entries[-MAX_ENTRIES:])
+            _atomic_write(_prune(entries, now))
     except Exception as e:
         log.warning(f'[audit] 记录失败(不影响业务): {e}')
 

@@ -6,7 +6,7 @@
  *   · 空集 = 不过滤,显示全部(「全部」chip 呈激活态)
  *   · 点类别 chip 切换其选中状态,选中一个或多个 = 显示所选类别的并集
  *   · 点「全部」清空选中集回到全显
- * 纯客户端过滤(≤500 条),切换即时重渲染;状态不持久化,刷新页面回到全显。
+ * 纯客户端过滤(一个月的量级),切换即时重渲染;状态不持久化,刷新页面回到全显。
  */
 
 const AUDIT_LIST_KEY = '__lgtbot_audit_list';
@@ -68,16 +68,13 @@ function auditSrcBadgeClass(src) {
 /* ──── 渲染:状态卡 ──── */
 function auditApplyStatus(data) {
   document.getElementById('audit-path').textContent = data.audit_path || '—';
-  const max = data.max_entries || 500;
-  const count = data.count || 0;
-  document.getElementById('audit-count').textContent = count;
-  document.getElementById('audit-count-sub').textContent = '上限 ' + max + ' 条 · 滚动淘汰最旧';
+  const days = data.retention_days || 30;
+  document.getElementById('audit-count').textContent = data.count || 0;
+  document.getElementById('audit-count-sub').textContent = '保留最近 ' + days + ' 天';
   document.getElementById('audit-oldest').textContent =
     data.oldest_ts ? auditFmtRelative(data.oldest_ts) : '（暂无记录）';
   document.getElementById('audit-oldest-sub').textContent =
-    data.oldest_ts
-      ? (count >= max ? '更早的记录已滚动淘汰' : auditFmtTime(data.oldest_ts))
-      : '状态变更操作触发后自动记录';
+    data.oldest_ts ? auditFmtTime(data.oldest_ts) : '状态变更操作触发后自动记录';
   document.getElementById('audit-size').textContent = auditFmtBytes(data.size_bytes || 0);
 }
 

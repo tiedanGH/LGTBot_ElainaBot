@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""audit 模块测试 —— 落盘 / 排序 / 500 截断 / 损坏容错 / 静默失败 / 并发。
+"""audit 模块测试 —— 落盘 / 排序 / 保留期清理 / 损坏容错 / 静默失败 / 并发。
 
 被测重点(对应 plan):
   · record() 原子落盘,字段类型正确,detail 截 500 字符
   · 文件内正序存储,get_entries() 新 → 旧
-  · MAX_ENTRIES 滚动淘汰最旧
+  · 超过保留期的记录在下次写入时清理,条数本身不设上限
   · 损坏文件(非法 JSON / 根非 list)→ 改名 .corrupt_* 留证 + 从空续记,不抛
   · 写盘失败时 record() 静默(永不影响业务)
   · 中文 / emoji 往返无损;多线程并发不死锁不丢条
@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import threading
+import time
 
 import pytest
 
@@ -74,24 +75,62 @@ def test_file_stores_oldest_first_and_get_entries_newest_first():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 3. MAX_ENTRIES 滚动淘汰
+# 3. 保留期清理
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_cap_evicts_oldest_beyond_max_entries():
-    # 直接预置 519 条(逐条 record 会做 519 次全量重写,没必要),再 record 1 条
-    os.makedirs(audit.AUDIT_DIR, exist_ok=True)
-    seed = [{'ts': i, 'cat': 'cache', 'action': f'a{i}', 'detail': '',
-             'ok': True, 'src': '面板'} for i in range(519)]
-    with open(audit.AUDIT_PATH, 'w', encoding='utf-8') as f:
-        json.dump(seed, f, ensure_ascii=False)
+def test_retention_window_is_one_month():
+    """★ 需求就是「保留一个月」—— 其余用例全按 RETENTION_S 相对表达,常量本身被顺手调走时只有这里能发现。"""
+    assert audit.RETENTION_DAYS == 30
+    assert audit.RETENTION_S == 30 * 86400
 
-    audit.record('cache', 'a519')
+
+def _seed(entries: list) -> None:
+    """直接预置文件(逐条 record 会做 N 次全量重写,没必要)。"""
+    os.makedirs(audit.AUDIT_DIR, exist_ok=True)
+    with open(audit.AUDIT_PATH, 'w', encoding='utf-8') as f:
+        json.dump(entries, f, ensure_ascii=False)
+
+
+def _entry(ts: int, action: str) -> dict:
+    return {'ts': ts, 'cat': 'cache', 'action': action, 'detail': '',
+            'ok': True, 'src': '面板'}
+
+
+def test_records_past_the_retention_window_are_dropped_on_the_next_write():
+    now = int(time.time())
+    _seed([_entry(now - audit.RETENTION_S - 1, '一个月零一秒前'),
+           _entry(now - audit.RETENTION_S, '正好一个月前'),
+           _entry(now - 86400, '昨天')])
+
+    audit.record('cache', '刚刚')
+
+    # 边界那条留下:清理的是「超过」保留期的,不是「到达」
+    assert [e['action'] for e in _read_file()] == ['正好一个月前', '昨天', '刚刚']
+
+
+def test_entry_count_itself_is_not_capped():
+    """★ 条数无上限 —— 只要在保留期内,多少条都留着。"""
+    now = int(time.time())
+    _seed([_entry(now - 3600, f'a{i}') for i in range(2000)])
+
+    audit.record('cache', 'a2000')
 
     entries = _read_file()
-    assert len(entries) == audit.MAX_ENTRIES == 500
-    assert entries[0]['action'] == 'a20'     # 最旧 20 条被淘汰
-    assert entries[-1]['action'] == 'a519'
+    assert len(entries) == 2001
+    assert entries[0]['action'] == 'a0' and entries[-1]['action'] == 'a2000'
+
+
+def test_entries_without_a_usable_timestamp_are_never_dropped():
+    """★ 审计流宁可留一条日期不明的记录 —— 时间解析不出来就删掉,等于给了「把 ts 写坏就能抹掉记录」这条自毁路径。"""
+    now = int(time.time())
+    _seed([{'cat': 'cache', 'action': '没有 ts', 'detail': '', 'ok': True, 'src': '面板'},
+           _entry('不是数字', 'ts 是字符串'),
+           _entry(now - audit.RETENTION_S - 1, '真的过期了')])
+
+    audit.record('cache', '刚刚')
+
+    assert [e['action'] for e in _read_file()] == ['没有 ts', 'ts 是字符串', '刚刚']
 
 
 # ─────────────────────────────────────────────────────────────────────────

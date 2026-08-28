@@ -51,7 +51,7 @@ def test_audit_payload_mirrors_module_state(tmp_path, monkeypatch):
 
     p = page_audit._payload()
     assert p['count'] == 2
-    assert p['max_entries'] == audit.MAX_ENTRIES
+    assert p['retention_days'] == audit.RETENTION_DAYS
     assert p['size_bytes'] > 0 and p['oldest_ts'] is not None
     # 新 → 旧
     assert [e['action'] for e in p['entries']] == ['重启 LGTBot', '增量编译']
