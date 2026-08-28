@@ -751,7 +751,8 @@ _QUEUED_KEY = 'scan_queued'
 _SCAN_STOP = 'nickname_review_scan_stop'
 
 
-_total_cache: list = [0.0, 0]        # [取值时刻, 值]
+# [取值时刻, 值]。哨兵不能用 0:单调钟从开机起算,机器刚起来的头 60 秒分母一直是 0
+_total_cache: list = [float('-inf'), 0]
 _TOTAL_TTL_S = 60.0
 
 

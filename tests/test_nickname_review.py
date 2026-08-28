@@ -13,6 +13,9 @@ import pytest
 
 from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
 
+# 模块加载那一刻的「从没取过」哨兵。scan_total 就地改写这个 list,必须在任何用例跑之前抓一份。
+_TOTAL_CACHE_DEFAULT = list(nr._total_cache)
+
 
 @pytest.fixture(autouse=True)
 def _fresh_db(tmp_path, monkeypatch):
@@ -27,6 +30,7 @@ def _fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(nr, '_loaded', False)
     monkeypatch.setattr(nr, 'ENABLED', True)
     monkeypatch.setattr(nr, 'FAIL_CLOSED', False)
+    monkeypatch.setattr(nr, '_total_cache', list(_TOTAL_CACHE_DEFAULT))
     boot._get_persistent().pop(nr._SCAN_STOP, None)
     boot._get_persistent().pop(nr._SCAN_KEY, None)
     nr._flagged.clear()
@@ -345,10 +349,8 @@ def test_call_counts_track_today_and_total():
     assert nr.call_counts() == {'today': 1, 'total': 4}
 
 
-def test_scan_total_is_cached_against_repeated_full_counts(monkeypatch):
-    """★ COUNT(*) 在大表上是全表扫,而面板扫描期间每 5s 轮询一次进度 ——
-    不缓存的话光是显示个分母就能把 CPU 吃掉。"""
-    monkeypatch.setattr(nr, '_total_cache', [0.0, 0])
+def _fake_count(monkeypatch, value):
+    """把 scan_total 的 COUNT(*) 换成定值,返回记录到的 SQL 列表。"""
     counted = []
 
     class _FakeConn:
@@ -357,17 +359,32 @@ def test_scan_total_is_cached_against_repeated_full_counts(monkeypatch):
             return self
 
         def fetchone(self):
-            return (4242,)
+            return (value,)
 
         def close(self):
             pass
 
     monkeypatch.setattr(nr.os.path, 'isfile', lambda p: True)
     monkeypatch.setattr(nr.sqlite3, 'connect', lambda *a, **k: _FakeConn())
+    return counted
+
+
+def test_scan_total_is_cached_against_repeated_full_counts(monkeypatch):
+    """★ COUNT(*) 在大表上是全表扫,而面板扫描期间每 5s 轮询一次进度 ——
+    不缓存的话光是显示个分母就能把 CPU 吃掉。"""
+    counted = _fake_count(monkeypatch, 4242)
     assert nr.scan_total() == 4242
     assert nr.scan_total() == 4242
     assert nr.scan_total() == 4242
     assert len(counted) == 1, f'重复调用应命中缓存，实际查了 {len(counted)} 次'
+
+
+def test_scan_total_still_counts_in_the_first_minute_after_boot(monkeypatch):
+    """★ monotonic 的起点是开机 —— 哨兵若用 0,机器刚起来的头 60 秒里「从没取过」会被当成「刚取过」,面板分母一直是 0。"""
+    counted = _fake_count(monkeypatch, 777)
+    monkeypatch.setattr(nr.time, 'monotonic', lambda: 5.0)
+    assert nr.scan_total() == 777
+    assert counted == ['SELECT COUNT(*) FROM user']
 
 
 def test_scan_refuses_to_start_without_switch_or_llm(monkeypatch):
