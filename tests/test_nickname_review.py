@@ -702,3 +702,50 @@ async def test_queued_counts_only_batches_that_were_actually_reviewed(monkeypatc
     st = nr.scan_status()
     assert st['resolved'] == 4                 # 四个人都取到了昵称
     assert st['queued'] == 2                   # 只有第一批真的审过
+
+
+async def test_failed_batch_splits_in_half_until_it_goes_through(monkeypatch):
+    """★ 大批失败、小批能过是中转站的常态(报错甚至与请求内容无关)。整批失败时
+    对半拆重试,能过的部分不该被一个坏的大请求拖着一起丢。"""
+    seen = []
+
+    async def only_small(names):
+        seen.append(len(names))
+        return None if len(names) > 2 else [False] * len(names)
+
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'review_names', only_small)
+    batch = {f'k{i}': f'名字{i}' for i in range(8)}
+    assert await nr._review_and_store(batch) is True
+    assert seen[0] == 8                          # 先整批试
+    assert max(seen[1:]) <= 4                    # 失败后往下拆
+    for k in batch:
+        assert nr.get_verdict(k) is not None     # 八条全部落库
+
+
+async def test_split_stops_at_a_single_name(monkeypatch):
+    """拆到单条仍失败就是真的不可用,不再往下拆(也没得拆)。"""
+    seen = []
+
+    async def always_fail(names):
+        seen.append(len(names))
+        return None
+
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'review_names', always_fail)
+    assert await nr._review_and_store({'a': 'A', 'b': 'B'}) is False
+    assert seen == [2, 1, 1]
+    assert nr.get_verdict('a') is None and nr.get_verdict('b') is None
+
+
+async def test_requeue_drops_names_the_split_already_settled(monkeypatch):
+    """拆批重试审掉的那部分不该被退回队列 —— 否则下一轮又白花一次调用。"""
+    async def only_small(names):
+        return None if len(names) > 1 else [False] * len(names)
+
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'review_names', only_small)
+    monkeypatch.setattr(nr, 'BATCH_SIZE', 4)
+    nr._queue.update({f'k{i}': f'名字{i}' for i in range(4)})
+    await nr._flush_loop(0.0)
+    assert not nr._queue                       # 四条最终都拆到单条审掉了

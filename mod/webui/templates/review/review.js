@@ -163,6 +163,18 @@ function reviewApplyScan(scan) {
     '　取到昵称 ' + (scan.resolved || 0) +
     '　新送审 ' + (scan.queued || 0);
 
+  /* 最近一次送审失败原样显示:400 / 模型不存在这类错误重试多少次都一样,
+     只报「中央 AI 不可用」的话看不出要去改模型选择 */
+  const errEl = document.getElementById('review-scan-error');
+  const err = scan.last_error || {};
+  /* 指定了模型时中央不做故障切换,这类错误只能靠改选择解决,把话说到位 */
+  const hint = (err.permanent && (reviewData || {}).model)
+    ? '　指定模型时中央不会故障切换，请在上方改选接口 / 模型。' : '';
+  errEl.textContent = err.message
+    ? ((err.permanent ? '⚠️ 需要处理：' : '⚠️ ') + err.message + hint)
+    : '';
+  errEl.className = 'review-scan-error' + (err.permanent ? ' permanent' : '');
+
   /* 扫描进行中才轮询 */
   if (scan.running && reviewScanTimer === null) {
     reviewScanTimer = setInterval(reviewRefresh, 5000);

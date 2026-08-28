@@ -75,6 +75,7 @@ _queue: dict = _p[_QUEUE_KEY]
 _flagged: set = _p[_FLAGGED_KEY]
 
 _seen_safe: dict = {}        # L1(纯进程内,丢了重查即可)
+_last_error: dict = {}       # 最近一次送审失败,面板据此告诉用户到底哪里不对
 _conn_lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 _loaded = False              # L0 是否已从 DB 载入
@@ -472,7 +473,9 @@ async def _flush_loop(delay: float) -> None:
             for key in list(_queue)[:max(1, BATCH_SIZE)]:
                 batch[key] = _queue.pop(key)
             if not await _review_and_store(batch):
-                _queue.update(batch)
+                # 拆批重试可能已经审掉一部分,只退回真的还没结论的
+                _queue.update({k: v for k, v in batch.items()
+                               if get_verdict(k) is None})
                 return
     except asyncio.CancelledError:
         raise
@@ -485,18 +488,37 @@ async def _review_and_store(batch: dict) -> bool:
     if not batch:
         return True
     if get_service() is None:
+        _note_error(llm_status()['message'])
         log.info(f'[昵称审核] 中央 AI 不可用，{len(batch)} 条顺延')
         return False
-    _count_call()
+    return await _review_chunk(batch)
+
+
+async def _review_chunk(batch: dict) -> bool:
+    """送审一批并落库;整批失败时对半拆开重试。
+
+    中转站对大请求的报错常常与请求内容无关(甚至谎报成模型不存在),同一个模型
+    小批量却能过。拆到单条仍失败才是真的不可用 —— 那时错误已被判为永久性,
+    不再往下拆。
+    """
     keys = list(batch)
+    if not keys:
+        return True
+    _count_call()
     verdicts = await review_names([batch[k] for k in keys])
-    if verdicts is None:
+    if verdicts is not None:
+        for key, flagged in zip(keys, verdicts):
+            put_verdict(key, batch[key], flagged, SRC_LLM)
+        hit = sum(1 for v in verdicts if v)
+        log.info(f'[昵称审核] 审完 {len(keys)} 个昵称,命中 {hit} 个')
+        return True
+    if len(keys) <= 1:
         return False
-    for key, flagged in zip(keys, verdicts):
-        put_verdict(key, batch[key], flagged, SRC_LLM)
-    hit = sum(1 for v in verdicts if v)
-    log.info(f'[昵称审核] 审完 {len(keys)} 个昵称,命中 {hit} 个')
-    return True
+    half = len(keys) // 2
+    log.info(f'[昵称审核] {len(keys)} 条整批失败，拆成 {half} + {len(keys) - half} 重试')
+    first = await _review_chunk({k: batch[k] for k in keys[:half]})
+    second = await _review_chunk({k: batch[k] for k in keys[half:]})
+    return first and second
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -606,6 +628,31 @@ def resolve_selection() -> tuple:
     return '', ''
 
 
+# 这些错误重试多少次都一样,得让用户去改选择而不是干等
+_PERMANENT_MARKERS = (
+    'model_not_found', 'invalid_request', 'unknown provider', '400',
+    '401', '403', 'unauthorized', 'invalid api key', 'permission',
+    'context_length_exceeded', '没有可用的 ai 接口', 'ai llm 服务未启用',
+)
+
+
+def _is_permanent(text: str) -> bool:
+    low = str(text or '').casefold()
+    return any(m in low for m in _PERMANENT_MARKERS)
+
+
+def last_error() -> dict:
+    """最近一次送审失败:``{'message', 'permanent', 'ts'}``;没有失败过返回 {}。"""
+    return dict(_last_error)
+
+
+def _note_error(text: str) -> None:
+    _last_error.clear()
+    if text:
+        _last_error.update(message=str(text)[:300], permanent=_is_permanent(text),
+                           ts=int(time.time()))
+
+
 def llm_status() -> dict:
     """中央 LLM 可用性 —— 面板据此决定总开关能不能打开。"""
     service = get_service()
@@ -651,7 +698,7 @@ async def review_names(names: list) -> list | None:
             provider_id=provider_id,
             model=model,
             temperature=0,
-            max_tokens=max(64, len(payload) * 4 + 32),
+            max_tokens=max(96, len(payload) * 6 + 64),
             consumer_plugin=CONSUMER,
             # 每批一个唯一 session:同 session_id 的并发调用会被中央互相 cancel
             session_id=f'{CONSUMER}:{time.time_ns()}',
@@ -659,13 +706,18 @@ async def review_names(names: list) -> list | None:
             prepare_context=False,
         )
     except Exception as e:
-        log.warning(f'[昵称审核] 调用中央 LLM 失败: {str(e)[:160]}')
+        _note_error(str(e))
+        hint = '（模型或接口不可用，请在「审核模型」里重新选择）' if _is_permanent(str(e)) else ''
+        log.warning(f'[昵称审核] 调用中央 LLM 失败{hint}: {str(e)[:160]}')
         return None
     arr = _extract_array(str((result or {}).get('text') or ''))
     if arr is None or len(arr) != len(payload):
-        log.warning(f'[昵称审核] 模型返回不合法(期望 {len(payload)} 项,'
-                    f'实得 {len(arr) if arr is not None else "非数组"}),本批作废')
+        msg = (f'模型返回不合法：期望 {len(payload)} 项，'
+               f'实得 {len(arr) if arr is not None else "非数组"}')
+        _note_error(msg)
+        log.warning(f'[昵称审核] {msg}，本批作废')
         return None
+    _note_error('')
     return [str(v).strip() in ('1', 'true', 'True') for v in arr]
 
 
@@ -748,6 +800,7 @@ def scan_status() -> dict:
         'total': scan_total(),
         'calls_today': calls['today'],
         'calls_total': calls['total'],
+        'last_error': last_error(),
     }
 
 
@@ -836,7 +889,8 @@ async def _scan_loop() -> None:
                 chunk = {k: batch[k] for k in keys[i:i + max(1, BATCH_SIZE)]}
                 if not await _review_and_store(chunk):
                     _flush_counters()
-                    log.info('[昵称审核] 批量扫描暂停：中央 AI 不可用')
+                    err = last_error().get('message') or '中央 AI 不可用'
+                    log.info(f'[昵称审核] 批量扫描暂停：{err}')
                     return
                 counters[_QUEUED_KEY] += len(chunk)
             _flush_counters()
