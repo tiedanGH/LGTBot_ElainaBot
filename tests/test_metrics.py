@@ -16,6 +16,7 @@ import os
 import shutil
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -521,3 +522,201 @@ def test_game_stats_missing_table_partial():
     assert g['today_matches'] == 1
     assert g['lgtbot_users'] is None
     assert any('lgtbot_users' in e for e in g['errors'])
+
+# ─────────────────────────────────────────────────────────────────────────
+# 不计分对局账本 —— 引擎不写库,合并进今日口径
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _unranked_file() -> dict:
+    with open(metrics.UNRANKED_PATH, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _day(days_ago: int = 0) -> str:
+    return (datetime.now() - timedelta(days=days_ago)).strftime('%Y-%m-%d')
+
+
+def _mid_today() -> float:
+    """今天 00:00 之后、现在之前的一个时刻(午夜刚过时退回 00:00 本身)。"""
+    now = datetime.now()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (start + (now - start) / 2).timestamp()
+
+
+def test_unranked_ledger_keeps_only_two_days():
+    """★ 只留今天与昨天 —— 昨天仅为「昨日同时段」对比而存在,更早的没有消费方。
+
+    保留窗口按墙上时钟算:补一条旧记录不能把今天的账本一起清掉,所以这里故意把最旧的一条放在最后写。
+    """
+    now = time.time()
+    for days in (0, 1, 2, 5):
+        metrics.record_unranked_match('五子棋', ['U1', 'U2'], 'G1',
+                                      ts=now - days * 86400)
+    assert sorted(_unranked_file()) == sorted([_day(0), _day(1)])
+    assert not os.path.exists(metrics.UNRANKED_PATH + '.tmp')
+
+
+def test_unranked_entry_keeps_name_players_group_and_time():
+    ts = _mid_today()
+    metrics.record_unranked_match('大富翁', ['U1', 'U2'], 'G7', ts=ts)
+    row = _unranked_file()[_day(0)][0]
+    assert row == {'ts': int(ts), 'game': '大富翁',
+                   'players': ['U1', 'U2'], 'gid': 'G7'}
+
+
+def test_unranked_dedups_the_private_broadcast_fanout():
+    """★ 私聊对局的结算广播按参与者逐个私发,同一局会到达多次 —— 不去重的话一局记成 N 局。"""
+    ts = _mid_today()
+    for _ in range(3):
+        metrics.record_unranked_match('大富翁', ['U1', 'U2'], '', ts=ts)
+    assert len(_unranked_file()[_day(0)]) == 1
+    # 间隔够远 = 真的第二局
+    metrics.record_unranked_match('大富翁', ['U1', 'U2'], '',
+                                  ts=ts + metrics._UNRANKED_DEDUP_S + 1)
+    assert len(_unranked_file()[_day(0)]) == 2
+
+
+def test_unranked_dedup_does_not_swallow_a_different_match():
+    ts = _mid_today()
+    metrics.record_unranked_match('大富翁', ['U1', 'U2'], 'G1', ts=ts)
+    metrics.record_unranked_match('大富翁', ['U1', 'U3'], 'G1', ts=ts)   # 换人
+    metrics.record_unranked_match('五子棋', ['U1', 'U2'], 'G1', ts=ts)   # 换游戏
+    metrics.record_unranked_match('大富翁', ['U1', 'U2'], 'G2', ts=ts)   # 换群
+    assert len(_unranked_file()[_day(0)]) == 4
+
+
+def test_unranked_record_swallows_write_failure(monkeypatch):
+    """统计失败绝不影响发消息 —— 这条挂在引擎线程的发送路径上。"""
+    monkeypatch.setattr(metrics, '_unranked_write',
+                        lambda d: (_ for _ in ()).throw(OSError('disk full')))
+    metrics.record_unranked_match('五子棋', ['U1'], 'G1')       # 不抛即通过
+
+
+def test_unranked_folds_into_today_counts_with_dedup():
+    """★ 玩家 / 群聊要和库里的集合**取并集**:同一个人今天既打了计分局也打了不计分局,只能算一个人。"""
+    _make_db([('五子棋', 0, 'G1', ['U1', 'U2'])])
+    ts = _mid_today()
+    metrics.record_unranked_match('大富翁', ['U2', 'U3'], 'G1', ts=ts)   # U2/G1 重合
+    metrics.record_unranked_match('大富翁', ['U4'], 'G9', ts=ts)
+
+    g = metrics.query_game_stats()
+    assert g['today_matches'] == 3                  # 1 计分 + 2 不计分
+    assert g['today_players'] == 4                  # U1/U2/U3/U4
+    assert g['today_groups'] == 2                   # G1/G9
+
+
+def test_unranked_private_match_adds_no_group():
+    _make_db([('五子棋', 0, 'G1', ['U1'])])
+    metrics.record_unranked_match('大富翁', ['U2'], '', ts=_mid_today())
+    g = metrics.query_game_stats()
+    assert g['today_matches'] == 2
+    assert g['today_groups'] == 1                   # 私聊局无群,同库里 NULL 口径
+
+
+def test_unranked_folds_into_yesterday_same_span():
+    """昨日账本只服务「昨日同时段」的涨跌对比:窗口外的不计入。"""
+    now = datetime.now()
+    yday_same = now - timedelta(days=1)
+    yday_start = yday_same.replace(hour=0, minute=0, second=0, microsecond=0)
+    if (yday_same - yday_start).total_seconds() < 4:
+        pytest.skip('恰在午夜,同时段窗口为空')
+    _make_db([('五子棋', 0, 'G1', ['U1'])])
+    inside = (yday_start + (yday_same - yday_start) / 2).timestamp()
+    metrics.record_unranked_match('大富翁', ['U8'], 'G8', ts=inside)
+    metrics.record_unranked_match('大富翁', ['U9'], 'G9',
+                                  ts=yday_same.timestamp() + 1)      # 晚于同时段
+
+    g = metrics.query_game_stats()
+    assert g['yesterday_matches_same_span'] == 1
+    assert g['yesterday_players_same_span'] == 1
+    assert g['yesterday_groups_same_span'] == 1
+    # 窗口下界:昨天的账本不能漏进今日口径
+    assert g['today_matches'] == 1
+    assert g['today_players'] == 1
+    assert g['today_groups'] == 1
+
+
+def test_unranked_tag_only_when_every_match_is_unranked():
+    """★ 标签的判定口径:该游戏今天**一局计分的都没有**才打标;既有计分又有不计分的只汇总,不打标。"""
+    _make_db([('五子棋', 0, 'G1', ['U1']),
+              ('大富翁', 0, 'G1', ['U1'])])
+    ts = _mid_today()
+    metrics.record_unranked_match('大富翁', ['U2'], 'G1', ts=ts)          # 混合
+    metrics.record_unranked_match('斗地主', ['U2', 'U3'], 'G1', ts=ts)    # 纯不计分
+    metrics.record_unranked_match('斗地主', ['U2', 'U4'], 'G1', ts=ts + 60)
+
+    g = metrics.query_game_stats()
+    tags = {t['game_name']: (t['count'], t['unranked'])
+            for t in g['top_games_today']}
+    assert tags == {'斗地主': (2, True), '大富翁': (2, False), '五子棋': (1, False)}
+
+
+def test_unranked_boards_merge_before_truncating_to_ten():
+    """★ 先合并再排序取 TOP10 —— 只合并两边各自的前十,会漏掉「库里排 11、不计分局很多」的游戏。"""
+    _make_db([('计分%02d' % i, 0, 'G1', ['U%d' % i]) for i in range(1, 12)])
+    ts = _mid_today()
+    for i in range(5):
+        metrics.record_unranked_match('计分11', ['UX'], 'G1', ts=ts + i * 60)
+
+    g = metrics.query_game_stats()
+    top = {t['game_name']: t['count'] for t in g['top_games_today']}
+    assert len(top) == 10
+    assert top['计分11'] == 6                        # 1 计分 + 5 不计分,升到榜首
+    assert g['top_games_today'][0]['game_name'] == '计分11'
+    assert g['top_players_today'][0]['count'] == 5   # UX 只有不计分局,照样上榜
+
+
+def test_unranked_stays_out_of_history_and_trend():
+    """★ 历史窗口查询与近 10 日只读数据库 —— 账本只有两天,混进 10 天的序列
+    会让曲线和 prev10 的对比同时失真;按需求历史视图也只显示计分游戏。"""
+    _make_db([('五子棋', 0, 'G1', ['U1']),
+              ('五子棋', 10, 'G1', ['U2'])])
+    metrics.record_unranked_match('大富翁', ['U3'], 'G1', ts=_mid_today())
+
+    g = metrics.query_game_stats()
+    assert g['today_matches'] == 2                       # 今日口径合并了
+    assert sum(t['count'] for t in g['trend_10d']) == 1  # 趋势没有
+    assert g['prev10_matches'] == 1
+    assert g['lgtbot_matches'] == 2                      # 累计也没有
+    assert [t['count'] for t in g['top_games_week']] == [1]
+    today = metrics.query_game_stats_for_date(datetime.now().strftime('%Y-%m-%d'))
+    assert today['day_matches'] == 1                     # 历史视图只有计分局
+
+
+def test_unranked_not_added_when_the_db_query_failed():
+    """库里那半边查不出来时不补 —— 只报不计分的一半数字更误导。"""
+    conn = sqlite3.connect(boot.DB_PATH)
+    conn.execute(_SCHEMA[0])                             # 只有 match 表
+    conn.commit()
+    conn.close()
+    metrics.record_unranked_match('大富翁', ['U1'], 'G1', ts=_mid_today())
+
+    g = metrics.query_game_stats()
+    assert g['today_matches'] == 1                       # match 表查得到 → 合并
+    assert g['today_players'] is None                    # user_with_match 缺表
+    assert any('today_players' in e for e in g['errors'])
+
+
+def test_unranked_not_added_when_the_match_table_is_missing():
+    """★ 对局数那一项也一样:库里查不出来就保持 None,补上不计分的那一半
+    会让面板显示一个只统计了一小半的数字,比显示「—」更误导。"""
+    conn = sqlite3.connect(boot.DB_PATH)
+    conn.execute(_SCHEMA[2])                             # 只有 user 表
+    conn.commit()
+    conn.close()
+    metrics.record_unranked_match('大富翁', ['U1'], 'G1', ts=_mid_today())
+
+    g = metrics.query_game_stats()
+    assert g['available'] is True
+    assert g['today_matches'] is None
+    assert g['yesterday_matches_same_span'] is None
+
+
+def test_unranked_corrupt_ledger_renamed_and_recovers():
+    os.makedirs(metrics.METRICS_DIR, exist_ok=True)
+    with open(metrics.UNRANKED_PATH, 'w', encoding='utf-8') as f:
+        f.write('{ not json')
+    metrics.record_unranked_match('五子棋', ['U1'], 'G1')
+    assert glob.glob(metrics.UNRANKED_PATH + '.corrupt_*')
+    assert len(_unranked_file()[_day(0)]) == 1

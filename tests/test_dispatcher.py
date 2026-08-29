@@ -1135,6 +1135,31 @@ async def test_stats_command_text_shows_same_span_delta(monkeypatch):
     assert '今日对局: 23 局' in txt2 and '（↑' not in txt2 and '（↓' not in txt2
 
 
+async def test_stats_text_fallback_has_no_unranked_tag(monkeypatch):
+    """★ 「不计分」标签只画在图片里。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
+    mark_push_group('G1')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 3,
+                                 'today_players': 2, 'today_groups': 1,
+                                 'top_games_today': [
+                                     {'game_name': '斗地主', 'count': 2,
+                                      'unranked': True},
+                                     {'game_name': '五子棋', 'count': 1,
+                                      'unranked': False}],
+                                 'top_players_today': [], 'trend_10d': []})
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    txt = ev.reply.await_args.args[0]
+    assert '斗地主 (2局)' in txt and '五子棋 (1局)' in txt
+    assert '不计分' not in txt
+
+
 def test_push_quota_view_near_limit_threshold():
     """额度用量达 85% 阈值 → near_limit(黄色警告);未到不告警;用满只标
     exhausted(红)不再标 near_limit,避免两种状态同时成立。"""

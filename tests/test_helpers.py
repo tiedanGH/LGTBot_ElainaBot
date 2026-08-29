@@ -600,3 +600,12 @@ def test_run_coro_blocking_swallows_coroutine_exception():
         loop.call_soon_threadsafe(loop.stop)
         t.join(timeout=5)
         loop.close()
+
+
+def test_mentioned_ids_extracts_in_order_without_duplicates():
+    """结算广播里电脑玩家渲染成纯文本,不带 <@…>,所以抽出来的天然只有真人。"""
+    text = ('游戏结束，公布分数：\n[0号：<@U1>] 3\n[1号：<@U2>] -3\n'
+            '[2号：机器人0号] 0\n[3号：<@U1>] 1')
+    assert helpers.mentioned_ids(text) == ['U1', 'U2']
+    assert helpers.mentioned_ids('没有提及') == []
+    assert helpers.mentioned_ids('') == []

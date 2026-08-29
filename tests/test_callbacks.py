@@ -1065,3 +1065,76 @@ async def test_restart_notice_escapes_reason(monkeypatch):
     mark_push_group('GE')
     await callbacks.notify_restart_rooms('*紧急*')
     assert r'\*紧急\*' in sender.send_to_group.await_args.args[1]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 不计分对局的补记 —— 引擎不写库,靠结算正文补账
+# ─────────────────────────────────────────────────────────────────────────
+
+_SETTLE_UNRANKED = ('游戏结束，公布分数：\n'
+                    '[0号：<@U1>] 3\n[1号：<@U2>] -3\n[2号：机器人0号] 0\n'
+                    '感谢诸位参与！\n\n游戏结果不记录：因为该游戏为非正式游戏')
+_SETTLE_SOLO = ('游戏结束，公布分数：\n[0号：<@U1>] 3\n'
+                '感谢诸位参与！\n\n游戏结果不记录：因为玩家数小于 2')
+
+
+@pytest.fixture
+def _recorded(monkeypatch):
+    """截住 metrics.record_unranked_match,只看调了什么。"""
+    calls = []
+    monkeypatch.setattr(callbacks.metrics, 'record_unranked_match',
+                        lambda *a, **k: calls.append(a))
+    callbacks._pending_unranked.clear()
+    yield calls
+    callbacks._pending_unranked.clear()
+
+
+def test_unranked_settlement_is_recorded_with_game_players_and_group(_recorded):
+    """★ 游戏名只有 cb_match_event 拿得到(它自己把 current_game 清了),原因与
+    参与者只有正文里有 —— 两边合起来才凑得出一条账。电脑玩家不带 @,天然不入。"""
+    state.current_game['g:88'] = '决胜二十一点'
+    callbacks.cb_match_event('88', False, 'game_over_unrecorded', '')
+    callbacks.cb_send_text_message('88', False, _SETTLE_UNRANKED)
+
+    assert _recorded == [('决胜二十一点', ['U1', 'U2'], '88')]
+
+
+def test_unranked_private_match_records_empty_group(_recorded):
+    state.current_game['u:9'] = '大富翁'
+    callbacks.cb_match_event('9', True, 'game_over_unrecorded', '')
+    callbacks.cb_send_text_message('9', True, _SETTLE_UNRANKED)
+
+    assert _recorded == [('大富翁', ['U1', 'U2'], '')]
+
+
+def test_solo_and_recorded_settlements_are_not_counted(_recorded):
+    """★ 「不记录」还有单机局与未连库两种原因,它们不是不计分,不能混进来。"""
+    state.current_game['g:1'] = '大富翁'
+    callbacks.cb_match_event('1', False, 'game_over_unrecorded', '')
+    callbacks.cb_send_text_message('1', False, _SETTLE_SOLO)
+
+    state.current_game['g:2'] = '大富翁'
+    callbacks.cb_match_event('2', False, 'game_over', '')
+    assert 'g:2' not in callbacks._pending_unranked      # 计分局压根不寄存
+    callbacks.cb_send_text_message('2', False, '游戏结束，公布分数：\n[0号：<@U1>] 3')
+
+    assert _recorded == []
+
+
+def test_unranked_stash_does_not_leak_into_the_next_message(_recorded):
+    """★ 寄存项只对紧随其后的那条结算文本有效 —— 不无条件 pop 的话,下一条普通广播会被当成这一局的结算。"""
+    state.current_game['g:5'] = '大富翁'
+    callbacks.cb_match_event('5', False, 'game_over_unrecorded', '')
+    callbacks.cb_send_text_message('5', False, '这不是结算广播')
+    callbacks.cb_send_text_message('5', False, _SETTLE_UNRANKED)
+
+    assert _recorded == []
+    assert 'g:5' not in callbacks._pending_unranked
+
+
+def test_unranked_without_known_game_still_counts_the_match(_recorded):
+    """游戏名未知也要记:这一局确实发生了,只是上不了游戏榜。"""
+    callbacks.cb_match_event('6', False, 'game_over_unrecorded', '')
+    callbacks.cb_send_text_message('6', False, _SETTLE_UNRANKED)
+
+    assert _recorded == [('', ['U1', 'U2'], '6')]

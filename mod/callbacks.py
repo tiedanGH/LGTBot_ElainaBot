@@ -780,6 +780,13 @@ _DM_LIMITED_GAMES: frozenset = frozenset({
 # 通过 cb_send_text/image 发完后,在同一把 per-target Lock 内调度提示发送。
 _pending_dm_warn_keys: set[str] = set()
 
+# 不计分对局的补记 —— 引擎不把它们写进 lgtbot.db,今日统计因此看不到。
+# 「不记录」的另两种原因(单机局 / 未连库)不属于不计分,marker 取得足够窄把它们排除在外。
+_UNRANKED_MARKER = '游戏结果不记录：因为该游戏为非正式游戏'
+# 原因与参与者只在结算正文里,而 cb_match_event 拿不到正文;游戏名反过来只在 cb_match_event 拿得到。
+# 所以在这里寄存,由紧随其后的那条结算文本取走。
+_pending_unranked: dict[str, str] = {}
+
 # 老文案 —— 白名单模式(正式环境主动私信被拒,发出去会失败)下的受限警告
 _DM_WARNING_TEXT_LEGACY = (
     '## ⚠️ 主动私信受限\n'
@@ -1081,9 +1088,11 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         # 结算广播不带 brief(bridge 传来的 game_name 为空),重开按钮的游戏名
         # 从 current_game 回查;pop 取完即清 —— 对局已随结算释放,残留会让之后
         # 的按钮回查到已结束的游戏。「游戏结果不记录」的结算不挂「查看战绩」。
+        game = state.current_game.pop(key, None)
+        if kind == 'game_over_unrecorded':
+            _pending_unranked[key] = game or ''
         btns = buttons.build_game_over_buttons(
-            state.current_game.pop(key, None),
-            include_record=(kind == 'game_over'),
+            game, include_record=(kind == 'game_over'),
         )
         if btns:
             state.pending_buttons[key] = btns
@@ -1192,6 +1201,18 @@ def _force_interrupt_buttons_for(key: str, msg: str):
     return buttons.build_force_interrupt_buttons()
 
 
+def _record_unranked(key: str, target_id: str, is_uid: bool, msg: str) -> None:
+    """把不计分对局补记进 metrics 的临时账本(见 _pending_unranked 段注释)。
+
+    pop 无条件执行:寄存项只对紧随其后的这一条结算文本有效,留着会串到下一局。
+    """
+    game = _pending_unranked.pop(key, None)
+    if game is None or _UNRANKED_MARKER not in msg:
+        return
+    metrics.record_unranked_match(game, helpers.mentioned_ids(msg),
+                                  '' if is_uid else target_id)
+
+
 def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """C++ → Python：发送文本消息（fire-and-forget,不阻塞 C++ 调用线程）
 
@@ -1211,6 +1232,7 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     GIL 保护下读写安全。这里 pop 出来跟着 send task 走。
     """
     key = helpers.target_key(target_id, is_uid)
+    _record_unranked(key, target_id, is_uid, msg)
     extra_buttons = state.pending_buttons.pop(key, None)
     if not extra_buttons:
         # 群管发起的中断投票 → 给「还差 N 人」那条广播挂「强制中断游戏」。

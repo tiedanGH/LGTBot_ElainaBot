@@ -187,7 +187,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── uploader.py          图床上传调度（COS / B站）+ 图片尺寸解析
 │   ├── backup.py            数据备份（创建 / 恢复 / 删除 / 轮转 + 启动自动检查）
 │   ├── audit.py             状态变更操作审计（持久化最近 30 天）
-│   ├── metrics.py           运行指标计数（上传 / 崩溃 / 配额,重启不丢）+ lgtbot.db 统计查询
+│   ├── metrics.py           运行指标计数（上传 / 崩溃 / 配额,重启不丢）+ lgtbot.db 统计查询 + 不计分对局账本
 │   ├── prebuilt.py          预编译包下载 / 校验 / 原子安装 / 本地·预编译切换 + 依赖自检
 │   ├── _prebuilt_swap.py    build_prebuilt 暂存换入:目录被运行中引擎占用时暂存 pending，boot 重启换入
 │   ├── log_attribution.py   类级 monkey-patch ，把本插件 push 的消息在 Web 面板正确归类
@@ -258,7 +258,8 @@ plugins/LGTBot_ElainaBot/
     ├── audit/               操作审计（WebUI「操作审计」标签使用）
     │   └── audit.json       最近 30 天的状态变更记录
     ├── metrics/             运行指标（WebUI「指标面板」标签使用）
-    │   └── metrics.json     上传 / 崩溃 / 配额计数器
+    │   ├── metrics.json     上传 / 崩溃 / 配额计数器
+    │   └── unranked.json    不计分对局的临时账本（引擎不写库，只留今天与昨天）
     ├── review/              昵称审核（WebUI「昵称审核」标签使用）
     │   ├── settings.json    总开关 + 接口 / 模型选择 + 批量条数（面板里改）
     │   └── nickname.db      SQLite：昵称文本 → 审核结论（永久缓存，同一昵称只审一次）

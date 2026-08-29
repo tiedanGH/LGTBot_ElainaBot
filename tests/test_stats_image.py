@@ -511,3 +511,51 @@ async def test_window_view_image_reply_has_the_newline(monkeypatch, _stats_env):
     ev = _fake_event()
     await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, '数据统计总'))
     assert ev.reply.await_args.args[0].startswith('<@USER1>\n![数据统计 ')
+
+
+def test_unranked_tag_is_actually_drawn():
+    """★ 名字短到不会被截断,所以两张图的唯一差别只能是胶囊本身 —— 用长名字比会被「预留位置导致截得更短」混过去。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    base = _sample_stats()
+    base['top_games_today'] = [{'game_name': '斗地主', 'count': 8}]
+    tagged = dict(base, top_games_today=[{'game_name': '斗地主', 'count': 8,
+                                          'unranked': True}])
+    a = stats_image.render_stats_image(tagged, sub_title='x')
+    b = stats_image.render_stats_image(base, sub_title='x')
+    assert a and b and a != b
+    assert uploader.get_image_size(a) == uploader.get_image_size(b)
+
+
+def test_unranked_tag_reserves_room_so_long_names_do_not_overlap_it():
+    """★ 打标的行必须先扣掉胶囊占位再截名字,否则长名会一直画到胶囊底下。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new('RGB', (10, 10)))
+    f = stats_image._font(24)
+    assert stats_image._unranked_tag_w(d) > 0
+
+    long_name = '这个游戏名字特别特别长长到必须被截断'
+    box = 300
+    plain = stats_image._fit_name(d, long_name, box, f, False)
+    tagged = stats_image._fit_name(d, long_name, box, f, True)
+    assert plain.endswith('…') and tagged.endswith('…')
+    assert len(tagged) < len(plain)
+    # 名字 + 胶囊合起来仍在框内
+    assert (stats_image._text_w(d, tagged, f)
+            + stats_image._unranked_tag_w(d)) <= box
+    # 短名字不受影响,也不补省略号
+    assert stats_image._fit_name(d, '斗地主', box, f, True) == '斗地主' 
+
+
+def test_unranked_tag_absent_when_flag_is_false():
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    g = _sample_stats()
+    g['top_games_today'] = [dict(t, unranked=False) for t in g['top_games_today']]
+    assert stats_image.render_stats_image(g, sub_title='x') == \
+           stats_image.render_stats_image(_sample_stats(), sub_title='x')

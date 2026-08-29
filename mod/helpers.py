@@ -113,6 +113,22 @@ def humanize_mentions(text: str) -> str:
     return _MENTION_RE.sub(_repl, text)
 
 
+def mentioned_ids(text: str) -> list:
+    """按出现顺序取出文本里被 @ 的 openid,去重。
+
+    引擎的结算广播用 ``At(pid)`` 点名每个玩家,电脑玩家渲染成纯文本
+    (msg_sender.cc::SavePlayer),所以这里拿到的天然只有真人。
+    """
+    if not text or '<@' not in text:
+        return []
+    seen, out = set(), []
+    for uid in _MENTION_RE.findall(text):
+        if uid not in seen:
+            seen.add(uid)
+            out.append(uid)
+    return out
+
+
 # ──── bot 绑定(config.yaml: bind_bot_appid) ──────────────────────────────
 # 本插件所有出站消息 / 数据库读取都固定走**绑定 bot**:配置了且在线用配置的,否则回退框架第一个 bot。
 # 解析每次调用惰性完成(bot 列表在框架侧可能晚于插件加载就绪,启动时缓存会拿到空)。

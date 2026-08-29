@@ -13,7 +13,8 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
       3. 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期)
       4. 可选的主动消息额度通栏
   · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
-  · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条
+  · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条。榜单条目带 ``unranked``
+    时(当天的对局全是不计分的)在名称后跟一个灰色「不计分」胶囊;既有计分又有不计分的游戏只汇总,不打标
 
 窗口模式(``g['date_mode']`` 真):无涨跌胶囊、无主动消息行、无趋势图;第 4 卡换成「对局人次」
 (``g['attendances']``,user_with_match 计次不去重,票根图标);双榜 TOP10(``g['rank_limit']``);卡片文案去「今日」。
@@ -193,6 +194,35 @@ def _delta_pill(d, x, y, diff, h=40, *, outline=False, bg=None) -> int:
         d.rounded_rectangle(box, radius=h // 2, fill=_tint(fg))
     d.text((x + 13, y + (h - 22) // 2 - 4), txt, font=f, fill=fg)
     return w
+
+
+_UNRANKED_TAG = '不计分'
+
+
+def _unranked_tag_w(d) -> int:
+    """「不计分」胶囊的占位宽度(含左侧间距),用于给游戏名留位置。"""
+    return _text_w(d, _UNRANKED_TAG, _font(18)) + 20 + 10
+
+
+def _unranked_tag(d, x, y) -> None:
+    """游戏名后的灰色「不计分」胶囊 —— 该游戏当天的对局全是不计分的。"""
+    f = _font(18)
+    w = _text_w(d, _UNRANKED_TAG, f) + 20
+    d.rounded_rectangle((x, y, x + w, y + 26), radius=13, fill=_TAG_BG)
+    d.text((x + 10, y + 1), _UNRANKED_TAG, font=f, fill=_TEXT_MUTED)
+
+
+def _fit_name(d, full: str, max_w: int, font, tagged: bool) -> str:
+    """把榜单名字截到放得下,超出补省略号。
+
+    打标的行要先扣掉胶囊占位,否则长名字会一直画到胶囊底下重叠。
+    """
+    if tagged:
+        max_w -= _unranked_tag_w(d)
+    name = full
+    while name and _text_w(d, name + '…', font) > max_w:
+        name = name[:-1]
+    return name + ('…' if name != full else '')
 
 
 def _icon(d, kind: str, ix: int, iy: int, fg) -> None:
@@ -507,12 +537,12 @@ def _render(g: dict, sub_title: str) -> bytes | None:
                 rf = _font(22)
                 d.text((cx + 28 + (38 - _text_w(d, str(j + 1), rf)) // 2, ry + 3),
                        str(j + 1), font=rf, fill=_TEXT_MUTED)
-            full = str(it.get(key, '') or '')
-            name, nf = full, _font(24)
-            while name and _text_w(d, name + '…', nf) > name_max_w:
-                name = name[:-1]
-            shown = name + ('…' if name != full else '')
+            tagged = bool(it.get('unranked'))
+            nf = _font(24)
+            shown = _fit_name(d, str(it.get(key, '') or ''), name_max_w, nf, tagged)
             d.text((cx + 84, ry), shown, font=nf, fill=_TEXT)
+            if tagged:
+                _unranked_tag(d, cx + 84 + _text_w(d, shown, nf) + 10, ry + 2)
             cf = _font(22)
             cnt_txt = f'{_fmt(cnt)}局'
             _bold_text(d, (cx + half_w - 28 - _text_w(d, cnt_txt, cf), ry + 2),

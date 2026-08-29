@@ -306,6 +306,142 @@ def mask_id(s: str, n: int = 3) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 不计分对局的临时账本(data/metrics/unranked.json)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# 引擎只在「正式局 + 倍率非 0 + 玩家 ≥2 + 已连库」时才 RecordMatch
+# (match.cc::ApplyChildGameOverFromScores),不计分局压根不在 lgtbot.db 里。
+# callbacks 在结算广播到达时补记到这里,query_game_stats 再合并进今日口径。
+#
+# 只留两天:今天供今日各卡与双榜,昨天**仅**供「昨日同时段」的涨跌对比;
+# 历史窗口查询(数据统计MMDD / MM / YYYY / 总)仍然只读数据库,不掺账本。
+
+UNRANKED_PATH = os.path.join(METRICS_DIR, 'unranked.json')
+
+_UNRANKED_KEEP_DAYS = 2
+# 私聊对局的广播按参与者逐个私发(match.h::MsgSenderBatchHandler),同一局的结算文本会到达多次。
+# 同游戏 + 同参与者 + 同群且相隔这么近的两条不可能是两局。
+_UNRANKED_DEDUP_S = 10
+
+
+def _unranked_load() -> dict:
+    """读 unranked.json 为 ``{日期: [条目]}``。必须在持有 _lock 时调用。"""
+    try:
+        with open(UNRANKED_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+        log.warning('[metrics] unranked.json 根节点不是 dict,按损坏处理')
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        log.warning(f'[metrics] unranked.json 解析失败,按损坏处理: {e}')
+    try:
+        os.replace(UNRANKED_PATH, f'{UNRANKED_PATH}.corrupt_{int(time.time())}')
+    except OSError:
+        pass
+    return {}
+
+
+def _unranked_write(d: dict) -> None:
+    """原子落盘(同 _atomic_write,只是换一个文件)。"""
+    os.makedirs(METRICS_DIR, exist_ok=True)
+    tmp = UNRANKED_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, UNRANKED_PATH)
+
+
+def _unranked_prune(d: dict) -> dict:
+    """只留今天与昨天 —— 更早的账本没有任何消费方。
+
+    保留窗口按**墙上时钟**算,不按被写入那条的时间戳:补一条旧记录不该把今天的账本清掉。
+    """
+    today = datetime.now()
+    keep = {(today - timedelta(days=i)).strftime('%Y-%m-%d')
+            for i in range(_UNRANKED_KEEP_DAYS)}
+    return {k: v for k, v in d.items() if k in keep}
+
+
+def _same_match(row: dict, game: str, ids: list, gid: str) -> bool:
+    return (str(row.get('game') or '') == game
+            and sorted(str(p) for p in (row.get('players') or [])) == sorted(ids)
+            and str(row.get('gid') or '') == gid)
+
+
+def record_unranked_match(game: str, players, gid: str = '', ts: float | None = None) -> None:
+    """记一局不计分对局。永不抛 —— 统计失败绝不影响发消息。
+
+    ``players`` 是参与者 openid;``gid`` 私聊局为空串,与库里 group_id 为 NULL 同义。
+    """
+    try:
+        now = float(time.time() if ts is None else ts)
+        day = datetime.fromtimestamp(now).strftime('%Y-%m-%d')
+        ids = [str(p) for p in (players or []) if p]
+        game = str(game or '')
+        gid = str(gid or '')
+        with _lock:
+            d = _unranked_load()
+            rows = d.get(day)
+            if not isinstance(rows, list):
+                rows = []
+            for row in reversed(rows):          # 新 → 旧,出窗即停
+                try:
+                    if float(row.get('ts') or 0) < now - _UNRANKED_DEDUP_S:
+                        break
+                except (TypeError, ValueError):
+                    continue
+                if _same_match(row, game, ids, gid):
+                    return                      # 私发扇出的同一局,不是第二局
+            rows.append({'ts': int(now), 'game': game, 'players': ids, 'gid': gid})
+            d[day] = rows
+            _unranked_write(_unranked_prune(d))
+    except Exception as e:
+        log.warning(f'[metrics] 不计分对局记录失败(不影响业务): {e}')
+
+
+def unranked_window(start: datetime, end: datetime | None = None) -> dict:
+    """``[start, end)`` 内的不计分对局汇总(``end`` 为 None = 到现在为止)。
+
+    返回 ``{'matches', 'players', 'groups', 'games', 'player_counts'}``,
+    其中 players / groups 是集合(要和库里的去重集合取并集,只给个数就没法去重)。
+    """
+    out = {'matches': 0, 'players': set(), 'groups': set(),
+           'games': {}, 'player_counts': {}}
+    lo = start.timestamp()
+    hi = end.timestamp() if end is not None else None
+    try:
+        with _lock:
+            d = _unranked_load()
+    except Exception as e:
+        log.warning(f'[metrics] 不计分账本读取失败: {e}')
+        return out
+    # 账本至多两天,直接扫全量按 ts 过滤,不必按日期键挑
+    for rows in d.values():
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                ts = float(row.get('ts') or 0)
+            except (TypeError, ValueError):
+                continue
+            if ts < lo or (hi is not None and ts >= hi):
+                continue
+            out['matches'] += 1
+            gid = str(row.get('gid') or '')
+            if gid:
+                out['groups'].add(gid)
+            name = str(row.get('game') or '')
+            if name:
+                out['games'][name] = out['games'].get(name, 0) + 1
+            for p in row.get('players') or []:
+                p = str(p)
+                out['players'].add(p)
+                out['player_counts'][p] = out['player_counts'].get(p, 0) + 1
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # lgtbot.db 只读统计
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -325,30 +461,34 @@ _SCALAR_SQL = {
     'lgtbot_match_attendances': 'SELECT COUNT(*) FROM user_with_match',
     'lgtbot_achievements':      'SELECT COUNT(*) FROM user_with_achievement',
     'today_matches':            f'SELECT COUNT(*) FROM match WHERE finish_time >= {_TODAY}',
-    'today_players':            ('SELECT COUNT(DISTINCT uwm.user_id) FROM user_with_match uwm '
-                                 'JOIN match m ON m.match_id = uwm.match_id '
-                                 f'WHERE m.finish_time >= {_TODAY}'),
-    # 私聊局 group_id 为 NULL,天然排除
-    'today_groups':             ('SELECT COUNT(DISTINCT group_id) FROM match '
-                                 f"WHERE finish_time >= {_TODAY} "
-                                 "AND group_id IS NOT NULL AND group_id != ''"),
-    # 昨日同时段对局 / 活跃玩家 / 活跃群聊(窗口定义见 _YDAY_* 注释)
+    # 昨日同时段对局(窗口定义见 _YDAY_* 注释)
     'yesterday_matches_same_span':  ('SELECT COUNT(*) FROM match '
                                      f'WHERE finish_time >= {_YDAY_START} '
                                      f'AND finish_time < {_YDAY_SAME}'),
-    'yesterday_players_same_span':  ('SELECT COUNT(DISTINCT uwm.user_id) FROM user_with_match uwm '
-                                     'JOIN match m ON m.match_id = uwm.match_id '
-                                     f'WHERE m.finish_time >= {_YDAY_START} '
-                                     f'AND m.finish_time < {_YDAY_SAME}'),
-    'yesterday_groups_same_span':   ('SELECT COUNT(DISTINCT group_id) FROM match '
-                                     f'WHERE finish_time >= {_YDAY_START} '
-                                     f'AND finish_time < {_YDAY_SAME} '
-                                     "AND group_id IS NOT NULL AND group_id != ''"),
     # 上一个 10 日的对局总数([今天-19 天, 今天-9 天) 整天窗口)——「近10日对局」的涨跌对比基准。
     # 跨度按整天算,不做时段对齐:近 10 日含今天(未过完),对比结果在一天内单调爬升,语义是"这一轮 10 天目前跑到哪了"。
     'prev10_matches':               ('SELECT COUNT(*) FROM match '
                                      "WHERE finish_time >= datetime('now','localtime','start of day','-19 days') "
                                      "AND finish_time < datetime('now','localtime','start of day','-9 days')"),
+}
+
+# 取去重集合而不是 COUNT:这四项要和不计分账本取并集才是真正的今日 / 昨日口径,只拿回一个数字就没法去重了。
+# 窗口是一天,行数与日活同量级。私聊局 group_id 为 NULL,群聊两项天然排除。
+_SET_SQL = {
+    'today_players':                ('SELECT DISTINCT uwm.user_id FROM user_with_match uwm '
+                                     'JOIN match m ON m.match_id = uwm.match_id '
+                                     f'WHERE m.finish_time >= {_TODAY}'),
+    'today_groups':                 ('SELECT DISTINCT group_id FROM match '
+                                     f"WHERE finish_time >= {_TODAY} "
+                                     "AND group_id IS NOT NULL AND group_id != ''"),
+    'yesterday_players_same_span':  ('SELECT DISTINCT uwm.user_id FROM user_with_match uwm '
+                                     'JOIN match m ON m.match_id = uwm.match_id '
+                                     f'WHERE m.finish_time >= {_YDAY_START} '
+                                     f'AND m.finish_time < {_YDAY_SAME}'),
+    'yesterday_groups_same_span':   ('SELECT DISTINCT group_id FROM match '
+                                     f'WHERE finish_time >= {_YDAY_START} '
+                                     f'AND finish_time < {_YDAY_SAME} '
+                                     "AND group_id IS NOT NULL AND group_id != ''"),
 }
 
 # 「本周」= 近 7 天(含今天),与今日口径同为本地 00:00 边界
@@ -361,9 +501,10 @@ _TOP_GAMES_ALL_SQL = ('SELECT game_name, COUNT(*) c FROM match '
 _TOP_GAMES_WEEK_SQL = ('SELECT game_name, COUNT(*) c FROM match '
                        f'WHERE finish_time >= {_WEEK} '
                        'GROUP BY game_name ORDER BY c DESC LIMIT 10')
+# 今日双榜不带 LIMIT:要先和不计分账本合并再排序。今日的分组基数很小。
 _TOP_GAMES_TODAY_SQL = ('SELECT game_name, COUNT(*) c FROM match '
                         f'WHERE finish_time >= {_TODAY} '
-                        'GROUP BY game_name ORDER BY c DESC LIMIT 10')
+                        'GROUP BY game_name')
 # 本周玩家参与榜(面板)/ 今日玩家参与榜(/数据统计 指令)
 _TOP_PLAYERS_WEEK_SQL = ('SELECT uwm.user_id, COUNT(*) c FROM user_with_match uwm '
                          'JOIN match m ON m.match_id = uwm.match_id '
@@ -372,7 +513,7 @@ _TOP_PLAYERS_WEEK_SQL = ('SELECT uwm.user_id, COUNT(*) c FROM user_with_match uw
 _TOP_PLAYERS_TODAY_SQL = ('SELECT uwm.user_id, COUNT(*) c FROM user_with_match uwm '
                           'JOIN match m ON m.match_id = uwm.match_id '
                           f'WHERE m.finish_time >= {_TODAY} '
-                          'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10')
+                          'GROUP BY uwm.user_id')
 
 # 对局趋势窗口:10 天(含今天,对齐排行榜 TOP10)。除每日对局数外,同窗口再查
 # 每日活跃玩家(去重),前端并排成一张表。
@@ -395,11 +536,16 @@ def query_game_stats() -> dict:
     原始 openid 不出本模块。榜单双口径:本周(近 7 天,面板展示)与今日
     (/数据统计 指令用)。trend_10d 恒 10 项(缺失日补 0,含今天,新→旧),
     每项含当日对局数与当日活跃玩家数。
+
+    **今日与昨日同时段的五项 + 今日双榜合并了不计分对局**(见 unranked_window):
+    这些局不在 lgtbot.db 里,不合并的话今日统计只报计分局。今日游戏榜的条目带 ``unranked`` 标志,
+    真时表示该游戏今天的对局全是不计分的。累计项、本周 / 总榜、近 10 日与趋势图都只读数据库。
     """
     out: dict = {
         'available': False,
         'errors': [],
         **{k: None for k in _SCALAR_SQL},
+        **{k: None for k in _SET_SQL},
         'top_games_all': [],
         'top_games_week': [],
         'top_games_today': [],
@@ -415,16 +561,23 @@ def query_game_stats() -> dict:
         conn = sqlite3.connect(f'file:{boot.DB_PATH}?mode=ro', uri=True, timeout=2.0)
         out['available'] = True
 
+        failed: set = set()
+
         def _rows(sql: str, tag: str) -> list:
             try:
                 return conn.execute(sql).fetchall()
             except sqlite3.OperationalError as e:
                 out['errors'].append(f'{tag}:{e}')
+                failed.add(tag)
                 return []
 
         for key, sql in _SCALAR_SQL.items():
             rows = _rows(sql, key)
             out[key] = int(rows[0][0]) if rows else None
+
+        # 去重集合先留着,下面和不计分账本取并集后才定数
+        db_sets = {key: {str(r[0]) for r in _rows(sql, key)}
+                   for key, sql in _SET_SQL.items()}
 
         def _games(sql: str, tag: str) -> list:
             return [{'game_name': str(g), 'count': int(c)} for g, c in _rows(sql, tag)]
@@ -435,9 +588,44 @@ def query_game_stats() -> dict:
 
         out['top_games_all'] = _games(_TOP_GAMES_ALL_SQL, 'top_games_all')
         out['top_games_week'] = _games(_TOP_GAMES_WEEK_SQL, 'top_games_week')
-        out['top_games_today'] = _games(_TOP_GAMES_TODAY_SQL, 'top_games_today')
         out['top_players_week'] = _players(_TOP_PLAYERS_WEEK_SQL, 'top_players_week')
-        out['top_players_today'] = _players(_TOP_PLAYERS_TODAY_SQL, 'top_players_today')
+
+        # ── 合并不计分对局(仅今日与昨日同时段两个窗口)──────────────────
+        # 「近 10 日对局」与趋势图不掺:账本只有 2 天,混进 10 天的序列会让曲线与 prev10 的对比同时失真。
+        now = datetime.now()
+        today0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        u_today = unranked_window(today0)
+        u_yday = unranked_window(today0 - timedelta(days=1), now - timedelta(days=1))
+
+        def _plus(key: str, extra: int) -> None:
+            """库里查失败(None)时不补 —— 只有不计分的那半边数字会误导。"""
+            if out[key] is not None:
+                out[key] += extra
+
+        _plus('today_matches', u_today['matches'])
+        _plus('yesterday_matches_same_span', u_yday['matches'])
+        for key, extra in (('today_players', u_today['players']),
+                           ('today_groups', u_today['groups']),
+                           ('yesterday_players_same_span', u_yday['players']),
+                           ('yesterday_groups_same_span', u_yday['groups'])):
+            out[key] = None if key in failed else len(db_sets[key] | extra)
+
+        db_games = {str(g): int(c) for g, c in _rows(_TOP_GAMES_TODAY_SQL, 'top_games_today')}
+        games = dict(db_games)
+        for name, c in u_today['games'].items():
+            games[name] = games.get(name, 0) + c
+        # 全部对局都不计分的游戏才打标;既有计分又有不计分的只汇总,不打标
+        out['top_games_today'] = [
+            {'game_name': n, 'count': c, 'unranked': n not in db_games}
+            for n, c in sorted(games.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]
+
+        players = {str(u): int(c)
+                   for u, c in _rows(_TOP_PLAYERS_TODAY_SQL, 'top_players_today')}
+        for uid, c in u_today['player_counts'].items():
+            players[uid] = players.get(uid, 0) + c
+        out['top_players_today'] = [
+            {'display': userinfo.display_name(uid) or mask_id(uid), 'count': c}
+            for uid, c in sorted(players.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]
 
         # 10 日趋势:查询按存在的日期聚合,Python 端补零成恒 10 项。
         # 新→旧排列(今天在最前,越靠近的日期越靠前)。
