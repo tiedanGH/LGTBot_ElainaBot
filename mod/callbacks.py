@@ -976,8 +976,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
     bridge 端的分类逻辑见 ``LGTBot_ElainaBot.cc::ClassifyMatchEvent``;本侧只
     根据 ``kind`` 走 switch:
 
-      ``announce``       仅刷新 ``state.current_game[key]``(brief 出现但非
-                         新建/加入/退出场景,如 /设置 成功后的回执),不动按钮。
+      ``announce``       刷新 ``state.current_game[key]``;房间仍在
+                         等待中时,再挂一组与 ``join_leave`` 相同的按钮。
       ``new_game``       刷新游戏名;在下一条文本回复挂「加入 / 退出 + 规则」;
                          标记「消息回复限制」教学(建房公告后紧随发出;全量群
                          改标「主动私信」提示,两者互斥,教学优先)。
@@ -1060,9 +1060,13 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
     # 按钮挂载 —— new_game / join_leave 都挂同样一组:
     #   · 群聊:  「加入 / 退出」+ 「📖《X》规则」 两行
     #   · 私聊:  仅「📖《X》规则」一行(DM 里 /加入 /退出 无意义,见 is_uid 分支)
-    # 私聊场景下 build_game_action_buttons 返回的若是空列表(game_name 未知的
-    # 极端情形),`if btns:` 跳过 pending_buttons 写入,避免给框架塞空按钮组。
-    if kind in ('new_game', 'join_leave'):
+    # 私聊场景下 build_game_action_buttons 返回的若是空列表(game_name 未知的极端情形),
+    # `if btns:` 跳过 pending_buttons 写入,避免给框架塞空按钮组。
+    #
+    # announce 也挂同一组:「设置成功」的回执带 brief,是玩家最常看到的报名入口之一。
+    # 但必须限定在**等待中的房间**对局已开始时挂「加入 / 退出」只会点出一个错误回执。
+    if kind in ('new_game', 'join_leave') or (
+            kind == 'announce' and key in state.waiting_rooms):
         btns = buttons.build_game_action_buttons(
             state.current_game.get(key),
             include_rule=True,
