@@ -102,7 +102,10 @@
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--panel-2);
 }
-.crash-modal-title { margin: 0; font-size: 15px; font-weight: 600; }
+.crash-modal-title {
+  margin: 0; font-size: 15px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 7px;
+}
 .crash-view-actions { display: inline-flex; gap: 6px; }
 .crash-modal-body {
   padding: 16px 18px; overflow-y: auto;

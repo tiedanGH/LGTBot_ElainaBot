@@ -5,6 +5,7 @@
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
   transition: background .15s, border-color .15s, color .15s;
+  display: inline-flex; align-items: center; gap: 5px;
 }
 .filters button:hover { background: var(--hover); border-color: var(--border-2); }
 .filters button.active {

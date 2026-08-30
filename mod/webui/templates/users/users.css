@@ -43,17 +43,26 @@
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
   transition: background .15s, border-color .15s;
+  display: inline-flex; align-items: center; gap: 5px;
 }
 .users-toolbar #users-refresh:hover {
   background: var(--hover); border-color: var(--border-2);
 }
 .users-toolbar #users-refresh:disabled { opacity: .5; cursor: wait; }
 
+/* 放大镜叠在搜索框左内侧 */
+.users-toolbar .users-search-wrap {
+  position: relative; display: inline-flex; align-items: center;
+  flex: 0 1 280px; min-width: 220px; max-width: 320px;
+}
+.users-toolbar .users-search-wrap .ui-icon {
+  position: absolute; left: 9px; color: var(--text-faint); pointer-events: none;
+}
 /* 搜索框(放在工具栏中间,可同时匹配 name / openid)*/
 .users-toolbar #users-search {
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   padding: 5px 10px; border-radius: 6px; font-size: 12px;
-  min-width: 220px; max-width: 320px; flex: 0 1 280px;
+  width: 100%; padding-left: 30px;
   transition: border-color .15s, background .15s;
 }
 .users-toolbar #users-search::placeholder { color: var(--text-faint); }
@@ -159,7 +168,7 @@
   .user-row .col-msgs, .user-row .col-seen { white-space: nowrap; }
   .user-row.empty { grid-template-columns: 1fr; width: auto; }
   .users-toolbar .spacer { display: none; }
-  .users-toolbar #users-search {
+  .users-toolbar .users-search-wrap {
     flex: 1 0 100%; min-width: 0; max-width: none;
   }
   .users-toolbar .pagination { margin-right: auto; }

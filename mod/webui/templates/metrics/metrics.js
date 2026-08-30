@@ -230,7 +230,7 @@ function metricsShowMsg(text, kind) {
 /* ──── 统一刷新(三个区一起) ──── */
 async function metricsRefresh() {
   const btn = document.getElementById('metrics-refresh-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+  if (btn) { btn.disabled = true; setBtnIcon(btn, '#i-hourglass', '...'); }
   try {
     const data = await metricsCallAction(METRICS_REFRESH_KEY);
     if (data.success) {
@@ -242,7 +242,7 @@ async function metricsRefresh() {
   } catch (e) {
     metricsShowMsg('❌ ' + e.message, 'err');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 刷新'; }
+    if (btn) { btn.disabled = false; setBtnIcon(btn, '#i-refresh', '刷新'); }
   }
 }
 

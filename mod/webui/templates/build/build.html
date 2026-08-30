@@ -1,6 +1,6 @@
 <div class="build">
   <section class="dash-section">
-    <h2 class="dash-section-title">🛠️ 引擎编译</h2>
+    <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-build"/></svg><span>引擎编译</span></h2>
 
     <!-- 顶部状态条:badge + 当前命令 + 开始时间 + 终止按钮 -->
     <div class="build-status">
@@ -10,25 +10,25 @@
         <span id="build-status-since" class="dash-meta-value"></span>
       </div>
       <div class="build-status-actions">
-        <button id="build-kill-btn" class="dash-btn dash-btn-danger" style="display:none">🛑 终止编译</button>
+        <button id="build-kill-btn" class="dash-btn dash-btn-danger" style="display:none"><svg class="ui-icon btn-icon"><use href="#i-stop"/></svg><span class="btn-label">终止编译</span></button>
       </div>
     </div>
 
     <!-- 常规编译按钮组 -->
     <div class="build-actions">
-      <button id="build-full"   class="dash-btn dash-btn-primary">🚀 完整编译</button>
-      <button id="build-incr"   class="dash-btn dash-btn-success">⚡ 增量编译</button>
-      <button id="build-bridge" class="dash-btn dash-btn-success">🔌 增量编译桥接层</button>
-      <button id="build-list"   class="dash-btn">📋 列出可编译目标</button>
-      <button id="build-custom" class="dash-btn">🎯 编译指定目标…</button>
-      <button id="build-newtarget" class="dash-btn">✨ 编译新游戏目标…</button>
-      <button id="build-api-token" class="dash-btn" title="复制编译 API 的认证 token（供框架内其他插件调用 /api/ext/lgtbot/build/compile）">🔑 复制 API Token</button>
+      <button id="build-full"   class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-rocket"/></svg><span class="btn-label">完整编译</span></button>
+      <button id="build-incr"   class="dash-btn dash-btn-success"><svg class="ui-icon btn-icon"><use href="#i-zap"/></svg><span class="btn-label">增量编译</span></button>
+      <button id="build-bridge" class="dash-btn dash-btn-success"><svg class="ui-icon btn-icon"><use href="#i-plug"/></svg><span class="btn-label">增量编译桥接层</span></button>
+      <button id="build-list"   class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-list"/></svg><span class="btn-label">列出可编译目标</span></button>
+      <button id="build-custom" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-target"/></svg><span class="btn-label">编译指定目标…</span></button>
+      <button id="build-newtarget" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-sparkle"/></svg><span class="btn-label">编译新游戏目标…</span></button>
+      <button id="build-api-token" class="dash-btn" title="复制编译 API 的认证 token（供框架内其他插件调用 /api/ext/lgtbot/build/compile）"><svg class="ui-icon btn-icon"><use href="#i-key"/></svg><span class="btn-label">复制 API Token</span></button>
     </div>
 
     <!-- 危险操作组(单独一行,red 样式) -->
     <div class="build-actions build-actions-danger">
-      <button id="build-clean"  class="dash-btn dash-btn-danger">🧹 清理重编 (--clean)</button>
-      <button id="build-remove" class="dash-btn dash-btn-danger">🗑️ 删除 build 目录</button>
+      <button id="build-clean"  class="dash-btn dash-btn-danger"><svg class="ui-icon btn-icon"><use href="#i-broom"/></svg><span class="btn-label">清理重编 (--clean)</span></button>
+      <button id="build-remove" class="dash-btn dash-btn-danger"><svg class="ui-icon btn-icon"><use href="#i-trash"/></svg><span class="btn-label">删除 build 目录</span></button>
     </div>
 
     <!-- 日志输出 -->

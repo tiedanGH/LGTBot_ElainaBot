@@ -2,7 +2,7 @@
 
   <!-- ──── 版本与更新 ──── -->
   <section class="dash-section">
-    <h2 class="dash-section-title">📦 版本与更新</h2>
+    <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-upgrade"/></svg><span>版本与更新</span></h2>
     <div class="dash-version">
       <div class="dash-version-info">
         <span class="dash-version-label">当前版本</span>
@@ -11,21 +11,21 @@
         <span id="dash-update-hint" class="dash-badge dash-badge-warn" style="display:none"></span>
       </div>
       <div class="dash-version-actions">
-        <button id="dash-prebuilt-jump" class="dash-btn dash-btn-warn" style="display:none" title="引擎未运行，可下载预编译包免编译部署">📦 预编译部署</button>
-        <button id="dash-check-update" class="dash-btn dash-btn-primary">🔍 检查更新</button>
+        <button id="dash-prebuilt-jump" class="dash-btn dash-btn-warn" style="display:none" title="引擎未运行，可下载预编译包免编译部署"><svg class="ui-icon btn-icon"><use href="#i-prebuilt"/></svg><span class="btn-label">预编译部署</span></button>
+        <button id="dash-check-update" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-search"/></svg><span class="btn-label">检查更新</span></button>
       </div>
     </div>
 
     <!-- 桥接层(本插件)更新行 -->
     <div class="dash-update-row" id="dash-bridge-row">
       <div class="dash-update-label">
-        <b>🔌 桥接层</b>
+        <b class="dash-inline-title"><svg class="ui-icon btn-icon"><use href="#i-plug"/></svg>桥接层</b>
         <span class="dash-update-detail" id="dash-bridge-detail">点击「检查更新」查看版本</span>
       </div>
       <div class="dash-update-actions">
         <button id="dash-do-download" class="dash-btn dash-btn-warn" style="display:none"
-                title="免 git：下载最新源码包直接覆盖更新">⬇ 下载更新</button>
-        <button id="dash-do-update" class="dash-btn dash-btn-warn" style="display:none">⬇ 更新桥接层</button>
+                title="免 git：下载最新源码包直接覆盖更新"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">下载更新</span></button>
+        <button id="dash-do-update" class="dash-btn dash-btn-warn" style="display:none"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">更新桥接层</span></button>
       </div>
     </div>
 
@@ -35,11 +35,11 @@
     <!-- 子模块 lgtbot 更新 / 初始化行 -->
     <div class="dash-update-row" id="dash-submodule-row">
       <div class="dash-update-label">
-        <b>🧩 <span class="dash-mono" id="dash-submodule-path">lgtbot</span></b>
+        <b class="dash-inline-title"><svg class="ui-icon btn-icon"><use href="#i-plugin"/></svg><span class="dash-mono" id="dash-submodule-path">lgtbot</span></b>
         <span class="dash-update-detail" id="dash-submodule-detail">点击「检查更新」查看 commit</span>
       </div>
       <div class="dash-update-actions">
-        <button id="dash-update-submodule" class="dash-btn dash-btn-warn" style="display:none">⬇ 更新子模块</button>
+        <button id="dash-update-submodule" class="dash-btn dash-btn-warn" style="display:none"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">更新子模块</span></button>
       </div>
     </div>
 
@@ -54,7 +54,7 @@
       <h2 class="dash-section-title dash-bot-title" id="dash-bot-toggle"
           role="button" tabindex="0" title="点击展开 / 折叠">
         <span id="dash-bot-caret" class="dash-bot-caret">▸</span>
-        🤖 机器人绑定
+        <svg class="ui-icon title-icon"><use href="#i-bot"/></svg><span>机器人绑定</span>
       </h2>
       <div id="dash-bot-summary" class="dash-bot-summary"></div>
     </div>
@@ -74,11 +74,11 @@
       <h2 class="dash-section-title dash-selfcheck-title" id="dash-selfcheck-toggle"
           role="button" tabindex="0" title="点击展开 / 折叠">
         <span id="dash-selfcheck-caret" class="dash-selfcheck-caret">▸</span>
-        🧪 运行环境
+        <svg class="ui-icon title-icon"><use href="#i-terminal"/></svg><span>运行环境</span>
         <span id="dash-selfcheck-badge" class="dash-selfcheck-badge"></span>
         <span id="dash-selfcheck-badge-warn" class="dash-selfcheck-badge warn"></span>
       </h2>
-      <button id="dash-selfcheck-refresh" class="dash-btn dash-btn-small">🔄 重新检测</button>
+      <button id="dash-selfcheck-refresh" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">重新检测</span></button>
     </div>
     <div id="dash-selfcheck-body" class="dash-selfcheck-body collapsed">
       <div class="dash-check-group">
@@ -86,7 +86,7 @@
         <div id="dash-runtime-list" class="dash-check-grid"><div class="dash-check-empty">检测中……</div></div>
       </div>
       <div class="dash-check-group">
-        <div class="dash-check-title">引擎编译依赖 <span class="dash-check-note">（用预编译包则无需，见「📦 预编译部署」）</span></div>
+        <div class="dash-check-title">引擎编译依赖 <span class="dash-check-note">（用预编译包则无需，见「预编译部署」）</span></div>
         <div id="dash-compile-list" class="dash-check-grid"><div class="dash-check-empty">检测中……</div></div>
       </div>
     </div>
@@ -95,8 +95,8 @@
   <!-- ──── 进行中的对局 ──── -->
   <section class="dash-section">
     <div class="dash-matches-head">
-      <h2 class="dash-section-title">🎮 进行中的对局<span id="dash-matches-count" class="dash-matches-count"></span></h2>
-      <span class="dash-matches-live" title="每几秒自动刷新">🟢 实时</span>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gamepad"/></svg>进行中的对局<span id="dash-matches-count" class="dash-matches-count"></span></h2>
+      <span class="dash-matches-live" title="每几秒自动刷新"><svg class="ui-icon btn-icon"><use href="#i-live"/></svg>实时</span>
     </div>
     <p class="dash-pluginconf-desc">
       仅统计<b>已开局</b>的对局（等待中的房间不计入）。以引擎事件跟踪，跨热重载保持，进程重启后清空。
@@ -107,11 +107,11 @@
   <!-- ──── 缓存清理 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">🧹 缓存清理</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-broom"/></svg><span>缓存清理</span></h2>
       <!-- 操作结果紧挨着按钮左侧 -->
       <div class="dash-section-meta dash-cache-head">
         <span id="dash-cache-msg" class="dash-cache-msg"></span>
-        <button id="dash-cache-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
+        <button id="dash-cache-refresh" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
       </div>
     </div>
     <div class="dash-cache-grid">
@@ -123,8 +123,8 @@
           <span class="dash-cache-count" id="dash-cache-avatar-count"></span>
         </div>
         <div class="dash-cache-actions">
-          <button class="dash-btn dash-btn-warn" data-clear="avatar">🧹 清理全部</button>
-          <button class="dash-btn" data-clear="avatar_7d">📅 保留 7 天</button>
+          <button class="dash-btn dash-btn-warn" data-clear="avatar"><svg class="ui-icon btn-icon"><use href="#i-broom"/></svg><span class="btn-label">清理全部</span></button>
+          <button class="dash-btn" data-clear="avatar_7d"><svg class="ui-icon btn-icon"><use href="#i-calendar"/></svg><span class="btn-label">保留 7 天</span></button>
         </div>
       </div>
       <div class="dash-cache-card">
@@ -135,8 +135,8 @@
           <span class="dash-cache-count" id="dash-cache-gen-count"></span>
         </div>
         <div class="dash-cache-actions">
-          <button class="dash-btn dash-btn-warn" data-clear="gen">🧹 清理全部</button>
-          <button class="dash-btn" data-clear="gen_7d">📅 保留 7 天</button>
+          <button class="dash-btn dash-btn-warn" data-clear="gen"><svg class="ui-icon btn-icon"><use href="#i-broom"/></svg><span class="btn-label">清理全部</span></button>
+          <button class="dash-btn" data-clear="gen_7d"><svg class="ui-icon btn-icon"><use href="#i-calendar"/></svg><span class="btn-label">保留 7 天</span></button>
         </div>
       </div>
       <div class="dash-cache-card">
@@ -147,8 +147,8 @@
           <span class="dash-cache-count" id="dash-cache-match-count"></span>
         </div>
         <div class="dash-cache-actions">
-          <button class="dash-btn dash-btn-warn" data-clear="match_all">🧹 清理全部</button>
-          <button class="dash-btn" data-clear="match_7d">📅 保留 7 天</button>
+          <button class="dash-btn dash-btn-warn" data-clear="match_all"><svg class="ui-icon btn-icon"><use href="#i-broom"/></svg><span class="btn-label">清理全部</span></button>
+          <button class="dash-btn" data-clear="match_7d"><svg class="ui-icon btn-icon"><use href="#i-calendar"/></svg><span class="btn-label">保留 7 天</span></button>
         </div>
       </div>
     </div>

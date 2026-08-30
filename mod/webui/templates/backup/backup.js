@@ -70,7 +70,7 @@ function backupApplyData(data) {
     document.getElementById('backup-latest-meta').textContent = backupFmtBytes(latest.size_bytes) + ' · ' + latest.name;
   } else {
     document.getElementById('backup-latest-time').textContent = '（从未备份）';
-    document.getElementById('backup-latest-meta').textContent = '点「💾 立即备份」开始';
+    document.getElementById('backup-latest-meta').textContent = '点「立即备份」开始';
   }
 
   document.getElementById('backup-total-count').textContent = backups.length;
@@ -91,9 +91,9 @@ function backupApplyData(data) {
       <td class="backup-col-time">${escapeHtml(backupFmtRelative(b.mtime_ts))}</td>
       <td class="backup-col-size">${escapeHtml(backupFmtBytes(b.size_bytes))}</td>
       <td class="backup-col-ops">
-        <button class="dash-btn dash-btn-small backup-btn-download" data-name="${safeName}">⬇ 下载</button>
+        <button class="dash-btn dash-btn-small backup-btn-download" data-name="${safeName}"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">下载</span></button>
         <button class="dash-btn dash-btn-small backup-btn-restore" data-name="${safeName}">↩ 恢复</button>
-        <button class="dash-btn dash-btn-small dash-btn-warn backup-btn-delete" data-name="${safeName}">🗑 删除</button>
+        <button class="dash-btn dash-btn-small dash-btn-warn backup-btn-delete" data-name="${safeName}"><svg class="ui-icon btn-icon"><use href="#i-trash"/></svg><span class="btn-label">删除</span></button>
       </td>
     </tr>`;
   }).join('');
@@ -168,8 +168,8 @@ function backupShowMsg(text, kind) {
 async function backupCreate() {
   const btn = document.getElementById('backup-create-btn');
   btn.disabled = true;
-  const oldText = btn.textContent;
-  btn.textContent = '⏳ 备份中……';
+  const oldText = btnLabel(btn);
+  setBtnIcon(btn, '#i-hourglass', '备份中……');
   backupShowMsg('正在打包数据库与配置……', 'info');
   try {
     const data = await backupCallAction(BACKUP_KEYS.create);
@@ -186,7 +186,7 @@ async function backupCreate() {
     backupShowMsg('❌ ' + e.message, 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = oldText;
+    setBtnIcon(btn, '#i-save', oldText);
   }
 }
 
@@ -194,7 +194,7 @@ async function backupCreate() {
 /* ──── 刷新列表 ──── */
 async function backupRefresh() {
   const btn = document.getElementById('backup-refresh-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+  if (btn) { btn.disabled = true; setBtnIcon(btn, '#i-hourglass', '...'); }
   try {
     const data = await backupCallAction(BACKUP_KEYS.list);
     if (data.success) {
@@ -212,7 +212,7 @@ async function backupRefresh() {
   } catch (e) {
     console.warn('[backup] refresh failed:', e);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 刷新列表'; }
+    if (btn) { btn.disabled = false; setBtnIcon(btn, '#i-refresh', '刷新列表'); }
   }
 }
 

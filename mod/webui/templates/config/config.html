@@ -3,7 +3,7 @@
   <!-- ──── 插件配置 (config.yaml) ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">🔧 插件配置</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-config"/></svg><span>插件配置</span></h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">文件</span>
         <span id="cfg-yaml-path" class="dash-meta-value dash-mono">—</span>
@@ -15,14 +15,14 @@
       <p class="dash-pluginconf-desc">
         也可使用主框架自带的插件管理编辑器（支持可视化编辑）：
       </p>
-      <a class="dash-btn dash-btn-primary" href="/web/plugins" target="_blank" rel="noopener">📝 前往主框架插件模块编辑</a>
+      <a class="dash-btn dash-btn-primary" href="/web/plugins" target="_blank" rel="noopener"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">前往主框架插件模块编辑</span></a>
     </div>
     <textarea id="cfg-yaml-editor" class="dash-editor" spellcheck="false"
               autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
     <div class="dash-editor-actions">
-      <button id="cfg-yaml-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
+      <button id="cfg-yaml-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存配置</span></button>
       <button id="cfg-yaml-revert" class="dash-btn">↩ 恢复</button>
-      <button id="cfg-yaml-reload" class="dash-btn dash-btn-warn">🔁 热重载配置</button>
+      <button id="cfg-yaml-reload" class="dash-btn dash-btn-warn"><svg class="ui-icon btn-icon"><use href="#i-restart"/></svg><span class="btn-label">热重载配置</span></button>
       <span id="cfg-yaml-msg" class="dash-config-msg"></span>
     </div>
     <!-- 热重载详细结果(diff / 警示),空时通过 .dash-pluginconf-msg:empty 自动隐藏 -->
@@ -34,7 +34,7 @@
     <!-- ──── 重要更新 (important_update.txt) ──── -->
     <section class="dash-section">
       <div class="dash-section-header">
-        <h2 class="dash-section-title">⚠️ 重要更新</h2>
+        <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-alert"/></svg><span>重要更新</span></h2>
         <div class="dash-section-meta">
           <span class="dash-meta-label">文件</span>
           <span id="cfg-important-path" class="dash-meta-value dash-mono">—</span>
@@ -46,7 +46,7 @@
       <textarea id="cfg-important-editor" class="dash-editor" spellcheck="false"
                 autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
       <div class="dash-editor-actions">
-        <button id="cfg-important-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-important-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
         <button id="cfg-important-revert" class="dash-btn">↩ 恢复</button>
         <span id="cfg-important-msg" class="dash-config-msg"></span>
       </div>
@@ -55,7 +55,7 @@
     <!-- ──── 更新公告 (update_notice.txt) ──── -->
     <section class="dash-section">
       <div class="dash-section-header">
-        <h2 class="dash-section-title">📢 更新公告</h2>
+        <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-megaphone"/></svg><span>更新公告</span></h2>
         <div class="dash-section-meta">
           <span class="dash-meta-label">文件</span>
           <span id="cfg-notice-path" class="dash-meta-value dash-mono">—</span>
@@ -67,7 +67,7 @@
       <textarea id="cfg-notice-editor" class="dash-editor" spellcheck="false"
                 autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
       <div class="dash-editor-actions">
-        <button id="cfg-notice-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-notice-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
         <button id="cfg-notice-revert" class="dash-btn">↩ 恢复</button>
         <span id="cfg-notice-msg" class="dash-config-msg"></span>
       </div>
@@ -76,7 +76,7 @@
     <!-- ──── 紧急公告 (urgent_notice.txt) ──── -->
     <section class="dash-section">
       <div class="dash-section-header">
-        <h2 class="dash-section-title">🚨 紧急公告</h2>
+        <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-bell"/></svg><span>紧急公告</span></h2>
         <div class="dash-section-meta">
           <span class="dash-meta-label">文件</span>
           <span id="cfg-urgent-path" class="dash-meta-value dash-mono">—</span>
@@ -88,13 +88,13 @@
       <textarea id="cfg-urgent-editor" class="dash-editor" spellcheck="false"
                 autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
       <div class="dash-editor-actions">
-        <button id="cfg-urgent-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-urgent-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
         <button id="cfg-urgent-revert" class="dash-btn">↩ 恢复</button>
         <!-- 启用态由 JS 加 .active -->
         <button id="cfg-urgent-toggle" class="dash-btn cfg-urgent-toggle"
-                title="启用后欢迎菜单展示紧急公告，新群首次建房额外通知一次，重启后依然生效">🚨 启用紧急公告</button>
+                title="启用后欢迎菜单展示紧急公告，新群首次建房额外通知一次，重启后依然生效"><svg class="ui-icon btn-icon"><use href="#i-bell"/></svg><span class="btn-label">启用紧急公告</span></button>
         <button id="cfg-urgent-reset" class="dash-btn dash-btn-danger"
-                title="清除全部已通知群记录，这些群下次新建游戏会再次收到紧急公告">♻ 重置全部已通知群（0 个）</button>
+                title="清除全部已通知群记录，这些群下次新建游戏会再次收到紧急公告"><svg class="ui-icon btn-icon"><use href="#i-reset"/></svg><span class="btn-label">重置全部已通知群（0 个）</span></button>
         <span id="cfg-urgent-msg" class="dash-config-msg"></span>
       </div>
     </section>
@@ -102,7 +102,7 @@
     <!-- ──── 疑难解答 (troubleshooting.txt) ──── -->
     <section class="dash-section">
       <div class="dash-section-header">
-        <h2 class="dash-section-title">❓ 疑难解答</h2>
+        <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-help"/></svg><span>疑难解答</span></h2>
         <div class="dash-section-meta">
           <span class="dash-meta-label">文件</span>
           <span id="cfg-trouble-path" class="dash-meta-value dash-mono">—</span>
@@ -114,7 +114,7 @@
       <textarea id="cfg-trouble-editor" class="dash-editor" spellcheck="false"
                 autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
       <div class="dash-editor-actions">
-        <button id="cfg-trouble-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-trouble-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
         <button id="cfg-trouble-revert" class="dash-btn">↩ 恢复</button>
         <span id="cfg-trouble-msg" class="dash-config-msg"></span>
       </div>
@@ -126,7 +126,7 @@
          page_config.render_tab_html() 在 sponsor_enabled 关闭时按标记整段切掉 -->
     <section class="dash-section">
       <div class="dash-section-header">
-        <h2 class="dash-section-title">❤️ 赞助鸣谢</h2>
+        <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-heart"/></svg><span>赞助鸣谢</span></h2>
         <div class="dash-section-meta">
           <span class="dash-meta-label">文件</span>
           <span id="cfg-sponsors-path" class="dash-meta-value dash-mono">—</span>
@@ -138,7 +138,7 @@
       <textarea id="cfg-sponsors-editor" class="dash-editor" spellcheck="false"
                 autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
       <div class="dash-editor-actions">
-        <button id="cfg-sponsors-save" class="dash-btn dash-btn-primary">💾 保存</button>
+        <button id="cfg-sponsors-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
         <button id="cfg-sponsors-revert" class="dash-btn">↩ 恢复</button>
         <span id="cfg-sponsors-msg" class="dash-config-msg"></span>
       </div>
@@ -148,7 +148,7 @@
     <!-- ──── 引擎配置 (lgtbot.json) ──── -->
     <section class="dash-section">
       <div class="dash-section-header">
-        <h2 class="dash-section-title">⚙️ 引擎配置</h2>
+        <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gear"/></svg><span>引擎配置</span></h2>
         <div class="dash-section-meta">
           <span class="dash-meta-label">文件</span>
           <span id="cfg-engine-path" class="dash-meta-value dash-mono">—</span>
@@ -160,7 +160,7 @@
       <textarea id="cfg-engine-editor" class="dash-editor" spellcheck="false"
                 autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
       <div class="dash-editor-actions">
-        <button id="cfg-engine-save" class="dash-btn dash-btn-primary">💾 保存配置</button>
+        <button id="cfg-engine-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存配置</span></button>
         <button id="cfg-engine-revert" class="dash-btn">↩ 恢复</button>
         <span id="cfg-engine-msg" class="dash-config-msg"></span>
       </div>

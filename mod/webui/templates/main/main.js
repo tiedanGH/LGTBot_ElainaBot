@@ -91,6 +91,20 @@ if (_fullscreenBtn) {
   });
 }
 
+/* 换按钮的图标与文案 —— 按钮里现在是 <svg> + <span class="btn-label"> */
+function setBtnIcon(btn, iconId, label) {
+  if (!btn) return;
+  const use = btn.querySelector('use');
+  if (use && iconId) use.setAttribute('href', iconId);
+  const span = btn.querySelector('.btn-label');
+  if (span && label != null) span.textContent = label;
+}
+/* 读按钮当前文案(配合 setBtnIcon 做「先存后还原」) */
+function btnLabel(btn) {
+  const span = btn && btn.querySelector('.btn-label');
+  return span ? span.textContent : '';
+}
+
 /* ──── 标签切换 ──── */
 document.querySelectorAll('.tabs .tab').forEach(btn => {
   btn.addEventListener('click', () => {

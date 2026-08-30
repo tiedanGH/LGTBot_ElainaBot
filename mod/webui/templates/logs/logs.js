@@ -83,7 +83,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('auto-toggle').addEventListener('click', () => {
     logsAutoRefresh = !logsAutoRefresh;
-    document.getElementById('auto-toggle').textContent = logsAutoRefresh ? '⏸ 自动' : '▶ 自动';
+    setBtnIcon(document.getElementById('auto-toggle'),
+           logsAutoRefresh ? '#i-pause' : '#i-play', '自动');
     const badge = document.getElementById('live-badge');
     if (badge) badge.style.opacity = logsAutoRefresh ? '1' : '.4';
     logsRender();

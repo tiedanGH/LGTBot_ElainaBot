@@ -87,14 +87,14 @@ function cfgApplyUrgentState(info) {
   const on = !!info.enabled;
   const toggle = document.getElementById('cfg-urgent-toggle');
   if (toggle) {
-    toggle.textContent = on ? '🚨 关闭紧急公告' : '🚨 启用紧急公告';
+    setBtnIcon(toggle, '#i-bell', on ? '关闭紧急公告' : '启用紧急公告');
     toggle.classList.toggle('active', on);
     toggle.disabled = false;          /* 动作跑完后由这里统一恢复可点 */
   }
   const reset = document.getElementById('cfg-urgent-reset');
   if (reset) {
     const n = info.notified_count || 0;
-    reset.textContent = '♻ 重置全部已通知群（' + n + ' 个）';
+    setBtnIcon(reset, '#i-reset', '重置全部已通知群（' + n + ' 个）');
     /* 一个都没通知过时没什么可重置,禁用避免误点(仍留着让人知道有这功能) */
     reset.disabled = !n;
   }
@@ -266,7 +266,7 @@ async function cfgReloadConfig() {
   const btn = document.getElementById('cfg-yaml-reload');
   const resEl = document.getElementById('cfg-yaml-reload-result');
   btn.disabled = true;
-  btn.textContent = '⏳ 重载中……';
+  setBtnIcon(btn, '#i-hourglass', '重载中……');
   resEl.innerHTML = '';
   try {
     const r = await fetch(apiUrl(CFG_KEYS.reload_config), { cache: 'no-store' });
@@ -307,7 +307,7 @@ async function cfgReloadConfig() {
     resEl.innerHTML = '<div class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</div>';
   } finally {
     btn.disabled = false;
-    btn.textContent = '🔁 热重载配置';
+    setBtnIcon(btn, '#i-restart', '热重载配置');
   }
 }
 

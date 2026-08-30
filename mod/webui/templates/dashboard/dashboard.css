@@ -109,8 +109,10 @@
 /* 实时刷新指示(无刷新按钮,每几秒自动拉取);呼吸动画提示「活着」 */
 .dash-matches-live {
   color: var(--in); font-size: 12px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 3px; line-height: 1;
   animation: dash-matches-pulse 2s ease-in-out infinite;
 }
+.dash-matches-live .ui-icon { width: 14px; height: 14px; }
 @keyframes dash-matches-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 /* 屏幕越宽列数越多: 1 列 - 3 列 */
 .dash-matches-list { display: grid; gap: 8px; grid-template-columns: 1fr; }

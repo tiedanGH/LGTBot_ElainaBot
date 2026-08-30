@@ -88,8 +88,8 @@ function crashApplyData(data) {
       '<td class="crash-col-uid">' + crashUidCell(d) + '</td>' +
       '<td class="crash-col-gid">' + crashGidCell(d) + '</td>' +
       '<td class="crash-col-act"><span class="crash-act-btns">' +
-        '<button class="dash-btn dash-btn-small crash-view" data-name="' + name + '">👁 查看</button>' +
-        '<button class="dash-btn dash-btn-small crash-dl" data-name="' + name + '">⬇ 下载</button>' +
+        '<button class="dash-btn dash-btn-small crash-view" data-name="' + name + '"><svg class="ui-icon btn-icon"><use href="#i-eye"/></svg><span class="btn-label">查看</span></button>' +
+        '<button class="dash-btn dash-btn-small crash-dl" data-name="' + name + '"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">下载</span></button>' +
       '</span></td></tr>';
   }).join('');
   body.querySelectorAll('.crash-view').forEach(b =>
@@ -114,7 +114,7 @@ function crashSyncSelection() {
   const sel = all.filter(c => c.checked);
   const btn = document.getElementById('crash-delete-btn');
   if (btn) {
-    btn.textContent = '🗑 删除选中 (' + sel.length + ')';
+    setBtnIcon(btn, '#i-trash', '删除选中 (' + sel.length + ')');
     btn.disabled = sel.length === 0;
   }
   const master = document.getElementById('crash-check-all');
@@ -192,7 +192,7 @@ function coreApplyData(data) {
       '<td class="crash-col-game">' + coreGameCell(a) + '</td>' +
       '<td class="crash-col-act"><span class="crash-act-btns">' +
         '<button class="dash-btn dash-btn-small core-dl" data-name="' + name +
-        '" data-dir="' + d + '">⬇ 下载</button>' +
+        '" data-dir="' + d + '"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">下载</span></button>' +
       '</span></td></tr>';
   }).join('');
   body.querySelectorAll('.core-dl').forEach(b =>
@@ -209,7 +209,7 @@ function coreSyncSelection() {
   const sel = all.filter(c => c.checked);
   const btn = document.getElementById('crash-core-delete');
   if (btn) {
-    btn.textContent = '🗑 删除选中 (' + sel.length + ')';
+    setBtnIcon(btn, '#i-trash', '删除选中 (' + sel.length + ')');
     btn.disabled = sel.length === 0;
   }
   const master = document.getElementById('crash-core-check-all');
@@ -280,7 +280,7 @@ function crashSetRefreshing(on) {
     if (on) {
       if (btn.dataset.label === undefined) btn.dataset.label = btn.textContent;
       btn.disabled = true;
-      btn.textContent = '⏳ 刷新中……';
+      setBtnIcon(btn, '#i-hourglass', '刷新中……');
     } else {
       btn.disabled = false;
       if (btn.dataset.label !== undefined) {

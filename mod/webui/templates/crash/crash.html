@@ -3,7 +3,7 @@
   <!-- ──── 状态卡 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">💥 崩溃转储</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-crash"/></svg><span>崩溃转储</span></h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">目录</span>
         <span id="crash-dir" class="dash-meta-value dash-mono">—</span>
@@ -42,11 +42,11 @@
   <!-- ──── 转储列表 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">📋 转储列表<span id="crash-count-badge" class="crash-title-badge"></span></h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-list"/></svg><span>转储列表</span><span id="crash-count-badge" class="crash-title-badge"></span></h2>
       <div class="dash-section-meta crash-list-actions">
         <span id="crash-action-msg" class="crash-action-msg"></span>
-        <button id="crash-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新</button>
-        <button id="crash-delete-btn" class="dash-btn dash-btn-small dash-btn-warn" disabled>🗑 删除选中 (0)</button>
+        <button id="crash-refresh-btn" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
+        <button id="crash-delete-btn" class="dash-btn dash-btn-small dash-btn-warn" disabled><svg class="ui-icon btn-icon"><use href="#i-trash"/></svg><span class="btn-label">删除选中 (0)</span></button>
       </div>
     </div>
     <div class="crash-table-wrap">
@@ -70,18 +70,18 @@
     </div>
     <p class="crash-note">
       引擎（C++ 桥接层）在崩溃时以 async-signal-safe 方式落盘信号 / si_addr / pid / tid + 触发源（uid·gid）+ backtrace 栈。
-      点「👁 查看」在弹窗中查看 dump 完整信息与 backtrace，「⬇ 下载」保存原始 dump 用于排障。
+      点「查看」在弹窗中查看 dump 完整信息与 backtrace，「下载」保存原始 dump 用于排障。
     </p>
   </section>
 
   <!-- ──── 游戏崩溃 core 文件 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">📋 游戏崩溃 core<span id="crash-core-badge" class="crash-title-badge"></span></h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-list"/></svg><span>游戏崩溃 core</span><span id="crash-core-badge" class="crash-title-badge"></span></h2>
       <div class="dash-section-meta crash-list-actions">
         <span id="crash-core-msg" class="crash-action-msg"></span>
-        <button id="crash-core-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
-        <button id="crash-core-delete" class="dash-btn dash-btn-small dash-btn-warn" disabled>🗑 删除选中 (0)</button>
+        <button id="crash-core-refresh" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
+        <button id="crash-core-delete" class="dash-btn dash-btn-small dash-btn-warn" disabled><svg class="ui-icon btn-icon"><use href="#i-trash"/></svg><span class="btn-label">删除选中 (0)</span></button>
       </div>
     </div>
     <div class="crash-table-wrap">
@@ -116,9 +116,9 @@
   <div id="crash-modal-backdrop" class="crash-modal-backdrop hidden" aria-hidden="true">
     <div id="crash-modal" class="crash-modal" role="dialog" aria-modal="true">
       <div class="crash-modal-head">
-        <h2 class="crash-modal-title">🔍 崩溃转储 · <span id="crash-view-name" class="dash-mono">—</span></h2>
+        <h2 class="crash-modal-title"><svg class="ui-icon title-icon"><use href="#i-search"/></svg><span>崩溃转储 · </span><span id="crash-view-name" class="dash-mono">—</span></h2>
         <div class="crash-view-actions">
-          <button id="crash-view-download" class="dash-btn dash-btn-small">⬇ 下载</button>
+          <button id="crash-view-download" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">下载</span></button>
           <button id="crash-view-close" class="dash-btn dash-btn-small">✕ 关闭</button>
         </div>
       </div>

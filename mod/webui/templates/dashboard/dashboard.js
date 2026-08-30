@@ -405,7 +405,7 @@ function dashApplyData(data) {
   if (dashRepoStatus === 'no_git') {
     /* no_git:右侧按钮切「初始化」;「⬇ 下载更新」等检查出新版本后由 dashRenderBridgeStatus 显示 */
     bDetail.innerHTML = '点击「检查更新」查看版本' + dashBridgeRepoLink() + dashGitWarnHtml();
-    bBtn.textContent = '📥 初始化为 git 仓库';
+    setBtnIcon(bBtn, '#i-inbox', '初始化为 git 仓库');
     bBtn.style.display = '';
   } else {
     /* ok 时初始文案「点击检查更新查看版本」+ 仓库链接;检查更新后由 dashRenderBridgeStatus 覆盖成版本对比 */
@@ -469,7 +469,7 @@ async function dashCheckUpdate() {
   const btn = document.getElementById('dash-check-update');
   const resEl = document.getElementById('dash-update-result');
   btn.disabled = true;
-  btn.textContent = '⏳ 检查中……';
+  setBtnIcon(btn, '#i-hourglass', '检查中……');
   resEl.innerHTML = '';
   /* 隐藏所有更新按钮,等结果回来再按需重显 */
   document.getElementById('dash-do-update').style.display = 'none';
@@ -495,7 +495,7 @@ async function dashCheckUpdate() {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
     btn.disabled = false;
-    btn.textContent = '🔍 检查更新';
+    setBtnIcon(btn, '#i-search', '检查更新');
   }
 }
 
@@ -513,7 +513,8 @@ function dashRenderBridgeStatus(bridge) {
   const noGit = dashRepoStatus === 'no_git';
   const gitWarn = noGit ? dashGitWarnHtml() : '';
   if (dlBtn) dlBtn.style.display = 'none';
-  btn.textContent = noGit ? '📥 初始化为 git 仓库' : '⬇ 更新桥接层';
+  setBtnIcon(btn, noGit ? '#i-inbox' : '#i-download',
+             noGit ? '初始化为 git 仓库' : '更新桥接层');
 
   if (!bridge || !bridge.success) {
     detail.innerHTML = '<span class="dash-msg-err">❌ ' +
@@ -562,7 +563,7 @@ function dashRenderSubmoduleStatus(sub) {
               '</a>';
     }
     detail.innerHTML = html;
-    btn.textContent = '⬇ 初始化子模块';
+    setBtnIcon(btn, '#i-download', '初始化子模块');
     btn.style.display = '';
     return;
   }
@@ -599,7 +600,7 @@ function dashRenderSubmoduleStatus(sub) {
     detail.innerHTML = '<span class="dash-msg-warn">✨ 本地 <b class="dash-mono">' +
       escapeHtml(local) + '</b> → 远端 <b class="dash-mono">' +
       escapeHtml(remote) + '</b></span>' + upstreamLink;
-    btn.textContent = '⬇ 更新子模块';
+    setBtnIcon(btn, '#i-download', '更新子模块');
     btn.style.display = '';
   } else {
     detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新 (本地 ' +
@@ -620,7 +621,7 @@ async function dashDoUpdate() {
   const btn = document.getElementById('dash-do-update');
   const resEl = document.getElementById('dash-update-result');
   btn.disabled = true;
-  btn.textContent = '⏳ 更新中……';
+  setBtnIcon(btn, '#i-hourglass', '更新中……');
   try {
     const data = await dashCallAction(DASH_KEYS.do_update);
     let html = '<div class="dash-msg-info">执行命令：<code class="dash-mono">' +
@@ -653,7 +654,7 @@ async function dashDoUpdate() {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
     btn.disabled = false;
-    btn.textContent = '⬇ 更新桥接层';
+    setBtnIcon(btn, '#i-download', '更新桥接层');
   }
 }
 
@@ -681,7 +682,7 @@ async function dashDoUpdateForce() {
   const resEl = document.getElementById('dash-update-result');
   if (forceBtn) {
     forceBtn.disabled = true;
-    forceBtn.textContent = '⏳ 强制更新中……';
+    setBtnIcon(forceBtn, '#i-hourglass', '强制更新中……');
   }
   try {
     const data = await dashCallAction(DASH_KEYS.do_update_force);
@@ -711,7 +712,7 @@ async function dashDoUpdateForce() {
   } finally {
     if (forceBtn) {
       forceBtn.disabled = false;
-      forceBtn.textContent = '💥 强制更新 (丢弃本地修改)';
+      setBtnIcon(forceBtn, '#i-crash', '强制更新 (丢弃本地修改)');
     }
   }
 }
@@ -733,7 +734,7 @@ async function dashInitRepo() {
   const btn = document.getElementById('dash-do-update');
   const resEl = document.getElementById('dash-update-result');
   btn.disabled = true;
-  btn.textContent = '⏳ 初始化中……';
+  setBtnIcon(btn, '#i-hourglass', '初始化中……');
   resEl.innerHTML = '';
   try {
     const data = await dashCallAction(DASH_KEYS.init_repo);
@@ -774,9 +775,9 @@ async function dashInitRepo() {
   } finally {
     btn.disabled = false;
     /* 按当前状态决定文案: 成功 → 走 'ok' 文案;失败 → 保持 no_git 文案让用户重试 */
-    btn.textContent = (dashRepoStatus === 'no_git'
-                        ? '📥 初始化为 git 仓库'
-                        : '⬇ 更新桥接层');
+    const noGit = dashRepoStatus === 'no_git';
+    setBtnIcon(btn, noGit ? '#i-inbox' : '#i-download',
+               noGit ? '初始化为 git 仓库' : '更新桥接层');
   }
 }
 
@@ -801,7 +802,7 @@ async function dashDoDownloadUpdate() {
   if (!ok) return;
   const dlBtn = document.getElementById('dash-do-download');
   const resEl = document.getElementById('dash-update-result');
-  if (dlBtn) { dlBtn.disabled = true; dlBtn.textContent = '⏬ 下载中……'; }
+  if (dlBtn) { dlBtn.disabled = true; setBtnIcon(dlBtn, '#i-download', '下载中……'); }
   try {
     const data = await dashCallAction(DASH_KEYS.download_update);
     resEl.innerHTML = data.success
@@ -811,7 +812,7 @@ async function dashDoDownloadUpdate() {
   } catch (e) {
     resEl.innerHTML = '<div class="dash-msg-err">❌ 请求失败：' + escapeHtml(e.message) + '</div>';
   } finally {
-    if (dlBtn) { dlBtn.disabled = false; dlBtn.textContent = '⬇ 下载更新'; }
+    if (dlBtn) { dlBtn.disabled = false; setBtnIcon(dlBtn, '#i-download', '下载更新'); }
   }
 }
 
@@ -848,9 +849,9 @@ async function dashDoUpdateSubmodule() {
 
   const btn = document.getElementById('dash-update-submodule');
   const resEl = document.getElementById('dash-update-result');
-  const originalLabel = btn.textContent;
+  const originalLabel = btnLabel(btn);
   btn.disabled = true;
-  btn.textContent = isInit ? '⏳ 初始化中……' : '⏳ 更新中……';
+  setBtnIcon(btn, '#i-hourglass', isInit ? '初始化中……' : '更新中……');
   try {
     const data = await dashCallAction(DASH_KEYS.update_submodule);
     let html = '';
@@ -873,7 +874,7 @@ async function dashDoUpdateSubmodule() {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
     btn.disabled = false;
-    btn.textContent = originalLabel;
+    setBtnIcon(btn, '#i-download', originalLabel);
   }
 }
 

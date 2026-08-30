@@ -3,7 +3,7 @@
   <!-- ──── 状态与总开关 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">🏷️ 昵称审核</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-review"/></svg><span>昵称审核</span></h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">结论库</span>
         <span id="review-db" class="dash-meta-value dash-mono">—</span>
@@ -39,8 +39,8 @@
     </div>
 
     <div class="review-actions-bar">
-      <button id="review-toggle" class="dash-btn dash-btn-small">🏷️ 启用昵称审核</button>
-      <button id="review-refresh" class="dash-btn dash-btn-small">🔄 刷新</button>
+      <button id="review-toggle" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-review"/></svg><span class="btn-label">启用昵称审核</span></button>
+      <button id="review-refresh" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
       <span id="review-msg" class="review-msg"></span>
     </div>
   </section>
@@ -48,7 +48,7 @@
   <!-- ──── 审核模型 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">🤖 审核模型</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-ai"/></svg><span>审核模型</span></h2>
       <div class="dash-section-meta">
         <span id="review-llm-state" class="dash-meta-value">—</span>
       </div>
@@ -74,18 +74,18 @@
           <option value="1">先显示匿名</option>
         </select>
       </label>
-      <button id="review-save" class="dash-btn dash-btn-small dash-btn-primary">💾 保存</button>
+      <button id="review-save" class="dash-btn dash-btn-small dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
     </div>
   </section>
 
   <!-- ──── 存量批量扫描 ──── -->
   <section class="dash-section" id="review-scan-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">📋 存量批量审核</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-backup"/></svg><span>存量批量审核</span></h2>
       <div class="dash-section-meta review-scan-actions">
-        <button id="review-scan-start" class="dash-btn dash-btn-small">▶ 开始 / 继续</button>
-        <button id="review-scan-pause" class="dash-btn dash-btn-small">⏸ 暂停</button>
-        <button id="review-scan-reset" class="dash-btn dash-btn-small dash-btn-warn">↺ 重置游标</button>
+        <button id="review-scan-start" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-play"/></svg><span class="btn-label">开始 / 继续</span></button>
+        <button id="review-scan-pause" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-pause"/></svg><span class="btn-label">暂停</span></button>
+        <button id="review-scan-reset" class="dash-btn dash-btn-small dash-btn-warn"><svg class="ui-icon btn-icon"><use href="#i-rotate-ccw"/></svg><span class="btn-label">重置游标</span></button>
       </div>
     </div>
 
@@ -104,7 +104,7 @@
   <!-- ──── 违规记录 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">⚠️ 违规记录</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-alert"/></svg><span>违规记录</span></h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">未处理</span>
         <span id="review-pending" class="dash-meta-value">—</span>
@@ -121,7 +121,7 @@
   <!-- ──── 白名单记录 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">✅ 白名单记录</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-check-circle"/></svg><span>白名单记录</span></h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">共</span>
         <span id="review-allowed-count" class="dash-meta-value">—</span>

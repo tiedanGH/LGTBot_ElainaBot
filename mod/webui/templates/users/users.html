@@ -2,7 +2,7 @@
   <span class="query-time-wrap">查询时间：<span id="users-query-time">—</span></span>
   <span class="users-total-wrap">总用户：<span id="users-total">—</span></span>
   <span class="spacer"></span>
-  <input type="text" id="users-search" placeholder="🔍 搜索 昵称 或 OpenID" autocomplete="off" spellcheck="false">
+  <span class="users-search-wrap"><svg class="ui-icon btn-icon"><use href="#i-search"/></svg><input type="text" id="users-search" placeholder="搜索 昵称 或 OpenID" autocomplete="off" spellcheck="false"></span>
   <span class="spacer"></span>
   <div class="pagination">
     <button id="users-prev" title="上一页">‹</button>
@@ -10,7 +10,7 @@
     <span class="page-total">/ <span id="users-page-total">1</span></span>
     <button id="users-next" title="下一页">›</button>
   </div>
-  <button id="users-refresh" title="重新查询主框架用户数据库">🔄 刷新数据</button>
+  <button id="users-refresh" title="重新查询主框架用户数据库"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新数据</span></button>
 </div>
 
 <div class="users-grid">

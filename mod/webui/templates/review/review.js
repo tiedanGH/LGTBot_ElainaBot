@@ -80,7 +80,8 @@ function reviewApplyData(d) {
     '累计调用 ' + (scan.calls_total || 0);
 
   const toggle = document.getElementById('review-toggle');
-  toggle.textContent = d.enabled ? '🏷️ 关闭昵称审核' : '🏷️ 启用昵称审核';
+  setBtnIcon(toggle, '#i-review',
+             d.enabled ? '关闭昵称审核' : '启用昵称审核');
   toggle.classList.toggle('active', !!d.enabled);
   toggle.disabled = !d.enabled && !d.llm_available;
   toggle.title = toggle.disabled ? d.llm_message : '';
@@ -134,9 +135,9 @@ async function reviewSaveSettings(btn) {
     batch_size: document.getElementById('review-batch').value,
     fail_closed: document.getElementById('review-failmode').value === '1' ? '1' : '0',
   });
-  const old = btn.textContent;
+  const old = btnLabel(btn);
   btn.disabled = true;
-  btn.textContent = '⏳ ...';
+  setBtnIcon(btn, '#i-hourglass', '...');
   try {
     const url = REVIEW_SETTINGS_ROUTE + TOKEN_QS + (TOKEN_QS ? '&' : '?') + q.toString();
     const data = await (await fetch(url, { cache: 'no-store' })).json();
@@ -146,7 +147,7 @@ async function reviewSaveSettings(btn) {
     reviewShowMsg('❌ ' + e.message, 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = old;
+    setBtnIcon(btn, '#i-save', old);
   }
   await reviewRefresh();
 }
@@ -195,7 +196,9 @@ function reviewRow(e, acts, extraClass) {
     '<span class="review-time">' + escapeHtml(reviewFmtTime(e.ts)) + '</span>' +
     acts.map(a =>
       '<button class="dash-btn dash-btn-small ' + a.cls + '" data-key="' + key +
-      '" data-op="' + a.op + '">' + a.text + '</button>').join('') +
+      '" data-op="' + a.op + '">' +
+      '<svg class="ui-icon btn-icon"><use href="' + a.icon + '"/></svg>' +
+      '<span class="btn-label">' + a.text + '</span></button>').join('') +
     '</div>';
 }
 
@@ -216,10 +219,10 @@ function reviewApplyEntries(entries) {
       (handled.length ? '没有待处理的违规记录' : '暂无违规记录') + '</div>';
   } else {
     body.innerHTML = shown.map(e => reviewRow(e, e.handled
-      ? [{op: 'acquit', cls: '', text: '↩ 翻案'},
-         {op: 'reopen', cls: 'dash-btn-success', text: '↺ 撤销处理'}]
-      : [{op: 'acquit', cls: '', text: '↩ 翻案'},
-         {op: 'handled', cls: '', text: '✓ 已处理'}],
+      ? [{op: 'acquit', cls: '', icon: '#i-undo', text: '翻案'},
+         {op: 'reopen', cls: 'dash-btn-success', icon: '#i-rotate-ccw', text: '撤销处理'}]
+      : [{op: 'acquit', cls: '', icon: '#i-undo', text: '翻案'},
+         {op: 'handled', cls: '', icon: '#i-check', text: '已处理'}],
       e.handled ? 'handled' : '')).join('');
   }
   reviewBindRow(body);
@@ -230,8 +233,8 @@ function reviewApplyAllowed(allowed) {
   const body = document.getElementById('review-allow-list');
   body.innerHTML = allowed.length
     ? allowed.map(e => reviewRow(e, [
-        {op: 'revoke', cls: '', text: '↩ 撤销白名单'},
-        {op: 'condemn', cls: 'review-btn-quiet', text: '⚠️ 判定违规'},
+        {op: 'revoke', cls: '', icon: '#i-undo', text: '撤销白名单'},
+        {op: 'condemn', cls: 'review-btn-quiet', icon: '#i-alert', text: '判定违规'},
       ])).join('')
     : '<div class="review-empty-row">暂无白名单记录</div>';
   reviewBindRow(body);
@@ -292,7 +295,7 @@ async function reviewVerdict(key, op, name) {
 
 async function reviewRunAction(key, btn) {
   const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+  if (btn) { btn.disabled = true; setBtnIcon(btn, '#i-hourglass', '...'); }
   try {
     const data = await reviewCallAction(key);
     reviewApplyData(data);

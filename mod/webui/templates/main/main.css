@@ -95,6 +95,11 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 }
 #restart-btn .ui-icon { width: 16px; height: 16px; }
 .tab-icon { width: 17px; height: 17px; margin-right: 6px; vertical-align: -4px; }
+/* 行内小标题(桥接层 / 子模块那种 <b>)同样要 flex 对齐 */
+.dash-inline-title { display: inline-flex; align-items: center; gap: 6px; }
+/* 按钮 / 区块标题里的图标比顶栏小一号,跟 13px 正文配平 */
+.btn-icon { width: 15px; height: 15px; }
+.title-icon { width: 17px; height: 17px; }
 
 /* ───── 顶部标题栏 ───── */
 .topbar {
@@ -237,6 +242,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .dash-section-title {
   font-size: 14px; font-weight: 600; color: var(--accent);
   margin: 0 0 12px 0;
+  display: inline-flex; align-items: center; gap: 7px;
 }
 .dash-section-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -259,6 +265,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px;
   cursor: pointer; font-size: 12px;
   transition: background .15s, border-color .15s, color .15s, opacity .15s;
+  /* 图标 + 文案并排:按钮 <svg> + <span class="btn-label"> 两段 */
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
 }
 .dash-btn:hover:not(:disabled) {
   background: var(--hover); border-color: var(--border-2);

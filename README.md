@@ -138,8 +138,8 @@ cd ../.. && python3 main.py
 
 规划中的改进方向，欢迎在 [QQ 群](https://qun.qq.com/universal-share/share?ac=1&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw&svctype=4&tempid=h5_group_info) 或 issue 中讨论：
 
-- [ ] **Web 面板图标 SVG 化** —— 把面板内**全部 emoji 图标**换成 SVG，摆脱各平台 emoji 字形不一致（Windows / macOS / 移动端差异明显）、无法随主题换色的问题
 - [ ] **定时任务小框架** —— 插件内建轻量定时调度，替掉现在的 ad-hoc 定时器。**固定时间**的每日备份、每日排行榜推送、过期渲染图定时清理。跨热重载不重复注册、进程重启后能补跑漏掉的任务、单个任务失败不拖垮其他任务
+- [x] **Web 面板图标 SVG 化** —— 把面板内**全部 emoji 图标**换成 SVG，摆脱各平台 emoji 字形不一致（Windows / macOS / 移动端差异明显）、无法随主题换色的问题
 - [x] **CI 预编译产物** —— GitHub Actions 三发行版矩阵编译引擎核心 + 50+ 游戏插件，发布到滚动 `prebuilt` release；面板「📦 预编译部署」下载切换，用户无需本地搭 Boost.Python / C++20 工具链
 - [x] **复用主框架用户数据** —— 昵称 / 头像 / 活跃 / 消息统计全部改读 ElainaBot 主框架数据库（data.db / wakeup.db / statistics.db），插件私有的 `data/user_cache.db` 完全停用；昵称变化由插件比对后经框架写队列回写保持最新
 - [x] **测试覆盖补齐** —— 裸奔模块补上单测防回归：`helpers`（转义 / 绑定解析 / 全量群集合 / 协程桥接）、`config`（全部可调字段下发 + 配置读写）、`audit`（类别登记漂移闸），以及 `webui/` 各 page 的数据组装与 action 端点（fragment 协议 / 注册对称性 / 惰性 HTML）

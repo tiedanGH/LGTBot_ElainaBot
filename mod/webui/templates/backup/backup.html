@@ -3,7 +3,7 @@
   <!-- ──── 状态卡 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">💾 数据备份</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-backup"/></svg><span>数据备份</span></h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">备份目录</span>
         <span id="backup-dir" class="dash-meta-value dash-mono">—</span>
@@ -34,15 +34,15 @@
     </div>
 
     <div class="backup-actions-bar">
-      <button id="backup-create-btn" class="dash-btn dash-btn-primary">💾 立即备份</button>
-      <button id="backup-refresh-btn" class="dash-btn dash-btn-small">🔄 刷新列表</button>
+      <button id="backup-create-btn" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">立即备份</span></button>
+      <button id="backup-refresh-btn" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新列表</span></button>
       <span id="backup-action-msg" class="backup-action-msg"></span>
     </div>
   </section>
 
   <!-- ──── 备份列表 ──── -->
   <section class="dash-section">
-    <h2 class="dash-section-title">📂 备份列表</h2>
+    <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-folder"/></svg><span>备份列表</span></h2>
     <div class="backup-table-wrap">
       <table class="backup-table">
         <thead>
@@ -62,7 +62,7 @@
 
   <!-- ──── 内容说明 ──── -->
   <section class="dash-section">
-    <h2 class="dash-section-title">📋 备份内容说明</h2>
+    <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-clipboard"/></svg><span>备份内容说明</span></h2>
     <ul class="backup-content-list">
       <li><code class="dash-mono">data/engine/lgtbot.db</code> &mdash; LGTBot 核心数据库：对局战绩、用户成就</li>
       <li><code class="dash-mono">data/engine/lgtbot.json</code> &mdash; LGTBot 引擎配置</li>

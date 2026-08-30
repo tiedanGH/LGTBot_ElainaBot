@@ -143,7 +143,7 @@ function pbRenderMirrorList() {
 }
 async function pbTestMirrors() {
   const btn = document.getElementById('pb-test-mirrors');
-  if (btn) { btn.disabled = true; btn.textContent = '📶 测速中…'; }
+  if (btn) { btn.disabled = true; setBtnIcon(btn, '#i-signal', '测速中…'); }
   try {
     const data = await pbCallRoute(PB_TESTMIRRORS_ROUTE, { method: 'POST', body: { customs: _pbCustoms } });
     if (data.success) {
@@ -155,7 +155,7 @@ async function pbTestMirrors() {
       pbShowMsg('❌ 测速失败：' + (data.message || ''), 'err');
     }
   } catch (e) { pbShowMsg('❌ 测速失败：' + e.message, 'err'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = '📶 测速'; } }
+  finally { if (btn) { btn.disabled = false; setBtnIcon(btn, '#i-signal', '测速'); } }
 }
 async function pbAddCustomMirror() {
   if (typeof dashPrompt !== 'function') return;
@@ -217,7 +217,7 @@ function pbRenderList(data) {
                      : '<span class="pb-tag pb-tag-mismatch">py 不匹配</span>');
     }
     if (a.installed) tags.push('<span class="pb-tag pb-tag-installed">已安装</span>');
-    const btn = '<button class="dash-btn dash-btn-small pb-dl" data-name="' + escapeHtml(a.name) + '">⬇ 下载</button>';
+    const btn = '<button class="dash-btn dash-btn-small pb-dl" data-name="' + escapeHtml(a.name) + '"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">下载</span></button>';
     return '<tr class="' + ((osOk && pyOk) ? 'pb-row-match' : '') + '">' +
            '<td>' + escapeHtml(a.os || '') + '</td>' +
            '<td class="dash-mono">' + escapeHtml(a.python_tag || '') + '</td>' +

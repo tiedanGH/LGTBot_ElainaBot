@@ -180,7 +180,7 @@ function auditShowMsg(text, kind) {
 /* ──── 刷新 ──── */
 async function auditRefresh() {
   const btn = document.getElementById('audit-refresh-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+  if (btn) { btn.disabled = true; setBtnIcon(btn, '#i-hourglass', '...'); }
   try {
     const data = await auditCallAction(AUDIT_LIST_KEY);
     if (data.success) {
@@ -192,7 +192,7 @@ async function auditRefresh() {
   } catch (e) {
     auditShowMsg('❌ ' + e.message, 'err');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 刷新'; }
+    if (btn) { btn.disabled = false; setBtnIcon(btn, '#i-refresh', '刷新'); }
   }
 }
 

@@ -3,7 +3,7 @@
   <!-- ──── 构建来源 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">🔀 构建来源</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-shuffle"/></svg><span>构建来源</span></h2>
       <span id="pb-mode-badge" class="dash-badge">当前运行：—</span>
     </div>
     <div class="pb-source-row">
@@ -13,8 +13,8 @@
         切换后需<b>重启 LGTBot</b> 才生效。
       </p>
       <div class="pb-switch-actions">
-        <button id="pb-use-local" class="dash-btn">🧱 用本地编译</button>
-        <button id="pb-use-prebuilt" class="dash-btn dash-btn-primary">📦 用预编译包</button>
+        <button id="pb-use-local" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-build"/></svg><span class="btn-label">用本地编译</span></button>
+        <button id="pb-use-prebuilt" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-prebuilt"/></svg><span class="btn-label">用预编译包</span></button>
       </div>
     </div>
     <div id="pb-switch-note" class="pb-switch-note"></div>
@@ -23,10 +23,10 @@
   <!-- ──── 下载镜像 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">🌐 下载镜像</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-globe"/></svg><span>下载镜像</span></h2>
       <div class="dash-section-meta">
-        <button id="pb-add-mirror" class="dash-btn">➕ 自定义镜像</button>
-        <button id="pb-test-mirrors" class="dash-btn">📶 测速</button>
+        <button id="pb-add-mirror" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">自定义镜像</span></button>
+        <button id="pb-test-mirrors" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-signal"/></svg><span class="btn-label">测速</span></button>
       </div>
     </div>
     <p class="pb-hint">预编译包较大，选延迟低的镜像可显著加快下载。</p>
@@ -38,20 +38,20 @@
     </div>
     <!-- 展开态:测速结果列表(默认未选择时展开) -->
     <div id="pb-mirror-list" class="pb-mirror-list">
-      <div class="pb-mirror-empty">点「📶 测速」按延迟排序后逐个选择，或「➕ 自定义镜像」添加自己的代理。</div>
+      <div class="pb-mirror-empty">点「测速」按延迟排序后逐个选择，或「自定义镜像」添加自己的代理。</div>
     </div>
   </section>
 
   <!-- ──── 预编译包列表 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
-      <h2 class="dash-section-title">📦 预编译包</h2>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-prebuilt"/></svg><span>预编译包</span></h2>
       <div class="dash-section-meta">
         <span class="dash-meta-label">本机</span>
         <span id="pb-local-plat" class="dash-meta-value dash-mono">—</span>
-        <button id="pb-upload-btn" class="dash-btn" title="手动上传本地已下载的预编译包 zip">⬆ 上传预编译包</button>
+        <button id="pb-upload-btn" class="dash-btn" title="手动上传本地已下载的预编译包 zip"><svg class="ui-icon btn-icon"><use href="#i-upload"/></svg><span class="btn-label">上传预编译包</span></button>
         <input id="pb-upload-input" type="file" accept=".zip,application/zip" style="display:none">
-        <button id="pb-list-refresh" class="dash-btn">🔄 刷新列表</button>
+        <button id="pb-list-refresh" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新列表</span></button>
       </div>
     </div>
     <div class="pb-table-wrap">
@@ -62,7 +62,7 @@
           </tr>
         </thead>
         <tbody id="pb-table-body">
-          <tr class="pb-empty"><td colspan="6">点击「🔄 刷新列表」从远程获取</td></tr>
+          <tr class="pb-empty"><td colspan="6">点击「刷新列表」从远程获取</td></tr>
         </tbody>
       </table>
     </div>

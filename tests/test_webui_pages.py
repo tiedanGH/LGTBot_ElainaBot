@@ -529,16 +529,69 @@ def test_top_bar_buttons_have_icons():
         assert re.search(r'id="%s".*?<use href="#%s"/>' % (btn, icon), top), btn
 
 
-def test_sprite_defines_exactly_the_icons_the_page_uses():
+def test_sprite_defines_exactly_the_icons_the_templates_use():
     """★ 引用与定义必须对齐两侧:少一个是空白占位,多一个是没人用的死图元。"""
+    import os
+    wm = _main()
+    blob = []
+    for root, _dirs, files in os.walk(os.path.join(os.path.dirname(wm.__file__),
+                                                   'templates')):
+        for fn in files:
+            with open(os.path.join(root, fn), encoding='utf-8') as f:
+                blob.append(f.read())
+    blob = '\n'.join(blob)
+    defined = set(re.findall(r'<symbol id="(i-[\w-]+)"', blob))
+    used = (set(re.findall(r'<use href="#(i-[\w-]+)"', blob))
+            | set(re.findall(r"'#(i-[\w-]+)'", blob)))
+    assert defined == used, (defined ^ used)
+
+
+_SVG_TABS = ('dashboard', 'metrics', 'config', 'prebuilt', 'build', 'backup',
+             'logs', 'crash', 'review', 'audit', 'users')
+
+
+def _tab_template(wm, tab: str, ext: str) -> str:
+    import os
+    with open(os.path.join(os.path.dirname(wm.__file__), 'templates', tab,
+                           tab + '.' + ext), encoding='utf-8') as f:
+        return f.read()
+
+
+def test_tab_buttons_pair_their_icon_with_a_label_span():
+    """★ 带图标的按钮文案必须单独包一层 .btn-label —— JS 要改文案时写的是这层,
+    整个按钮写 textContent 会把 <svg> 一起冲掉,图标从此消失。"""
+    wm = _main()
+    for tab in _SVG_TABS:
+        html = _tab_template(wm, tab, 'html')
+        for m in re.finditer(r'<(button|a)\b[^>]*>(.*?)</\1>', html, re.S):
+            body = m.group(2)
+            if '<use href="#i-' not in body:
+                continue
+            assert '<span class="btn-label">' in body, (tab, m.group(0)[:90])
+
+
+def test_tab_js_swaps_button_icons_through_the_shared_helper():
+    """★ 换按钮文案统一走 setBtnIcon:它同时改 <use> 的 href 和 .btn-label,是唯一不会把图标冲掉的写法。"""
     wm = _main()
     html = wm._render_html()
-    defined = set(re.findall(r'<symbol id="(i-[\w-]+)"', html))
-    used = set(re.findall(r'<use href="#(i-[\w-]+)"', html))
-    # 主题的三态由 JS 换 href,页面上只写死了自动态那一个
-    used |= {'i-theme-light', 'i-theme-dark'}
-    assert defined == used, (defined ^ used)
-    assert len(defined) == 17
+    assert 'function setBtnIcon(btn, iconId, label)' in html
+    assert 'function btnLabel(btn)' in html
+    for tab in ('dashboard', 'metrics', 'config', 'prebuilt', 'backup',
+                'logs', 'crash', 'review', 'audit'):
+        js = _tab_template(wm, tab, 'js')
+        assert 'setBtnIcon(' in js, tab
+
+
+def test_button_and_title_icons_line_up_with_their_text():
+    """图标与文案并排靠 flex 对齐,不靠 vertical-align 猜 —— 按钮和区块标题两处都要开,否则图标会吊在文字上沿。"""
+    wm = _main()
+    css = wm._render_html()
+    css = css[:css.index('</style>')]
+    assert re.search(r'\.dash-btn \{[^}]*display: inline-flex;[^}]*gap: 6px;', css, re.S)
+    assert re.search(r'\.dash-section-title \{[^}]*display: inline-flex;[^}]*gap: 7px;',
+                     css, re.S)
+    assert '.btn-icon { width: 15px; height: 15px; }' in css
+    assert '.title-icon { width: 17px; height: 17px; }' in css
 
 
 def test_icons_follow_the_current_text_colour():
@@ -955,7 +1008,8 @@ def test_review_records_split_into_violations_and_whitelist():
     html = wm._render_html()
     for frag in ('id="review-list"', 'id="review-allow-list"',
                  'id="review-toggle-handled"', 'id="review-allowed-count"',
-                 '⚠️ 违规记录', '✅ 白名单记录'):
+                 '<use href="#i-alert"/></svg><span>违规记录</span>',
+                 '<use href="#i-check-circle"/></svg><span>白名单记录</span>'):
         assert frag in html, frag
     assert "op: 'revoke'" in html and "op: 'condemn'" in html
 
