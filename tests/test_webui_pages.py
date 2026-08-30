@@ -497,6 +497,124 @@ def test_main_js_uses_the_restart_route():
     assert wm._RESTART_PANEL_ROUTE in html
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# SVG 图标
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _sticky_top(html: str) -> str:
+    """顶栏 + 标签导航那一段(不含各标签的内容)。"""
+    i = html.index('<div class="sticky-top">')
+    return html[i:html.index('<div class="page-content">', i)]
+
+
+def test_every_tab_has_an_icon():
+    """每个标签都要有,漏一个就是一行图标对不齐的标签。"""
+    wm = _main()
+    top = _sticky_top(wm._render_html())
+    tabs = re.findall(r'<button class="tab[^"]*" data-tab="(\w+)">(.*?)</button>', top)
+    assert len(tabs) == 11
+    for name, body in tabs:
+        assert re.match(r'<svg class="ui-icon tab-icon"><use href="#i-[\w-]+"/></svg>',
+                        body), name
+
+
+def test_top_bar_buttons_have_icons():
+    wm = _main()
+    top = _sticky_top(wm._render_html())
+    for btn, icon in (('fullscreen-btn', 'i-fullscreen'),
+                      ('theme-toggle', 'i-theme-auto'),
+                      ('planned-restart-btn', 'i-maintenance'),
+                      ('restart-btn', 'i-restart')):
+        assert re.search(r'id="%s".*?<use href="#%s"/>' % (btn, icon), top), btn
+
+
+def test_sprite_defines_exactly_the_icons_the_page_uses():
+    """★ 引用与定义必须对齐两侧:少一个是空白占位,多一个是没人用的死图元。"""
+    wm = _main()
+    html = wm._render_html()
+    defined = set(re.findall(r'<symbol id="(i-[\w-]+)"', html))
+    used = set(re.findall(r'<use href="#(i-[\w-]+)"', html))
+    # 主题的三态由 JS 换 href,页面上只写死了自动态那一个
+    used |= {'i-theme-light', 'i-theme-dark'}
+    assert defined == used, (defined ^ used)
+    assert len(defined) == 17
+
+
+def test_icons_follow_the_current_text_colour():
+    """★ 换 SVG 的目的之一就是跟着主题 / 选中态换色 —— 图元里写死颜色就白换了。"""
+    wm = _main()
+    html = wm._render_html()
+    css = html[:html.index('</style>')]
+    assert re.search(r'\.ui-icon \{[^}]*stroke: currentColor', css, re.S)
+    assert re.search(r'\.ui-icon \{[^}]*fill: none', css, re.S)
+    sprite = html[html.index('<svg xmlns'):html.index('</svg>') + 6]
+    assert not re.search(r'(?:fill|stroke)="(?!none\b|currentColor\b)[^"]+"', sprite)
+    # sprite 本身不占位
+    assert '.icon-sprite { display: none; }' in css
+
+
+def test_theme_button_swaps_the_use_href_not_the_button_text():
+    """★ 按钮里现在是 SVG,写 textContent 会把它整个冲掉,图标从此消失。"""
+    wm = _main()
+    html = wm._render_html()
+    assert ("const THEME_ICON = {auto: '#i-theme-auto', light: '#i-theme-light', "
+            "dark: '#i-theme-dark'};") in html
+    assert "if (use) use.setAttribute('href', THEME_ICON[themeMode]);" in html
+    assert 'btn.textContent = THEME_ICON' not in html
+
+
+def test_planned_restart_rewrites_only_its_label_span():
+    """★ 同上:整个按钮写 textContent 会连图标一起抹掉。"""
+    wm = _main()
+    html = wm._render_html()
+    assert 'id="planned-restart-label"' in html
+    assert "label.textContent = on ? '取消计划重启' : '计划重启';" in html
+    assert 'btn.textContent = on ?' not in html
+
+
+def test_title_carries_the_inlined_site_logo():
+    """★ 站标走 data URI:面板 HTML 由框架路由吐出,页面里的相对路径落不到插件
+    目录,单为一张图开一条静态路由不值当。"""
+    wm = _main()
+    html = wm._render_html()
+    assert re.search(r'<h1><img class="topbar-logo" src="data:image/png;base64,[A-Za-z0-9+/=]+"'
+                     r' alt="">LGTBot 机器人</h1>', html)
+    assert '__LOGO_DATA_URI__' not in html          # 占位符必须被替换掉
+    css = html[:html.index('</style>')]
+    assert '.topbar-logo { width: 26px; height: 26px;' in css
+    # 标题要缩进:不补的话站标贴着滚动区左沿,比下面每个标签都更靠左
+    indent = re.search(r'\.topbar h1 \{[^}]*padding-left: (\d+)px', css, re.S)
+    assert indent and int(indent.group(1)) > 0
+
+
+def test_missing_logo_file_does_not_break_the_page(tmp_path, monkeypatch):
+    """★ 读不到图就是一张破图,页面其余部分照常 —— 面板不该因为少一张装饰图
+    整个打不开(站标在 import 期读盘,抛出去就是插件加载失败)。"""
+    wm = _main()
+    monkeypatch.setattr(wm, '_LOGO_PATH', str(tmp_path / 'nope.png'))
+    assert wm._logo_data_uri() == ''
+    monkeypatch.setattr(wm, '_LOGO_DATA_URI', '')
+    html = wm._render_html()
+    assert '<img class="topbar-logo" src="" alt="">LGTBot 机器人' in html
+    assert '<div class="tabs">' in html
+
+
+def test_restart_icon_is_drawn_heavier_but_smaller_than_the_rest():
+    """★ 重启那枚照 🔁 画成回路,描边比其余图标粗一档 —— 写在图元上才压得过
+    .ui-icon 继承下来的那一档;同时单独收小一号,否则又粗又同尺寸会显得大一圈。"""
+    wm = _main()
+    html = wm._render_html()
+    css = html[:html.index('</style>')]
+    sym = re.search(r'<symbol id="i-restart".*?</symbol>', html, re.S).group(0)
+    assert sym.count('stroke-width="2"') == 4       # 四段(两条弧 + 两个箭头)都要加粗
+    stroke = re.search(r'\.ui-icon \{[^}]*stroke-width: ([\d.]+)', css, re.S)
+    assert stroke and float(stroke.group(1)) < 2
+    size = re.search(r'\.ui-icon \{[^}]*width: (\d+)px', css, re.S)
+    own = re.search(r'#restart-btn \.ui-icon \{ width: (\d+)px', css)
+    assert size and own and int(own.group(1)) < int(size.group(1))
+
+
 def test_theme_toggle_is_tri_state_and_defaults_to_auto():
     """★ 主题三态:自动 → 浅色 → 深色 → 自动,默认自动。
 
@@ -512,8 +630,8 @@ def test_theme_toggle_is_tri_state_and_defaults_to_auto():
     assert "return frameworkDark() ? 'dark' : 'light';" in html
     # 默认自动:没存过 / 存的是旧值都落到 auto
     assert "applyTheme(saved || 'auto')" in html
-    # 首屏按钮就是自动态图标,不能还是原来的 ☀
-    assert re.search(r'id="theme-toggle"[^>]*>🌗<', html)
+    # 首屏按钮就是自动态图标,不能还是浅色那一个
+    assert re.search(r'id="theme-toggle".*?<use href="#i-theme-auto"', html)
     # 点击按 THEME_MODES 轮转,原来的「明暗对翻」写法必须消失
     assert 'THEME_MODES.indexOf(themeMode) + 1' in html
     assert "cur === 'dark' ? 'light' : 'dark'" not in html
@@ -566,7 +684,7 @@ def test_clean_badge_threshold_and_wiring():
     assert "classList.toggle('on', (bytes || 0) > TAB_CLEAN_THRESHOLD)" in html
     # 两个标签各挂一枚,id 与调用处对得上
     for tab, badge in (('dashboard', 'dash-clean-badge'), ('crash', 'crash-clean-badge')):
-        assert re.search(r'data-tab="%s"[^<]*<span class="tab-clean-badge" id="%s">清理</span>'
+        assert re.search(r'data-tab="%s"[^>]*>.*?<span class="tab-clean-badge" id="%s">清理</span>'
                          % (tab, badge), html), badge
         assert f"setTabCleanBadge('{badge}'" in html
     # 仪表盘算的是三类图片缓存的**合计**,崩溃转储算 core 文件总占用

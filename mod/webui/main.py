@@ -9,7 +9,7 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
     子模块 update / 清理各缓存 / 引擎编译启停),通过 wrap ``web_pages.get_pages``
     从侧边栏列表过滤;前端用 ``fetch(apiUrl(key))`` 触发，响应是单 HTML 片段
     (``<div id="msg">`` / ``<pre id="result">``),JS 用 DOMParser 解析。
-  · 顶部标题栏右侧放「🔁 重启 LGTBot」按钮(整页通用，不属于任一标签)
+  · 顶部标题栏右侧放「重启 LGTBot」按钮(整页通用，不属于任一标签)
   · 面板标签:仪表盘(``page_dashboard``)/ 指标面板(``page_metrics``)/
     配置管理(``page_config``)/ 引擎编译(``page_build``)/ 数据备份
     (``page_backup``)/ 消息日志(``page_logs``)/ 操作审计(``page_audit``)/
@@ -38,6 +38,7 @@ JSON 都拼进同一份 HTML —— 这样无论用户当前在哪个标签上�
 
 from __future__ import annotations
 
+import base64
 import html
 import os
 
@@ -203,16 +204,36 @@ def _load(name: str) -> str:
         return f.read()
 
 
-# import 时一次性读入,缓存为模块常量。热重载会重新执行 import → 重新读盘,
-# 改完模板存盘后下次插件热重载就能看到新版本(无须重启进程)。
+# import 时一次性读入,缓存为模块常量。热重载会重新执行 import → 重新读盘。
 _MAIN_HTML = _load('main/main.html')
 _MAIN_CSS = _load('main/main.css')
 _MAIN_JS = _load('main/main.js')
+# 图标 sprite —— 整页只内联一份,各处用 use 元素按 id 引用
+_ICON_SPRITE = _load('main/icons.svg')
+
+
+# 站标在插件根的 _images/ 下
+_LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), '_images', 'lgtbot_icon.png')
+
+
+def _logo_data_uri() -> str:
+    """顶栏站标 —— 读 ``_images/lgtbot_icon.png`` 转 data URI。"""
+    try:
+        with open(_LOGO_PATH, 'rb') as f:
+            return 'data:image/png;base64,' + base64.b64encode(f.read()).decode('ascii')
+    except OSError:
+        return ''
+
+
+_LOGO_DATA_URI = _logo_data_uri()
 
 
 def _render_html() -> str:
     """每次访问页面调用，生成最新 HTML(含四个标签的内容和数据)。"""
     return (_MAIN_HTML
+            .replace('__ICON_SPRITE__', _ICON_SPRITE)
+            .replace('__LOGO_DATA_URI__', _LOGO_DATA_URI)
             .replace('__MAIN_CSS__', _MAIN_CSS)
             .replace('__DASHBOARD_CSS__', page_dashboard.TAB_CSS)
             .replace('__METRICS_CSS__', page_metrics.TAB_CSS)
@@ -280,7 +301,7 @@ def _render_html() -> str:
 async def _render_restart(reason: str = '') -> str:
     """触发重启 + 返回单个 ``<div id="msg">…</div>``。
 
-    只用做 JS 的回执片段:主页 main.js 的「🔁 重启 LGTBot」按钮 fetch 后用
+    只用做 JS 的回执片段:主页 main.js 的「重启 LGTBot」按钮 fetch 后用
     DOMParser 抠 #msg.textContent 显示成顶部横幅，完整 HTML 外壳(DOCTYPE /
     卡片 / hint) 都用不到。这个 key 又被 get_pages 过滤掉，用户也不会以独立
     页面身份打开它，所以连 <html><body> 都省了。

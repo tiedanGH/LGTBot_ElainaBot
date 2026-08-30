@@ -86,12 +86,31 @@ a, a:visited { color: var(--accent); }
    :visited 也要写:伪类 (0,1,1) 比 .dash-btn-primary (0,1,0) 优先级更高 */
 a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 
+/* ───── SVG 图标 ─────  */
+.icon-sprite { display: none; }
+.ui-icon {
+  width: 18px; height: 18px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+#restart-btn .ui-icon { width: 16px; height: 16px; }
+.tab-icon { width: 17px; height: 17px; margin-right: 6px; vertical-align: -4px; }
+
 /* ───── 顶部标题栏 ───── */
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 14px; gap: 16px; flex-wrap: wrap;
 }
-.topbar h1 { font-size: 18px; color: var(--accent); }
+.topbar h1 {
+  font-size: 18px; color: var(--accent);
+  display: inline-flex; align-items: center; gap: 9px;
+  /* 站标不贴着滚动区左沿:下面标签的图标本身还有一层按钮内边距,不补这点
+     缩进的话标题会比标签行更靠左 */
+  padding-left: 14px;
+}
+/* 站标内联成 data URI(见 webui/main.py):面板 HTML 由框架路由吐出,
+   相对路径取不到插件目录里的图片,单为一张图注册静态路由不值当。 */
+.topbar-logo { width: 26px; height: 26px; border-radius: 6px; flex: 0 0 auto; }
 /* 「实时」标签 —— 仅该标签聚焦(.active)时显示,其余标签聚焦时隐藏。透明度由消息日志页「⏸ 自动」开关经 #live-badge 控制。 */
 .tabs .tab .tab-live-badge {
   display: none;
@@ -121,6 +140,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px;
   cursor: pointer; font-size: 13px;
   transition: background .15s, border-color .15s, color .15s;
+  display: inline-flex; align-items: center; gap: 6px;
 }
 .restart-btn:hover { background: var(--hover); border-color: var(--border-2); }
 /* 计划重启按钮激活(维护模式开启)时橙色高亮,提醒管理员当前挡着新游戏 */

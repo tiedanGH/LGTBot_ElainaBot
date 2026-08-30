@@ -41,29 +41,31 @@ __PREBUILT_CSS__
   </style>
 </head>
 <body>
+__ICON_SPRITE__
+
   <div class="sticky-top">
     <div class="topbar">
-      <h1>LGTBot 机器人</h1>
+      <h1><img class="topbar-logo" src="__LOGO_DATA_URI__" alt="">LGTBot 机器人</h1>
       <div class="topbar-actions">
-        <button id="fullscreen-btn" class="icon-btn" title="新窗口全屏打开">⛶</button>
-        <button id="theme-toggle" class="icon-btn" title="主题：自动（跟随主面板）">🌗</button>
-        <button id="planned-restart-btn" class="restart-btn planned-btn" title="切换维护模式：暂停创建新游戏">🚧 计划重启</button>
-        <button id="restart-btn" class="restart-btn" title="重启 LGTBot 引擎 (整进程重载 C++)">🔁 重启 LGTBot</button>
+        <button id="fullscreen-btn" class="icon-btn" title="新窗口全屏打开"><svg class="ui-icon"><use href="#i-fullscreen"/></svg></button>
+        <button id="theme-toggle" class="icon-btn" title="主题：自动（跟随主面板）"><svg class="ui-icon"><use href="#i-theme-auto"/></svg></button>
+        <button id="planned-restart-btn" class="restart-btn planned-btn" title="切换维护模式：暂停创建新游戏"><svg class="ui-icon"><use href="#i-maintenance"/></svg><span id="planned-restart-label">计划重启</span></button>
+        <button id="restart-btn" class="restart-btn" title="重启 LGTBot 引擎 (整进程重载 C++)"><svg class="ui-icon"><use href="#i-restart"/></svg><span>重启 LGTBot</span></button>
       </div>
     </div>
 
     <div class="tabs">
-      <button class="tab active" data-tab="dashboard">📊 仪表盘<span class="tab-clean-badge" id="dash-clean-badge">清理</span></button>
-      <button class="tab" data-tab="metrics">📈 指标面板</button>
-      <button class="tab" data-tab="config">⚙️ 配置管理</button>
-      <button class="tab" data-tab="prebuilt">📦 预编译部署</button>
-      <button class="tab" data-tab="build">🛠️ 引擎编译</button>
-      <button class="tab" data-tab="backup">💾 数据备份</button>
-      <button class="tab" data-tab="logs">📜 消息日志<span class="tab-live-badge" id="live-badge">实时</span></button>
-      <button class="tab" data-tab="crash">💥 崩溃转储<span class="tab-clean-badge" id="crash-clean-badge">清理</span></button>
-      <button class="tab" data-tab="review">🏷️ 昵称审核<span class="tab-alert-badge" id="review-pending-badge"></span></button>
-      <button class="tab" data-tab="audit">🛡️ 操作审计</button>
-      <button class="tab" data-tab="users">👥 用户数据</button>
+      <button class="tab active" data-tab="dashboard"><svg class="ui-icon tab-icon"><use href="#i-dashboard"/></svg>仪表盘<span class="tab-clean-badge" id="dash-clean-badge">清理</span></button>
+      <button class="tab" data-tab="metrics"><svg class="ui-icon tab-icon"><use href="#i-metrics"/></svg>指标面板</button>
+      <button class="tab" data-tab="config"><svg class="ui-icon tab-icon"><use href="#i-config"/></svg>配置管理</button>
+      <button class="tab" data-tab="prebuilt"><svg class="ui-icon tab-icon"><use href="#i-prebuilt"/></svg>预编译部署</button>
+      <button class="tab" data-tab="build"><svg class="ui-icon tab-icon"><use href="#i-build"/></svg>引擎编译</button>
+      <button class="tab" data-tab="backup"><svg class="ui-icon tab-icon"><use href="#i-backup"/></svg>数据备份</button>
+      <button class="tab" data-tab="logs"><svg class="ui-icon tab-icon"><use href="#i-logs"/></svg>消息日志<span class="tab-live-badge" id="live-badge">实时</span></button>
+      <button class="tab" data-tab="crash"><svg class="ui-icon tab-icon"><use href="#i-crash"/></svg>崩溃转储<span class="tab-clean-badge" id="crash-clean-badge">清理</span></button>
+      <button class="tab" data-tab="review"><svg class="ui-icon tab-icon"><use href="#i-review"/></svg>昵称审核<span class="tab-alert-badge" id="review-pending-badge"></span></button>
+      <button class="tab" data-tab="audit"><svg class="ui-icon tab-icon"><use href="#i-audit"/></svg>操作审计</button>
+      <button class="tab" data-tab="users"><svg class="ui-icon tab-icon"><use href="#i-users"/></svg>用户数据</button>
     </div>
   </div>
 

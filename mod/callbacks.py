@@ -361,7 +361,7 @@ def restart_room_message(reason: str) -> str:
     ``reason`` 由主人 / 面板填写,仍按 markdown 语境转义(同维护提示)。
     """
     parts = ['## 🔁 LGT-Bot 即将重启', '',
-             '> 本群有**尚未开始**的房间，重启后会被清空']
+             '> 本群有**尚未开始**的房间，已被清理']
     if reason:
         parts += ['', f'📌 更新内容：{helpers.sanitize_md_name(reason)}']
     parts += ['', '⏳ 预计 10 秒内恢复服务...']

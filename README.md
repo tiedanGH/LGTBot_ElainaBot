@@ -208,7 +208,7 @@ plugins/LGTBot_ElainaBot/
 │       ├── page_crash.py    「崩溃转储」标签：崩溃重启概况 + dump 列表 + 游戏 core 列表（下载 / 批量删除）
 │       ├── page_users.py    「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
 │       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
-│           ├── main/        主骨架 / 全局 + 通用 CSS / 公共 JS
+│           ├── main/        主骨架 / 全局 + 通用 CSS / 公共 JS / 图标 SVG
 │           ├── dashboard/   「仪表盘」标签 HTML / CSS / JS
 │           ├── metrics/     「指标面板」标签 HTML / CSS / JS
 │           ├── config/      「配置管理」标签 HTML / CSS / JS
@@ -222,7 +222,8 @@ plugins/LGTBot_ElainaBot/
 │           └── users/       「用户数据」标签 HTML / CSS / JS
 │
 ├── _images/                 仓库内置静态资源
-│   └── logo_transparent_colorful.png   欢迎菜单顶部 logo
+│   ├── logo_transparent_colorful.png   欢迎菜单顶部 logo
+│   └── lgtbot_icon.png      站标 64×64，Web 面板顶栏内联成 data URI
 │
 ├── tools/
 │   ├── pack_prebuilt.sh     CI 打包脚本：收运行时子集 + manifest.json → dist/*.zip

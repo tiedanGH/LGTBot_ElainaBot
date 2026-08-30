@@ -26,9 +26,9 @@ function escapeHtml(s) {
 
 /* ──── 主题(顶部标题栏右侧的 #theme-toggle,整页通用)────
    三态循环:自动 → 浅色 → 深色 → 自动,默认自动。「自动」跟随主框架面板的夜间模式。
-   图标显示「当前实际主题」:自动 🌗,浅色 ☀,深色 🌙(自动态用半月区分,具体是明是暗看页面本身)。 */
+   图标显示「当前实际主题」:自动 = 半月,浅色 = 太阳,深色 = 月亮(自动态用半月区分,具体是明是暗看页面本身)。 */
 const THEME_MODES = ['auto', 'light', 'dark'];
-const THEME_ICON = {auto: '🌗', light: '☀', dark: '🌙'};
+const THEME_ICON = {auto: '#i-theme-auto', light: '#i-theme-light', dark: '#i-theme-dark'};
 const THEME_TITLE = {
   auto: '主题：自动（跟随主面板）',
   light: '主题：浅色',
@@ -48,7 +48,9 @@ function applyTheme(mode) {
   document.documentElement.setAttribute('data-theme', resolveTheme(themeMode));
   const btn = document.getElementById('theme-toggle');
   if (btn) {
-    btn.textContent = THEME_ICON[themeMode];
+    /* 改 <use> 的 href 换图标 */
+    const use = btn.querySelector('use');
+    if (use) use.setAttribute('href', THEME_ICON[themeMode]);
     btn.title = THEME_TITLE[themeMode];
   }
   try { localStorage.setItem(STORAGE_THEME, themeMode); } catch (e) {}
@@ -118,7 +120,8 @@ function showBanner(msg, isWarning) {
 function applyPlannedRestartUI(on) {
   const btn = document.getElementById('planned-restart-btn');
   if (!btn) return;
-  btn.textContent = on ? '🚧 取消计划重启' : '🚧 计划重启';
+  const label = document.getElementById('planned-restart-label');
+  if (label) label.textContent = on ? '取消计划重启' : '计划重启';
   btn.classList.toggle('active', on);
 }
 
