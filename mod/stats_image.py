@@ -200,8 +200,8 @@ _UNRANKED_TAG = '不计分'
 
 
 def _unranked_tag_w(d) -> int:
-    """「不计分」胶囊的占位宽度(含左侧间距),用于给游戏名留位置。"""
-    return _text_w(d, _UNRANKED_TAG, _font(18)) + 20 + 10
+    """「不计分」胶囊本身的宽度(不含左右间距)。"""
+    return _text_w(d, _UNRANKED_TAG, _font(18)) + 20
 
 
 def _unranked_tag(d, x, y) -> None:
@@ -212,17 +212,20 @@ def _unranked_tag(d, x, y) -> None:
     d.text((x + 10, y + 1), _UNRANKED_TAG, font=f, fill=_TEXT_MUTED)
 
 
-def _fit_name(d, full: str, max_w: int, font, tagged: bool) -> str:
-    """把榜单名字截到放得下,超出补省略号。
-
-    打标的行要先扣掉胶囊占位,否则长名字会一直画到胶囊底下重叠。
-    """
-    if tagged:
-        max_w -= _unranked_tag_w(d)
+def _fit_name(d, full: str, max_w: int, font) -> str:
+    """把榜单名字截到放得下,超出补省略号。"""
     name = full
     while name and _text_w(d, name + '…', font) > max_w:
         name = name[:-1]
     return name + ('…' if name != full else '')
+
+
+def _rank_row_layout(d, cx: int, half_w: int, cnt_txt: str, cnt_font, tagged: bool):
+    """一行榜单的横向布局 → ``(名字起点, 名字可用宽, 计数起点)``。"""
+    name_x = cx + 84
+    cnt_x = cx + half_w - 28 - _text_w(d, cnt_txt, cnt_font)
+    right = cnt_x - 12 - ((_unranked_tag_w(d) + 10) if tagged else 0)
+    return name_x, max(0, right - name_x), cnt_x
 
 
 def _icon(d, kind: str, ix: int, iy: int, fg) -> None:
@@ -522,7 +525,6 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             d.text((cx + 28, y + 92), '暂无数据', font=_font(24), fill=_TEXT_FAINT)
             continue
         max_c = max(it.get('count', 0) or 1 for it in items)
-        name_max_w = half_w - 88 - 28 - 100                 # 名次 + 计数留白
         for j, it in enumerate(items):
             ry = y + 88 + j * 74
             cnt = it.get('count', 0)
@@ -538,15 +540,15 @@ def _render(g: dict, sub_title: str) -> bytes | None:
                 d.text((cx + 28 + (38 - _text_w(d, str(j + 1), rf)) // 2, ry + 3),
                        str(j + 1), font=rf, fill=_TEXT_MUTED)
             tagged = bool(it.get('unranked'))
-            nf = _font(24)
-            shown = _fit_name(d, str(it.get(key, '') or ''), name_max_w, nf, tagged)
-            d.text((cx + 84, ry), shown, font=nf, fill=_TEXT)
-            if tagged:
-                _unranked_tag(d, cx + 84 + _text_w(d, shown, nf) + 10, ry + 2)
-            cf = _font(22)
+            nf, cf = _font(24), _font(22)
             cnt_txt = f'{_fmt(cnt)}局'
-            _bold_text(d, (cx + half_w - 28 - _text_w(d, cnt_txt, cf), ry + 2),
-                       cnt_txt, cf, fg)
+            name_x, name_w, cnt_x = _rank_row_layout(
+                d, cx, half_w, cnt_txt, cf, tagged)
+            shown = _fit_name(d, str(it.get(key, '') or ''), name_w, nf)
+            d.text((name_x, ry), shown, font=nf, fill=_TEXT)
+            if tagged:
+                _unranked_tag(d, name_x + _text_w(d, shown, nf) + 10, ry + 2)
+            _bold_text(d, (cnt_x, ry + 2), cnt_txt, cf, fg)
             bar_x, bar_y = cx + 84, ry + 40
             bar_w = half_w - 84 - 28
             d.rounded_rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + 10), radius=5,

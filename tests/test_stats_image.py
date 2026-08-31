@@ -528,27 +528,49 @@ def test_unranked_tag_is_actually_drawn():
     assert uploader.get_image_size(a) == uploader.get_image_size(b)
 
 
-def test_unranked_tag_reserves_room_so_long_names_do_not_overlap_it():
-    """★ 打标的行必须先扣掉胶囊占位再截名字,否则长名会一直画到胶囊底下。"""
+def test_rank_row_gives_the_name_everything_up_to_the_count():
+    """★ 计数按实际文本宽右对齐。打标的行再从可用宽里扣掉胶囊。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new('RGB', (10, 10)))
+    cf = stats_image._font(22)
+    cx, half_w = 36, 453
+    tag_w = stats_image._unranked_tag_w(d)
+    assert tag_w > 0
+
+    nx, nw, cnt_x = stats_image._rank_row_layout(d, cx, half_w, '8局', cf, True)
+    # 计数右对齐到栏内边缘
+    assert cnt_x + stats_image._text_w(d, '8局', cf) == cx + half_w - 28
+    # 名字 + 胶囊合起来仍在计数之前
+    assert nx + nw + 10 + tag_w <= cnt_x
+    # 不打标时名字直接顶到计数之前,正好宽出一个胶囊
+    _nx2, nw2, cnt_x2 = stats_image._rank_row_layout(d, cx, half_w, '8局', cf, False)
+    assert cnt_x2 == cnt_x and nw2 - nw == tag_w + 10
+    # 计数越长,留给名字的越少
+    _nx3, nw3, _c3 = stats_image._rank_row_layout(d, cx, half_w, '12345局', cf, False)
+    assert nw3 < nw2
+
+
+def test_unranked_tag_trails_the_game_name():
+    """★ 胶囊跟在游戏名后面,不是钉在计数旁边 —— 名字短时它就该靠着名字。"""
+    import inspect
+    src = inspect.getsource(stats_image._render)
+    assert "_unranked_tag(d, name_x + _text_w(d, shown, nf) + 10, ry + 2)" in src
+
+
+def test_fit_name_only_truncates_when_needed():
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
     from PIL import Image, ImageDraw
     d = ImageDraw.Draw(Image.new('RGB', (10, 10)))
     f = stats_image._font(24)
-    assert stats_image._unranked_tag_w(d) > 0
-
     long_name = '这个游戏名字特别特别长长到必须被截断'
-    box = 300
-    plain = stats_image._fit_name(d, long_name, box, f, False)
-    tagged = stats_image._fit_name(d, long_name, box, f, True)
-    assert plain.endswith('…') and tagged.endswith('…')
-    assert len(tagged) < len(plain)
-    # 名字 + 胶囊合起来仍在框内
-    assert (stats_image._text_w(d, tagged, f)
-            + stats_image._unranked_tag_w(d)) <= box
-    # 短名字不受影响,也不补省略号
-    assert stats_image._fit_name(d, '斗地主', box, f, True) == '斗地主' 
+    assert stats_image._fit_name(d, long_name, 300, f).endswith('…')
+    assert stats_image._text_w(d, stats_image._fit_name(d, long_name, 300, f), f) <= 300
+    assert stats_image._fit_name(d, '斗地主', 300, f) == '斗地主'
 
 
 def test_unranked_tag_absent_when_flag_is_false():
