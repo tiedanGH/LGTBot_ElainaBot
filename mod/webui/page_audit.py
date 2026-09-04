@@ -60,8 +60,8 @@ def _payload() -> dict:
         'retention_days': audit.RETENTION_DAYS,
         'audit_path': audit.AUDIT_PATH,
         'query_time': int(time.time()),
-        'categories': {cat: {'emoji': emoji, 'label': label}
-                       for cat, (emoji, label) in audit.CATEGORIES.items()},
+        'categories': {cat: {'icon': icon, 'label': label}
+                       for cat, (icon, label) in audit.CATEGORIES.items()},
     }
 
 

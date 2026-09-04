@@ -14,6 +14,8 @@
   --out: #1d6fdc;
   --img: #e08600;
   --warn: #d97706;
+  --perm-full: #2b7fc9;
+  --perm-push: #7d5bd0;
   --tag-bg: #eef0f7;
   --tag-text: #4a5160;
   --hover: #eef1f9;
@@ -36,6 +38,8 @@
   --out: #2196f3;
   --img: #ff9800;
   --warn: #ffa726;
+  --perm-full: #74c0f4;
+  --perm-push: #b49bf5;
   --tag-bg: #2a2a3e;
   --tag-text: #aab0c4;
   --hover: #22223e;

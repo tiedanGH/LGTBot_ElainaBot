@@ -58,8 +58,8 @@ def test_audit_payload_mirrors_module_state(tmp_path, monkeypatch):
     assert p['entries'][0]['ok'] is False and p['entries'][0]['src'] == audit.SRC_CMD
     # 类别映射随 payload 下发,前端据此渲染徽标 —— 必须覆盖 CATEGORIES 全量
     assert set(p['categories']) == set(audit.CATEGORIES)
-    assert p['categories']['build'] == {'emoji': audit.CATEGORIES['build'][0],
-                                        'label': audit.CATEGORIES['build'][1]}
+    assert p['categories']['build'] == {'icon': audit.CATEGORIES['build'][0],
+                                       'label': audit.CATEGORIES['build'][1]}
 
 
 def test_audit_render_list_is_success_fragment(tmp_path, monkeypatch):

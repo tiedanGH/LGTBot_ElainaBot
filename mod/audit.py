@@ -47,17 +47,17 @@ SRC_CMD = '指令'
 SRC_AUTO = '自动'
 SRC_API = 'API'      # 编译 API 等对其他插件开放的 HTTP 接口触发
 
-# cat 短码 → (emoji, 中文标签)。单一真相源:后端只存短码,page_audit 把
-# 此映射随 payload 下发,前端据此渲染类别徽标与筛选按钮。
+# cat 短码 → (图标 id, 中文标签)。单一真相源:后端只存短码,page_audit 把
+# 此映射随 payload 下发,前端据此渲染类别徽标与筛选按钮。图标 id 指向面板 sprite,与同名功能的标签共用图元。
 CATEGORIES = {
-    'build':   ('🛠️', '引擎编译'),
-    'backup':  ('💾', '数据备份'),
-    'cache':   ('🧹', '缓存清理'),
-    'update':  ('⬇️', '更新维护'),
-    'config':  ('⚙️', '配置变更'),
-    'restart': ('🔁', '重启'),
-    'bind':    ('🔗', '机器人绑定'),
-    'match':   ('🎮', '对局干预'),
+    'build':   ('#i-build', '引擎编译'),
+    'backup':  ('#i-backup', '数据备份'),
+    'cache':   ('#i-broom', '缓存清理'),
+    'update':  ('#i-upgrade', '更新维护'),
+    'config':  ('#i-config', '配置变更'),
+    'restart': ('#i-restart', '重启'),
+    'bind':    ('#i-bot', '机器人绑定'),
+    'match':   ('#i-gamepad', '对局干预'),
 }
 
 # 单 asyncio loop 下各入口天然串行;锁防未来从引擎工作线程记录(对齐 page_logs 的 threading.Lock 先例),成本可忽略。

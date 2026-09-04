@@ -46,10 +46,10 @@ function dashBridgeRepoLink() {
 }
 
 /* no_git(插件市场安装)时桥接层行的第二行提示 —— 版本检测照常走 GitHub API,
-   不依赖本地 git;git 只影响「⬇ 更新桥接层」那条路,有新版本时可用「⬇ 下载更新」替代 */
+   不依赖本地 git;git 只影响「⬇ 更新桥接层」那条路,有新版本时可用「下载更新」替代 */
 function dashGitWarnHtml() {
   return '<br><span class="dash-msg-warn dash-bridge-gitwarn">⚠️ 未检测到 .git/（可能从插件市场安装）：' +
-         '可点「📥 初始化为 git 仓库」启用 git 更新；或有新版本时直接「⬇ 下载更新」覆盖更新。</span>';
+         '可点「初始化为 git 仓库」启用 git 更新；或有新版本时直接「下载更新」覆盖更新。</span>';
 }
 
 function dashFmtBytes(n) {
@@ -106,7 +106,8 @@ function dashRenderMatches(data) {
         (isUid ? '私信' : '群聊') + '</span>' +
       '<span class="dash-match-game" title="游戏">' + game + '</span>' +
       '<span class="dash-match-loc" title="' + (isUid ? '用户' : '群') + '">' + loc + '</span>' +
-      (since ? '<span class="dash-match-since" title="已进行时长">🕒 ' + since + '</span>' : '') +
+      (since ? '<span class="dash-match-since" title="已进行时长">' +
+                 '<svg class="ui-icon"><use href="#i-clock"/></svg>' + since + '</span>' : '') +
       '</div>';
   }).join('');
 }
@@ -141,9 +142,11 @@ let dashBotInited = false;
 function dashBotPermHtml(bot) {
   const vol = (bot.full_volume == null) ? '—' : bot.full_volume;
   const push = (bot.proactive == null) ? '—' : bot.proactive;
-  return '<span class="dash-bot-vol" title="可接收群内全部消息的群数量">🌐 全量 ' +
+  return '<span class="dash-bot-vol vol-full" title="可接收群内全部消息的群数量">' +
+           '<svg class="ui-icon"><use href="#i-globe"/></svg>全量 ' +
            escapeHtml(String(vol)) + '</span>' +
-         '<span class="dash-bot-vol" title="可发送主动消息的群数量">📢 主动 ' +
+         '<span class="dash-bot-vol vol-push" title="可发送主动消息的群数量">' +
+           '<svg class="ui-icon"><use href="#i-megaphone"/></svg>主动 ' +
            escapeHtml(String(push)) + '</span>';
 }
 
@@ -292,7 +295,8 @@ function dashReleaseCard(r, latestLabel) {
   /* 单个(已最新)沿用「最新 Release：」前缀,与旧版一致;多个时每卡按版本自述 */
   const prefix = latestLabel ? '最新 Release：' : '';
   return '<details class="dash-release">' +
-      '<summary>📄 ' + prefix + escapeHtml(title) + '</summary>' +
+      '<summary><svg class="ui-icon"><use href="#i-file-text"/></svg>' +
+        prefix + escapeHtml(title) + '</summary>' +
       '<div class="dash-release-body">' + dashMdToHtml(r.body || '（无正文）') + link + '</div>' +
     '</details>';
 }
@@ -403,7 +407,7 @@ function dashApplyData(data) {
   const bDetail = document.getElementById('dash-bridge-detail');
   const bBtn = document.getElementById('dash-do-update');
   if (dashRepoStatus === 'no_git') {
-    /* no_git:右侧按钮切「初始化」;「⬇ 下载更新」等检查出新版本后由 dashRenderBridgeStatus 显示 */
+    /* no_git:右侧按钮切「初始化」;「下载更新」等检查出新版本后由 dashRenderBridgeStatus 显示 */
     bDetail.innerHTML = '点击「检查更新」查看版本' + dashBridgeRepoLink() + dashGitWarnHtml();
     setBtnIcon(bBtn, '#i-inbox', '初始化为 git 仓库');
     bBtn.style.display = '';
@@ -509,7 +513,7 @@ function dashRenderBridgeStatus(bridge) {
   if (bridge && (bridge.repo_url || bridge.repo_owner)) dashBridgeRepo = bridge;
   const repoLink = dashBridgeRepoLink();
 
-  /* no_git(插件市场安装):版本检测走 GitHub API,;右侧按钮保持「初始化」,有新版本再追加「⬇ 下载更新」 */
+  /* no_git(插件市场安装):版本检测走 GitHub API,;右侧按钮保持「初始化」,有新版本再追加「下载更新」 */
   const noGit = dashRepoStatus === 'no_git';
   const gitWarn = noGit ? dashGitWarnHtml() : '';
   if (dlBtn) dlBtn.style.display = 'none';
@@ -751,7 +755,7 @@ async function dashInitRepo() {
       /* 本机没有 git 环境 → 引导走免 git 路径,不让用户卡死在装 git 上 */
       if (data.git_missing) {
         parts.push('<div class="dash-msg-warn">💡 没有 git 也可更新：' +
-                   '点「🔍 检查更新」，有新版本时会出现「⬇ 下载更新」按钮，' +
+                   '点「检查更新」，有新版本时会出现「下载更新」按钮，' +
                    '可直接下载覆盖更新；或从插件市场重新安装最新版。</div>');
       }
     }

@@ -50,10 +50,16 @@ function auditFmtRelative(ts) {
          String(d.getDate()).padStart(2, '0') + ' ' + hhmm;
 }
 
-/* cat 短码 → {emoji, label};未知短码回退 ❓ + 原文 */
+/* cat 短码 → {icon, label};未知短码回退问号图标 + 原文 */
 function auditCatInfo(cat) {
   const info = (auditData && auditData.categories) ? auditData.categories[cat] : null;
-  return info || { emoji: '❓', label: cat || '未知' };
+  return info || { icon: '#i-help', label: cat || '未知' };
+}
+
+function auditCatHtml(info, cat) {
+  return '<svg class="ui-icon btn-icon"><use href="' +
+         escapeHtml(info.icon || '#i-help') + '"/></svg>' +
+         '<span class="btn-label">' + escapeHtml(info.label || cat) + '</span>';
 }
 
 /* 来源 → 徽标 class(复用 dash-badge 主题色 + audit 自有 API 色):
@@ -87,7 +93,7 @@ function auditRenderChips() {
   for (const [cat, info] of Object.entries(cats)) {
     const active = auditFilter.has(cat) ? ' active' : '';
     chips.push('<button class="audit-chip' + active + '" data-cat="' + escapeHtml(cat) + '">' +
-               escapeHtml((info.emoji || '') + ' ' + (info.label || cat)) + '</button>');
+               auditCatHtml(info, cat) + '</button>');
   }
   wrap.innerHTML = chips.join('');
   wrap.querySelectorAll('.audit-chip').forEach(chip => {
@@ -126,7 +132,7 @@ function auditRenderTable() {
     const detail = e.detail || '';
     return `<tr>
       <td class="audit-col-time" title="${fullTime}">${escapeHtml(auditFmtRelative(e.ts))}</td>
-      <td class="audit-col-cat">${escapeHtml(cat.emoji + ' ' + cat.label)}</td>
+      <td class="audit-col-cat"><span class="audit-cat">${auditCatHtml(cat, e.cat)}</span></td>
       <td class="audit-col-action">${escapeHtml(e.action || '')}</td>
       <td class="audit-col-detail">${detail
         ? '<span class="audit-detail-text" title="' + escapeHtml(detail) + '">' + escapeHtml(detail) + '</span>'

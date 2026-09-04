@@ -568,7 +568,7 @@ async def download(asset_name: str, preferred_mirror: str | None = None) -> dict
     log.info(f'[prebuilt] ✅ 已安装 {asset_name} → '
              + ('build_prebuilt.pending/(暂存,重启后换入)' if swap.get('pending') else 'build_prebuilt/'))
     return {'success': True, 'asset': asset_name, 'pending': swap.get('pending', False),
-            'message': (note or '下载安装完成,切到「📦 用预编译包」并重启 LGTBot 生效')}
+            'message': (note or '下载安装完成,切到「用预编译包」并重启 LGTBot 生效')}
 
 
 async def _download_one(url: str, asset: dict) -> None:
@@ -627,4 +627,4 @@ def install_uploaded(zip_path: str) -> dict:
     log.info('[prebuilt] ✅ 已从上传包安装 → '
              + ('build_prebuilt.pending/(暂存,重启后换入)' if swap.get('pending') else 'build_prebuilt/'))
     return {'success': True, 'pending': swap.get('pending', False),
-            'message': (note or '上传包已安装,切到「📦 用预编译包」并重启 LGTBot 生效')}
+            'message': (note or '上传包已安装,切到「用预编译包」并重启 LGTBot 生效')}

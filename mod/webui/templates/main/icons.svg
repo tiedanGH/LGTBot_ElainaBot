@@ -152,7 +152,7 @@
     <path d="M12 9.5v4.2M12 17.2h.01"/>
   </symbol>
   <symbol id="i-megaphone" viewBox="0 0 24 24">
-    <path d="M4 9.4v5.2a1.8 1.8 0 0 0 1.8 1.8h2.4L18 21V3l-9.8 4.6H5.8A1.8 1.8 0 0 0 4 9.4z"/>
+    <path d="M4 9.4v5.2a1.8 1.8 0 0 0 1.8 1.8h2.4L18 18V6l-9.8 1.6H5.8A1.8 1.8 0 0 0 4 9.4z"/>
     <path d="M8.2 16.4v3.4a1.6 1.6 0 0 0 3.2 0v-2.6"/>
   </symbol>
   <symbol id="i-bell" viewBox="0 0 24 24">
@@ -254,10 +254,10 @@
   </symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.8 12.6 9.6 17.4 19.2 6.8"/></symbol>
   <symbol id="i-arrow-down" viewBox="0 0 24 24">
-    <path d="M12 4.6v14.8M6.4 13.6 12 19.2l5.6-5.6"/>
+    <path d="M9.2 3.2h5.6v9.2h3.8L12 20.8 5.4 12.4h3.8z" fill="currentColor" stroke="none"/>
   </symbol>
   <symbol id="i-arrow-up" viewBox="0 0 24 24">
-    <path d="M12 19.4V4.6M6.4 10.4 12 4.8l5.6 5.6"/>
+    <path d="M9.2 20.8h5.6v-9.2h3.8L12 3.2 5.4 11.6h3.8z" fill="currentColor" stroke="none"/>
   </symbol>
   <symbol id="i-undo" viewBox="0 0 24 24">
     <path d="M3.6 8.8h11a5.6 5.6 0 0 1 0 11.2H8.2"/>
@@ -265,6 +265,18 @@
   </symbol>
   <symbol id="i-rotate-ccw" viewBox="0 0 24 24">
     <path d="M3.6 12a8.4 8.4 0 1 0 2.46-5.94"/><path d="M3.6 4.2v5.1h5.1"/>
+  </symbol>
+  <symbol id="i-x" viewBox="0 0 24 24">
+    <path d="M5.8 5.8 18.2 18.2M18.2 5.8 5.8 18.2"/>
+  </symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="8.6"/>
+    <path d="M12 6.6V12l3.7 2.3"/>
+  </symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24">
+    <path d="M13.6 2.8H7.2a1.8 1.8 0 0 0-1.8 1.8v14.8a1.8 1.8 0 0 0 1.8 1.8h9.6a1.8 1.8 0 0 0 1.8-1.8V7.6z"/>
+    <path d="M13.6 2.8v4.8h5"/>
+    <path d="M8.8 12.8h6.4M8.8 16.4h6.4"/>
   </symbol>
 
   <symbol id="i-upgrade" viewBox="0 0 24 24">

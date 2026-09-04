@@ -45,7 +45,9 @@
   padding: 4px 10px; border-radius: 14px; font-size: 12px; cursor: pointer;
   border: 1px solid var(--border); background: var(--panel-2);
   color: var(--text-muted); line-height: 1.4; user-select: none;
+  display: inline-flex; align-items: center; gap: 5px;
 }
+.audit-chip .ui-icon, .audit-cat .ui-icon { width: 14px; height: 14px; }
 .audit-chip:hover { background: var(--hover); }
 .audit-chip.active {
   background: var(--accent); border-color: var(--accent);
@@ -83,6 +85,8 @@
    nowrap 保证永不换行 —— 内容多宽列就多宽,无需预估最长文案 */
 .audit-col-time   { width: 1px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .audit-col-cat    { width: 1px; font-size: 12px; white-space: nowrap; }
+/* td 本身改 flex 会退出表格布局,包一层 span 再对齐 */
+.audit-cat { display: inline-flex; align-items: center; gap: 5px; }
 .audit-col-action { width: 1px; white-space: nowrap; }
 .audit-col-src    { width: 1px; white-space: nowrap; }
 .audit-col-result { width: 1px; white-space: nowrap; }

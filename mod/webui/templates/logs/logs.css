@@ -30,7 +30,7 @@
   font-weight: 600; font-size: 11px;
   display: flex; align-items: center; gap: 3px; line-height: 1.5;
 }
-.log-row .dir .ui-icon { width: 13px; height: 13px; stroke-width: 2.2; }
+.log-row .dir .ui-icon { width: 12px; height: 12px; }
 .log-row.in .dir { color: var(--in); }
 .log-row.out .dir { color: var(--out); }
 .log-row .who {

@@ -150,7 +150,13 @@
 }
 /* 备注名(人工维护)—— 只加粗,颜色继承 .dash-match-loc 的 muted 灰 */
 .dash-match-remark { font-weight: 600; }
-.dash-match-since { color: var(--text-muted); font-size: 12px; white-space: nowrap; margin-left: auto; }
+.dash-match-since {
+  color: var(--text-muted); font-size: 12px; white-space: nowrap; margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.dash-match-since .ui-icon {
+  width: 16px; height: 16px; position: relative; top: 1px;
+}
 
 /* ──── 机器人绑定 ──── */
 /* 折叠(标题可点 + caret + body.collapsed) */
@@ -181,7 +187,13 @@
 .dash-bot-idline, .dash-bot-permline { display: contents; }
 .dash-bot-qq { color: var(--text-muted); }
 /* 全量群数量,紧跟 QQ 右侧 */
-.dash-bot-vol { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.dash-bot-vol {
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.dash-bot-vol.vol-full { color: var(--perm-full); }
+.dash-bot-vol.vol-push { color: var(--perm-push); }
+.dash-bot-vol .ui-icon { width: 14px; height: 14px; }
 .dash-bot-row .dash-btn,
 .dash-bot-row .dash-badge { margin-left: auto; }
 
@@ -194,6 +206,10 @@
 /* 仅相邻两卡之间留距 —— 单卡(已最新)外观与旧版一致 */
 .dash-release + .dash-release { margin-top: 8px; }
 .dash-release summary { cursor: pointer; color: var(--accent); user-select: none; }
+/* summary 改 flex 会连展开三角一起吃掉(display 不再是 list-item) */
+.dash-release summary .ui-icon {
+  width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px;
+}
 .dash-release-body {
   margin-top: 8px; max-height: 320px; overflow-y: auto; line-height: 1.65;
 }
