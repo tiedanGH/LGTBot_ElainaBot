@@ -99,13 +99,16 @@
   display: flex; flex-direction: column; overflow: hidden;
 }
 .crash-modal-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 12px;
   padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--panel-2);
 }
 .crash-modal-title {
   margin: 0; font-size: 15px; font-weight: 600;
   display: inline-flex; align-items: center; gap: 7px;
 }
+.crash-view-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crash-view-name::before { content: '·'; margin-right: 6px; color: var(--text-faint); }
 .crash-view-actions { display: inline-flex; gap: 6px; }
 .crash-modal-body {
   padding: 16px 18px; overflow-y: auto;
@@ -147,4 +150,19 @@
   .crash-col-uid, .crash-col-gid { white-space: nowrap; word-break: normal; }
   .crash-col-name .dash-mono { overflow: visible; text-overflow: clip; }
   .crash-col-mod, .crash-col-game { overflow: visible; text-overflow: clip; }
+
+  /* 查看弹窗头部:文件名落到第二行占满整宽,按钮跟标题并排 */
+  .crash-modal-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title actions"
+                         "name  name";
+    gap: 8px 10px;
+  }
+  .crash-modal-title { grid-area: title; }
+  .crash-view-actions { grid-area: actions; }
+  .crash-view-name {
+    grid-area: name; white-space: normal; overflow: visible; word-break: break-all;
+    font-size: 12px;
+  }
+  .crash-view-name::before { content: none; }
 }
