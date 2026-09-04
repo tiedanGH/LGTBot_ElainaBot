@@ -26,7 +26,11 @@
 .log-row:last-child { border-bottom: none; }
 .log-row:hover { background: var(--panel-2); }
 .log-row .time { color: var(--text-faint); font-family: 'Consolas', monospace; }
-.log-row .dir { font-weight: 600; font-size: 11px; }
+.log-row .dir {
+  font-weight: 600; font-size: 11px;
+  display: flex; align-items: center; gap: 3px; line-height: 1.5;
+}
+.log-row .dir .ui-icon { width: 13px; height: 13px; stroke-width: 2.2; }
 .log-row.in .dir { color: var(--in); }
 .log-row.out .dir { color: var(--out); }
 .log-row .who {

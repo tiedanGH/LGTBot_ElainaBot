@@ -18,7 +18,7 @@ const CFG_VALIDATED_SAVE_ROUTE = '/api/ext/lgtbot/config/save';
 /* 每个编辑器一份状态:
  *   dataKey  —— get_data() 返回的 JSON 里对应哪个 key(缺失 = 后端没渲染该区块)
  *   absPath  —— 保存请求要原样回传给 /api/config-file/save 的绝对路径
- *   original —— 最近一次从后端拉到的内容,用来做 dirty 检测 + 「↩ 恢复」
+ *   original —— 最近一次从后端拉到的内容,用来做 dirty 检测 + 「恢复」
  *   format   —— 主框架保存端点的格式 hint(yaml / json / text)
  *   editorId / pathId / msgId / saveBtnId —— 对应 DOM 元素 id
  *

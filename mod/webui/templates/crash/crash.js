@@ -277,17 +277,8 @@ function crashSetRefreshing(on) {
   CRASH_REFRESH_BTNS.forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    if (on) {
-      if (btn.dataset.label === undefined) btn.dataset.label = btn.textContent;
-      btn.disabled = true;
-      setBtnIcon(btn, '#i-hourglass', '刷新中……');
-    } else {
-      btn.disabled = false;
-      if (btn.dataset.label !== undefined) {
-        btn.textContent = btn.dataset.label;
-        delete btn.dataset.label;
-      }
-    }
+    if (on) setBtnBusy(btn, '刷新中……');
+    else clearBtnBusy(btn);
   });
 }
 

@@ -963,24 +963,19 @@ async function dashClearCache(which) {
 async function dashRefreshCache() {
   const btn = document.getElementById('dash-cache-refresh');
   const msgEl = document.getElementById('dash-cache-msg');
-  btn.disabled = true;
-  msgEl.textContent = '⏳ 统计中……';
-  msgEl.className = 'dash-cache-msg dash-msg-info';
+  setBtnBusy(btn, '统计中……');
   try {
     await dashRefreshAll(false);   // 失败要抛出,好在消息行给反馈
-    msgEl.textContent = '✅ 已刷新';
-    msgEl.className = 'dash-cache-msg dash-msg-ok';
+    /* 刷新清掉上一次清理留下的结果行 */
+    msgEl.textContent = '';
+    msgEl.className = 'dash-cache-msg';
   } catch (e) {
     msgEl.textContent = '❌ ' + e.message;
     msgEl.className = 'dash-cache-msg dash-msg-err';
   } finally {
-    btn.disabled = false;
+    clearBtnBusy(btn);
   }
 }
-
-/* 注:dashReloadConfig 已搬到 templates/config/config.js 的 cfgReloadConfig,
-   action key 不变(__lgtbot_dash_reload_config),webui/main.py 中 provider
-   现在是 page_config.render_reload_config。 */
 
 window.addEventListener('DOMContentLoaded', () => {
   dashLoadInline();

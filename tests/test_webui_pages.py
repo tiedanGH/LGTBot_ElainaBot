@@ -1072,3 +1072,26 @@ def test_tab_alert_badge_is_vertically_centred():
     rule = re.search(r'\.tabs \.tab \.tab-alert-badge \{(.*?)\}', css, re.S).group(1)
     assert 'vertical-align: middle' in rule
     assert 'position: relative' in rule and 'top: -1px' in rule
+
+
+def test_busy_buttons_come_back_with_their_own_icon():
+    """★ 忙碌态结束要还原图标 + 文案两样;只记文案、拿 textContent 写回去。"""
+    wm = _main()
+    html = wm._render_html()
+    assert 'function setBtnBusy(btn, label)' in html
+    assert 'function clearBtnBusy(btn)' in html
+    assert "btn.dataset.busyIcon = use ? (use.getAttribute('href') || '') : '';" in html
+    assert 'btn.dataset.busyLabel = btnLabel(btn);' in html
+    assert 'setBtnIcon(btn, btn.dataset.busyIcon, btn.dataset.busyLabel);' in html
+    for tab in ('crash', 'review', 'dashboard'):
+        js = _tab_template(wm, tab, 'js')
+        assert 'setBtnBusy(' in js and 'clearBtnBusy(' in js, tab
+
+
+def test_tab_js_only_reads_textcontent_off_data_islands():
+    """★ 反向钉死上一条:各页读 .textContent 只允许用来解内嵌 JSON。"""
+    wm = _main()
+    for tab in _SVG_TABS:
+        for line in _tab_template(wm, tab, 'js').splitlines():
+            for m in re.finditer(r'\.textContent(?! *=(?!=))', line):
+                assert 'JSON.parse' in line, (tab, line.strip())

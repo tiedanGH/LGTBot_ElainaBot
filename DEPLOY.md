@@ -264,7 +264,7 @@ rm -rf plugins/LGTBot_ElainaBot
 
 > **安全关闭：** 插件 `@on_unload` 会调用 `release_bot_if_not_processing_games`，存在进行中游戏时会拒绝释放并打印警告，请等待对局结束或 `kill -9`。
 
-> **数据备份不丢：** 插件每天自动备份核心数据库到 `<framework_root>/data/backup/lgtbot/LGTBot_*.zip`。卸载只删 `plugins/LGTBot_ElainaBot/`，**备份目录保留**。重新安装后可在「💾 数据备份」tab 一键「↩ 恢复」回卸载前的状态。
+> **数据备份不丢：** 插件每天自动备份核心数据库到 `<framework_root>/data/backup/lgtbot/LGTBot_*.zip`。卸载只删 `plugins/LGTBot_ElainaBot/`，**备份目录保留**。重新安装后可在「数据备份」tab 一键「恢复」回卸载前的状态。
 
 ---
 

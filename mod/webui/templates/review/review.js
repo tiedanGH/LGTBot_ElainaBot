@@ -294,8 +294,7 @@ async function reviewVerdict(key, op, name) {
 }
 
 async function reviewRunAction(key, btn) {
-  const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; setBtnIcon(btn, '#i-hourglass', '...'); }
+  setBtnBusy(btn, '...');
   try {
     const data = await reviewCallAction(key);
     reviewApplyData(data);
@@ -303,7 +302,7 @@ async function reviewRunAction(key, btn) {
   } catch (e) {
     reviewShowMsg('❌ ' + e.message, 'err');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = old; }
+    clearBtnBusy(btn);
   }
 }
 

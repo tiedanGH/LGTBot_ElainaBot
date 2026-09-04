@@ -92,7 +92,7 @@ function backupApplyData(data) {
       <td class="backup-col-size">${escapeHtml(backupFmtBytes(b.size_bytes))}</td>
       <td class="backup-col-ops">
         <button class="dash-btn dash-btn-small backup-btn-download" data-name="${safeName}"><svg class="ui-icon btn-icon"><use href="#i-download"/></svg><span class="btn-label">下载</span></button>
-        <button class="dash-btn dash-btn-small backup-btn-restore" data-name="${safeName}">↩ 恢复</button>
+        <button class="dash-btn dash-btn-small backup-btn-restore" data-name="${safeName}"><svg class="ui-icon btn-icon"><use href="#i-undo"/></svg><span class="btn-label">恢复</span></button>
         <button class="dash-btn dash-btn-small dash-btn-warn backup-btn-delete" data-name="${safeName}"><svg class="ui-icon btn-icon"><use href="#i-trash"/></svg><span class="btn-label">删除</span></button>
       </td>
     </tr>`;

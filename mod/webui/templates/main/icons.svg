@@ -229,6 +229,10 @@
     <path d="M6.4 2.8h11.2M6.4 21.2h11.2"/>
     <path d="M7.6 2.8v3.6c0 2 1.6 3.6 4.4 5.6 2.8-2 4.4-3.6 4.4-5.6V2.8"/>
     <path d="M7.6 21.2v-3.6c0-2 1.6-3.6 4.4-5.6 2.8 2 4.4 3.6 4.4 5.6v3.6"/>
+    <path d="M8.35 8.65h7.3c-.85 1.35-2 2.25-3.65 3.35-1.65-1.1-2.8-2-3.65-3.35z" fill="currentColor" stroke="none"/>
+    <path d="M8.6 21.2c.3-2 1.6-3.4 3.4-3.4s3.1 1.4 3.4 3.4z" fill="currentColor" stroke="none"/>
+    <circle cx="12" cy="13.9" r=".85" fill="currentColor" stroke="none"/>
+    <circle cx="12" cy="15.9" r=".7" fill="currentColor" stroke="none"/>
   </symbol>
 
   <symbol id="i-folder" viewBox="0 0 24 24">

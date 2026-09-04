@@ -38,7 +38,9 @@ function logsRender() {
   }
   const rows = filtered.slice().reverse().map(l => {
     const cls = 'log-row ' + (l.direction === 'in' ? 'in' : 'out');
-    const dir = l.direction === 'in' ? '⬇ 收' : '⬆ 发';
+    const dir = '<svg class="ui-icon"><use href="' +
+      (l.direction === 'in' ? '#i-arrow-down' : '#i-arrow-up') + '"/></svg>' +
+      (l.direction === 'in' ? '收' : '发');
     const kindTag = '<span class="kind-tag">' + (l.kind === 'group' ? '群' : '私') + '</span>';
     const who = l.gid
       ? kindTag + 'g:' + escapeHtml(l.gid.slice(0, 16))

@@ -105,6 +105,23 @@ function btnLabel(btn) {
   return span ? span.textContent : '';
 }
 
+/* 按钮忙碌态 —— 图标与文案都存进 dataset 再换成沙漏,退出时原样放回。 */
+function setBtnBusy(btn, label) {
+  if (!btn || btn.dataset.busyIcon !== undefined) return;
+  const use = btn.querySelector('use');
+  btn.dataset.busyIcon = use ? (use.getAttribute('href') || '') : '';
+  btn.dataset.busyLabel = btnLabel(btn);
+  btn.disabled = true;
+  setBtnIcon(btn, '#i-hourglass', label);
+}
+function clearBtnBusy(btn) {
+  if (!btn || btn.dataset.busyIcon === undefined) return;
+  btn.disabled = false;
+  setBtnIcon(btn, btn.dataset.busyIcon, btn.dataset.busyLabel);
+  delete btn.dataset.busyIcon;
+  delete btn.dataset.busyLabel;
+}
+
 /* ──── 标签切换 ──── */
 document.querySelectorAll('.tabs .tab').forEach(btn => {
   btn.addEventListener('click', () => {
