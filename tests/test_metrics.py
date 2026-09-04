@@ -619,13 +619,15 @@ def test_unranked_folds_into_yesterday_same_span():
     now = datetime.now()
     yday_same = now - timedelta(days=1)
     yday_start = yday_same.replace(hour=0, minute=0, second=0, microsecond=0)
-    if (yday_same - yday_start).total_seconds() < 4:
-        pytest.skip('恰在午夜,同时段窗口为空')
+    span = (yday_same - yday_start).total_seconds()
+    # 窗口上界是 query_game_stats 自己取的 now,两端各留 60s 余量,建库耗时才不会把「窗口外」那条挤进窗口
+    if not 60 < span < 86400 - 60:
+        pytest.skip('恰在午夜前后,同时段窗口两端留不出余量')
     _make_db([('五子棋', 0, 'G1', ['U1'])])
-    inside = (yday_start + (yday_same - yday_start) / 2).timestamp()
+    inside = (yday_start + timedelta(seconds=span / 2)).timestamp()
     metrics.record_unranked_match('大富翁', ['U8'], 'G8', ts=inside)
     metrics.record_unranked_match('大富翁', ['U9'], 'G9',
-                                  ts=yday_same.timestamp() + 1)      # 晚于同时段
+                                  ts=yday_same.timestamp() + 60)     # 晚于同时段
 
     g = metrics.query_game_stats()
     assert g['yesterday_matches_same_span'] == 1
