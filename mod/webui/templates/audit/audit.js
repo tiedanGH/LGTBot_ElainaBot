@@ -132,7 +132,7 @@ function auditRenderTable() {
     const detail = e.detail || '';
     return `<tr>
       <td class="audit-col-time" title="${fullTime}">${escapeHtml(auditFmtRelative(e.ts))}</td>
-      <td class="audit-col-cat"><span class="audit-cat">${auditCatHtml(cat, e.cat)}</span></td>
+      <td class="audit-col-cat"><span class="audit-cat" data-cat="${escapeHtml(e.cat || '')}">${auditCatHtml(cat, e.cat)}</span></td>
       <td class="audit-col-action">${escapeHtml(e.action || '')}</td>
       <td class="audit-col-detail">${detail
         ? '<span class="audit-detail-text" title="' + escapeHtml(detail) + '">' + escapeHtml(detail) + '</span>'

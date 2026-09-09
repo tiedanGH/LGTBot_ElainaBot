@@ -41,17 +41,42 @@
 .audit-filter-chips {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
+/* 每个类别一枚主色 --cat:浅底由它兑 --panel 派生,选中实底用 --cat-solid。 */
+.audit-chip, .audit-cat {
+  --cat: var(--text-muted);
+  --cat-solid: var(--accent);
+}
+[data-cat="build"]   { --cat: #b3600c; --cat-solid: #a9590a; }
+[data-cat="backup"]  { --cat: #0e7a68; --cat-solid: #0c6d5d; }
+[data-cat="cache"]   { --cat: #1f74b8; --cat-solid: #1b68a6; }
+[data-cat="update"]  { --cat: #1c8043; --cat-solid: #17713a; }
+[data-cat="config"]  { --cat: #6046c4; --cat-solid: #5940b4; }
+[data-cat="restart"] { --cat: #b83a3a; --cat-solid: #a83434; }
+[data-cat="bind"]    { --cat: #a53f92; --cat-solid: #953984; }
+[data-cat="match"]   { --cat: #8a6c07; --cat-solid: #7d6106; }
+/* 深色主题只提亮描边色 */
+html[data-theme="dark"] [data-cat="build"]   { --cat: #e59a4e; }
+html[data-theme="dark"] [data-cat="backup"]  { --cat: #43c8ad; }
+html[data-theme="dark"] [data-cat="cache"]   { --cat: #6ab8ec; }
+html[data-theme="dark"] [data-cat="update"]  { --cat: #52c47a; }
+html[data-theme="dark"] [data-cat="config"]  { --cat: #a294f2; }
+html[data-theme="dark"] [data-cat="restart"] { --cat: #ef8383; }
+html[data-theme="dark"] [data-cat="bind"]    { --cat: #e18ad0; }
+html[data-theme="dark"] [data-cat="match"]   { --cat: #d6bb44; }
+
 .audit-chip {
   padding: 4px 10px; border-radius: 14px; font-size: 12px; cursor: pointer;
-  border: 1px solid var(--border); background: var(--panel-2);
-  color: var(--text-muted); line-height: 1.4; user-select: none;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--cat) 15%, var(--panel));
+  color: var(--cat); line-height: 1.4; user-select: none;
   display: inline-flex; align-items: center; gap: 5px;
+  transition: background .15s, color .15s, border-color .15s;
 }
 .audit-chip .ui-icon, .audit-cat .ui-icon { width: 14px; height: 14px; }
-.audit-chip:hover { background: var(--hover); }
+.audit-chip:hover { border-color: var(--cat); }
 .audit-chip.active {
-  background: var(--accent); border-color: var(--accent);
-  color: var(--accent-text); font-weight: 600;
+  background: var(--cat-solid); border-color: var(--cat-solid);
+  color: #fff; font-weight: 600;
 }
 
 /* ── 记录表格 ── */
@@ -81,12 +106,16 @@
 .audit-table tbody tr:last-child td { border-bottom: none; }
 .audit-table tbody tr:hover { background: var(--hover); }
 
-/* 窄列:auto 布局下 width:1px 即 shrink-to-fit(收缩到内容宽),
-   nowrap 保证永不换行 —— 内容多宽列就多宽,无需预估最长文案 */
+/* 窄列:auto 布局下 width:1px 即 shrink-to-fit(收缩到内容宽),nowrap 保证永不换行 */
 .audit-col-time   { width: 1px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .audit-col-cat    { width: 1px; font-size: 12px; white-space: nowrap; }
-/* td 本身改 flex 会退出表格布局,包一层 span 再对齐 */
-.audit-cat { display: inline-flex; align-items: center; gap: 5px; }
+/* td 本身改 flex 会退出表格布局,包一层 span 再对齐。 */
+.audit-cat {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; margin: -3px 0; border-radius: 11px;
+  background: color-mix(in srgb, var(--cat) 15%, var(--panel));
+  color: var(--cat);
+}
 .audit-col-action { width: 1px; white-space: nowrap; }
 .audit-col-src    { width: 1px; white-space: nowrap; }
 .audit-col-result { width: 1px; white-space: nowrap; }
