@@ -16,7 +16,7 @@ __plugin_meta__ = {
     'name': 'LGTBot 机器人',
     'author': '铁蛋',
     'description': '基于 C++ 的 LGTBot 游戏裁判机器人',
-    'version': '2.11.3',
+    'version': '2.11.4',
     'github': 'https://github.com/tiedanGH/LGTBot_ElainaBot',
 }
 
@@ -121,20 +121,17 @@ async def _setup():
         log.warning(f'崩溃死循环检测异常: {e}')
 
     # ── 热重载检测：上一轮的引擎可能还活着 ─────────────────────────────────
-    # 若此时再调 LGTBot_ElainaBot.start()，C++ 会覆盖 g_bot_core，旧引擎实例被丢弃，
-    # 进行中的游戏全部失联（玩家命令进入新引擎找不到 match）。
-    # 解决：检测到引擎已在运行时，先尝试干净释放；释放失败（有游戏在跑）则
-    # 跳过 start()，复用现有引擎，让玩家可以继续游戏。
+    # 若此时再调 start()，C++ 会覆盖 g_bot_core，旧引擎实例被丢弃，进行中的游戏全部失联（玩家命令进入新引擎找不到 match）。
+    # 解决：检测到引擎已在运行时，先尝试干净释放；释放失败（有游戏在跑）则跳过 start()，复用现有引擎，让玩家可以继续游戏。
     if boot.is_engine_running():
         if boot.LGTBot_ElainaBot.release_bot_if_not_processing_games():
             boot.mark_engine_running(False)
-            log.info('🔁 [热重载] 旧引擎已干净释放，将重新初始化')
+            log.info('🔁 [热重载] 旧引擎已成功释放，将重新初始化')
         else:
             log.warning('=' * 60)
             log.warning('🔁 [热重载] 检测到引擎已在运行 + 有进行中的游戏')
             log.warning('   ▸ 已跳过引擎重启，复用现有引擎，玩家可继续游戏')
-            log.warning('   ▸ 注意：本次不刷新游戏列表 / 配置项；待所有游戏结束后')
-            log.warning('     再次保存任意文件触发热重载，将自动完成完整重启')
+            log.warning('   ▸ 注意：本次不刷新游戏列表 / 配置项，需引擎重启后才生效')
             log.warning('=' * 60)
             _state.started = True   # 让新 dispatcher 正常派发消息
             # 复用旧引擎也属于热重载成功,触发备份检查(若距上次 > 24h 才真备)
