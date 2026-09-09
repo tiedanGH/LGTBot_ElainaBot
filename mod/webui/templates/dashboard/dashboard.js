@@ -52,6 +52,21 @@ function dashGitWarnHtml() {
          '可点「初始化为 git 仓库」启用 git 更新；或有新版本时直接「下载更新」覆盖更新。</span>';
 }
 
+/* 桥接层刚更新完,按钮从此固定为「刷新控制台」,点了整页重载。 */
+let dashBridgeNeedsReload = false;
+
+function dashMarkBridgeUpdated() {
+  dashBridgeNeedsReload = true;
+  const btn = document.getElementById('dash-do-update');
+  if (!btn) return;
+  btn.style.display = '';
+  btn.disabled = false;
+  /* 从橙色警示态切成主按钮 */
+  btn.classList.remove('dash-btn-warn');
+  btn.classList.add('dash-btn-primary');
+  setBtnIcon(btn, '#i-refresh', '刷新控制台');
+}
+
 function dashFmtBytes(n) {
   if (n == null) return '—';
   if (n < 1024) return n + ' B';
@@ -475,8 +490,10 @@ async function dashCheckUpdate() {
   btn.disabled = true;
   setBtnIcon(btn, '#i-hourglass', '检查中……');
   resEl.innerHTML = '';
-  /* 隐藏所有更新按钮,等结果回来再按需重显 */
-  document.getElementById('dash-do-update').style.display = 'none';
+  /* 隐藏所有更新按钮,等结果回来再按需重显(「刷新控制台」除外) */
+  if (!dashBridgeNeedsReload) {
+    document.getElementById('dash-do-update').style.display = 'none';
+  }
   /* 注意:dash-update-submodule 不一定隐藏 —— 如果 status=missing/empty,
      在 dashApplyData 阶段就显示了「初始化子模块」按钮。
      这里也先隐藏,新结果回来时 dashRenderSubmoduleStatus 会重新决定。 */
@@ -517,13 +534,19 @@ function dashRenderBridgeStatus(bridge) {
   const noGit = dashRepoStatus === 'no_git';
   const gitWarn = noGit ? dashGitWarnHtml() : '';
   if (dlBtn) dlBtn.style.display = 'none';
-  setBtnIcon(btn, noGit ? '#i-inbox' : '#i-download',
-             noGit ? '初始化为 git 仓库' : '更新桥接层');
+  /* 更新完成后按钮已固定成「刷新控制台」:版本行照常刷新,但它的显隐与文案一概不再由这里决定。 */
+  const showBtn = (show) => {
+    if (!dashBridgeNeedsReload) btn.style.display = show ? '' : 'none';
+  };
+  if (!dashBridgeNeedsReload) {
+    setBtnIcon(btn, noGit ? '#i-inbox' : '#i-download',
+               noGit ? '初始化为 git 仓库' : '更新桥接层');
+  }
 
   if (!bridge || !bridge.success) {
     detail.innerHTML = '<span class="dash-msg-err">❌ ' +
       escapeHtml(bridge && bridge.error ? bridge.error : '检查失败') + '</span>' + repoLink + gitWarn;
-    btn.style.display = noGit ? '' : 'none';   // no_git 时保留初始化按钮
+    showBtn(noGit);                            // no_git 时保留初始化按钮
     return;
   }
   const local = dashFmtVersion(bridge.local_version);
@@ -532,11 +555,11 @@ function dashRenderBridgeStatus(bridge) {
     detail.innerHTML = '<span class="dash-msg-warn">✨ 本地 <b>' +
       escapeHtml(local) + '</b> → 远端 <b>' + escapeHtml(remote) + '</b></span>' + repoLink + gitWarn;
     /* 有更新:git 仓库走「更新桥接层」;no_git 走「下载更新」(初始化按钮并存) */
-    btn.style.display = '';
+    showBtn(true);
     if (noGit && dlBtn) dlBtn.style.display = '';
   } else {
     detail.innerHTML = '<span class="dash-msg-ok">✅ 已是最新版本 (' + escapeHtml(remote) + ')</span>' + repoLink + gitWarn;
-    btn.style.display = noGit ? '' : 'none';   // 最新:无下载按钮;no_git 仍可初始化
+    showBtn(noGit);                            // 最新:无下载按钮;no_git 仍可初始化
   }
 }
 
@@ -635,6 +658,7 @@ async function dashDoUpdate() {
     } else {
       html += '<div class="dash-msg-err">' + escapeHtml(data.message || '更新失败') + '</div>';
     }
+    if (data.success) dashMarkBridgeUpdated();
     if (data.stdout) html += '<pre class="dash-pre">stdout:\n' + escapeHtml(data.stdout) + '</pre>';
     if (data.stderr) html += '<pre class="dash-pre">stderr:\n' + escapeHtml(data.stderr) + '</pre>';
     /* 失败时附加「💥 强制更新」按钮 —— 典型场景:工作区脏 (`would be
@@ -657,8 +681,10 @@ async function dashDoUpdate() {
   } catch (e) {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
-    btn.disabled = false;
-    setBtnIcon(btn, '#i-download', '更新桥接层');
+    if (!dashBridgeNeedsReload) {
+      btn.disabled = false;
+      setBtnIcon(btn, '#i-download', '更新桥接层');
+    }
   }
 }
 
@@ -711,6 +737,7 @@ async function dashDoUpdateForce() {
       html += '<ul class="dash-pluginconf-changes">' + items.join('') + '</ul>';
     }
     resEl.innerHTML = html;
+    if (data.success) dashMarkBridgeUpdated();
   } catch (e) {
     resEl.innerHTML = '<span class="dash-msg-err">❌ ' + escapeHtml(e.message) + '</span>';
   } finally {
@@ -788,6 +815,7 @@ async function dashInitRepo() {
 /* 桥接层行按钮的分发器: 按 dashRepoStatus 决定调哪个 handler。
    一个 button 元素 + 一个 click listener,handler 根据状态分支。 */
 async function dashBridgeButtonClick() {
+  if (dashBridgeNeedsReload) return location.reload();
   if (dashRepoStatus === 'no_git') return dashInitRepo();
   return dashDoUpdate();
 }
