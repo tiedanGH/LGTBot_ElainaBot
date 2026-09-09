@@ -421,6 +421,7 @@ def test_build_and_restart_apis_registered_without_panel_auth(_clean_registry):
     assert open_paths == {
         '/api/ext/lgtbot/build/compile',
         '/api/ext/lgtbot/build/terminate',
+        '/api/ext/lgtbot/build/status',
         '/api/ext/lgtbot/restart',
         '/api/ext/lgtbot/planned-restart',
     }

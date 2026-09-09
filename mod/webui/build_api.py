@@ -6,14 +6,11 @@
 API 触发的编译同样落 state.json + build.log,面板打开就能看到实时日志;反之面板起的编译也会让 API 返回 409。
 
 端点(webui/main.py 以 ``auth=False`` 注册,面板登录态不适用,靠自有 token):
-  · ``POST /api/ext/lgtbot/build/compile``    {"target": "<name>", "new": bool}
-    编译单个目标(桥接层传 ``LGTBot_ElainaBot``)。``new`` 缺省 false 走 -i
-    增量;true 表示**新增的目标**(如刚放进 lgtbot/games/ 的新游戏)—— 它不在
-    build/ 的 CMake 缓存里,增量必报 "No rule to make target",改走
-    cmake 重新配置 + make target(build.sh 不带 -i),耗时多出配置阶段。
-    **同步等待**编译结束再响应 —— 完整 / 增量全量编译动辄十几分钟,HTTP
-    语义下必超时,故 API 只开放单目标。
-  · ``POST /api/ext/lgtbot/build/terminate``  强制中断当前编译(含面板起的)。
+  · ``POST /api/ext/lgtbot/build/compile``    {"target": "<name>", "new": bool} 编译单个目标(桥接层传 ``LGTBot_ElainaBot``)
+   ``new`` 缺省 false 走 -i 增量;true 表示**新增的目标**。**同步等待**编译结束再响应
+  · ``POST /api/ext/lgtbot/build/terminate``  强制中断当前编译(含面板)。
+  · ``GET  /api/ext/lgtbot/build/status``     编译服务此刻是否可用(不触发任何动作)。
+    ``available=false`` 时给出原因与 compile 此刻会返回的状态码。
 
 认证:``Authorization: Bearer <token>`` 或 ``X-API-Token: <token>``。
 token 落 ``data/build/api_token``(独立文件,不存在则随机生成;放 data/build/ 而非编译产物 build/
@@ -21,7 +18,8 @@ token 落 ``data/build/api_token``(独立文件,不存在则随机生成;放 dat
 面板「引擎编译」标签有一键复制按钮。
 
 状态码约定(响应体一律 JSON):
-  200 编译成功(elapsed_sec 用时 / active_matches 进行中对局数)或中断成功
+  200 编译成功(elapsed_sec 用时 / active_matches 进行中对局数)或中断成功;
+      status 恒 200 —— 探测成功不等于服务可用,看响应体的 available
   400 缺 target / target 名非法
   401 token 缺失或错误
   409 已有编译在进行(compile)/ 没有编译在进行(terminate)/ build 目录缺失
@@ -58,6 +56,7 @@ _POLL_INTERVAL = 1.0
 
 _ROUTE_COMPILE = '/api/ext/lgtbot/build/compile'
 _ROUTE_TERMINATE = '/api/ext/lgtbot/build/terminate'
+_ROUTE_STATUS = '/api/ext/lgtbot/build/status'
 
 # 日志尾巴的 ANSI / 控制字符清洗(API 消费方是程序,不需要颜色)
 _ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|\x1b[=>()]?[0-9A-Za-z]')
@@ -131,6 +130,15 @@ def _service_unavailable_reason() -> str | None:
     return None
 
 
+def _not_ready_reason(st: dict) -> 'tuple[int, str] | None':
+    """编译此刻发起不了的 (状态码, 原因);可以发起返回 None。"""
+    if not os.path.isdir(os.path.join(boot.PLUGIN_DIR, 'build')):
+        return 409, 'build/ 目录不存在，请先在面板完成一次完整编译'
+    if st['running']:
+        return 409, '已有编译在进行中，请稍后重试或调用 terminate 中断'
+    return None
+
+
 def _plain_log_tail(max_bytes: int = 8192, max_lines: int = 40) -> str:
     """build.log 末尾,剥 ANSI / 控制字符,截最后 max_lines 行(诊断用)。"""
     text = page_build._read_log_tail(max_bytes)
@@ -180,10 +188,9 @@ async def compile_handler(request: 'web.Request') -> 'web.Response':
         return _err(400, f'target 名称非法: {target!r}(仅字母/数字/下划线/连字符,'
                          f'1-63 字符,首字符为字母或下划线)')
 
-    if not os.path.isdir(os.path.join(boot.PLUGIN_DIR, 'build')):
-        return _err(409, 'build/ 目录不存在，请先在面板完成一次完整编译')
-    if page_build.get_build_state()['running']:
-        return _err(409, '已有编译在进行中，请稍后重试或调用 terminate 中断')
+    blocked = _not_ready_reason(page_build.get_build_state())
+    if blocked:
+        return _err(*blocked)
 
     # new=true:目标是新增的(不在 CMake 缓存),必须重跑 configure —— 不能带 -i
     if is_new:
@@ -224,6 +231,37 @@ async def compile_handler(request: 'web.Request') -> 'web.Response':
                 elapsed_sec=elapsed, log_tail=_plain_log_tail())
 
 
+async def status_handler(request: 'web.Request') -> 'web.Response':
+    """``GET /api/ext/lgtbot/build/status`` —— 只读探测,不触发任何动作、不落审计。
+
+    ``compile_status`` 是 compile **此刻**会返回的 HTTP 状态码(可用时为 200),HTTP 层恒 200:探测本身成功。
+    """
+    if not _check_auth(request):
+        return _err(401, 'token 缺失或错误')
+
+    st = page_build.get_build_state()
+    reason = _service_unavailable_reason()
+    blocked = (503, reason) if reason else _not_ready_reason(st)
+    return web.json_response({
+        'success': True,
+        'available': blocked is None,
+        'reason': blocked[1] if blocked else None,
+        'compile_status': blocked[0] if blocked else 200,
+        'building': st['running'],
+        # 正在编译时说明是哪一条命令、什么时候起的;刚结束时带上退出码与用时
+        'build': {
+            'cmd_display': st.get('cmd_display', ''),
+            'kind': st.get('kind', 'build'),
+            'started_iso': st.get('started_iso', ''),
+            'finished': st.get('finished', False),
+            'returncode': st.get('returncode'),
+            'elapsed_sec': st.get('elapsed_sec'),
+        },
+        'mode': prebuilt.mode_info(),
+        'active_matches': _active_match_count(),
+    })
+
+
 async def terminate_handler(request: 'web.Request') -> 'web.Response':
     """``POST /api/ext/lgtbot/build/terminate`` —— 强制中断当前编译(不限发起方)。"""
     if not _check_auth(request):
@@ -256,6 +294,7 @@ def render_api_token() -> str:
         'endpoints': {
             'compile': _ROUTE_COMPILE,
             'terminate': _ROUTE_TERMINATE,
+            'status': _ROUTE_STATUS,
             'restart': '/api/ext/lgtbot/restart',
             'planned': '/api/ext/lgtbot/planned-restart',
         },

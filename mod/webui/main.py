@@ -143,6 +143,7 @@ _PREBUILT_UPLOAD_ROUTE      = '/api/ext/lgtbot/prebuilt/upload'   # 手动上传
 # 编译 API(供框架内其他插件调用):auth=False 免面板登录,handler 自验独立 token
 _BUILD_API_COMPILE_ROUTE    = '/api/ext/lgtbot/build/compile'
 _BUILD_API_TERMINATE_ROUTE  = '/api/ext/lgtbot/build/terminate'
+_BUILD_API_STATUS_ROUTE     = '/api/ext/lgtbot/build/status'
 # 重启 / 计划重启 API(同一枚 token;POST 与面板 GET /planned-restart 同路径不同方法)
 _RESTART_API_ROUTE          = '/api/ext/lgtbot/restart'
 _PLANNED_API_ROUTE          = '/api/ext/lgtbot/planned-restart'
@@ -552,6 +553,7 @@ def register():
     # 编译 API:auth=False 跳过面板登录校验 —— handler 内部验独立 token(data/build/api_token),供框架内其他插件程序化调用
     web_pages.register_route('POST', _BUILD_API_COMPILE_ROUTE, build_api.compile_handler, auth=False)
     web_pages.register_route('POST', _BUILD_API_TERMINATE_ROUTE, build_api.terminate_handler, auth=False)
+    web_pages.register_route('GET', _BUILD_API_STATUS_ROUTE, build_api.status_handler, auth=False)
     # 重启 / 计划重启 API(同 token 体系;计划重启支持 enable/auto/reason 请求体)
     web_pages.register_route('POST', _RESTART_API_ROUTE, restart_api.restart_handler, auth=False)
     web_pages.register_route('POST', _PLANNED_API_ROUTE, restart_api.planned_restart_handler, auth=False)
@@ -563,9 +565,6 @@ def unregister():
     web_pages.unregister_page(PAGE_KEY)
     for k in _HIDDEN_KEYS:
         web_pages.unregister_page(k)
-    # 注销 backup register_route 路由(其余 ``_register_hidden_action`` 注册的
-    # action 端点都是放在 ``web_pages._registry``,前面循环已清掉;register_route
-    # 是另一张表 ``web_pages._routes``,要显式 unregister)
     web_pages.unregister_route('GET', _BACKUP_RESTORE_ROUTE)
     web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
     web_pages.unregister_route('GET', _BACKUP_DOWNLOAD_ROUTE)
@@ -587,7 +586,6 @@ def unregister():
     web_pages.unregister_route('POST', _PREBUILT_UPLOAD_ROUTE)
     web_pages.unregister_route('POST', _BUILD_API_COMPILE_ROUTE)
     web_pages.unregister_route('POST', _BUILD_API_TERMINATE_ROUTE)
+    web_pages.unregister_route('GET', _BUILD_API_STATUS_ROUTE)
     web_pages.unregister_route('POST', _RESTART_API_ROUTE)
     web_pages.unregister_route('POST', _PLANNED_API_ROUTE)
-    # get_pages 的 wrap 不主动 unwrap:其它插件可能后续也加了包装,贸然恢复会断链。
-    # 留着的副作用仅是过滤一组已不存在的 key,无害。

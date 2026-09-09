@@ -305,3 +305,115 @@ async def test_terminate_kills_running_build(tmp_path, monkeypatch):
     assert resp.status == 200
     assert _body(resp)['success'] is True
     assert seen['src'] == 'API'
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# status:只读探测
+# ─────────────────────────────────────────────────────────────────────────
+
+async def test_status_rejects_bad_token(tmp_path, monkeypatch):
+    api = _api()
+    monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
+    resp = await api.status_handler(_FakeReq(token=None))
+    assert resp.status == 401
+    resp = await api.status_handler(_FakeReq(token='wrong'))
+    assert resp.status == 401
+
+
+async def test_status_reports_available_when_idle(tmp_path, monkeypatch):
+    api = _api()
+    monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
+    token = api.get_or_create_api_token()
+    _local_mode(monkeypatch, api)
+    _touch_build_env(api)
+    monkeypatch.setattr(api.page_build, 'get_build_state',
+                        lambda: {'running': False, 'finished': True,
+                                 'returncode': 0, 'elapsed_sec': 42,
+                                 'cmd_display': '增量编译目标 x', 'kind': 'build',
+                                 'started_iso': '2026-09-09T10:00:00'})
+    state.active_matches.clear()
+    state.active_matches['m1'] = {'target_id': 'g1', 'is_uid': False}
+
+    resp = await api.status_handler(_FakeReq(token=token))
+    assert resp.status == 200
+    data = _body(resp)
+    assert data['available'] is True
+    assert data['reason'] is None
+    assert data['compile_status'] == 200
+    assert data['building'] is False
+    assert data['build']['returncode'] == 0 and data['build']['elapsed_sec'] == 42
+    assert data['active_matches'] == 1
+
+
+async def test_status_unavailable_while_building(tmp_path, monkeypatch):
+    """正在编译 → available=false + 原因 + compile 此刻会返回的 409。"""
+    api = _api()
+    monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
+    token = api.get_or_create_api_token()
+    _local_mode(monkeypatch, api)
+    _touch_build_env(api)
+    monkeypatch.setattr(api.page_build, 'get_build_state',
+                        lambda: {'running': True, 'pid': 7,
+                                 'cmd_display': '增量编译目标 numcomb',
+                                 'kind': 'build', 'started_iso': '2026-09-09T10:00:00'})
+
+    resp = await api.status_handler(_FakeReq(token=token))
+    assert resp.status == 200                       # 探测本身成功
+    data = _body(resp)
+    assert data['available'] is False
+    assert data['compile_status'] == 409
+    assert '已有编译在进行' in data['reason']
+    assert data['building'] is True
+    assert data['build']['cmd_display'] == '增量编译目标 numcomb'
+
+
+async def test_status_unavailable_in_prebuilt_mode(tmp_path, monkeypatch):
+    api = _api()
+    monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
+    token = api.get_or_create_api_token()
+    _touch_build_env(api)
+    monkeypatch.setattr(api.prebuilt, 'mode_info',
+                        lambda: {'running': 'prebuilt', 'selected': 'prebuilt'})
+    monkeypatch.setattr(api.page_build, 'get_build_state', lambda: {'running': False})
+
+    data = _body(await api.status_handler(_FakeReq(token=token)))
+    assert data['available'] is False
+    assert data['compile_status'] == 503
+    assert '预编译' in data['reason']
+    assert data['mode']['running'] == 'prebuilt'
+
+
+async def test_status_and_compile_share_one_verdict(tmp_path, monkeypatch):
+    """★ status 说不可用,compile 就必须以同一个状态码拒绝 —— 两处判定同源。"""
+    api = _api()
+    monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
+    token = api.get_or_create_api_token()
+    _local_mode(monkeypatch, api)
+    _touch_build_env(api)
+    monkeypatch.setattr(api.page_build, 'get_build_state',
+                        lambda: {'running': True, 'pid': 7, 'cmd_display': 'x'})
+
+    st = _body(await api.status_handler(_FakeReq(token=token)))
+    resp = await api.compile_handler(_FakeReq(token=token, body={'target': 'numcomb'}))
+    assert st['available'] is False
+    assert st['compile_status'] == resp.status
+    assert st['reason'] == _body(resp)['error']
+
+
+async def test_status_does_not_touch_the_build(tmp_path, monkeypatch):
+    """★ 只读:不起编译、不 kill、不落审计。"""
+    api = _api()
+    monkeypatch.setattr(api, 'TOKEN_PATH', str(tmp_path / 'api_token'))
+    token = api.get_or_create_api_token()
+    _local_mode(monkeypatch, api)
+    _touch_build_env(api)
+    monkeypatch.setattr(api.page_build, 'get_build_state', lambda: {'running': False})
+    calls = []
+    monkeypatch.setattr(api.page_build, '_start_build',
+                        lambda *a, **k: calls.append('start'))
+    monkeypatch.setattr(api.page_build, '_kill_build',
+                        lambda *a, **k: calls.append('kill'))
+    monkeypatch.setattr(api.audit, 'record', lambda *a, **k: calls.append('audit'))
+
+    await api.status_handler(_FakeReq(token=token))
+    assert calls == []

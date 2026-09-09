@@ -132,6 +132,7 @@ cd ../.. && python3 main.py
   - 消息收发、全量群数据、邀请链接、错误推送均固定走绑定 bot，其他 bot 的事件静默忽略
 - **自动化 API** —— 面向框架内其他插件的 HTTP 接口，独立 token 认证（面板一键复制）
   - 编译：`POST /api/ext/lgtbot/build/compile`（`{"target": "<名称>", "new": bool}`，同步等待并返回用时）与 `.../build/terminate`（强制中断）；完整增量编译不开放
+  - 状态：`GET .../build/status` —— 只读探测编译服务此刻是否可用
   - 重启：`POST .../restart`（立即重启，可选 `{"reason": "更新内容"}` 随重启提示发给仍有等待中房间的群）与 `POST .../planned-restart`（`{"enable", "auto", "reason"}` —— 开关计划重启维护模式，`auto: true` 时全部对局结束后自动重启）
 
 ## 开发计划（TODO）
@@ -198,7 +199,7 @@ plugins/LGTBot_ElainaBot/
 │       ├── page_metrics.py  「指标面板」标签：数据统计 + 运行指标 + 游戏数据
 │       ├── page_config.py   「配置管理」标签：插件和引擎全部配置的内置编辑器 + 热重载
 │       ├── page_build.py    「引擎编译」标签：子进程 + state.json + build.log + ANSI 解析成结构化段 + 编译动作
-│       ├── build_api.py     编译 API（供其他插件调用）：token 认证 + 单目标同步编译 / 强制中断
+│       ├── build_api.py     编译 API（供其他插件调用）：token 认证 + 单目标同步编译 / 强制中断 / 状态探测
 │       ├── restart_api.py   重启 / 计划重启 API：立即重启 + enable/auto/reason 维护模式开关
 │       ├── page_prebuilt.py 「预编译部署」标签：镜像测速·选择 / 包列表 / 下载进度 / 本地·预编译切换
 │       ├── page_backup.py   「数据备份」标签：列出 / 创建 / 恢复 / 下载 / 删除备份 zip
