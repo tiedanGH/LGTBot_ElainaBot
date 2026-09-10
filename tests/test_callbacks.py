@@ -1138,3 +1138,34 @@ def test_unranked_without_known_game_still_counts_the_match(_recorded):
     callbacks.cb_send_text_message('6', False, _SETTLE_UNRANKED)
 
     assert _recorded == [('', ['U1', 'U2'], '6')]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 引擎崩溃自启:审计
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_engine_crash_restart_is_audited(tmp_path, monkeypatch):
+    """★ 崩溃自启必须在 execv 之前落审计 —— 工作线程 return 时可能在
+    tcache_thread_shutdown 撞出 SIGABRT,C++ 侧当场 execv,晚一步就永远写不进去。"""
+    from plugins.LGTBot_ElainaBot.mod import audit
+
+    monkeypatch.setattr(audit, 'AUDIT_DIR', str(tmp_path))
+    monkeypatch.setattr(audit, 'AUDIT_PATH', str(tmp_path / 'audit.json'))
+    monkeypatch.setattr(callbacks, '_crash_handled', False)
+    monkeypatch.setattr(state, 'event_loop', None)      # 走「无 loop → 直接 execv」分支
+
+    execv_called = []
+    monkeypatch.setattr(callbacks.os, 'execv',
+                        lambda *a: execv_called.append(a))
+
+    callbacks.cb_lgtbot_crashed('U1', 'G1', False, '触发崩溃的原文', 11)
+
+    assert execv_called, '崩溃路径应当走到 execv'
+    entries = audit.get_entries()
+    assert len(entries) == 1
+    e = entries[0]
+    assert e['cat'] == 'restart' and e['action'] == '引擎崩溃自动重启'
+    assert e['src'] == audit.SRC_AUTO and e['ok'] is True
+    assert 'SIGSEGV' in e['detail']
+    # 用户原文只进本地 log,不能随审计进面板
+    assert '触发崩溃的原文' not in e['detail']

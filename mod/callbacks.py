@@ -31,7 +31,8 @@ import sys
 import time
 
 from core.base.logger import get_logger, PLUGIN
-from . import state, quota, helpers, boot, uploader, userinfo, buttons, log_attribution, metrics
+from . import (state, quota, helpers, boot, uploader, userinfo, buttons,
+               log_attribution, metrics, audit)
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -165,9 +166,13 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
     except Exception:
         pass
 
-    # 指标:崩溃累计(live 信号路径)。record 同步写盘且永不抛
-    # 在腐败 heap上属 best-effort,但发生在 execv 之前,通常能成功落盘。
+    # 指标 + 审计:两者都同步写盘且永不抛。在腐败 heap 上属 best-effort,但发生在 execv 之前,通常能成功落盘
+    # 且必须趁现在写:工作线程 return 时若在 tcache_thread_shutdown 撞出 SIGABRT,C++ 侧会立刻 execv,后面的代码都跑不到。
     metrics.record_crash(sig_name)
+    audit.record('restart', '引擎崩溃自动重启',
+                 f'{sig_name}；触发源 {target}；'
+                 f'{_LGTBOT_CRASH_DELAY_S:.0f}s 后 os.execv 自启',
+                 src=audit.SRC_AUTO)
 
     # 异步善后:发道歉 + 倒计时 + execv。C++ wrapper 即将 return,不能在这里阻塞。
     loop = state.event_loop
