@@ -8,6 +8,7 @@
   · image_hosting: str               markdown 图片内嵌使用的图床名（默认 any = 自动依次尝试；留空 = 禁用）
   · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
   · active_push_daily_limit: int     单个群 / 用户每日主动消息条数上限（0 = 不限）
+  · text_at_as_mention: bool        全量群里「@机器人名称」文本前缀是否算 @
   · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
   · notify_groups: list[str]         通知群 openid 列表（崩溃报告 / 熔断告警 / 自动重启说明向全部群主动推送）
   · blocked_commands: list[str]      追加屏蔽指令（与 dispatcher 内置屏蔽表共同生效，命中的消息不转发给引擎）
@@ -36,6 +37,7 @@ DEFAULT_CONFIG = {
     'image_hosting': 'any',
     'refresh_wait_timeout': 15.0,
     'active_push_daily_limit': 1000,
+    'text_at_as_mention': True,
     'image_upload_dedup_ttl': 60.0,
     'notify_groups': [],
     'blocked_commands': [],
@@ -49,6 +51,7 @@ CONFIG_COMMENTS = {
     'image_hosting': '游戏图片走 markdown 内嵌时使用的图床。默认 any 自动依次尝试全部可用图床，单选提升效率。可选值以 image_hosting 模块为准：cos / bilibili / chatglm / xingye / nature / qq_file；留空 = 不启用图床。失败回退 msg_type=7',
     'refresh_wait_timeout': '被动消息配额耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
     'active_push_daily_limit': '单个群 / 用户每日主动消息条数上限（QQ 官方接口限制，默认 1000）。用满后该群 / 用户当日退回「刷新按钮」被动机制，次日 0 点自动恢复；设 0 = 不限制',
+    'text_at_as_mention': '把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @',
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
     'notify_groups': 'LGTBot 重要通知群 openid 列表，可填多个：引擎崩溃 / 引擎告警 / 自动重启提示 会同时推送给全部群。这些群需要主动消息权限',
     'blocked_commands': '屏蔽指令列表：命中的消息不再转发给引擎，用于化解与其他插件的指令冲突',
@@ -137,7 +140,8 @@ def _apply_runtime_tunables(cfg: dict):
     下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
     ``load_plugin_config`` 处理,不在此函数内):
       bind_bot_appid → image_hosting → refresh_wait_timeout →
-      active_push_daily_limit → image_upload_dedup_ttl → notify_groups → blocked_commands →
+      active_push_daily_limit → text_at_as_mention → image_upload_dedup_ttl →
+      notify_groups → blocked_commands →
       sandbox_dm_users → menu_game_buttons → sponsor_enabled
     """
     from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
@@ -220,6 +224,21 @@ def _apply_runtime_tunables(cfg: dict):
                      f'{_callbacks.ACTIVE_PUSH_DAILY_LIMIT} → {limit_i}'
                      + ('（不限制）' if limit_i == 0 else ''))
             _callbacks.ACTIVE_PUSH_DAILY_LIMIT = limit_i
+
+    # ── text_at_as_mention ────────────────────────────────────────────────
+    # 只认真正的布尔值,'true' / 1 这类近似值按非法忽略并保留现值。
+    raw_text_at = cfg.get('text_at_as_mention', None)
+    if raw_text_at is None:
+        text_at_on = True
+    elif isinstance(raw_text_at, bool):
+        text_at_on = raw_text_at
+    else:
+        log.warning(f'text_at_as_mention 应为布尔值 true / false，已忽略 (got {raw_text_at!r})')
+        text_at_on = _dispatcher.TEXT_AT_AS_MENTION
+    if _dispatcher.TEXT_AT_AS_MENTION != text_at_on:
+        log.info(f'text_at_as_mention: {"开启" if text_at_on else "关闭"}'
+                 f'（原 {"开启" if _dispatcher.TEXT_AT_AS_MENTION else "关闭"}）')
+        _dispatcher.TEXT_AT_AS_MENTION = text_at_on
 
     # ── image_upload_dedup_ttl ────────────────────────────────────────────
     # 同份图片重复上传去重 TTL。0 = 关闭去重(每次都重新上传,仍保留 filename

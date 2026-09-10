@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1474,3 +1475,95 @@ def test_auto_restart_skips_already_notified_groups():
     import inspect
     src = inspect.getsource(dispatcher._auto_restart_watcher)
     assert src.index('_notify_auto_restart') < src.index('_notify_restart_rooms')
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# text_at_as_mention:复制粘贴出来的「@机器人名称」文本前缀
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def _bot_named(monkeypatch):
+    """让 helpers.get_sender 返回一个带 _bot_name 的桩;返回可改名的容器。"""
+    box = {'name': 'LGTBot'}
+    monkeypatch.setattr(dispatcher.helpers, 'get_sender',
+                        lambda appid='': SimpleNamespace(_bot_name=box['name']))
+    return box
+
+
+def test_text_at_as_mention_module_default_is_on():
+    """★ 配置加载整个失败时兑底的就是这个模块默认值。"""
+    assert dispatcher.TEXT_AT_AS_MENTION is True
+
+
+def _text_at_event(content):
+    return _mock_event(
+        event_type=dispatcher.GROUP_MESSAGE_CREATE,
+        is_group=True, group_id='FULL_GROUP', user_id='U1',
+        message_id='M_TEXTAT', content=content,
+        is_at_self=False,          # 文本 @ 不带 mentions,框架判定为没 @
+    )
+
+
+async def test_text_at_prefix_counts_as_mention(patched_downstream, _bot_named,
+                                                monkeypatch):
+    """★ 开关打开时,「@机器人名称 指令」要剥掉前缀后照常进引擎 ——
+    复制粘贴出来的 @ 是纯文本,QQ 不给 mentions,不特判就整条被当日常对话丢掉。"""
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
+    _state.started = True
+
+    await dispatcher.lgtbot_dispatch(_text_at_event('@LGTBot /新游戏 决胜五子'), None)
+
+    patched_downstream['log_incoming'].assert_called_once()
+    assert patched_downstream['log_incoming'].call_args[0][2] == '/新游戏 决胜五子'
+    patched_downstream['thread_start'].assert_called_once()
+
+
+async def test_text_at_prefix_ignored_when_switch_off(patched_downstream,
+                                                      _bot_named, monkeypatch):
+    """★ 开关关闭 = 只认真实 @,文本前缀原样按日常对话挡掉。"""
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', False)
+    _state.started = True
+
+    await dispatcher.lgtbot_dispatch(_text_at_event('@LGTBot /新游戏 决胜五子'), None)
+
+    patched_downstream['thread_start'].assert_not_called()
+
+
+async def test_text_at_only_strips_the_bots_own_name(patched_downstream,
+                                                     _bot_named, monkeypatch):
+    """@ 的是别人 → 与本 bot 无关,照旧挡掉,不能被前缀匹配误放行。"""
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
+    _state.started = True
+
+    await dispatcher.lgtbot_dispatch(_text_at_event('@隔壁机器人 /新游戏'), None)
+
+    patched_downstream['thread_start'].assert_not_called()
+
+
+async def test_text_at_falls_back_to_blocking_without_a_bot_name(
+        patched_downstream, _bot_named, monkeypatch):
+    """★ 名字还没拉到(启动早期)时不能瞎猜 —— 退化成只认真实 @,
+    否则空名字会让 '@' 开头的任意消息都被当成 @ 机器人。"""
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
+    _bot_named['name'] = ''
+    _state.started = True
+
+    await dispatcher.lgtbot_dispatch(_text_at_event('@ 随便说点什么'), None)
+
+    patched_downstream['thread_start'].assert_not_called()
+
+
+async def test_real_at_is_untouched_by_the_switch(patched_downstream,
+                                                  _bot_named, monkeypatch):
+    """真实 @(is_at_self=True)与开关无关,内容一个字都不该被动。"""
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', False)
+    _state.started = True
+
+    event = _mock_event(
+        event_type=dispatcher.GROUP_MESSAGE_CREATE,
+        is_group=True, group_id='FULL_GROUP', user_id='U1',
+        message_id='M_REALAT', content='/新游戏 决胜五子', is_at_self=True)
+    await dispatcher.lgtbot_dispatch(event, None)
+
+    assert patched_downstream['log_incoming'].call_args[0][2] == '/新游戏 决胜五子'

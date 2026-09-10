@@ -375,6 +375,26 @@ BUILTIN_BLOCKED_COMMANDS: tuple[str, ...] = ('全量申请', '全量列表', '�
 # 与内置表共同组成屏蔽表;匹配语义比内置表严格(斜杠按配置原样)。
 BLOCKED_COMMANDS: tuple[str, ...] = ()
 
+# 复制粘贴出来的 @ 只是一段「@机器人名称」纯文本,不会在 payload 里给 mentions,
+# 事件的 is_at_self 因此为假 —— 但用户主观上就是在 @ 机器人。
+# 开启后把这类消息也当作 @,剥掉前缀再往下走;关闭则只认真实 @。
+# 由 config.text_at_as_mention 下发。
+TEXT_AT_AS_MENTION: bool = True
+
+
+def _strip_text_at_prefix(content: str, appid: str) -> str | None:
+    """开头是「@机器人名称」时剥掉它返回剩余内容;不是则返回 ``None``。
+
+    只剥开头一处:消息正文里再出现同名 @ 是用户自己写的内容,不能动。
+    取不到机器人名字(启动早期尚未拉到)时一律返回 None,退化成只认真实 @。
+    """
+    sender = helpers.get_sender(appid)
+    name = (getattr(sender, '_bot_name', '') or '').strip()
+    if not name or not content.startswith('@' + name):
+        return None
+    # QQ 客户端复制出来的 @ 后面跟的可能是普通空格,也可能是不间断空格
+    return content[len(name) + 1:].strip(' \t\u00a0')
+
 
 def _is_blocked_command(text: str) -> bool:
     """content 是否命中屏蔽表(BUILTIN_BLOCKED_COMMANDS + BLOCKED_COMMANDS)。
@@ -1173,10 +1193,16 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     #     硬卡这道闸会把所有老的 AT_CREATE 流量误挡 —— 用户反馈过的现象。
     #   · GROUP_MESSAGE_CREATE 是「全量群任意消息」,只有 is_at_self=True 才
     #     该交给 LGTBot 引擎,其他是日常聊天。
-    if event.event_type == GROUP_MESSAGE_CREATE and not getattr(event, 'is_at_self', False):
-        return
-
+    #   · 文本形式的 @(复制粘贴)不带 mentions,is_at_self 同样为假,
+    #     由 TEXT_AT_AS_MENTION 决定是放行(剥掉前缀)还是照旧挡掉。
     content = (event.content or '').strip()
+    if event.event_type == GROUP_MESSAGE_CREATE and not getattr(event, 'is_at_self', False):
+        text_at = (_strip_text_at_prefix(content, event.appid or '')
+                   if TEXT_AT_AS_MENTION else None)
+        if text_at is None:
+            return
+        content = text_at
+
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
 

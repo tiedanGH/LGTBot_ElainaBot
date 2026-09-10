@@ -45,6 +45,7 @@ def _reset_tunables(monkeypatch):
     monkeypatch.setattr(callbacks, 'SANDBOX_DM_USERS', frozenset())
     monkeypatch.setattr(callbacks, 'DM_PUSH_ALL', False)
     monkeypatch.setattr(dispatcher, 'BLOCKED_COMMANDS', ())
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
     monkeypatch.setattr(buttons, 'MENU_GAMES', list(buttons.DEFAULT_MENU_GAMES))
     monkeypatch.setattr(buttons, 'SPONSOR_ENABLED', False)
 
@@ -456,3 +457,28 @@ def test_validator_flags_renamed_field_as_migration_not_unknown():
     # 真正的未知字段仍照旧提示
     _e, w2 = pc._validate_config_yaml('nonsense_field: 1\n')
     assert any('未知字段' in w for w in w2)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# text_at_as_mention
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_text_at_as_mention_defaults_on():
+    """★ 该开关默认打开 —— 默认值散在三处,任何一处改成 False 都会让老配置文件的用户悄悄失去这个行为。"""
+    assert config.DEFAULT_CONFIG['text_at_as_mention'] is True
+    config._apply_runtime_tunables(_base_cfg())
+    assert dispatcher.TEXT_AT_AS_MENTION is True
+    # 老配置文件里根本没有这个 key
+    cfg = _base_cfg()
+    del cfg['text_at_as_mention']
+    config._apply_runtime_tunables(cfg)
+    assert dispatcher.TEXT_AT_AS_MENTION is True
+
+
+def test_text_at_as_mention_switches_off_and_rejects_non_bool():
+    config._apply_runtime_tunables(_base_cfg(text_at_as_mention=False))
+    assert dispatcher.TEXT_AT_AS_MENTION is False
+    # 'true' / 1 这类近似值按非法忽略,保留现值(不静默翻转)
+    config._apply_runtime_tunables(_base_cfg(text_at_as_mention='true'))
+    assert dispatcher.TEXT_AT_AS_MENTION is False

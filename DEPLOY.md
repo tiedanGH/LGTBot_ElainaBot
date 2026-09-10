@@ -188,6 +188,8 @@ image_hosting: 'any'
 refresh_wait_timeout: 15.0
 # 单个群 / 用户每日主动消息条数上限（QQ 官方接口限制）；用满后当日退回刷新按钮机制，次日 0 点恢复；0 = 不限制
 active_push_daily_limit: 1000
+# 把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @
+text_at_as_mention: true
 # 同份图片重复上传去重 TTL（秒），并发请求共享上传结果；0 = 关闭去重，负数自动归 0
 image_upload_dedup_ttl: 60.0
 # 通知群 openid 列表，**可填多个，通知会同时推给全部群**：引擎崩溃 / 引擎告警 / 自动重启说明。留空 = 不推送。
@@ -217,6 +219,7 @@ sponsor_enabled: false
 | `image_hosting`           | `str`       | `'any'` | markdown 图片内嵌使用的图床。`any`（默认）按主框架优先级自动依次尝试；也可指定单个（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`）省去逐个重试；失败走 msg_type=7 |
 | `refresh_wait_timeout`    | `float`     | `15.0`  | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                                                        |
 | `active_push_daily_limit` | `int`       | `1000`  | **单个群 / 单个用户**每日主动消息条数上限（QQ 官方接口限制，官方调整后改这里即可）。用满后该群 / 用户当日失去主动直推资格，退回「刷新按钮」被动机制；**次日 0 点自动重置**。`0` = 不限制。                            |
+| `text_at_as_mention`      | `bool`      | `true`  | 把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @。                                                                                          |
 | `image_upload_dedup_ttl`  | `float`     | `60.0`  | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用                          |
 | `notify_groups`           | `list[str]` | `[]`    | 通知群 openid 列表，**可填多个，通知会同时推给全部群**：引擎崩溃 / 引擎告警 / 自动重启说明。留空 = 不推送。这些群需给 bot 开全量推送权限。（旧字段名 `crash_notify_group` 仍会被读取并提示迁移）              |
 | `blocked_commands`        | `list[str]` | `[]`    | 屏蔽指令列表：命中的消息（文本 / 按钮回调）不再转发给 LGTBot 引擎，化解其他插件的指令冲突。带 / 不带 `/` **严格按配置匹配**，`指令 参数` 形式也命中。                                              |
