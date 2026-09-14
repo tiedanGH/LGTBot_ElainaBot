@@ -4,7 +4,7 @@
  *   · config.yaml / lgtbot.json(带 target 字段)→ 本插件校验端点
  *     /api/ext/lgtbot/config/save —— 服务端语法 + schema 校验通过才落盘,
  *     校验失败返回 errors 列表,文件保持原样
- *   · 纯文本编辑器(公告 / 疑难解答等)→ 主框架 /api/config-file/save
+ *   · 纯文本编辑器(公告 / 疑难解答等)→ 同一个端点,只是没有可校验的语法
  * 热重载按钮调 __lgtbot_dash_reload_config(从原 dashboard 搬迁,key 不变)。
  */
 
@@ -34,28 +34,28 @@ const cfgEditors = {
   },
   important: {
     dataKey: 'important_update',
-    absPath: '', original: '', format: 'text',
+    absPath: '', original: '', format: 'text', target: 'important_update',
     editorId: 'cfg-important-editor', pathId: 'cfg-important-path',
     msgId: 'cfg-important-msg', saveBtnId: 'cfg-important-save', revertBtnId: 'cfg-important-revert',
     saveHint: '，下次发送「更新公告」指令时即生效；留空则不渲染该区块',
   },
   notice: {
     dataKey: 'update_notice',
-    absPath: '', original: '', format: 'text',
+    absPath: '', original: '', format: 'text', target: 'update_notice',
     editorId: 'cfg-notice-editor', pathId: 'cfg-notice-path',
     msgId: 'cfg-notice-msg', saveBtnId: 'cfg-notice-save', revertBtnId: 'cfg-notice-revert',
     saveHint: '，下次发送「更新公告」指令时即生效',
   },
   urgent: {
     dataKey: 'urgent_notice',
-    absPath: '', original: '', format: 'text',
+    absPath: '', original: '', format: 'text', target: 'urgent_notice',
     editorId: 'cfg-urgent-editor', pathId: 'cfg-urgent-path',
     msgId: 'cfg-urgent-msg', saveBtnId: 'cfg-urgent-save', revertBtnId: 'cfg-urgent-revert',
     saveHint: '，下次打开欢迎菜单时即生效（需「启用紧急公告」）',
   },
   trouble: {
     dataKey: 'troubleshooting',
-    absPath: '', original: '', format: 'text',
+    absPath: '', original: '', format: 'text', target: 'troubleshooting',
     editorId: 'cfg-trouble-editor', pathId: 'cfg-trouble-path',
     msgId: 'cfg-trouble-msg', saveBtnId: 'cfg-trouble-save', revertBtnId: 'cfg-trouble-revert',
     saveHint: '，下次发送「疑难解答」指令时即生效',
@@ -64,7 +64,7 @@ const cfgEditors = {
    * sponsor_enabled 关闭时整段被服务端切掉,标记之内不要放别的表项。 */
   sponsors: {
     dataKey: 'sponsors',
-    absPath: '', original: '', format: 'text',
+    absPath: '', original: '', format: 'text', target: 'sponsors',
     editorId: 'cfg-sponsors-editor', pathId: 'cfg-sponsors-path',
     msgId: 'cfg-sponsors-msg', saveBtnId: 'cfg-sponsors-save', revertBtnId: 'cfg-sponsors-revert',
     saveHint: '，下次发送「赞助支持」指令时即生效',
@@ -143,53 +143,29 @@ async function cfgSave(key) {
   const btn = document.getElementById(state.saveBtnId);
   if (btn) btn.disabled = true;
   try {
-    /* config.yaml / lgtbot.json → 插件校验端点:服务端语法 + schema 校验通过才落盘;失败返回 errors,文件不动。 */
-    if (state.target) {
-      if (state.format === 'json') {
-        try { JSON.parse(text); }
-        catch (e) { cfgShowMsg(key, '❌ JSON 格式错误：' + e.message, 'err'); return; }
-      }
-      const r = await fetch(CFG_VALIDATED_SAVE_ROUTE + TOKEN_QS, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: state.target, content: text }),
-      });
-      const data = await r.json();
-      if (data.success) {
-        const warn = (data.warnings && data.warnings.length)
-          ? '（提醒：' + data.warnings.join('；') + '）' : '';
-        cfgShowMsg(key, '✅ 校验通过并已保存' + state.saveHint + warn, warn ? 'info' : 'ok');
-        state.original = text;
-        delete editor.dataset.dirty;
-      } else {
-        const errs = (data.errors && data.errors.length)
-          ? data.errors.join('；') : '校验失败';
-        cfgShowMsg(key, '❌ 未保存 —— ' + errs, 'err');
-      }
-      return;
+    /* 一律走插件端点:路径由服务端按 target 解析,客户端传的绝对路径不参与保存。
+       yaml / json 要过服务端语法 + schema 校验,不过就返回 errors 且文件不动。 */
+    if (state.format === 'json') {
+      try { JSON.parse(text); }
+      catch (e) { cfgShowMsg(key, '❌ JSON 格式错误：' + e.message, 'err'); return; }
     }
-
-    /* 纯文本编辑器(公告 / 疑难解答等)→ 主框架通用保存端点 */
-    if (!state.absPath) {
-      cfgShowMsg(key, '文件路径未知，无法保存', 'err');
-      return;
-    }
-    const r = await fetch('/api/config-file/save' + TOKEN_QS, {
+    const r = await fetch(CFG_VALIDATED_SAVE_ROUTE + TOKEN_QS, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: state.absPath,
-        content: text,
-        format: state.format,
-      }),
+      body: JSON.stringify({ target: state.target, content: text }),
     });
     const data = await r.json();
     if (data.success) {
-      cfgShowMsg(key, '✅ 已保存' + state.saveHint, 'ok');
+      const warn = (data.warnings && data.warnings.length)
+        ? '（提醒：' + data.warnings.join('；') + '）' : '';
+      const okText = state.format === 'text' ? '✅ 已保存' : '✅ 校验通过并已保存';
+      cfgShowMsg(key, okText + state.saveHint + warn, warn ? 'info' : 'ok');
       state.original = text;
       delete editor.dataset.dirty;
     } else {
-      cfgShowMsg(key, '❌ ' + (data.message || '保存失败'), 'err');
+      const errs = (data.errors && data.errors.length)
+        ? data.errors.join('；') : '保存失败';
+      cfgShowMsg(key, '❌ 未保存 —— ' + errs, 'err');
     }
   } catch (e) {
     cfgShowMsg(key, '❌ 请求失败：' + e.message, 'err');

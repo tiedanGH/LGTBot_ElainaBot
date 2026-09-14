@@ -17,6 +17,7 @@ menu_game_buttons 应用块整段误删,``SANDBOX_DM_USERS`` 从此恒为空集�
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -482,3 +483,74 @@ def test_text_at_as_mention_switches_off_and_rejects_non_bool():
     # 'true' / 1 这类近似值按非法忽略,保留现值(不静默翻转)
     config._apply_runtime_tunables(_base_cfg(text_at_as_mention='true'))
     assert dispatcher.TEXT_AT_AS_MENTION is False
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 配置保存端点:七个编辑器统一走 /api/ext/lgtbot/config/save
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _pc():
+    pytest.importorskip('aiohttp')
+    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    return page_config
+
+
+class _FakeSaveReq:
+    def __init__(self, body):
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+def _resp_body(resp) -> dict:
+    import json as _json
+    return _json.loads(resp.text)
+
+
+def test_every_editor_saves_through_the_plugin_endpoint():
+    """★ 每个编辑器都必须带 target,且 target 在 _SAVE_TARGETS 里有登记。"""
+    pc = _pc()
+    targets = re.findall(r"target: '([\w]+)'", pc.TAB_JS)
+    # 表项数 == 带 target 的项数 —— 漏一个就会走到不存在的分支
+    assert len(targets) == pc.TAB_JS.count('dataKey:')
+    for t in targets:
+        assert t in pc._SAVE_TARGETS, t
+
+
+async def test_plain_text_target_writes_the_file(tmp_path, monkeypatch):
+    """纯文案 target 无可校验,但要真的落盘并记一条审计。"""
+    pc = _pc()
+    target_file = tmp_path / 'update_notice.txt'
+    monkeypatch.setitem(pc._SAVE_TARGETS, 'update_notice', (str(target_file), pc._validate_plain_text))
+    recorded = []
+    monkeypatch.setattr(pc.audit, 'record', lambda *a, **k: recorded.append((a, k)))
+    resp = await pc.save_config_handler(
+        _FakeSaveReq({'target': 'update_notice', 'content': '# 公告正文\n第二行'}))
+
+    assert _resp_body(resp)['success'] is True
+    assert target_file.read_text(encoding='utf-8') == '# 公告正文\n第二行'
+    assert recorded and recorded[0][0][1] == '保存 update_notice.txt'
+
+
+async def test_unknown_target_is_rejected():
+    """路径只认服务端登记的 target,客户端不能塞任意文件名。"""
+    pc = _pc()
+    resp = await pc.save_config_handler(
+        _FakeSaveReq({'target': '../../etc/passwd', 'content': 'x'}))
+    assert resp.status == 400
+    assert _resp_body(resp)['success'] is False
+
+
+async def test_save_creates_missing_parent_dir(tmp_path, monkeypatch):
+    """sponsors.txt 这类文件可能从未写过,父目录缺失也要能建出来。"""
+    pc = _pc()
+    target_file = tmp_path / 'nested' / 'sponsors.txt'
+    monkeypatch.setitem(pc._SAVE_TARGETS, 'sponsors', (str(target_file), pc._validate_plain_text))
+    monkeypatch.setattr(pc.audit, 'record', lambda *a, **k: None)
+    resp = await pc.save_config_handler(
+        _FakeSaveReq({'target': 'sponsors', 'content': '感谢名单'}))
+
+    assert _resp_body(resp)['success'] is True
+    assert target_file.read_text(encoding='utf-8') == '感谢名单'

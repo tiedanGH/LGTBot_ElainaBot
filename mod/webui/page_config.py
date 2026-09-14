@@ -11,8 +11,9 @@
   6. ❤️ 赞助鸣谢 (data/sponsors.txt)         同上；**仅 sponsor_enabled 开启时渲染**，关闭时整段区块与数据都不进页面
   7. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
 
-保存全部走主框架 ``/api/config-file/save`` 端点(yaml/json/text format)——
-不在本插件自建 POST endpoint,复用主框架的注释保留 + 格式校验逻辑。
+保存全部走本文件的 ``/api/ext/lgtbot/config/save``:七个编辑器写的都是插件自己
+data/ 下的文件,落盘、校验、审计理应由插件自己负责,不依赖框架通用端点
+(它的可编辑类型白名单会变 —— 纯文案的 .txt 已被排除在外)。
 
 「热重载配置」按钮调 ``__lgtbot_dash_reload_config`` action,逻辑从原本的
 ``page_dashboard`` 搬迁到本文件(保留 action key 不变，JS 调用兼容)。
@@ -364,8 +365,9 @@ def render_urgent_reset() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 # 带校验的配置保存 —— POST /api/ext/lgtbot/config/save
 # ─────────────────────────────────────────────────────────────────────────
-# config.yaml / lgtbot.json 两个编辑器不再走主框架 /api/config-file/save (只写盘不校验)
-# 先语法解析 + 字段 schema 校验,全部通过才原子落盘,一个格式错误不再让插件加载回退默认配置或引擎启动失败。
+# 七个编辑器统一走这里。config.yaml / lgtbot.json 先语法解析 + 字段 schema 校验,
+# 全部通过才原子落盘,一个格式错误不再让插件加载回退默认配置或引擎启动失败;
+# 纯文案文件无可校验,走同一条路是为了落盘 / 审计口径统一。
 # 路径由服务端按 target 解析,不信任客户端传路径。
 
 # 图床合法值**动态**取自主框架 image_hosting 模块 status()(≥2.0.0 beds/ 自动发现,与运行时校验同源,避免两处漂移)。
@@ -475,6 +477,11 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
     return errors, warnings
 
 
+def _validate_plain_text(text: str) -> list:
+    """纯文案文件没有语法可言,恒通过 —— 仍走本端点是为了落盘 / 审计口径统一。"""
+    return []
+
+
 def _validate_engine_json(text: str) -> list:
     """校验 lgtbot.json:必须是合法 JSON 且根为对象(引擎 nlohmann 解析要求)。
 
@@ -493,11 +500,17 @@ def _validate_engine_json(text: str) -> list:
 _SAVE_TARGETS = {
     'config_yaml': (_CONFIG_YAML_PATH, _validate_config_yaml),
     'engine_json': (None, _validate_engine_json),   # 路径运行时取 boot.CONF_PATH
+    'important_update': (_IMPORTANT_UPDATE_PATH, _validate_plain_text),
+    'update_notice': (_UPDATE_NOTICE_PATH, _validate_plain_text),
+    'urgent_notice': (_URGENT_NOTICE_PATH, _validate_plain_text),
+    'troubleshooting': (_TROUBLESHOOTING_PATH, _validate_plain_text),
+    'sponsors': (_SPONSORS_PATH, _validate_plain_text),
 }
 
 
 def _atomic_write(path: str, content: str) -> None:
     """临时文件 + os.replace 原子落盘,避免写一半被读到。"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
         f.write(content)
@@ -522,7 +535,7 @@ async def save_config_handler(request: 'web.Request') -> 'web.Response':
     path, validator = _SAVE_TARGETS[target]
     if path is None:
         path = boot.CONF_PATH
-    fname = 'config.yaml' if target == 'config_yaml' else 'lgtbot.json'
+    fname = os.path.basename(path)
     result = validator(content)
     errors, warnings = result if isinstance(result, tuple) else (result, [])
     if errors:
