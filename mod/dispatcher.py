@@ -204,6 +204,21 @@ def _prewarm_nickname(content: str, uid: str) -> None:
         log.debug(f'昵称预热送审失败 ({uid}): {e}')
 
 
+def _prewarm_push_permission(gid: str, content: str) -> None:
+    """要开局了,提前探一次本群的主动消息权限。
+
+    非全量群收不到 GROUP_MESSAGE_CREATE,``note_group_message`` 那条快速通道对它们不生效。
+    群主刚授权完的第一局仍按旧结论走,要等这局的下一条消息才纠正过来。
+    探测带 60s 节流,且已确知可推送的群直接跳过,开局频次可忽略。
+    """
+    if not gid or not _JOIN_GAME_RE.match(content or ''):
+        return
+    try:
+        helpers.refresh_group_push_permission(gid)
+    except Exception as e:
+        log.debug(f'群 {gid} 主动消息权限预热失败: {e}')
+
+
 async def _maybe_notify_urgent(event, content: str, gid: str) -> None:
     """新群第一次建房 → 额外推一条「紧急公告」,发完记下该群,此后不再打扰。
 
@@ -1272,6 +1287,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 
     # 新群首次建房 → 额外推一条紧急公告(公告已启用且该群没通知过时才发)
     _prewarm_nickname(content, uid)
+    _prewarm_push_permission(event.group_id or '', content)
     await _maybe_notify_urgent(event, content, gid)
 
     # 群管发的 /中断:给随后那条中断投票广播预约「强制中断游戏」按钮

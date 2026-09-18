@@ -415,6 +415,10 @@ def refresh_group_push_permission(gid: str) -> None:
         last = marks.get(gid, 0.0)
         if now - last < _PUSH_PROBE_INTERVAL:
             return
+        # 已确知可推送的群不必再探
+        hit = _push_cache().get(gid)
+        if hit is not None and hit[0] and now < hit[1]:
+            return
         marks[gid] = now
         bot = get_bound_bot()
         loop = state.event_loop
@@ -429,15 +433,26 @@ def refresh_group_push_permission(gid: str) -> None:
 
 
 async def _do_probe(sender, gid: str) -> None:
-    """调框架 ``get_group_bot_state``(它自己写回 DB),完成后打掉该群缓存。"""
+    """拉一次 bot_state,**拿返回值直接刷缓存**。
+
+    框架那个方法自己会把权限位写回 DB,但在 log_service 缺席时整段跳过写库,每 60s 白探一次。
+    手上已经有 QQ 的原话,直接落缓存 —— 顺带省掉一次 DB 往返。
+    """
     try:
-        await sender.get_group_bot_state(gid, return_error=True)
+        data, _err = await sender.get_group_bot_state(gid, return_error=True)
     except Exception as e:
         log.debug(f'刷新群 {gid} bot_state 失败: {e}')
         return
-    # 不看返回值:框架已把最新权限位落库,这里只负责让下次判定重新读 DB
     try:
-        _push_cache().pop(gid, None)
+        cache = _push_cache()
+        if not isinstance(data, dict):
+            cache.pop(gid, None)      # 没拿到结论:清掉,下次重新读 DB
+            return
+        ok = bool(data.get('allow_proactive_msg'))
+        was = cache.get(gid)
+        cache[gid] = (ok, time.time() + (_PUSH_TTL if ok else _PUSH_MISS_TTL))
+        if ok and not (was and was[0]):
+            log.info(f'✅ 群 {gid} 已开通主动消息权限，后续不再挂刷新按钮')
     except Exception:
         pass
 
@@ -452,10 +467,6 @@ def note_group_message(gid: str) -> None:
     if not gid:
         return
     state.full_volume_groups.add(gid)
-    # 已确知可推送的群不必再探(缓存命中且为 True)
-    hit = _push_cache().get(gid)
-    if hit is not None and hit[0] and time.time() < hit[1]:
-        return
     refresh_group_push_permission(gid)
 
 

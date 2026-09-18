@@ -609,3 +609,63 @@ def test_mentioned_ids_extracts_in_order_without_duplicates():
     assert helpers.mentioned_ids(text) == ['U1', 'U2']
     assert helpers.mentioned_ids('没有提及') == []
     assert helpers.mentioned_ids('') == []
+
+
+class _AnsweringProbeSender:
+    """按预设答案回 bot_state 的桩(区别于 _ProbeSender 的空回答)。"""
+
+    def __init__(self, allow_proactive, full_access=False):
+        self.calls: list = []
+        self._data = {'allow_proactive_msg': 1 if allow_proactive else 0,
+                      'recv_msg_setting': 'all' if full_access else 'at'}
+
+    async def get_group_bot_state(self, gid, return_error=False):
+        self.calls.append(gid)
+        return (self._data, None)
+
+
+async def test_probe_result_lands_in_cache_without_a_db_round_trip(monkeypatch):
+    """★ 探测拿到的就是 QQ 的原话,直接落缓存。"""
+    sender = _AnsweringProbeSender(allow_proactive=True)
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    # DB 仍是旧值 0 —— 缓存必须靠探测结果翻正,而不是靠重读 DB
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 0}]})})
+
+    assert helpers.can_push_group('GNEW') is False      # 首次:读到旧值
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert sender.calls == ['GNEW']
+    ok, exp = helpers._push_cache()['GNEW']
+    assert ok is True                                   # 探测已把结论翻正
+    assert exp - time.time() > helpers._PUSH_MISS_TTL + 1   # 肯定结论走长 TTL
+    assert helpers.can_push_group('GNEW') is True       # 不重启即生效
+
+
+async def test_probe_negative_answer_keeps_the_short_ttl(monkeypatch):
+    """探测也说没权限 → 仍按短 TTL 缓存,不把「否」钉死 5 分钟。"""
+    sender = _AnsweringProbeSender(allow_proactive=False)
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 0}]})})
+
+    helpers.can_push_group('GSTILL')
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    ok, exp = helpers._push_cache()['GSTILL']
+    assert ok is False
+    assert exp - time.time() <= helpers._PUSH_MISS_TTL + 1
+
+
+async def test_probe_skips_groups_already_known_pushable(monkeypatch):
+    """★ 闸门在 refresh_group_push_permission 内,每个调用点都受益。"""
+    sender = _AnsweringProbeSender(allow_proactive=True)
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 1}]})})
+
+    assert helpers.can_push_group('GOK') is True        # 缓存成 True
+    helpers.refresh_group_push_permission('GOK')
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert sender.calls == []

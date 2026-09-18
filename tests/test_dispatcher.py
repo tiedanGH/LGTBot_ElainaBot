@@ -1567,3 +1567,39 @@ async def test_real_at_is_untouched_by_the_switch(patched_downstream,
     await dispatcher.lgtbot_dispatch(event, None)
 
     assert patched_downstream['log_incoming'].call_args[0][2] == '/新游戏 决胜五子'
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 开局前预热主动消息权限
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_new_game_prewarms_group_push_permission(monkeypatch):
+    """★ 非全量群收不到 GROUP_MESSAGE_CREATE,note_group_message 那条快速通道对它们不生效。"""
+    seen = []
+    monkeypatch.setattr(dispatcher.helpers, 'refresh_group_push_permission', lambda gid: seen.append(gid))
+
+    dispatcher._prewarm_push_permission('G1', '/新游戏 决胜五子')
+    dispatcher._prewarm_push_permission('G2', '随机游戏')
+    dispatcher._prewarm_push_permission('G3', '加入')
+    assert seen == ['G1', 'G2', 'G3']
+
+    seen.clear()
+    dispatcher._prewarm_push_permission('G9', '今天天气真好')   # 不是开局指令
+    dispatcher._prewarm_push_permission('', '/新游戏 决胜五子')  # 私信没有群号
+    assert seen == []
+
+
+async def test_dispatch_hooks_the_push_permission_prewarm(patched_downstream, monkeypatch):
+    """★ 光有 helper 不够:派发链路上真的调了才有用。"""
+    seen = []
+    monkeypatch.setattr(dispatcher.helpers, 'refresh_group_push_permission',
+                        lambda gid: seen.append(gid))
+    _state.started = True
+
+    await dispatcher.lgtbot_dispatch(_mock_event(
+        event_type=dispatcher.GROUP_AT_MESSAGE_CREATE, is_group=True,
+        group_id='GNEWGAME', user_id='U1', message_id='M1',
+        content='/新游戏 决胜五子'), None)
+
+    assert seen == ['GNEWGAME']
