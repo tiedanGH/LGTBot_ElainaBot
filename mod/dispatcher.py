@@ -381,10 +381,20 @@ def _deny_super_admin_cmd(event, content: str, uid: str) -> bool:
 # 框架把所有命中的 handler 全部执行,其他插件处理完后,消息仍会落进本插件的 catch-all 被转发给引擎。
 # 命中屏蔽表的消息 catch-all 直接跳过,引擎不再二次回复。
 
-# 部署自带插件的指令,固定屏蔽、无需配置。匹配斜杠不敏感,且允许参数不带空格
-# 直接跟数字(``dau0503`` / ``全量申请123456789``)—— 主框架派发对 handler
-# 正则本身就做斜杠互换匹配,且 全量申请 / dau 的参数正则是 ``\s*`` 空格可选。
-BUILTIN_BLOCKED_COMMANDS: tuple[str, ...] = ('全量申请', '全量列表', '关闭欢迎', '开启欢迎', 'dau')
+# 主框架 system 插件的全部指令 —— 每个部署都有。
+_SYSTEM_PLUGIN_COMMANDS = (
+    '我的id', 'ping', 'dm', '原始数据', '框架更新', '用户统计', 'dau',
+    '群检测', '删除被踢群', '管理登录', '切换appid',
+    'bot列表', 'bot数据', 'bot数据max', 'bot通知',
+    '黑名单帮助', '黑名单查看', '黑名单添加', '黑名单删除',
+    '群黑名单添加', '群黑名单删除',
+)
+
+# 本部署随插件一起分发的其他指令
+_BUNDLED_PLUGIN_COMMANDS = ('全量申请', '全量列表', '关闭欢迎', '开启欢迎')
+
+BUILTIN_BLOCKED_COMMANDS: tuple[str, ...] = (
+    _SYSTEM_PLUGIN_COMMANDS + _BUNDLED_PLUGIN_COMMANDS)
 
 # 用户配置的追加项(config.yaml: blocked_commands,config.py 热重载时覆写),
 # 与内置表共同组成屏蔽表;匹配语义比内置表严格(斜杠按配置原样)。

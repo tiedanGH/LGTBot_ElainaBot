@@ -273,6 +273,48 @@ async def test_group_message_event_notes_permission_change(patched_downstream,
 # ─────────────────────────────────────────────────────────────────────────
 
 
+def test_builtin_list_covers_every_system_plugin_command():
+    """★ system 插件每个部署都有,它的指令必须全部在内置屏蔽表里。
+    「关于」「重启」例外:本插件有同名专属 handler,由 _EXCLUSIVE_RES 接管。
+    """
+    import os
+    import re as _re
+
+    here = os.path.realpath(dispatcher.__file__)      # 穿过 pytest_root 软链
+    root = ''
+    for _ in range(6):
+        here = os.path.dirname(here)
+        cand = os.path.join(here, 'plugins', 'system')
+        if os.path.isdir(cand):
+            root = cand
+            break
+    if not root:
+        pytest.skip('未随框架一起检出 plugins/system')
+
+    meta = set('.^$*+?{}[]()|' + chr(92))
+    pat = _re.compile(r"@handler\(\s*r?['\"]\^(.*?)['\"]", _re.S)
+    lits = set()
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if d != '__pycache__']
+        for fn in fns:
+            if not fn.endswith('.py'):
+                continue
+            with open(os.path.join(dp, fn), encoding='utf-8') as f:
+                for m in pat.finditer(f.read()):
+                    lit = ''
+                    for ch in m.group(1):
+                        if ch in meta:
+                            break
+                        lit += ch
+                    if lit.strip():
+                        lits.add(lit.strip())
+
+    assert lits, '没扫到 system 插件的 handler'
+    for lit in sorted(lits):
+        assert (dispatcher._is_blocked_command(lit)
+                or dispatcher._is_exclusive_command(lit)), f'system 指令未覆盖: {lit!r}'
+
+
 def test_builtin_blocked_commands_cover_all_plugin_forms():
     """内置指令的全部真实触发形态都要命中:裸 / 带斜杠 / 空白参数 /
     无空格数字连写参数(全量申请、dau 的参数正则是 ``\\s*`` 空格可选,
@@ -282,11 +324,15 @@ def test_builtin_blocked_commands_cover_all_plugin_forms():
         '全量申请', '/全量申请', '全量申请 123456789', '全量申请123456789',
         '全量列表', '/全量列表',
         '关闭欢迎', '/关闭欢迎', '开启欢迎', '/开启欢迎',
+        '我的id', '/我的id',
+        'ping', '管理登录', 'bot列表', 'bot数据max', '切换appid 102003762',
+        '黑名单添加 abc', '群黑名单删除 abc', '框架更新', '原始数据', '群检测',
     )
     for text in hits:
         assert dispatcher._is_blocked_command(text), f'应命中却漏过: {text!r}'
 
-    misses = ('', 'daux', 'dau测试', '全量', '全量列表们', '开启', '关闭欢迎吧', '新游戏 五子棋')
+    misses = ('', 'daux', 'dau测试', '全量', '全量列表们', '开启', '关闭欢迎吧',
+              '新游戏 五子棋', '我的ID', '我的')
     for text in misses:
         assert not dispatcher._is_blocked_command(text), f'不应命中却挡了: {text!r}'
 
