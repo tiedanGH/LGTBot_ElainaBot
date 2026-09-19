@@ -391,6 +391,9 @@ def invalidate_push_cache() -> None:
 #     直接证据,权限刚变动的可能性最高,借它做快速识别
 _PUSH_PROBE_KEY = 'group_push_probe_at'   # gid → 上次发起探测的时刻
 _PUSH_PROBE_INTERVAL = 60.0               # 每群最多每 60s 拉一次(群资料接口有频控)
+# 已确认有权限的群只做低频复核。
+# 权限被收回是罕见事件,结论也早已写进库,can_push_group 每次过期重读 DB 就够用了。
+_PUSH_PROBE_OK_INTERVAL = 1800.0
 
 
 def _probe_marks() -> dict:
@@ -412,12 +415,12 @@ def refresh_group_push_permission(gid: str) -> None:
     try:
         marks = _probe_marks()
         now = time.time()
-        last = marks.get(gid, 0.0)
-        if now - last < _PUSH_PROBE_INTERVAL:
-            return
-        # 已确知可推送的群不必再探
         hit = _push_cache().get(gid)
-        if hit is not None and hit[0] and now < hit[1]:
+        known_ok = hit is not None and hit[0]
+        if known_ok and now < hit[1]:
+            return                      # 结论还新鲜,不必复核
+        if now - marks.get(gid, 0.0) < (_PUSH_PROBE_OK_INTERVAL if known_ok
+                                        else _PUSH_PROBE_INTERVAL):
             return
         marks[gid] = now
         bot = get_bound_bot()
@@ -451,7 +454,8 @@ async def _do_probe(sender, gid: str) -> None:
         ok = bool(data.get('allow_proactive_msg'))
         was = cache.get(gid)
         cache[gid] = (ok, time.time() + (_PUSH_TTL if ok else _PUSH_MISS_TTL))
-        if ok and not (was and was[0]):
+        # 只在检测到权限发生变化时播报
+        if ok and was is not None and not was[0]:
             log.info(f'✅ 群 {gid} 已开通主动消息权限，后续不再挂刷新按钮')
     except Exception:
         pass

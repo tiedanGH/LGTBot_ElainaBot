@@ -669,3 +669,57 @@ async def test_probe_skips_groups_already_known_pushable(monkeypatch):
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert sender.calls == []
+
+
+async def test_discovering_a_group_is_not_announced(monkeypatch, caplog):
+    """★ 首次见到某个群只是「发现」,不是「变化」,不该播报。"""
+    import logging
+    sender = _AnsweringProbeSender(allow_proactive=True)
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 1}]})})
+    helpers._push_cache().pop('GFRESH', None)
+
+    with caplog.at_level(logging.INFO):
+        await helpers._do_probe(sender, 'GFRESH')
+    assert helpers._push_cache()['GFRESH'][0] is True
+    assert '已开通主动消息权限' not in caplog.text
+
+
+async def test_real_grant_is_announced_once(monkeypatch, caplog):
+    """★ 确知没权限 → 现在有了,这才是值得播报的那一次;再探不重复播报。"""
+    import logging
+    sender = _AnsweringProbeSender(allow_proactive=True)
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 0}]})})
+    helpers._push_cache()['GGRANT'] = (False, time.time() + 30)
+
+    with caplog.at_level(logging.INFO):
+        await helpers._do_probe(sender, 'GGRANT')
+        assert caplog.text.count('已开通主动消息权限') == 1
+        await helpers._do_probe(sender, 'GGRANT')          # 再探一次
+        assert caplog.text.count('已开通主动消息权限') == 1  # 不重复
+
+
+async def test_confirmed_group_is_rechecked_rarely(monkeypatch):
+    """★ note_group_message 挂在每条群消息上。"""
+    sender = _AnsweringProbeSender(allow_proactive=True)
+    monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
+    _set_bots(monkeypatch, {'A': _bot_with_sender(
+        sender, {'groups_users': [{'allow_proactive_msg': 1}]})})
+
+    now = time.time()
+    helpers._push_cache()['GOLD'] = (True, now - 1)        # 结论已过期
+    helpers._probe_marks()['GOLD'] = now - 120             # 120s 前探过一次
+
+    helpers.refresh_group_push_permission('GOLD')
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert sender.calls == []          # 距上次不足 30 分钟,不复核
+
+    helpers._probe_marks()['GOLD'] = now - helpers._PUSH_PROBE_OK_INTERVAL - 1
+    helpers.refresh_group_push_permission('GOLD')
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert sender.calls == ['GOLD']    # 过了复核窗口才放行一次
