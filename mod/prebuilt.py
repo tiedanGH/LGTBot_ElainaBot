@@ -160,6 +160,15 @@ def mode_info() -> dict:
     }
 
 
+def using_prebuilt() -> bool:
+    """引擎是否在用预编译包 —— ``running`` / ``selected`` 任一是 prebuilt 都算。"""
+    try:
+        mode = mode_info()
+    except Exception:
+        return False
+    return mode.get('running') == 'prebuilt' or mode.get('selected') == 'prebuilt'
+
+
 def set_mode(use_prebuilt: bool) -> dict:
     """写 marker 切换模式。切预编译前要求预编译包已下载可用(``build_prebuilt/build/`` 在)。
 

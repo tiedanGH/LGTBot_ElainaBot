@@ -310,7 +310,7 @@ def _import_extension() -> tuple[object, str]:
     if not hasattr(_lib, 'start'):
         where = getattr(_lib, '__file__', None) or getattr(_lib, '__path__', '?')
         sys.modules.pop('LGTBot_ElainaBot', None)
-        return None, f'导入到的不是 C++ 扩展(疑似同名目录被当成命名空间包): {where}'
+        return None, f'非 C++ 扩展: {where}'
     return _lib, ''
 
 

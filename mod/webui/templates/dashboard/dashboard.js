@@ -602,17 +602,23 @@ function dashRenderSubmoduleStatus(sub) {
   const pathEl = document.getElementById('dash-submodule-path');
   if (sub.path) pathEl.textContent = sub.path;
 
-  /* 未初始化:红叉 + 「初始化子模块」按钮 */
+  /* 未初始化 */
   if (sub.status === 'missing' || sub.status === 'empty') {
-    const reason = sub.status === 'missing' ? '文件夹不存在' : '文件夹为空';
-    let html = '<span class="dash-msg-err">❌ 子模块未初始化 (' + reason + ')</span>';
+    let link = '';
     if (sub.upstream_url) {
-      html += ' · 上游 <a href="' + escapeHtml(sub.upstream_url) +
-              '" target="_blank" rel="noopener">' +
-              escapeHtml((sub.upstream_owner || '') + '/' + (sub.upstream_repo || '')) +
-              '</a>';
+      link = ' · 上游 <a href="' + escapeHtml(sub.upstream_url) +
+             '" target="_blank" rel="noopener">' +
+             escapeHtml((sub.upstream_owner || '') + '/' + (sub.upstream_repo || '')) +
+             '</a>';
     }
-    detail.innerHTML = html;
+    /* 用预编译包时子模块压根不参与构建 —— 这不是故障 */
+    if (sub.prebuilt) {
+      detail.innerHTML = '<span class="dash-msg-ok">已使用预编译部署，无需初始化子模块</span>' + link;
+      btn.style.display = 'none';
+      return;
+    }
+    const reason = sub.status === 'missing' ? '文件夹不存在' : '文件夹为空';
+    detail.innerHTML = '<span class="dash-msg-err">❌ 子模块未初始化 (' + reason + ')</span>' + link;
     setBtnIcon(btn, '#i-download', '初始化子模块');
     btn.style.display = '';
     return;

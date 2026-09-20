@@ -122,8 +122,7 @@ def _service_unavailable_reason() -> str | None:
     预编译模式看两个维度:``running``(本进程实际加载的)和 ``selected``(marker 最新选择,可能待重启生效)。
     任一是 prebuilt 都拒绝 —— 前者编出的 .so 当前进程根本不加载,后者重启后不加载,对调用方都是无效编译。
     """
-    mode = prebuilt.mode_info()
-    if mode.get('running') == 'prebuilt' or mode.get('selected') == 'prebuilt':
+    if prebuilt.using_prebuilt():
         return '引擎当前使用预编译包，本地编译服务不可用'
     if not os.path.isfile(os.path.join(boot.PLUGIN_DIR, 'build.sh')):
         return 'build.sh 不存在，编译服务不可用'

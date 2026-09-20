@@ -468,6 +468,7 @@ def _get_submodule_info(query_remote: bool = False) -> dict:
         'remote_commit_full': '',
         'has_update': False,
         'error': '',
+        'prebuilt': prebuilt.using_prebuilt(),
     }
 
     sub_abs = os.path.join(boot.PLUGIN_DIR, sub_path)

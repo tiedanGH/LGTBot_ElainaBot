@@ -656,3 +656,18 @@ def test_self_check_header_multiarch(monkeypatch, tmp_path):
                         lambda pat: real_glob(pat.replace('/usr/include/', str(inc) + '/')))
     monkeypatch.setattr(pd.os.path, 'isfile', lambda p: False)   # 非 multiarch 直查路径不存在
     assert pd._header_present('/usr/include/curl/curl.h') is True
+
+
+def test_using_prebuilt_covers_both_dimensions(monkeypatch):
+    """★ running 是本进程实际加载的,selected 是 marker 的最新选择(重启后生效)。任一是 prebuilt 都算。"""
+    for running, selected, want in (('local', 'local', False),
+                                    ('prebuilt', 'local', True),
+                                    ('local', 'prebuilt', True),
+                                    ('prebuilt', 'prebuilt', True)):
+        monkeypatch.setattr(prebuilt, 'mode_info',
+                            lambda r=running, s=selected: {'running': r, 'selected': s})
+        assert prebuilt.using_prebuilt() is want, (running, selected)
+    # 查不出来时不能误报成“在用预编译”
+    monkeypatch.setattr(prebuilt, 'mode_info',
+                        lambda: (_ for _ in ()).throw(RuntimeError('boom')))
+    assert prebuilt.using_prebuilt() is False
