@@ -166,12 +166,13 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
                                  {level: 'info'});
     if (!ok) return;
   } else {
-    /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选(默认不勾)。
-       手动模式拦新建房间;自动模式不限制,对局清空并静默 30s 后自动重启。 */
+    /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选。默认勾上走自动:不拦新游戏,对局自然清空并静默 30s 后自己重启。 */
     const input = await dashPrompt(
-      '启用计划重启？\n\n手动模式（默认）：玩家无法创建新游戏（进行中的对局与已建房间不受影响），逐渐清空对局后手动重启。\n自动重启：不限制新游戏创建，全部对局结束并静默 30 秒后自动执行重启。\n\n可填写维护原因（将展示给玩家）：',
+      '启用计划重启？\n\n' +
+      '自动重启（推荐）：不限制新游戏创建，等全部对局结束自动重启。\n\n' +
+      '填写维护原因重启时展示给玩家：',
       {defaultValue: '', okText: '启用', level: 'warn',
-       checkbox: '自动重启：全部对局结束后自动重启（不限制新游戏创建）'}
+       checkbox: '自动重启（对局全部结束后自动执行）', checkboxChecked: true}
     );
     if (input === null) return;
     reason = (input.value || '').trim();
@@ -201,7 +202,7 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
 document.getElementById('restart-btn').addEventListener('click', async () => {
   /* prompt 而非 confirm:顺手收一条可选的「更新内容」,会随重启通知发给还有等待中房间的群。 */
   const input = await dashPrompt(
-    '确认重启 LGTBot？\n\n将以新进程重新加载 C++ 引擎、bridge 与全部游戏插件。\n若存在进行中的对局会自动拒绝重启。\n\n可填写更新内容（将随重启提示发送）：',
+    '确认重启 LGTBot？\n\n将以新进程重新加载 C++ 引擎与全部游戏插件。\n若存在进行中的对局会自动拒绝重启。\n\n更新内容（将随重启提示发送）：',
     {defaultValue: '', okText: '重启', level: 'warn'}
   );
   if (input === null) return;
@@ -247,7 +248,8 @@ let _dashModalHasCheckbox = false;
 const _DASH_OK_TEXT = { confirm: '确定', alert: '我知道了', prompt: '确认' };
 
 function _dashOpenModal(opts) {
-  const { message, level, kind, defaultValue, okText, cancelText, checkbox } = opts;
+  const { message, level, kind, defaultValue, okText, cancelText,
+          checkbox, checkboxChecked } = opts;
   return new Promise(resolve => {
     /* 上一个 modal 还未结算就被新的覆盖时,旧 promise resolve 取消值,防止上层 await 永远 stuck */
     if (_dashModalResolve) {
@@ -278,10 +280,10 @@ function _dashOpenModal(opts) {
       inputEl.style.display = 'none';
       inputEl.value = '';
     }
-    /* 可选勾选项(如计划重启的「自动重启」):默认不勾选,每次打开都复位 */
+    /* 可选勾选项(如计划重启的「自动重启」)。每次打开都按 checkboxChecked 复位。 */
     if (cbRow) {
       cbRow.style.display = checkbox ? '' : 'none';
-      if (cbEl) cbEl.checked = false;
+      if (cbEl) cbEl.checked = !!checkboxChecked;
       if (cbLabel) cbLabel.textContent = checkbox || '';
     }
     /* alert 只要一个「我知道了」,不显示取消 */
@@ -328,11 +330,13 @@ function dashAlert(message, opts) {
   });
 }
 function dashPrompt(message, opts) {
-  /* opts.checkbox 非空时弹窗底部多一个勾选项(默认不勾),返回值变为 {value, checked}|null。 */
+  /* opts.checkbox 非空时弹窗底部多一个勾选项,初始状态由 opts.checkboxChecked 决定;
+     返回值变为 {value, checked}|null。 */
   const o = opts || {};
   return _dashOpenModal({
     message, kind: 'prompt', level: o.level,
-    defaultValue: o.defaultValue, checkbox: o.checkbox,
+    defaultValue: o.defaultValue,
+    checkbox: o.checkbox, checkboxChecked: o.checkboxChecked,
     okText: o.okText, cancelText: o.cancelText,
   });
 }

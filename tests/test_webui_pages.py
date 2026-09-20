@@ -1096,3 +1096,11 @@ def test_tab_js_only_reads_textcontent_off_data_islands():
         for line in _tab_template(wm, tab, 'js').splitlines():
             for m in re.finditer(r'\.textContent(?! *=(?!=))', line):
                 assert 'JSON.parse' in line, (tab, line.strip())
+
+
+def test_planned_restart_dialog_defaults_to_auto():
+    """★ 绝大多数维护都该走自动:不拦新游戏,对局自然散场后自己重启。"""
+    wm = _main()
+    html = wm._render_html()
+    assert 'checkboxChecked: true' in html
+    assert 'if (cbEl) cbEl.checked = !!checkboxChecked;' in html

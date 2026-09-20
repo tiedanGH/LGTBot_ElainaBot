@@ -1493,12 +1493,12 @@ def check_and_prepare_restart() -> tuple[bool, str]:
     """
     if not boot.LGTBOT_AVAILABLE:
         state.started = False
-        return True, '🔁 LGTBot 正在重启（当前引擎未加载，将按最新构建来源重新加载）...'
+        return True, '🔁 LGTBot 正在重启...\n当前引擎未加载，将按最新构建来源重新加载'
     if not boot.LGTBot_ElainaBot.release_bot_if_not_processing_games():
         return False, '⚠️ 当前存在进行中的游戏，请等待对局结束后再重启！'
     state.started = False
     boot.mark_engine_running(False)
-    return True, '🔁 LGTBot 正在重启（重新加载全部 C++ 引擎与游戏插件）...'
+    return True, '🔁 LGTBot 正在重启...\n重新加载全部 C++ 引擎与游戏插件'
 
 
 def schedule_exec_after(delay: float = 0.5, on_failure=None) -> None:
