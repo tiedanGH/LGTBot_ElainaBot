@@ -234,7 +234,7 @@
 .dash-bot-title { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .dash-selfcheck-caret,
 .dash-bot-caret { font-size: 11px; color: var(--text-muted); }
-.dash-selfcheck-badge { font-size: 13px; font-weight: 700; }
+.dash-selfcheck-badge { font-size: 13px; font-weight: 700; margin-left: 4px; }
 .dash-selfcheck-badge.bad  { color: #dc3545; }    /* 有红色异常:红字计数 */
 .dash-selfcheck-badge.ok   { color: var(--in); }  /* 无异常且无警告:绿字「环境正常」 */
 .dash-selfcheck-badge.warn { color: #e6a23c; }    /* 警告计数:黄字(与红字计数可并存) */

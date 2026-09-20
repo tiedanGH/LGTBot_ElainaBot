@@ -194,11 +194,13 @@ function reviewRow(e, acts, extraClass) {
     '<span class="review-name" data-name="' + name + '" title="点击查看完整昵称">' +
       name + '</span>' +
     '<span class="review-time">' + escapeHtml(reviewFmtTime(e.ts)) + '</span>' +
-    acts.map(a =>
-      '<button class="dash-btn dash-btn-small ' + a.cls + '" data-key="' + key +
-      '" data-op="' + a.op + '">' +
-      '<svg class="ui-icon btn-icon"><use href="' + a.icon + '"/></svg>' +
-      '<span class="btn-label">' + a.text + '</span></button>').join('') +
+    '<span class="review-ops">' +
+      acts.map(a =>
+        '<button class="dash-btn dash-btn-small ' + a.cls + '" data-key="' + key +
+        '" data-op="' + a.op + '">' +
+        '<svg class="ui-icon btn-icon"><use href="' + a.icon + '"/></svg>' +
+        '<span class="btn-label">' + a.text + '</span></button>').join('') +
+    '</span>' +
     '</div>';
 }
 

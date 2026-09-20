@@ -102,6 +102,8 @@
 }
 /* 按钮不参与收缩,否则长昵称行会把「翻案」压成竖排 */
 .review-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
+/* 桌面端这层容器不参与布局,按钮仍是 .review-row 的直接 flex 子项。 */
+.review-ops { display: contents; }
 .review-empty-row {
   grid-column: 1 / -1;
   text-align: center; padding: 24px 16px; color: var(--text-faint); font-size: 13px;
@@ -140,4 +142,12 @@
   .review-status-card { padding: 10px 12px; }
   .review-status-value { font-size: 15px; }
   .review-row { padding: 7px 10px; gap: 8px; font-size: 12px; }
+  /* 拆成两行,第一行昵称、日期贴右,第二行两个按钮平分。 */
+  .review-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center; row-gap: 6px;
+  }
+  .review-time { justify-self: end; }
+  .review-ops { display: flex; gap: 6px; grid-column: 1 / -1; }
+  .review-ops .dash-btn { flex: 1 1 0; justify-content: center; }
 }

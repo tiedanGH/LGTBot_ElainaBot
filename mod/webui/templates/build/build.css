@@ -19,6 +19,18 @@
   word-break: break-all; min-width: 0;
 }
 
+/* ── 移动端:状态条三段竖排 ── */
+@media (max-width: 600px) {
+  .build-status { flex-direction: column; align-items: stretch; gap: 8px; }
+  .build-status-info {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  }
+  /* 空闲时后两段是空串:竖排下空元素照样吃掉一道 gap,把状态条底部撑出空白 */
+  .build-status-info > span:empty { display: none; }
+  /* 去掉这层容器 —— 终止按钮 display:none 时不该还占着一整道 gap */
+  .build-status-actions { display: contents; }
+}
+
 /* 按钮组容器:flex-wrap 自适应窄屏 */
 .build-actions {
   display: flex; gap: 8px; flex-wrap: wrap;
