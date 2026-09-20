@@ -95,12 +95,9 @@
   <!-- ──── 进行中的对局 ──── -->
   <section class="dash-section">
     <div class="dash-matches-head">
-      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gamepad"/></svg>进行中的对局<span id="dash-matches-count" class="dash-matches-count"></span></h2>
-      <span class="dash-matches-live" title="每几秒自动刷新"><svg class="ui-icon btn-icon"><use href="#i-live"/></svg>实时</span>
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gamepad"/></svg>进行中的对局<span id="dash-matches-count" class="dash-matches-count"></span><span class="dash-matches-live" title="每几秒自动刷新"><svg class="ui-icon btn-icon"><use href="#i-live"/></svg>实时</span></h2>
+      <button id="dash-waiting-toggle" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-hourglass"/></svg><span class="btn-label">显示等待房间</span></button>
     </div>
-    <p class="dash-pluginconf-desc">
-      仅统计<b>已开局</b>的对局（等待中的房间不计入）。以引擎事件跟踪，跨热重载保持，进程重启后清空。
-    </p>
     <div id="dash-matches-list" class="dash-matches-list"></div>
   </section>
 

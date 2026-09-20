@@ -212,3 +212,39 @@ def test_bot_line_spacing_is_scoped_to_cards():
     assert re.search(r'column-gap: 10px; row-gap: \d+px;', m)          # 摘要靠网格行距
     assert re.search(r'\.dash-bot-row \.dash-bot-permline \{ margin-top: \d+px; \}', m)
     assert '  .dash-bot-permline { margin-top:' not in m
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 等待中的房间(仪表盘默认折叠,点按钮展开)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_waiting_rooms_ride_along_with_the_matches_payload(monkeypatch):
+    """★ 那个开关是纯展示态,不该为它多开一个端点。"""
+    import json
+    from plugins.LGTBot_ElainaBot.mod import state
+    pd = _pd()
+    monkeypatch.setattr(state, 'active_matches',
+                        {'g:G1': {'target_id': 'G1', 'is_uid': False,
+                                  'game': '登仙路', 'since': 100}})
+    monkeypatch.setattr(state, 'waiting_rooms',
+                        {'g:G2': {'target_id': 'G2', 'is_uid': False,
+                                  'game': '谁是牛头王', 'since': 200}})
+    monkeypatch.setattr(pd.userinfo, 'get_group_names', lambda gids: {})
+    monkeypatch.setattr(pd, '_group_remarks', lambda: {})
+
+    assert [m['id'] for m in pd._waiting_rooms_view()] == ['G2']
+    assert [m['id'] for m in pd._active_matches_view()] == ['G1']
+
+    # 实时轮询端点
+    frag = pd.render_matches()
+    body = json.loads(frag[frag.index('>') + 1:frag.rindex('<')]
+                      .replace('&lt;', '<').replace('&gt;', '>')
+                      .replace('&quot;', '"').replace('&#x27;', "'")
+                      .replace('&amp;', '&'))
+    assert [m['id'] for m in body['matches']] == ['G1']
+    assert [m['id'] for m in body['waiting']] == ['G2']
+
+    # 首屏 payload —— 整页刷新走这条,少了它展开按钮第一眼是空的
+    first = json.loads(pd.get_data().replace(chr(92) + '/', '/'))
+    assert [m['id'] for m in first['waiting']] == ['G2']

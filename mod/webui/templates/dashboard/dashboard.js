@@ -94,41 +94,64 @@ function dashFmtSince(ts) {
   return Math.floor(secs / 86400) + ' 天';
 }
 
+/* 等待中的房间默认不显示:需要时点标题栏右侧那个按钮展开。 */
+let dashWaitingShown = false;
+let dashLastRooms = {matches: [], waiting: []};
+
+/* 已开局显示时钟 + 已进行时长,等待中显示沙漏 + 未开始。 */
+function dashRoomRow(m, waiting) {
+  const isUid = !!m.is_uid;
+  const idText = escapeHtml(String(m.id || ''));
+  /* 展示名三级降级:昵称(私信)/ 备注名 → 群名称 → openid(灰字 mono)。 */
+  const loc = m.name
+    ? (m.name_src === 'remark'
+        ? '<b class="dash-match-remark">' + escapeHtml(m.name) + '</b>'
+        : escapeHtml(m.name))
+    : '<span class="dash-mono dash-match-id">' + idText + '</span>';
+  const game = m.game ? escapeHtml(m.game) : '未知游戏';
+  const since = dashFmtSince(m.since);
+  const tail = waiting
+    ? '<span class="dash-match-since" title="已建房，等待开局">' +
+        '<svg class="ui-icon"><use href="#i-hourglass"/></svg>未开始</span>'
+    : (since ? '<span class="dash-match-since" title="已进行时长">' +
+                 '<svg class="ui-icon"><use href="#i-clock"/></svg>' + since + '</span>' : '');
+  return '<div class="dash-match-row' + (waiting ? ' waiting' : '') + '">' +
+    '<span class="dash-match-type ' + (isUid ? 'dm' : 'grp') + '">' +
+      (isUid ? '私信' : '群聊') + '</span>' +
+    '<span class="dash-match-game" title="游戏">' + game + '</span>' +
+    '<span class="dash-match-loc" title="' + (isUid ? '用户' : '群') + '">' + loc + '</span>' +
+    tail +
+    '</div>';
+}
+
 function dashRenderMatches(data) {
   const wrap = document.getElementById('dash-matches-list');
   const countEl = document.getElementById('dash-matches-count');
   if (!wrap) return;
-  const matches = data.matches || [];
+  dashLastRooms = {matches: data.matches || [], waiting: data.waiting || []};
+  const matches = dashLastRooms.matches;
+  const waiting = dashLastRooms.waiting;
   if (countEl) countEl.textContent = matches.length ? ' (' + matches.length + ')' : '';
-  if (!matches.length) {
-    wrap.innerHTML = '<div class="dash-matches-empty">当前没有进行中的对局</div>';
-    return;
-  }
-  wrap.innerHTML = matches.map(m => {
-    const isUid = !!m.is_uid;
-    const idText = escapeHtml(String(m.id || ''));
-    /* 展示名三级降级(后端 _active_matches_view 已定好):昵称(私信)/ 备注名 → 群名称 → openid(灰字 mono)。
-       备注名是人工维护的,加粗突出与自动取来的群名区分开;name_src 由后端下发,前端不重复判定优先级。 */
-    const loc = m.name
-      ? (m.name_src === 'remark'
-          ? '<b class="dash-match-remark">' + escapeHtml(m.name) + '</b>'
-          : escapeHtml(m.name))
-      : '<span class="dash-mono dash-match-id">' + idText + '</span>';
-    const game = m.game ? escapeHtml(m.game) : '未知游戏';
-    const since = dashFmtSince(m.since);
-    return '<div class="dash-match-row">' +
-      '<span class="dash-match-type ' + (isUid ? 'dm' : 'grp') + '">' +
-        (isUid ? '私信' : '群聊') + '</span>' +
-      '<span class="dash-match-game" title="游戏">' + game + '</span>' +
-      '<span class="dash-match-loc" title="' + (isUid ? '用户' : '群') + '">' + loc + '</span>' +
-      (since ? '<span class="dash-match-since" title="已进行时长">' +
-                 '<svg class="ui-icon"><use href="#i-clock"/></svg>' + since + '</span>' : '') +
-      '</div>';
-  }).join('');
+  dashApplyWaitingToggle(waiting.length);
+
+  const rows = matches.map(m => dashRoomRow(m, false));
+  if (dashWaitingShown) rows.push(...waiting.map(m => dashRoomRow(m, true)));
+  wrap.innerHTML = rows.length ? rows.join('')
+    : '<div class="dash-matches-empty">' +
+      (dashWaitingShown ? '当前没有进行中和等待中的房间' : '当前没有进行中的对局') + '</div>';
 }
 
-/* 进行中对局实时刷新 —— 由 main.js 的 setInterval 每几秒调一次。走只读轻量端点
- * (只返回对局列表,不跑缓存 os.walk 等重活),失败静默不打扰。与日志页同理。 */
+/* 按钮文案带上房间数 —— 没展开时这是唯一能看出「有没有人在等」的线索。 */
+function dashApplyWaitingToggle(count) {
+  const btn = document.getElementById('dash-waiting-toggle');
+  if (!btn) return;
+  const n = count ? ' (' + count + ')' : '';
+  setBtnIcon(btn, '#i-hourglass',
+             (dashWaitingShown ? '隐藏等待房间' : '显示等待房间') + n);
+  btn.classList.toggle('active', dashWaitingShown);
+}
+
+/* 进行中对局实时刷新 —— 由 main.js 的 setInterval 每几秒调一次。 */
 async function dashMatchesRefresh() {
   try {
     const data = await dashCallAction(DASH_KEYS.matches);
@@ -1048,6 +1071,11 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   /* 运行环境自检「重新检测」→ 只重新拉 dashboard-data(含最新 self_check)刷新
      检查项与红字计数,**不改变折叠态**(见 dashRenderSelfCheck 的首屏一次性规则) */
+  const waitBtn = document.getElementById('dash-waiting-toggle');
+  if (waitBtn) waitBtn.addEventListener('click', () => {
+    dashWaitingShown = !dashWaitingShown;
+    dashRenderMatches(dashLastRooms);   // 用上一次的数据就地重画,不等下一轮轮询
+  });
   const scBtn = document.getElementById('dash-selfcheck-refresh');
   if (scBtn) scBtn.addEventListener('click', dashRefreshAll);
 });

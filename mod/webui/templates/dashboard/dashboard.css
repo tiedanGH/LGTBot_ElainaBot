@@ -108,20 +108,25 @@
 .dash-matches-count { color: var(--text-muted); font-size: 13px; font-weight: 400; }
 /* 实时刷新指示(无刷新按钮,每几秒自动拉取);呼吸动画提示「活着」 */
 .dash-matches-live {
-  color: var(--in); font-size: 12px; white-space: nowrap;
+  color: var(--in); font-size: 12px; font-weight: 400; white-space: nowrap;
   display: inline-flex; align-items: center; gap: 3px; line-height: 1;
   animation: dash-matches-pulse 2s ease-in-out infinite;
 }
 .dash-matches-live .ui-icon { width: 14px; height: 14px; }
 @keyframes dash-matches-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 /* 屏幕越宽列数越多: 1 列 - 3 列 */
-.dash-matches-list { display: grid; gap: 8px; grid-template-columns: 1fr; }
+.dash-matches-list {
+  display: grid; gap: 8px; grid-template-columns: 1fr; margin-top: 10px;
+}
 @media (min-width: 720px)  { .dash-matches-list { grid-template-columns: repeat(2, 1fr); } }
 @media (min-width: 1200px) { .dash-matches-list { grid-template-columns: repeat(3, 1fr); } }
+/* 空态与对局行等高:两边都钉同一个 min-height 而不是各自凑 padding */
+.dash-match-row, .dash-matches-empty { min-height: 38px; }
 .dash-matches-empty {
   grid-column: 1 / -1;   /* 无对局时占满整行,不被网格挤成单列宽 */
   color: var(--text-muted); font-size: 13px;
-  padding: 14px 12px; text-align: center;
+  padding: 8px 12px; text-align: center;
+  display: flex; align-items: center; justify-content: center;
   background: var(--panel-2); border: 1px dashed var(--border); border-radius: 8px;
 }
 .dash-match-row {

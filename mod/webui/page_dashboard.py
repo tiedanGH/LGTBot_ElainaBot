@@ -621,8 +621,8 @@ def _remark_name(val) -> str:
     return str(val) if val else ''
 
 
-def _active_matches_view() -> list:
-    """把 ``state.active_matches`` 整理成仪表盘可渲染的进行中对局列表(最近开始的在前)。
+def _rooms_view(records: list) -> list:
+    """把 ``active_matches`` / ``waiting_rooms`` 的记录整理成仪表盘可渲染的列表(最近的在前)。
 
     展示名:
       · 私聊局 —— 主框架 users 表昵称(userinfo)
@@ -635,7 +635,7 @@ def _active_matches_view() -> list:
     ``game`` 为空(如单机局开局广播无 brief 且此前无 new_game)时交给前端显示「未知游戏」。
     ``since`` 为开局时刻的 epoch 秒,时长由前端计算。
     """
-    matches = list(state.active_matches.values())
+    matches = list(records)
     gids = [str(m.get('target_id', '')) for m in matches if not m.get('is_uid')]
     # 仅在存在群局时才读备注文件 / 查群名,省掉纯私聊场景的磁盘 IO 与查询
     remarks = _group_remarks() if gids else {}
@@ -664,6 +664,16 @@ def _active_matches_view() -> list:
     return out
 
 
+def _active_matches_view() -> list:
+    """进行中(已开局)的对局。"""
+    return _rooms_view(list(state.active_matches.values()))
+
+
+def _waiting_rooms_view() -> list:
+    """等待中(已建房、未开局)的房间 —— 仪表盘默认折叠,点按钮才展开。"""
+    return _rooms_view(list(state.waiting_rooms.values()))
+
+
 def get_data() -> str:
     """返回可嵌入 ``<script id="dashboard-data">`` 的 JSON 字符串。
 
@@ -676,6 +686,7 @@ def get_data() -> str:
         'github_url': meta.get('github', ''),
         'engine_running': bool(boot.is_engine_running()),
         'matches': _active_matches_view(),
+        'waiting': _waiting_rooms_view(),
         'bots': helpers.list_framework_bots(),
         'bound_appid': helpers.get_bound_appid(),
         'bind_configured': state.bind_bot_appid or '',
@@ -708,8 +719,10 @@ def render_matches() -> str:
     """只读轻量端点:只返回进行中对局列表,供前端每几秒实时轮询。
 
     刻意**不**复用 get_data() —— 那会顺带跑缓存目录 os.walk / 机器人列表等较重逻辑,
-    不适合高频轮询;这里只读内存里的 state.active_matches(+ 群备注 / 昵称查表),开销极小。"""
-    return _fragment({'matches': _active_matches_view()})
+    不适合高频轮询;这里只读内存里的两份 dict(+ 群备注 / 昵称查表),开销极小。
+    等待中的房间一并返回:前端那个开关是纯展示态,不该为它多开一个端点。"""
+    return _fragment({'matches': _active_matches_view(),
+                      'waiting': _waiting_rooms_view()})
 
 
 def _bridge_repo_link() -> dict:
