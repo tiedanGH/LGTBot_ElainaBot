@@ -293,7 +293,7 @@ async def test_auto_watcher_exits_when_mode_disabled(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 指令「计划重启 [自动] [原因]」的 auto 解析
+# 指令「计划重启 [手动|自动] [原因]」的 auto 解析(默认自动)
 # ─────────────────────────────────────────────────────────────────────────
 
 def _planned_match(text):
@@ -322,12 +322,39 @@ async def test_planned_command_auto_keyword(monkeypatch):
     assert not state.is_planned_restart()
 
 
-async def test_planned_command_auto_not_a_word(monkeypatch):
-    """「自动」未独立成词(如原因叫"自动升级")→ 不触发 auto,整串作原因。"""
-    msg = await _run_planned_cmd(monkeypatch, '计划重启 自动升级')
+async def test_planned_command_defaults_to_auto(monkeypatch):
+    """★ 不带关键词就是自动模式 —— 与面板弹窗默认一致:不拦新游戏,对局散场后自己重启。"""
+    msg = await _run_planned_cmd(monkeypatch, '计划重启')
+    assert state.is_planned_restart() and state.is_planned_restart_auto()
+    assert '自动执行重启' in msg
+    await _run_planned_cmd(monkeypatch, '计划重启')          # 关闭
+
+    msg = await _run_planned_cmd(monkeypatch, '计划重启 升级引擎')
+    assert state.is_planned_restart_auto()
+    assert state.planned_restart_reason() == '升级引擎'
+    await _run_planned_cmd(monkeypatch, '计划重启')
+
+
+async def test_planned_command_manual_keyword(monkeypatch):
+    """★ 首词恰为「手动」才退回手动:拦新游戏,关键词剥掉不进原因。"""
+    msg = await _run_planned_cmd(monkeypatch, '计划重启 手动 升级引擎')
     assert state.is_planned_restart() and not state.is_planned_restart_auto()
-    assert state.planned_restart_reason() == '自动升级'
-    assert '自动执行重启' not in msg
+    assert state.planned_restart_reason() == '升级引擎'
+    assert '已禁用新游戏创建' in msg and '自动执行重启' not in msg
+    await _run_planned_cmd(monkeypatch, '计划重启')
+
+    await _run_planned_cmd(monkeypatch, '计划重启 手动')      # 只有关键词
+    assert not state.is_planned_restart_auto()
+    assert state.planned_restart_reason() == ''
+    await _run_planned_cmd(monkeypatch, '计划重启')
+
+
+async def test_planned_command_keyword_must_stand_alone(monkeypatch):
+    """关键词没独立成词(原因叫"手动升级")→ 仍按默认自动,整串作原因。"""
+    await _run_planned_cmd(monkeypatch, '计划重启 手动升级')
+    assert state.is_planned_restart_auto()
+    assert state.planned_restart_reason() == '手动升级'
+    await _run_planned_cmd(monkeypatch, '计划重启')
 
 
 async def test_auto_watcher_grace_resets_on_new_match(monkeypatch):

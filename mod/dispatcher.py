@@ -1874,7 +1874,7 @@ async def lgtbot_admin_interrupt(event, match):
 
 @handler(_P_PLANNED,
          name='计划重启',
-         desc='切换维护模式:暂停创建新游戏 (可带维护原因:计划重启 <原因>)',
+         desc='切换维护模式:默认自动重启;计划重启 手动 <原因> 则人工重启（阻止新游戏创建）',
          owner_only=True,
          event_types=_LGT_MSG_EVENTS,
          priority=100,
@@ -1885,20 +1885,17 @@ async def lgtbot_planned_restart(event, match):
     与真「重启」互补:先启用本模式挡住新房间,等进行中的对局自然结束,
     再发「重启」平滑换进程(重启后本模式自动恢复关闭)。
 
-    「计划重启 <原因>」可带维护原因,原因会展示在玩家创建新游戏时收到的
-    维护提示里(关闭维护模式时自动清空,故关闭指令不必带原因)。
-    「计划重启 自动 <原因>」首词恰为「自动」时启用**自动重启**:不限制新
-    游戏创建,全部对局结束并静默 30s 后自动执行重启(默认手动 —— 拦新建
-    房间;原因含"自动"字样但不独立成词不受影响)。
+    默认**自动重启**:不限制新游戏创建,全部对局结束并静默 30s 后自动执行重启。
+    首词恰为「手动」才退回手动模式 —— 拦下新建房间,由管理员自己点重启。
     """
     if helpers.is_foreign_event(event):
         return
     raw = (match.group(1) or '').strip() if match and match.lastindex else ''
-    auto = False
+    auto = True
     reason = raw
     parts = raw.split(None, 1)
-    if parts and parts[0] == '自动':
-        auto = True
+    if parts and parts[0] in ('手动', '自动'):
+        auto = parts[0] == '自动'
         reason = parts[1].strip() if len(parts) > 1 else ''
     _on, msg = set_planned_mode(not state.is_planned_restart(), reason, auto)
     audit.record('restart', '计划重启模式',

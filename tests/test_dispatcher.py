@@ -600,6 +600,7 @@ async def test_planned_restart_command_accepts_reason(monkeypatch):
     st.active_matches.clear()
     st.set_planned_restart(False)
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher', lambda: None)
     try:
         ev = _mock_event(is_group=True, group_id='G1', user_id='U1',
                          content='计划重启 例行维护')
