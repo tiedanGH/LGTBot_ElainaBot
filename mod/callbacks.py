@@ -12,14 +12,11 @@
   · _serialized_text_send            Lock → _send_text_quota_managed → 消费教学标记
   · _serialized_mixed_send           Lock → _send_mixed_message → 消费教学标记
   · _send_text_quota_managed         配额管理 + 自动追加刷新按钮
-  · _send_mixed_message              图文混排:全图上传成功 → 单条 markdown 按原
-                                     排版内联;否则退回逐图媒体通道
+  · _send_mixed_message              图文混排:全图上传成功 → 单条 markdown 排版内联;否则退回逐图媒体通道
   · _send_image_quota_managed        配额管理 + 上传 + media 字段（支持 event_id）
 
-设计要点：cb_send_text/image_message 不再阻塞 C++ 调用线程 —— lgtbot 的 read
-thread 在 OnPost 里只持 Match.mutex_ 几十 µs。修复了等刷新按钮 15s 期间 read
-thread 持锁 → 玩家新指令排队 → 释放锁后紧接着 OnGameOver 把 child_in_ 置 NULL
-→ 排队那条 SendExecute → WriteFrame(NULL) → SIGSEGV 的链式 race。
+设计要点：cb_send_text/image_message 不阻塞 C++ 调用线程
+lgtbot 的 read thread 在 OnPost 里只持 Match.mutex_ 几十 µs。
 """
 
 from __future__ import annotations
@@ -39,14 +36,13 @@ log = get_logger(PLUGIN, 'LGTBot')
 
 
 # ──────── lgtbot 段错误恢复(C++ 桥接层 SigSegvHandler → 这里) ─────────────
-# 一旦 lgtbot 内部触发 SIGSEGV/SIGBUS,bridge 的 wrapper 用 sigsetjmp/siglongjmp
-# 把控制权拽回 Python,然后调本函数善后。注意此时 lgtbot 进程内状态损坏
-# (mutex/heap/pipe 都可能是脏的),所以这里**不再调任何 lgtbot 函数**,只做
-# Python 侧的事:发日志 + 给玩家道歉 + 调度 30s 后整进程 execv。
+# 一旦 lgtbot 内部触发 SIGSEGV/SIGBUS,bridge 的 wrapper 用 sigsetjmp/siglongjmp 把控制权拽回 Python,然后调本函数善后。
+# 注意此时 lgtbot 进程内状态损坏(mutex/heap/pipe 都可能是脏的),所以这里**不再调任何 lgtbot 函数**,只做Python 侧的事:
+# 发日志 + 给玩家道歉 + 调度 30s 后整进程 execv。
 
 _LGTBOT_CRASH_DELAY_S = 30.0       # 倒计时 execv;给 framework 其他清理留 buffer
-# 工作线程被阻塞等道歉 / 通知 HTTP 完成的最长秒数 —— 必须趁线程还没退出去
-# 触发 SIGABRT 之前把"重要的事"发完。HTTP 往返通常 100–500ms,8s 是大头富余。
+# 工作线程被阻塞等道歉 / 通知 HTTP 完成的最长秒数
+# 必须趁线程还没退出去触发 SIGABRT 之前把"重要的事"发完。HTTP 往返通常 100–500ms。
 _CRASH_SEND_TIMEOUT_S = 8.0
 _CRASH_APOLOGY_MD = (
     '## 💥 游戏模块发生致命错误\n'
@@ -61,7 +57,7 @@ _CRASH_APOLOGY_MD_BELATED = (
     '## 💥 游戏模块发生致命错误\n'
     '\n'
     'LGT-Bot 引擎发生未预料的崩溃，**进行中的对局已丢失**。\n'
-    '机器人已自动重启恢复服务，现在可以继续使用 ✅\n'
+    '机器人已自动重启恢复服务，可以重新开局 ✅\n'
     '\n'
     '崩溃报告已自动转发至官方群，非常抱歉给您带来不便，我们会尽快修复 🌹'
 )
@@ -116,9 +112,9 @@ def _is_sandbox_dm(target_id: str, is_uid: bool) -> bool:
     """私信目标是否具备「配额耗尽后主动直推」资格(all 模式 = 所有人)。"""
     return is_uid and (DM_PUSH_ALL or target_id in SANDBOX_DM_USERS)
 # 信号编号 → 名称,日志里更可读。
-# 数字 key 对应 SigSegvHandler 路径(C++ bridge 直接传 int);字符串 key
-# 对应 OnCxxTerminate 写入 marker 文件里的 sig=<kind> 字段(目前只有
-# cxx_terminate 一种,std::terminate / uncaught C++ exception 路径)。
+# 数字 key 对应 SigSegvHandler 路径(C++ bridge 直接传 int);
+# 字符串 key 对应 OnCxxTerminate 写入 marker 文件里的 sig=<kind> 字段
+# (目前只有 cxx_terminate 一种,std::terminate / uncaught C++ exception 路径)。
 _SIG_NAMES = {
     6: 'SIGABRT', 7: 'SIGBUS', 11: 'SIGSEGV',
     'cxx_terminate': 'C++ 异常未捕获',
@@ -151,9 +147,8 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
     log.error(f'💥 LGTBot 引擎崩溃 ({sig_name})')
     log.error(f'   触发源: {target}')
     log.error(f'   消息内容: {preview!r}')
-    # C++ bridge (SigSegvHandler → DumpCrashToFile) 已经把栈 dump 落盘到
-    # <plugin_dir>/LGTBot_CRASH_DUMPS/crash_<sec>_<pid>_<tid>.log,
-    # 管理员去那目录看最新文件就能拿到 backtrace + 信号上下文。
+    # C++ bridge (SigSegvHandler → DumpCrashToFile) 已经把栈 dump 落盘到：
+    # <plugin_dir>/LGTBot_CRASH_DUMPS/crash_<sec>_<pid>_<tid>.log
     crash_dir = os.path.join(boot.PLUGIN_DIR, 'LGTBot_CRASH_DUMPS')
     log.error(f'   栈 dump 目录: {crash_dir}/ (按 mtime 排序看最新)')
     log.error(f'   进程将在 {_LGTBOT_CRASH_DELAY_S:.0f}s 后 os.execv 自启，所有对局丢失')
@@ -177,8 +172,7 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
     # 异步善后:发道歉 + 倒计时 + execv。C++ wrapper 即将 return,不能在这里阻塞。
     loop = state.event_loop
     if loop is None or loop.is_closed():
-        # 没 loop 就只能立即退出让 supervisor 重启 —— 道歉就送不出了,但
-        # 不至于卡死。
+        # 没 loop 就只能立即退出让 supervisor 重启 —— 道歉就送不出了,但不至于卡死。
         log.error('asyncio loop 不可用，直接 os.execv')
         try:
             os.execv(sys.executable, [sys.executable] + sys.argv)
@@ -190,12 +184,10 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
     msg_len = len(preview)
 
     # ── Phase 1: **阻塞当前工作线程**等道歉 + 通知 HTTP 发完 ───────────────────
-    # 关键设计:cb_lgtbot_crashed 跑在出错的工作线程上,该线程一旦 return 就
-    # 进入退出流程,极可能在 glibc tcache_thread_shutdown 撞坏 heap 触发 SIGABRT
-    # (用户实测过的 case)。我们必须趁工作线程还活着,把"重要的事" —— 尤其
-    # **崩溃报告推送给管理员通知群** —— 同步发完。
-    # 用 run_coroutine_threadsafe + Future.result(timeout=) 实现跨线程阻塞等待;
-    # 超时直接放弃当前未完成的发送,避免无限卡死。
+    # 关键设计:cb_lgtbot_crashed 跑在出错的工作线程上,该线程一旦 return 就进入退出流程,
+    # 极可能在 glibc tcache_thread_shutdown 撞坏 heap 触发 SIGABRT。
+    # 必须趁工作线程还活着,把"重要的事" —— 尤其 **崩溃报告推送给管理员通知群** —— 同步发完。
+    # 用 run_coroutine_threadsafe + Future.result(timeout=) 实现跨线程阻塞等待;超时直接放弃当前未完成的发送。
     try:
         send_fut = asyncio.run_coroutine_threadsafe(
             _send_crash_messages(uid, gid, is_uid, sig_name, msg_len), loop)
@@ -206,9 +198,9 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
         log.warning(f'崩溃消息发送异常,仍继续重启流程: {e}')
 
     # ── Phase 2: 调度 30s 后整进程 execv (不阻塞,asyncio loop 跑) ────────────
-    # 此时道歉 + 通知 HTTP 已经发出或失败,工作线程可以返回了。30s buffer 留给
-    # 主框架其他清理工作(WebUI 日志 flush、框架写队列落盘等)。中途若工作线程退出
-    # 触发 SIGABRT,C++ 桥接层的 SigAbrtHandler 会用预存的 execv 参数立即重启。
+    # 此时道歉 + 通知 HTTP 已经发出或失败,工作线程可以返回了。
+    # 30s buffer 留给主框架其他清理工作(WebUI 日志 flush、框架写队列落盘等)。
+    # 中途若工作线程退出触发 SIGABRT,C++ 桥接层的 SigAbrtHandler 会用预存的 execv 参数立即重启。
     try:
         asyncio.run_coroutine_threadsafe(
             _post_send_countdown(sig_name), loop)
@@ -221,10 +213,8 @@ async def _send_crash_messages(uid: str, gid: str, is_uid: bool,
                                sig_name: str, msg_len: int) -> None:
     """同步阻塞路径:并发发道歉 + 通知,worker 线程通过 ``Future.result`` 等完。
 
-    用 ``asyncio.gather(*, return_exceptions=True)`` 保证一边失败不影响另一边
-    (尤其通知群推送是用户最重视的,不能被道歉发送失败牵连)。再加一层
-    ``asyncio.wait_for`` 做内部超时兜底,免得 HTTP hung 把整个 future 拖到外层
-    8s 超时才被砍。
+    用 ``asyncio.gather(*, return_exceptions=True)`` 保证一边失败不影响另一边(尤其通知群推送,不能被道歉发送失败牵连)。
+    再加一层 ``asyncio.wait_for`` 做内部超时兜底,免得 HTTP hung 把整个 future 拖到外层 8s 超时才被砍。
     """
     coros = []
     # 优先级:通知群 > 道歉。先 append 表示在 gather 里优先调度,实际 HTTP 并发。
@@ -268,13 +258,8 @@ async def _try_send_crash_apology(target_id: str, is_uid: bool,
                                   *, is_belated: bool = False) -> None:
     """走标准发送通道把道歉送达 —— 复用现有 quota/sender 设施。
 
-    ``is_belated=True`` 走 ``_CRASH_APOLOGY_MD_BELATED`` —— 这条路径下进程已经
-    重启完成,「30 秒后自动重启」不再适用,改为「已恢复服务」。SIGSEGV 路径
-    保持默认 False,文案不变。
-
-    SIGSEGV 路径下注意不挂额外按钮 —— 进程马上要 execv 重启,任何 callback 都
-    会落空;补发路径下进程已稳定,挂按钮其实安全,但为了文案一致这里也共用
-    同一组 build_support_buttons(那组本身是 link 按钮,不依赖回调)。
+    ``is_belated=True`` 走 ``_CRASH_APOLOGY_MD_BELATED`` —— 这条路径下进程已经重启完成,
+    「30 秒后自动重启」不再适用,改为「已恢复服务」。SIGSEGV 路径保持默认 False,文案不变。
     """
     md = _CRASH_APOLOGY_MD_BELATED if is_belated else _CRASH_APOLOGY_MD
     try:
@@ -294,8 +279,7 @@ def _collateral_targets(active: set, crash_id: str, crash_is_uid: bool) -> set:
 
 async def _send_collateral_notice(target_id: str, is_uid: bool) -> None:
     """给受牵连的进行中对局发中断通知。被动未超额发被动,超额**直接主动、不等刷新**
-    (崩溃即将 execv,没时间等 15s;普通群主动会被 QQ 拒、全量群 / 私聊可达,尽力送达)。
-    附官方群 / 反馈 link 按钮(不依赖回调,execv 前也安全)。"""
+    (崩溃即将 execv,没时间等 15s;普通群主动会被 QQ 拒、全量群 / 私聊可达,尽力送达)。"""
     try:
         key = helpers.target_key(target_id, is_uid)
         consumed = quota.try_consume_ref(key)
@@ -323,8 +307,7 @@ async def broadcast_notify(md: str, label: str, *, timeout: float = 8.0) -> int:
 
     三类通知共用本函数:崩溃报告、崩溃死循环熔断告警、自动重启说明。
     用 ``sender.send_to_group(group_id, content)`` 不带 ``msg_id``/``event_id``
-    走 push API —— 仅在该群 QQ 后台给本 bot 开了「全量推送」权限时能落地,
-    没权限会被 QQ 拒。
+    走 push API —— 仅在该群 QQ 后台给本 bot 开了「全量推送」权限时能落地,没权限会被 QQ 拒。
 
     几个刻意的选择:
       · **并发发送 + ``return_exceptions=True``**:一个群失败绝不能连累其他群 —— 这几条恰恰是最不能漏的消息。
@@ -359,12 +342,7 @@ async def broadcast_notify(md: str, label: str, *, timeout: float = 8.0) -> int:
 
 
 def restart_room_message(reason: str) -> str:
-    """重启前发给「等待中房间」的简要通知。
-
-    只讲两件事:马上要重启(房间会没)、这次更新了什么。**不提计划重启** ——
-    收到这条的是正在等人开局的玩家,维护模式怎么开的与他们无关。
-    ``reason`` 由主人 / 面板填写,仍按 markdown 语境转义(同维护提示)。
-    """
+    """重启前发给「等待中房间」的简要通知。"""
     parts = ['## 🔁 LGT-Bot 即将重启', '',
              '> 本群有**尚未开始**的房间，已被清理']
     if reason:
@@ -374,12 +352,7 @@ def restart_room_message(reason: str) -> str:
 
 
 def snapshot_waiting_rooms() -> list:
-    """快照当前等待中房间(带 ``key``),供重启路径**在释放引擎之前**取。
-
-    ★ 必须先快照:``check_and_prepare_restart`` → ``release_bot_if_not_processing_games``
-    → 上游 ``LGTBot_ReleaseIfNoProcessingGames`` 会把所有 match ``Terminate(true)`` 等待中房间就此解散,
-    引擎回调 ``terminate`` 又把它们从 ``state.waiting_rooms`` 里清掉。
-    """
+    """快照当前等待中房间(带 ``key``),供重启路径**在释放引擎之前**取。"""
     return [dict(r, key=k) for k, r in state.waiting_rooms.items()]
 
 
@@ -497,10 +470,9 @@ _BELATED_APOLOGY_DELAY_S = 5.0
 
 # ── 崩溃死循环熔断 ─────────────────────────────────────────────────────────
 # C++ 侧 abort-class handler(SigAbrtHandler / OnCxxTerminate)在 execv 前往
-# `LGTBot_CRASH_DUMPS/abort_restart_history` 追加一行重启时间戳。若 heap 腐败
-# 是确定性的,会每次重启又立刻 abort → 紧凑 execv 死循环。check_crash_loop()
-# 在 @on_load 读历史:窗口内重启 ≥ 阈值则判定死循环,暂停启动引擎(主框架仍
-# 运行)+ 告警,并清空历史 —— 人工修复后存盘触发热重载即自动复位重试。
+# `LGTBot_CRASH_DUMPS/abort_restart_history` 追加一行重启时间戳。
+# 若 heap 腐败是确定性的,会每次重启又立刻 abort → 紧凑 execv 死循环。check_crash_loop()
+# 在 @on_load 读历史:窗口内重启 ≥ 阈值则判定死循环,暂停启动引擎(主框架仍运行)+ 告警,并清空历史。
 _ABORT_HISTORY_NAME = 'abort_restart_history'
 _CRASH_LOOP_WINDOW_S = 120.0       # 统计窗口
 _CRASH_LOOP_THRESHOLD = 4          # 窗口内重启达到该次数即熔断
@@ -730,7 +702,7 @@ async def _alert_crash_loop_tripped(count: int) -> None:
         '- 需在后台手动重启引擎才能恢复游戏模块运行\n'
         '```\n'
         '\n'
-        '> 💡 此消息为自动推送，请尽快联系开发者排查修复'
+        '> 💡 此消息为自动推送，请尽快联系开发者手动重启'
     )
     await broadcast_notify(md, '崩溃熔断告警')
 
@@ -746,8 +718,7 @@ async def _alert_crash_loop_tripped(count: int) -> None:
 #      Lock 排队(见下面 _send_locks);Lock 保证 QQ 端按 cb 调用顺序送达
 #   3. 建房公告 send task 跑完后,我们才在同一个 task 末尾调 _consume_pending_tip
 #      → 调度教学提示 task,后者再次抢同一把 Lock 排到建房公告后面 → 顺序得证。
-#
-# 为什么挂 new_game 而不是 game_started(旧实现):
+
 # 建房广播是对 /新游戏 命令 msg_id 的**第 1 条**回复,教学提示紧随其后为第 2 条,必然在被动配额内送达;
 # 而游戏开始的消息发得晚(开局刷屏高峰),常常已超配额把提示吞掉。单机局无 new_game 广播 → 不再发教学。
 _pending_tip_keys: set[str] = set()
@@ -755,9 +726,8 @@ _pending_tip_keys: set[str] = set()
 # ─────────────────────────────────────────────────────────────────────────
 # 「带开局私信」游戏白名单 —— 此集合内的游戏在**全量群**里 cb_match_event(kind='new_game')
 # 时会被记入 _pending_dm_warn_keys,在建房公告发完后追加一条「主动私信」提示给群内玩家。
-# 与「消息回复限制」教学**互斥**:非全量群建房时发的是回复限制教学(覆盖面更广,
-# 含刷新按钮机制),私信提示被抑制;全量群不需要教学,才轮到私信提示。
-# **私信里新建游戏不提示**(玩家已在私信会话内)。
+# 与「消息回复限制」教学**互斥**:非全量群建房时发的是回复限制教学(覆盖面更广,含刷新按钮机制),
+# 私信提示被抑制;全量群不需要教学,才轮到私信提示。**私信里新建游戏不提示**(玩家已在私信会话内)。
 #
 # 触发逻辑:
 #   1. C++ 引擎调 cb_match_event(kind='new_game', game_name='XXX')
@@ -787,30 +757,22 @@ _UNRANKED_MARKER = '游戏结果不记录：因为该游戏为非正式游戏'
 # 所以在这里寄存,由紧随其后的那条结算文本取走。
 _pending_unranked: dict[str, str] = {}
 
-# 老文案 —— 白名单模式(正式环境主动私信被拒,发出去会失败)下的受限警告
+# 白名单模式(正式环境主动私信被拒,发出去会失败)下的受限警告
 _DM_WARNING_TEXT_LEGACY = (
     '## ⚠️ 主动私信受限\n'
     '此游戏存在**主动私信**，会受到协议限制发送失败。\n'
-    '请在游戏中**私信机器人**发送“赛况”来短暂激活私信和查看私信信息'
+    '请在游戏中**私信机器人**发送“赛况”来短暂激活私信'
 )
 
-# 新文案 —— 全员直推(sandbox_dm_users: ['all'])模式:
-# 私信发得出去,只需玩家加好友,且未关闭机器人的主动消息权限
+# 全员直推(sandbox_dm_users: ['all'])模式
 _DM_WARNING_TEXT_ALL = (
     '## 💬 主动私信提醒\n'
-    '此游戏存在**主动私信**。若无法接收，请点击机器人头像 → 右上角设置中进入「权限设置」中开启**主动消息**权限'
+    '此游戏存在**主动私信**。请在机器人头像→权限设置开启**主动消息**权限'
 )
 
 # ──────── per-target 串行化:发到同一 target 的消息按 cb 调用顺序送达 QQ ────────
-# 引入背景:旧实现 cb_send_text_message 走 helpers.run_coro_blocking 同步等 15s
-# (内部 wait_and_consume 等用户点刷新),期间 lgtbot 的 read thread 持有 Match.mutex_,
-# 这窗口足以让玩家发出新指令进 Match::Request 排队 → 15s 后释放锁 → 紧接着
-# OnGameOver 抢锁置 state=IS_OVER + CloseInput() 把 child_in_ 置 NULL → 排队那条
-# SendExecute → WriteFrame(NULL) → SIGSEGV。
-#
-# 新实现 cb_send_text/image_message 改 fire-and-forget:投递到 asyncio loop 立即
-# 返回,read thread 在 OnPost 里持锁只剩几十 µs。 per-target asyncio.Lock 保证发到
-# 同一 target 的消息按 cb 调用顺序送达 QQ(asyncio FIFO + Lock 串行)。
+# cb_send_text/image_message 改 fire-and-forget:投递到 asyncio loop 立即返回,read thread 在 OnPost 里持锁只剩几十 µs。
+# per-target asyncio.Lock 保证发到同一 target 的消息按 cb 调用顺序送达 QQ(asyncio FIFO + Lock 串行)。
 _send_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -826,12 +788,12 @@ def _get_send_lock(key: str) -> asyncio.Lock:
 _REFRESH_TIP_BASE_GROUP = (
     '## ⚠️ 消息回复限制\n'
     '机器人每条消息**最多回复5次**，且**5分钟**后失效。\n'
-    '🔄 ***请及时点击刷新按钮***，否则将**影响机器人发消息和游戏进程**。'
+    '🔄 ***请及时点击刷新按钮***，否则将**影响消息接收和游戏进程**。'
 )
 _REFRESH_TIP_BASE_DM = (
     '## ⚠️ 私信回复限制\n'
     '机器人每条消息**最多回复4次**，且**60分钟**后失效。\n'
-    '🔄 ***请及时点击刷新按钮***，否则将**影响机器人发消息和游戏进程**。'
+    '🔄 ***请及时点击刷新按钮***，否则将**影响消息接收和游戏进程**。'
 )
 
 # 全量申请段 —— 只在群聊里拼到末尾,私信里没有「群号」概念
@@ -845,17 +807,16 @@ _REFRESH_TIP_GROUP_TAIL = (
 async def _send_refresh_tip(target_id: str, is_uid: bool) -> None:
     """走标准 `_send_text_quota_managed` 通道发出教学提示。
 
-    第 4 / 5 条配额上的真正刷新按钮由 ``_send_text_quota_managed`` 按 count
-    自动挂载;教学消息本身视场景另带「全量申请」按钮。
+    第 4 / 5 条配额上的真正刷新按钮由 ``_send_text_quota_managed`` 按 count 自动挂载;
+    教学消息本身视场景另带「全量申请」按钮。
 
-    走 per-target Lock 排队 —— 跟 ``_serialized_text_send`` 共用同一把锁,保证
-    教学提示永远在「开局公告」之后到达 QQ。
+    走 per-target Lock 排队 —— 跟 ``_serialized_text_send`` 共用同一把锁,
+    保证教学提示永远在「开局公告」之后到达 QQ。
 
     分支:
-      · 私信(``is_uid=True``):DM 版 BASE(4 条/60 分钟),无附加按钮 ——
-        私聊没有「群号」概念,「全量申请」段会显得突兀。
-      · 群聊(``is_uid=False``):群版 BASE(5 条/5 分钟)+ GROUP_TAIL 段,底部
-        挂一行「全量申请」type=2 按钮(回填到输入框,用户自行补群号再发);
+      · 私信(``is_uid=True``):DM 版 BASE(4 条/60 分钟),无附加按钮。
+      · 群聊(``is_uid=False``):群版 BASE(5 条/5 分钟)+ GROUP_TAIL 段,
+        底部挂一行「全量申请」type=2 按钮(回填到输入框,用户自行补群号再发);
         实际命令由另一个插件实现,本插件只提供 UI 入口。
     """
     if is_uid:
@@ -876,8 +837,8 @@ async def _send_refresh_tip(target_id: str, is_uid: bool) -> None:
 def _schedule_refresh_tip(target_id: str, is_uid: bool) -> None:
     """C++ 工作线程安全地把 `_send_refresh_tip` 投到 asyncio loop,fire-and-forget。
 
-    `asyncio.run_coroutine_threadsafe` 返回的 Future 故意不 await —— C++ 线程
-    立即返回继续处理引擎下一帧。
+    `asyncio.run_coroutine_threadsafe` 返回的 Future 故意不 await
+    C++ 线程立即返回继续处理引擎下一帧。
     """
     loop = state.event_loop
     if loop is None or loop.is_closed():
@@ -900,8 +861,8 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
     看到「游戏开始」再看到「消息回复限制」教学。
 
     有主动推送资格的群里 bot 不被被动回复条数限制,refresh 按钮永远不会出现
-    —— 这条教学的整段文案(在讲怎么点刷新按钮)会变成误导。所以只清掉标记,
-    不发送。判据是 ``can_push_group`` 而非全量群:**没开全量但开了主动推送**
+    —— 这条教学的整段文案(在讲怎么点刷新按钮)会变成误导。所以只清掉标记,不发送。
+    判据是 ``can_push_group`` 而非全量群:**没开全量但开了主动推送**
     的群同样全程不需要刷新按钮,不该收到这条提示。
     沙箱私信用户同理:配额满后直接主动直推,不依赖刷新按钮,教学同样会误导。
     """
@@ -918,8 +879,8 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
 
 
 # ─────────── 「带开局私信」游戏限制提示 ──────────────────────────────────
-# 结构跟上面 _consume_pending_tip / _schedule_refresh_tip 完全对称 —— 在
-# cb_match_event(kind='new_game') 阶段判定游戏名是否在 _DM_LIMITED_GAMES
+# 结构跟上面 _consume_pending_tip / _schedule_refresh_tip 完全对称
+# 在 cb_match_event(kind='new_game') 阶段判定游戏名是否在 _DM_LIMITED_GAMES
 # 内并打 _pending_dm_warn_keys 标记;真正的发送时机由 _serialized_text/
 # image_send 在开局公告同步落地后调 _consume_pending_dm_warn 触发。
 
@@ -927,8 +888,7 @@ async def _send_dm_warning(target_id: str, is_uid: bool) -> None:
     """走标准 ``_send_text_quota_managed`` 通道发出「主动私信」提示。
 
     文案随模式切换:全员直推(``DM_PUSH_ALL``)用提醒版(加好友 + 开权限即可收到),
-    白名单老模式用受限警告版。两版底部都挂「💫 添加好友」link 按钮,
-    链接是 ``_build_robot_invite_link`` 的同款邀请页。
+    白名单模式用受限警告版。两版底部都挂「💫 添加好友」link 按钮。
 
     与 ``_send_refresh_tip`` 同一把 per-target Lock,保证排在「房间已创建」公告之后到达 QQ。
     """
