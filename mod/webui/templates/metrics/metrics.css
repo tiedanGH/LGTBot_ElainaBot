@@ -40,6 +40,17 @@
 .metrics-delta-tag.metrics-delta-down {
   background: color-mix(in srgb, #00a870 18%, transparent); color: #00a870;
 }
+/* 今日卡右上角数据对比胶囊 */
+.metrics-label-row .metrics-delta-tag { font-size: 11px; line-height: 14px; padding: 0 7px; }
+/* 小字行数据对比胶囊 */
+.metrics-delta-tag.metrics-delta-outline {
+  background: transparent; font-size: 10px; line-height: 12px; padding: 0 5px;
+  border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+}
+.metrics-sub-num {
+  color: var(--accent); font-weight: 600;
+  font-family: 'Consolas', 'Menlo', monospace;
+}
 
 .metrics-action-msg { font-size: 12px; display: block; margin-top: 8px; }
 .metrics-action-msg:empty { display: none; }

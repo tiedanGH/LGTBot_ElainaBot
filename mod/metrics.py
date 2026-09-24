@@ -528,8 +528,30 @@ _TREND_PLAYERS_SQL = ('SELECT date(m.finish_time) d, COUNT(DISTINCT uwm.user_id)
                       f'WHERE m.finish_time >= {_TREND_SINCE} '
                       'GROUP BY d ORDER BY d')
 
+# 面板「游戏数据」四张今日卡的近 10 日小字行 + 对局人次卡,只有 ``ten_day=True`` 才查 ——
+# /数据统计 指令在事件循环里同步查库,用不上的不跑。近 10 日与趋势图同窗(含今天),上一个 10 日同
+# prev10_matches,四项口径同 _span_stats。user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表,
+# 所以两个窗口连同今日 / 昨日同时段的人次合成一条一次扫完(仿真 200 万人次时逐项单查慢约 1.8 秒)。
+_PREV10_SINCE = "datetime('now','localtime','start of day','-19 days')"
+_TEN_DAY_SQL = {
+    ('recent10_matches', 'recent10_groups', 'prev10_groups'): (
+        f'SELECT SUM(finish_time >= {_TREND_SINCE}), '
+        f"COUNT(DISTINCT CASE WHEN finish_time >= {_TREND_SINCE} THEN NULLIF(group_id, '') END), "
+        f"COUNT(DISTINCT CASE WHEN finish_time < {_TREND_SINCE} THEN NULLIF(group_id, '') END) "
+        f'FROM match WHERE finish_time >= {_PREV10_SINCE}'),
+    ('recent10_players', 'prev10_players', 'recent10_attendances', 'prev10_attendances',
+     'today_attendances', 'yesterday_attendances_same_span'): (
+        f'SELECT COUNT(DISTINCT CASE WHEN m.finish_time >= {_TREND_SINCE} THEN uwm.user_id END), '
+        f'COUNT(DISTINCT CASE WHEN m.finish_time < {_TREND_SINCE} THEN uwm.user_id END), '
+        f'SUM(m.finish_time >= {_TREND_SINCE}), SUM(m.finish_time < {_TREND_SINCE}), '
+        f'SUM(m.finish_time >= {_TODAY}), '
+        f'SUM(m.finish_time >= {_YDAY_START} AND m.finish_time < {_YDAY_SAME}) '
+        'FROM user_with_match uwm JOIN match m ON m.match_id = uwm.match_id '
+        f'WHERE m.finish_time >= {_PREV10_SINCE}'),
+}
 
-def query_game_stats() -> dict:
+
+def query_game_stats(ten_day: bool = False) -> dict:
     """lgtbot.db 游戏统计快照(只读)。任何失败不抛 —— 单项置 None/空 + errors。
 
     参与榜在此完成昵称解析(userinfo.get_name,主框架 users 表)与脱敏兜底(mask_id),
@@ -537,15 +559,18 @@ def query_game_stats() -> dict:
     (/数据统计 指令用)。trend_10d 恒 10 项(缺失日补 0,含今天,新→旧),
     每项含当日对局数与当日活跃玩家数。
 
-    **今日与昨日同时段的五项 + 今日双榜合并了不计分对局**(见 unranked_window):
+    **今日与昨日同时段的各项 + 今日双榜合并了不计分对局**(见 unranked_window):
     这些局不在 lgtbot.db 里,不合并的话今日统计只报计分局。今日游戏榜的条目带 ``unranked`` 标志,
     真时表示该游戏今天的对局全是不计分的。累计项、本周 / 总榜、近 10 日与趋势图都只读数据库。
+
+    ``ten_day`` 真时额外给出 _TEN_DAY_SQL 那几项(面板用),否则留 None。
     """
     out: dict = {
         'available': False,
         'errors': [],
         **{k: None for k in _SCALAR_SQL},
         **{k: None for k in _SET_SQL},
+        **{k: None for keys in _TEN_DAY_SQL for k in keys},
         'top_games_all': [],
         'top_games_week': [],
         'top_games_today': [],
@@ -609,6 +634,16 @@ def query_game_stats() -> dict:
                            ('yesterday_players_same_span', u_yday['players']),
                            ('yesterday_groups_same_span', u_yday['groups'])):
             out[key] = None if key in failed else len(db_sets[key] | extra)
+
+        if ten_day:
+            for keys, sql in _TEN_DAY_SQL.items():
+                rows = _rows(sql, keys[0])
+                if rows:
+                    # SUM 在窗口内没有行时是 NULL
+                    out.update({k: int(v or 0) for k, v in zip(keys, rows[0])})
+            # 人次不去重,不计分那半边直接按参与者个数相加
+            _plus('today_attendances', sum(u_today['player_counts'].values()))
+            _plus('yesterday_attendances_same_span', sum(u_yday['player_counts'].values()))
 
         db_games = {str(g): int(c) for g, c in _rows(_TOP_GAMES_TODAY_SQL, 'top_games_today')}
         games = dict(db_games)

@@ -32,9 +32,6 @@ function metricsRenderStats(stats) {
   /* 玩家转化(跨库:lgtbot 注册 ÷ 框架用户):任一缺失 → — */
   document.getElementById('metrics-stat-conversion').textContent =
     (s.player_conversion == null) ? '—' : (s.player_conversion + '%');
-
-  /* 近 10 日私信用户(wakeup.db,日粒度),数据随 stats 下发,在此一并渲染 */
-  document.getElementById('metrics-stat-dm10').textContent = metricsFmtNum(s.dm_active_10d);
 }
 
 /* ──── ② 运行指标区 ──── */
@@ -110,52 +107,40 @@ function metricsRankRows(list, nameKey) {
   ).join('');
 }
 
-/* 涨跌标签(形态与配色对齐 dau 卡片:涨红跌绿)。前缀文案保持灰、只有标签着色,所以返回的是 HTML 片段而非纯文本。
-   diff 一律先过 Number:调用方给的是两数相减,理论上必为数字,强制收敛一次杜绝畸形 payload 让字符串拼进 innerHTML。 */
-function metricsDeltaTag(diff) {
+/* 涨跌标签(涨红跌绿)。前缀文案保持灰、只有标签着色,所以返回的是 HTML 片段而非纯文本。
+   variant 追加款式类,tip 写进 title 说明对比的是谁。 */
+function metricsDeltaTag(diff, variant, tip) {
   const n = Number(diff);
   if (!isFinite(n)) return '';
-  if (n > 0) return '<span class="metrics-delta-tag metrics-delta-up">↑ ' + n + '</span>';
-  if (n < 0) return '<span class="metrics-delta-tag metrics-delta-down">↓ ' + Math.abs(n) + '</span>';
-  return '<span class="metrics-delta-tag">- 0</span>';
+  const dir = n > 0 ? ' metrics-delta-up' : (n < 0 ? ' metrics-delta-down' : '');
+  const text = n > 0 ? '↑ ' + n : (n < 0 ? '↓ ' + Math.abs(n) : '- 0');
+  return '<span class="metrics-delta-tag' + dir + (variant ? ' ' + variant : '') + '"'
+    + (tip ? ' title="' + escapeHtml(tip) + '"' : '') + '>' + text + '</span>';
 }
 
-/* 「较昨日同时段」涨跌副标题(模仿 dau 面板的增减标识):有对比数据时替换
-   卡片 sub 行,缺数据(旧库 / 查询失败)保留原说明文案。 */
-function metricsDeltaSub(id, cur, yday, fallback) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  if (cur == null || yday == null) { el.textContent = fallback; return; }
-  el.innerHTML = '较昨日同时段 ' + metricsDeltaTag(cur - yday);
+/* 今日卡:右上角胶囊对比昨日同时段;小字行是近 10 日总量 + 对比上一个 10 日的描边胶囊。
+   缺数据(旧库 / 查询失败)时不画胶囊,小字回退原说明文案。 */
+function metricsTodayCard(key, today, yday, recent10, prev10, noun, fallback) {
+  document.getElementById('metrics-' + key).textContent = metricsFmtNum(today);
+  document.getElementById('metrics-' + key + '-delta').innerHTML =
+    (today == null || yday == null) ? '' : metricsDeltaTag(today - yday, '', '较昨日同时段');
+  const sub = document.getElementById('metrics-' + key + '-sub');
+  const n10 = Number(recent10);
+  if (recent10 == null || !isFinite(n10)) { sub.textContent = fallback; return; }
+  sub.innerHTML = '近 10 日' + noun + ' <b class="metrics-sub-num">' + n10 + '</b>'
+    + (prev10 == null ? '' : ' ' + metricsDeltaTag(n10 - prev10, 'metrics-delta-outline', '较上一个 10 日'));
 }
 
 function metricsRenderGame(game, activePush) {
   const g = game || {};
-  document.getElementById('metrics-today-matches').textContent = metricsFmtNum(g.today_matches);
-  document.getElementById('metrics-today-players').textContent = metricsFmtNum(g.today_players);
-  document.getElementById('metrics-today-groups').textContent = metricsFmtNum(g.today_groups);
-  metricsDeltaSub('metrics-today-matches-sub', g.today_matches,
-                  g.yesterday_matches_same_span, '当日 00:00 起已结束的对局');
-  metricsDeltaSub('metrics-today-players-sub', g.today_players,
-                  g.yesterday_players_same_span, '今日参与游戏的玩家');
-  metricsDeltaSub('metrics-today-groups-sub', g.today_groups,
-                  g.yesterday_groups_same_span, '今日进行游戏的群聊');
-
-  /* 「近 10 日私信用户」卡的 sub 行借位展示:
-     近 10 日对局总数 + 对比上一个 10 日整期的涨跌(与数据统计图片卡同口径:trend 求和 vs prev10_matches)。
-     任一缺数据回退原说明文案。卡片主数值(私信用户数)不动。 */
-  const dm10Sub = document.getElementById('metrics-stat-dm10-sub');
-  if (dm10Sub) {
-    const trend10 = Array.isArray(g.trend_10d) ? g.trend_10d : [];
-    const total10 = trend10.length
-      ? trend10.reduce((a, t) => a + (Number(t.count) || 0), 0) : null;
-    if (total10 == null || g.prev10_matches == null) {
-      dm10Sub.textContent = '私信过机器人的活跃用户数';
-    } else {
-      dm10Sub.innerHTML = '近 10 日对局 ' + total10 + ' '
-        + metricsDeltaTag(total10 - g.prev10_matches);
-    }
-  }
+  metricsTodayCard('today-matches', g.today_matches, g.yesterday_matches_same_span,
+                   g.recent10_matches, g.prev10_matches, '对局', '当日 00:00 起已结束的对局');
+  metricsTodayCard('today-players', g.today_players, g.yesterday_players_same_span,
+                   g.recent10_players, g.prev10_players, '玩家', '今日参与游戏的玩家');
+  metricsTodayCard('today-groups', g.today_groups, g.yesterday_groups_same_span,
+                   g.recent10_groups, g.prev10_groups, '群聊', '今日进行游戏的群聊');
+  metricsTodayCard('today-attendances', g.today_attendances, g.yesterday_attendances_same_span,
+                   g.recent10_attendances, g.prev10_attendances, '对局人次', '今日参与对局的总人次');
 
   /* 今日主动消息:大数字 = 总条数,小字 = 平均每群 / 每人(2 位小数) */
   const ap = activePush || {};

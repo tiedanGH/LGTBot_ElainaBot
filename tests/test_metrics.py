@@ -321,11 +321,13 @@ def test_yesterday_same_span_counts_only_matching_window():
         ('大富翁', inside, 'G1', ['U2']),            # 同上(U2 去重)
         ('五子棋', after_span, 'G1', ['U3']),        # 昨日·晚于同时段 → 不计
     ])
-    g = metrics.query_game_stats()
+    g = metrics.query_game_stats(ten_day=True)
     assert g['yesterday_matches_same_span'] == 2
     assert g['yesterday_players_same_span'] == 2      # U1 / U2
     assert g['yesterday_groups_same_span'] == 1       # 都在 G1
+    assert g['yesterday_attendances_same_span'] == 3  # 人次不去重:U1 / U2 / U2
     assert g['today_matches'] == 1                    # 今日口径不受影响
+    assert g['today_attendances'] == 1
 
 
 def test_prev10_matches_counts_previous_block_only():
@@ -341,6 +343,66 @@ def test_prev10_matches_counts_previous_block_only():
     g = metrics.query_game_stats()
     assert g['prev10_matches'] == 2
     assert sum(t['count'] for t in g['trend_10d']) == 2      # 本期(0/9 天前)
+
+
+def test_ten_day_windows_split_at_nine_days_ago():
+    """近 10 日 = 0–9 天前(含今天),上一个 10 日 = 10–19 天前,20 天前两边都不算。
+    玩家 / 群聊按窗口去重、私聊局不算群、人次不去重 —— 口径同按日 / 按月视图。"""
+    _make_db([
+        ('五子棋', 0, 'G1', ['U1', 'U2']),
+        ('五子棋', 9, 'G2', ['U1']),            # 边界:9 天前属于本期
+        ('大富翁', 3, None, ['U3']),            # 私聊局(两种落库形态)
+        ('大富翁', 4, '', ['U3']),
+        ('五子棋', 10, 'G1', ['U4', 'U5']),     # 边界:10 天前属上期
+        ('五子棋', 19, 'G1', ['U4']),
+        ('五子棋', 20, 'G9', ['U9']),           # 更早,不计
+    ])
+    g = metrics.query_game_stats(ten_day=True)
+    assert (g['recent10_matches'], g['recent10_players'], g['recent10_groups'],
+            g['recent10_attendances']) == (4, 3, 2, 5)
+    assert (g['prev10_matches'], g['prev10_players'], g['prev10_groups'],
+            g['prev10_attendances']) == (2, 2, 1, 3)
+
+
+def test_ten_day_stats_are_zero_on_a_quiet_db():
+    """近 20 天一局都没有时 SUM 是 NULL —— 得落成 0,而不是让整份游戏数据报「打开失败」。"""
+    _make_db([('五子棋', 30, 'G1', ['U1'])])
+    g = metrics.query_game_stats(ten_day=True)
+    assert g['available'] is True and g['errors'] == []
+    assert (g['recent10_matches'], g['recent10_attendances'], g['today_attendances'],
+            g['prev10_attendances']) == (0, 0, 0, 0)
+
+
+def test_ten_day_stats_only_when_asked():
+    """★ /数据统计 指令在事件循环里同步查库,不跑那条整表 JOIN —— 不带 ten_day 时这几项留 None。"""
+    _make_db([('五子棋', 0, 'G1', ['U1'])])
+    keys = [k for ks in metrics._TEN_DAY_SQL for k in ks]
+    assert all(metrics.query_game_stats()[k] is None for k in keys)
+    g = metrics.query_game_stats(ten_day=True)
+    assert all(isinstance(g[k], int) for k in keys), {k: g[k] for k in keys}
+
+
+def test_today_attendances_fold_in_unranked_but_ten_days_do_not():
+    """今日人次同今日其余几项合并不计分账本(按参与者个数,不去重);近 10 日只读库 —— 账本只有两天。"""
+    _make_db([('五子棋', 0, 'G1', ['U1', 'U2'])])
+    metrics.record_unranked_match('大富翁', ['U1', 'U3', 'U4'], 'G1', ts=_mid_today())
+    g = metrics.query_game_stats(ten_day=True)
+    assert g['today_attendances'] == 5              # 2 计分 + 3 不计分
+    assert g['recent10_attendances'] == 2
+
+
+def test_ten_day_join_failure_keeps_the_match_side():
+    """user_with_match 缺表:JOIN 那条的六项留 None(不计分的一半也不补),match 表那条照常出数。"""
+    conn = sqlite3.connect(boot.DB_PATH)
+    conn.execute(_SCHEMA[0])                             # 只有 match 表
+    conn.execute("INSERT INTO match VALUES (1, '五子棋', ?, 'G1', 'U1', 1, 1)", (_ts(0),))
+    conn.commit()
+    conn.close()
+    metrics.record_unranked_match('大富翁', ['U2'], 'G1', ts=_mid_today())
+    g = metrics.query_game_stats(ten_day=True)
+    assert (g['recent10_matches'], g['recent10_groups'], g['prev10_groups']) == (1, 1, 0)
+    assert g['recent10_players'] is None and g['today_attendances'] is None
+    assert any(e.startswith('recent10_players:') for e in g['errors'])
 
 
 def test_query_game_stats_for_date_day_and_attendances():
@@ -629,14 +691,16 @@ def test_unranked_folds_into_yesterday_same_span():
     metrics.record_unranked_match('大富翁', ['U9'], 'G9',
                                   ts=yday_same.timestamp() + 60)     # 晚于同时段
 
-    g = metrics.query_game_stats()
+    g = metrics.query_game_stats(ten_day=True)
     assert g['yesterday_matches_same_span'] == 1
     assert g['yesterday_players_same_span'] == 1
     assert g['yesterday_groups_same_span'] == 1
+    assert g['yesterday_attendances_same_span'] == 1
     # 窗口下界:昨天的账本不能漏进今日口径
     assert g['today_matches'] == 1
     assert g['today_players'] == 1
     assert g['today_groups'] == 1
+    assert g['today_attendances'] == 1
 
 
 def test_unranked_tag_only_when_every_match_is_unranked():

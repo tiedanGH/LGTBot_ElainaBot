@@ -112,17 +112,16 @@ def _metrics_env(monkeypatch):
     """把 page_metrics 依赖的四个数据源全部替换成可控替身。"""
     _a, page_metrics, _l = _pages()
     monkeypatch.setattr(page_metrics.metrics, 'query_game_stats',
-                        lambda: {'available': True, 'errors': [],
-                                 'lgtbot_users': 50, 'lgtbot_matches': 120,
-                                 'lgtbot_match_attendances': 300,
-                                 'lgtbot_achievements': 7})
+                        lambda **_: {'available': True, 'errors': [],
+                                     'lgtbot_users': 50, 'lgtbot_matches': 120,
+                                     'lgtbot_match_attendances': 300,
+                                     'lgtbot_achievements': 7})
     monkeypatch.setattr(page_metrics.metrics, 'snapshot',
                         lambda: {'upload_total': 1000, 'upload_fail': 1,
                                  'restart_total': 3})
     monkeypatch.setattr(page_metrics.metrics, 'active_push_today',
                         lambda: {'group': 5, 'user': 2})
     monkeypatch.setattr(page_metrics.userinfo, 'count_users', lambda: 200)
-    monkeypatch.setattr(page_metrics.userinfo, 'dm_active_count', lambda d: 11)
     monkeypatch.setattr(page_metrics.uploader, 'hosting_availability',
                         lambda: {'cos': 'ok'})
     return page_metrics
@@ -132,7 +131,6 @@ def test_metrics_payload_computes_conversion_and_upload_rate(_metrics_env):
     """两个服务端算好的派生值:玩家转化率(2 位)、上传成功率(4 位)。"""
     p = _metrics_env._payload()
     assert p['stats']['player_conversion'] == 25.0          # 50 / 200
-    assert p['stats']['dm_active_10d'] == 11
     assert p['runtime']['upload_rate'] == 99.9              # (1000-1)/1000
     assert p['runtime']['restart_total'] == 3               # snapshot 原样并入
     assert p['runtime']['hosting'] == {'cos': 'ok'}
@@ -151,7 +149,7 @@ def test_metrics_payload_none_instead_of_zero_division(monkeypatch, _metrics_env
     assert p['runtime']['upload_rate'] is None
 
     monkeypatch.setattr(_metrics_env.metrics, 'query_game_stats',
-                        lambda: {'available': False, 'errors': ['db 不存在']})
+                        lambda **_: {'available': False, 'errors': ['db 不存在']})
     p2 = _metrics_env._payload()
     assert p2['stats']['lgtbot_users'] is None
     assert p2['stats']['player_conversion'] is None
@@ -187,9 +185,41 @@ def test_metrics_delta_tag_style_contract():
     assert not re.search(r'\.metrics-status-sub\.metrics-delta-(up|down)', css)
     assert "classList.add('metrics-delta-up'" not in js
     assert "classList.add('metrics-delta-down'" not in js
-    # 两处文案都必须走标签函数包裹
-    assert js.count('metricsDeltaTag(') >= 3            # 1 处定义 + 2 处调用
-    assert '较昨日同时段 \' + metricsDeltaTag(' in js
+    # 右上角对比昨日同时段、小字行对比上一个 10 日,两颗都走标签函数,对比基准写进 title
+    assert "metricsDeltaTag(today - yday, '', '较昨日同时段')" in js
+    assert "metricsDeltaTag(n10 - prev10, 'metrics-delta-outline', '较上一个 10 日')" in js
+    # 描边款与涨跌色同优先级,靠源序在后才盖得掉涨跌的实底背景
+    outline = css.index('.metrics-delta-tag.metrics-delta-outline {')
+    assert outline > css.index('.metrics-delta-tag.metrics-delta-down {')
+    assert 'background: transparent' in css[outline:css.index('}', outline)]
+
+
+def test_metrics_panel_asks_for_the_ten_day_stats(monkeypatch, _metrics_env):
+    """★ 今日卡的近 10 日小字行只在 ten_day=True 时有数 —— 漏传的话小字全部静默回退说明文案。"""
+    seen = {}
+    monkeypatch.setattr(_metrics_env.metrics, 'query_game_stats',
+                        lambda **kw: seen.update(kw) or {'available': True, 'errors': []})
+    _metrics_env._payload()
+    assert seen == {'ten_day': True}
+
+
+def test_metrics_today_cards_have_every_element_the_js_writes():
+    """★ metricsTodayCard 按 key 拼三个 id(数字 / 右上角胶囊 / 小字行)—— 缺一个就是
+    getElementById 拿到 null,整个游戏数据区连同下面的榜单都不再渲染。"""
+    _a, page_metrics, _l = _pages()
+    keys = re.findall(r"metricsTodayCard\('([\w-]+)'", page_metrics.TAB_JS)
+    assert keys == ['today-matches', 'today-players', 'today-groups', 'today-attendances']
+    for k in keys:
+        for suffix in ('', '-delta', '-sub'):
+            assert f'id="metrics-{k}{suffix}"' in page_metrics.TAB_HTML, k + suffix
+
+
+def test_metrics_section_titles_all_sit_in_a_header():
+    """★ 标题直接放在 section 里时,它的 margin-bottom 和网格的 margin-top 叠成 24px;
+    包进 .dash-section-header 才和「运行指标」一样折叠成 12px。"""
+    _a, page_metrics, _l = _pages()
+    before = re.findall(r'(<[^<>]+>)\s*<h2 class="dash-section-title"', page_metrics.TAB_HTML)
+    assert len(before) == 4 and set(before) == {'<div class="dash-section-header">'}, before
 
 
 # ─────────────────────────────────────────────────────────────────────────

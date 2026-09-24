@@ -15,7 +15,9 @@
 
   <!-- ──── ① 数据统计 ──── -->
   <section class="dash-section">
-    <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-chart-bar"/></svg><span>数据统计</span></h2>
+    <div class="dash-section-header">
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-chart-bar"/></svg><span>数据统计</span></h2>
+    </div>
     <div class="metrics-status-grid fold-grid" style="--cards: 6">
       <div class="metrics-status-card">
         <div class="metrics-status-label">用户总数</div>
@@ -93,27 +95,41 @@
 
   <!-- ──── ③ 游戏数据 ──── -->
   <section class="dash-section">
-    <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gamepad"/></svg><span>游戏数据</span></h2>
+    <div class="dash-section-header">
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gamepad"/></svg><span>游戏数据</span></h2>
+    </div>
     <div class="metrics-status-grid fold-grid" style="--cards: 6">
       <div class="metrics-status-card">
-        <div class="metrics-status-label">今日对局</div>
+        <div class="metrics-status-label metrics-label-row">
+          <span>今日对局</span>
+          <span id="metrics-today-matches-delta"></span>
+        </div>
         <div id="metrics-today-matches" class="metrics-status-value">—</div>
         <div id="metrics-today-matches-sub" class="metrics-status-sub">当日 00:00 起已结束的对局</div>
       </div>
       <div class="metrics-status-card">
-        <div class="metrics-status-label">今日活跃玩家</div>
+        <div class="metrics-status-label metrics-label-row">
+          <span>今日活跃玩家</span>
+          <span id="metrics-today-players-delta"></span>
+        </div>
         <div id="metrics-today-players" class="metrics-status-value">—</div>
         <div id="metrics-today-players-sub" class="metrics-status-sub">今日参与游戏的玩家</div>
       </div>
       <div class="metrics-status-card">
-        <div class="metrics-status-label">今日活跃群聊</div>
+        <div class="metrics-status-label metrics-label-row">
+          <span>今日活跃群聊</span>
+          <span id="metrics-today-groups-delta"></span>
+        </div>
         <div id="metrics-today-groups" class="metrics-status-value">—</div>
         <div id="metrics-today-groups-sub" class="metrics-status-sub">今日进行游戏的群聊</div>
       </div>
       <div class="metrics-status-card">
-        <div class="metrics-status-label">近 10 日私信用户</div>
-        <div id="metrics-stat-dm10" class="metrics-status-value">—</div>
-        <div id="metrics-stat-dm10-sub" class="metrics-status-sub">私信过机器人的活跃用户数</div>
+        <div class="metrics-status-label metrics-label-row">
+          <span>今日对局人次</span>
+          <span id="metrics-today-attendances-delta"></span>
+        </div>
+        <div id="metrics-today-attendances" class="metrics-status-value">—</div>
+        <div id="metrics-today-attendances-sub" class="metrics-status-sub">今日参与对局的总人次</div>
       </div>
       <div class="metrics-status-card">
         <div class="metrics-status-label">今日群聊主动</div>
