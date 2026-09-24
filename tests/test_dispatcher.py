@@ -644,8 +644,47 @@ def test_push_quota_view_group_and_dm():
         callbacks.ACTIVE_PUSH_DAILY_LIMIT = orig_limit
 
 
+def test_push_quota_view_carries_the_scene_total(monkeypatch):
+    """★ 群里带全部群的今日主动总数、私信里带全部私信的。"""
+    from plugins.LGTBot_ElainaBot.mod import metrics
+    monkeypatch.setattr(metrics, 'active_push_today',
+                        lambda: {'group_total': 3456, 'group_targets_n': 9,
+                                 'dm_total': 211, 'dm_targets_n': 4})
+    assert dispatcher._push_quota_view('G1', False)['total'] == 3456
+    assert dispatcher._push_quota_view('U1', True)['total'] == 211
+
+
+async def test_stats_command_text_appends_the_scene_total(monkeypatch):
+    """文本保底与图片同口径:额度行末尾跟上今日群 / 私信总计,有没有上限都带。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 1,
+                                 'today_players': 1, 'today_groups': 1,
+                                 'top_games_today': [], 'top_players_today': [],
+                                 'trend_10d': []})
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 12)
+    monkeypatch.setattr(metrics, 'active_push_today',
+                        lambda: {'group_total': 3456, 'group_targets_n': 9,
+                                 'dm_total': 211, 'dm_targets_n': 4})
+    mark_push_group('G1')
+    for limit, want in ((1000, '本群今日主动消息: 12/1000 条 · 群总计 3456 条'),
+                        (0, '本群今日主动消息: 12 条 · 群总计 3456 条')):
+        monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', limit)
+        ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计')
+        ev.reply = AsyncMock()
+        await dispatcher.lgtbot_data_stats(ev, None)
+        assert want in ev.reply.await_args.args[0]
+
+    ev = _mock_event(is_direct=True, user_id='U1', content='数据统计')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, None)
+    assert '本私信今日主动消息: 12 条 · 私信总计 211 条' in ev.reply.await_args.args[0]
+
+
 async def test_stats_command_text_shows_push_quota(monkeypatch):
-    """「数据统计」文本输出带本会话额度行:群里显示「本群」、私信显示「你的私信」。"""
+    """「数据统计」文本输出带本会话额度行:群里显示「本群」、私信显示「本私信」。"""
     from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
@@ -668,7 +707,7 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
     ev2.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev2, None)
     txt2 = ev2.reply.await_args.args[0]
-    assert '你的私信今日主动消息: 1000/1000 条' in txt2
+    assert '本私信今日主动消息: 1000/1000 条' in txt2
     assert '已用满' in txt2                        # 用满时给出说明
 
 

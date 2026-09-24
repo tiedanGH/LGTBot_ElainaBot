@@ -11,7 +11,7 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
          胶囊,与下面的今日行一眼区分;角标是**今日净变化**本身,不是与昨日对比
       2. 今日活跃玩家 / 今日活跃群聊(实底胶囊,对比昨日同时段)
       3. 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期)
-      4. 可选的主动消息额度通栏
+      4. 可选的主动消息额度通栏(本会话用量 / 上限 + 今日全部群或全部私信的总计)
   · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条。榜单条目带 ``unranked``
     时(当天的对局全是不计分的)在名称后跟一个灰色「不计分」胶囊;既有计分又有不计分的游戏只汇总,不打标
@@ -458,22 +458,29 @@ def _render(g: dict, sub_title: str) -> bytes | None:
                font=_font(24), fill=_TEXT_MUTED)
         val_txt = f'{_fmt(used)} / {_fmt(limit)}' if limit else f'{_fmt(used)}'
         # 有上限时数字缩小上移,把卡片底部让给进度条;不限量(limit=0)没有进度条。
-        if limit:
-            _bold_text(d, (cx + 96, cy + 54), val_txt, _font(36), fg)
-        else:
-            _bold_text(d, (cx + 96, cy + 60), val_txt, _font(48), fg)
+        vf, vy = (_font(36), cy + 54) if limit else (_font(48), cy + 60)
+        _bold_text(d, (cx + 96, vy), val_txt, vf, fg)
+        # 今日总计(全部群 / 全部私信)跟在后面:灰标签 + accent 数字,不随本会话的额度状态变色
+        if pq.get('total') is not None:
+            lf = _font(24)
+            label = '群总计' if pq.get('is_group') else '私信总计'
+            tx = cx + 96 + _text_w(d, val_txt, vf) + 36
+            d.text((tx, vy + vf.getmetrics()[0] - lf.getmetrics()[0]), label,
+                   font=lf, fill=_TEXT_MUTED)
+            _bold_text(d, (tx + _text_w(d, label, lf) + 10, vy),
+                       _fmt(pq.get('total')), vf, _ACCENT)
         tip = ''
         if exhausted:
             tip = '已用满 · 改用刷新按钮，次日 0 点恢复'
         elif near:
             tip = f'即将用尽 · 剩余 {_fmt(pq.get("remaining") or 0)} 条'
         if tip:
+            # 胶囊压在 cy+20..56:数字大时下面那行「用量 + 总计」会伸到胶囊正下方,得留出空隙
             tf = _font(22)
-            d.rounded_rectangle(
-                (cx + full_w - 24 - _text_w(d, tip, tf) - 26, cy + 24,
-                 cx + full_w - 24, cy + 62), radius=19, fill=_tint(fg))
-            d.text((cx + full_w - 24 - _text_w(d, tip, tf) - 13, cy + 32),
-                   tip, font=tf, fill=fg)
+            tx0, ty0, th = cx + full_w - 24 - _text_w(d, tip, tf) - 26, cy + 20, 36
+            d.rounded_rectangle((tx0, ty0, cx + full_w - 24, ty0 + th),
+                                radius=th // 2, fill=_tint(fg))
+            d.text((tx0 + 13, ty0 + (th - 22) // 2 - 4), tip, font=tf, fill=fg)
         if limit:
             # 进度条:用量占比(用满为满格红)。y 要与上方数值留出间距
             bar_x, bar_y = cx + 96, cy + tile_h - 26

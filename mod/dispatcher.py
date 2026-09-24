@@ -238,7 +238,8 @@ def _push_quota_view(target_id: str, is_uid: bool) -> dict:
     """当前会话目标今日主动消息额度用量,供「数据统计」展示。
 
     额度是 **per 群 / per 用户** 的(QQ 官方接口限制),所以群里查的是本群、私信里查的是该用户自己的私信额度。
-    返回 ``{shown, is_group, used, limit, remaining, ratio, near_limit, exhausted, no_permission}``:
+    返回 ``{shown, is_group, used, limit, remaining, ratio, near_limit, exhausted, no_permission, total}``:
+      · ``total``          今日全部群(全部私信)的主动消息总条数
       · ``limit=0``        未设上限(仅展示用量,不告警)
       · ``shown=False``    无有效目标(不展示该行)
       · ``near_limit``     用量已达 ``PUSH_QUOTA_WARN_RATIO``(85%)但未用满 —— 黄色警告,提醒即将触顶
@@ -250,7 +251,7 @@ def _push_quota_view(target_id: str, is_uid: bool) -> dict:
     if not target_id:
         return {'shown': False, 'is_group': not is_uid, 'used': 0, 'limit': 0,
                 'remaining': 0, 'ratio': 0.0, 'near_limit': False,
-                'exhausted': False, 'no_permission': False}
+                'exhausted': False, 'no_permission': False, 'total': 0}
     from . import callbacks as _callbacks      # 函数内导入,避免模块级互引
     limit = int(_callbacks.ACTIVE_PUSH_DAILY_LIMIT or 0)
     used = metrics.active_push_used(target_id, is_uid)
@@ -268,6 +269,7 @@ def _push_quota_view(target_id: str, is_uid: bool) -> dict:
                            and ratio >= PUSH_QUOTA_WARN_RATIO),
         'exhausted': exhausted,
         'no_permission': no_perm,
+        'total': metrics.active_push_today()['dm_total' if is_uid else 'group_total'],
     }
 
 
@@ -1030,7 +1032,8 @@ async def lgtbot_data_stats(event, match):
             lines.append('⚠️ 本群未开启全量消息权限，无法推送主动消息')
             lines.append('   请 @机器人 发送「全量申请」完成授权')
         else:
-            scope = '本群' if pq['is_group'] else '你的私信'
+            scope = '本群' if pq['is_group'] else '本私信'
+            total = f' · {"群" if pq["is_group"] else "私信"}总计 {pq.get("total", 0)} 条'
             if pq['limit']:
                 if pq['exhausted']:
                     icon, tail = '⚠️', '（已用满，改用刷新按钮，次日 0 点恢复）'
@@ -1040,9 +1043,9 @@ async def lgtbot_data_stats(event, match):
                 else:
                     icon, tail = '📮', ''
                 lines.append(f'{icon} {scope}今日主动消息: '
-                             f'{pq["used"]}/{pq["limit"]} 条{tail}')
+                             f'{pq["used"]}/{pq["limit"]} 条{tail}{total}')
             else:
-                lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条')
+                lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条{total}')
     await event.reply('\n'.join(lines))
 
 

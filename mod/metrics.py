@@ -528,9 +528,8 @@ _TREND_PLAYERS_SQL = ('SELECT date(m.finish_time) d, COUNT(DISTINCT uwm.user_id)
                       f'WHERE m.finish_time >= {_TREND_SINCE} '
                       'GROUP BY d ORDER BY d')
 
-# 面板「游戏数据」四张今日卡的近 10 日小字行 + 对局人次卡,只有 ``ten_day=True`` 才查 ——
-# /数据统计 指令在事件循环里同步查库,用不上的不跑。近 10 日与趋势图同窗(含今天),上一个 10 日同
-# prev10_matches,四项口径同 _span_stats。user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表,
+# 面板「游戏数据」四张今日卡的近 10 日小字行 + 对局人次卡,只有 ``ten_day=True`` 才查,/数据统计 指令在事件循环里同步查库,用不上的不跑。
+# 近 10 日与趋势图同窗(含今天),上一个 10 日同 prev10_matches,四项口径同 _span_stats。user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表,
 # 所以两个窗口连同今日 / 昨日同时段的人次合成一条一次扫完(仿真 200 万人次时逐项单查慢约 1.8 秒)。
 _PREV10_SINCE = "datetime('now','localtime','start of day','-19 days')"
 _TEN_DAY_SQL = {

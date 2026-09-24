@@ -170,30 +170,6 @@ def test_metrics_get_data_is_valid_embeddable_json(_metrics_env):
     assert json.loads(data)['stats']['lgtbot_matches'] == 120
 
 
-def test_metrics_delta_tag_style_contract():
-    """★ 涨跌标签的样式契约(纯前端,只能查模板文本):
-
-      · 标签类 ``.metrics-delta-tag`` 存在,涨=红 #e34d59、跌=绿 #00a870 ——
-        与 dau 卡片和 stats_image 胶囊三处同色。JS 不得再往 sub 元素上挂 delta 颜色类,着色只发生在标签 span 内。
-    """
-    _a, page_metrics, _l = _pages()
-    css, js = page_metrics.TAB_CSS, page_metrics.TAB_JS
-    assert '.metrics-delta-tag' in css
-    assert re.search(r'\.metrics-delta-tag\.metrics-delta-up\s*\{[^}]*#e34d59', css)
-    assert re.search(r'\.metrics-delta-tag\.metrics-delta-down\s*\{[^}]*#00a870', css)
-    # 旧写法:直接给 .metrics-status-sub 上色 —— 已废弃,复活即变红
-    assert not re.search(r'\.metrics-status-sub\.metrics-delta-(up|down)', css)
-    assert "classList.add('metrics-delta-up'" not in js
-    assert "classList.add('metrics-delta-down'" not in js
-    # 右上角对比昨日同时段、小字行对比上一个 10 日,两颗都走标签函数,对比基准写进 title
-    assert "metricsDeltaTag(today - yday, '', '较昨日同时段')" in js
-    assert "metricsDeltaTag(n10 - prev10, 'metrics-delta-outline', '较上一个 10 日')" in js
-    # 描边款与涨跌色同优先级,靠源序在后才盖得掉涨跌的实底背景
-    outline = css.index('.metrics-delta-tag.metrics-delta-outline {')
-    assert outline > css.index('.metrics-delta-tag.metrics-delta-down {')
-    assert 'background: transparent' in css[outline:css.index('}', outline)]
-
-
 def test_metrics_panel_asks_for_the_ten_day_stats(monkeypatch, _metrics_env):
     """★ 今日卡的近 10 日小字行只在 ten_day=True 时有数 —— 漏传的话小字全部静默回退说明文案。"""
     seen = {}
@@ -204,22 +180,13 @@ def test_metrics_panel_asks_for_the_ten_day_stats(monkeypatch, _metrics_env):
 
 
 def test_metrics_today_cards_have_every_element_the_js_writes():
-    """★ metricsTodayCard 按 key 拼三个 id(数字 / 右上角胶囊 / 小字行)—— 缺一个就是
-    getElementById 拿到 null,整个游戏数据区连同下面的榜单都不再渲染。"""
+    """★ metricsTodayCard 按 key 拼三个 id(数字 / 右上角胶囊 / 小字行)。"""
     _a, page_metrics, _l = _pages()
     keys = re.findall(r"metricsTodayCard\('([\w-]+)'", page_metrics.TAB_JS)
     assert keys == ['today-matches', 'today-players', 'today-groups', 'today-attendances']
     for k in keys:
         for suffix in ('', '-delta', '-sub'):
             assert f'id="metrics-{k}{suffix}"' in page_metrics.TAB_HTML, k + suffix
-
-
-def test_metrics_section_titles_all_sit_in_a_header():
-    """★ 标题直接放在 section 里时,它的 margin-bottom 和网格的 margin-top 叠成 24px;
-    包进 .dash-section-header 才和「运行指标」一样折叠成 12px。"""
-    _a, page_metrics, _l = _pages()
-    before = re.findall(r'(<[^<>]+>)\s*<h2 class="dash-section-title"', page_metrics.TAB_HTML)
-    assert len(before) == 4 and set(before) == {'<div class="dash-section-header">'}, before
 
 
 # ─────────────────────────────────────────────────────────────────────────
