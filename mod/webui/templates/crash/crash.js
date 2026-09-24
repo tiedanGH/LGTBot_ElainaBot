@@ -83,7 +83,7 @@ function crashApplyData(data) {
       '<td class="crash-col-chk"><input type="checkbox" class="crash-check" data-name="' + name + '"></td>' +
       '<td class="crash-col-time">' + escapeHtml(crashFmtTime(d.mtime)) + '</td>' +
       '<td class="crash-col-sig">' + sig + '</td>' +
-      '<td class="crash-col-size dash-mono">' + crashFmtBytes(d.size) + '</td>' +
+      '<td class="crash-col-size dash-mono">' + escapeHtml(crashFmtBytes(d.size)) + '</td>' +
       '<td class="crash-col-name"><span class="dash-mono">' + name + '</span></td>' +
       '<td class="crash-col-uid">' + crashUidCell(d) + '</td>' +
       '<td class="crash-col-gid">' + crashGidCell(d) + '</td>' +
@@ -185,7 +185,7 @@ function coreApplyData(data) {
         name + '" data-dir="' + d + '"></td>' +
       '<td class="crash-col-time">' + escapeHtml(crashFmtTime(c.crash_ts)) + '</td>' +
       '<td class="crash-col-sig">' + coreSigCell(a) + '</td>' +
-      '<td class="crash-col-size dash-mono">' + crashFmtBytes(c.size) + '</td>' +
+      '<td class="crash-col-size dash-mono">' + escapeHtml(crashFmtBytes(c.size)) + '</td>' +
       '<td class="crash-col-name"><span class="dash-mono" title="' + escapeHtml(tip) + '">' +
         name + '</span></td>' +
       '<td class="crash-col-mod">' + coreModuleCell(a) + '</td>' +
@@ -313,12 +313,12 @@ function crashRenderMeta(meta) {
   meta = meta || {};
   const rows = [];
   const sigName = meta.signal_name || (meta.signal != null ? ('sig' + meta.signal) : '未知');
-  rows.push(crashMetaItem('信号', escapeHtml(sigName) + (meta.signal != null ? ' (' + meta.signal + ')' : '')));
+  rows.push(crashMetaItem('信号', escapeHtml(sigName) + (meta.signal != null ? ' (' + escapeHtml(String(meta.signal)) + ')' : '')));
   rows.push(crashMetaItem('时间', escapeHtml(crashFmtTime(meta.mtime))));
-  rows.push(crashMetaItem('大小', crashFmtBytes(meta.size)));
+  rows.push(crashMetaItem('大小', escapeHtml(crashFmtBytes(meta.size))));
   if (meta.si_addr) rows.push(crashMetaItem('si_addr', escapeHtml(meta.si_addr)));
-  if (meta.pid != null) rows.push(crashMetaItem('pid', meta.pid));
-  if (meta.tid != null) rows.push(crashMetaItem('tid', meta.tid));
+  if (meta.pid != null) rows.push(crashMetaItem('pid', escapeHtml(String(meta.pid))));
+  if (meta.tid != null) rows.push(crashMetaItem('tid', escapeHtml(String(meta.tid))));
   // 触发源分「用户」「群」两项独立展示;私信在群项标「私信触发」
   rows.push(crashMetaItem('用户', meta.uid ? escapeHtml(meta.uid) : '—'));
   let gidVal;
