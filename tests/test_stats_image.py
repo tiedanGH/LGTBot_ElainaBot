@@ -615,10 +615,11 @@ def test_unlimited_push_quota_number_matches_the_other_tiles(monkeypatch):
 
 
 def _quota_draw_calls(monkeypatch, pq):
-    """渲染一张带主动消息行的图,记下全部文字 (xy, 文本, 字体, 颜色) 与圆角矩形 (box, 填充)。"""
+    """渲染一张带主动消息行的图,记下全部文字 (xy, 文本, 字体, 颜色)、圆角矩形与纸飞机图标。"""
     from PIL import ImageDraw
-    texts, rects = [], []
+    texts, rects, icons = [], [], []
     real_text, real_rect = ImageDraw.ImageDraw.text, ImageDraw.ImageDraw.rounded_rectangle
+    real_push = stats_image._push_icon
 
     def text(self, xy, t, *a, **kw):
         texts.append((xy, t, kw.get('font'), kw.get('fill')))
@@ -628,11 +629,16 @@ def _quota_draw_calls(monkeypatch, pq):
         rects.append((tuple(box), kw.get('fill')))
         return real_rect(self, box, *a, **kw)
 
+    def push_icon(d, ix, iy, fg, size=52):
+        icons.append((ix, iy, fg, size))
+        return real_push(d, ix, iy, fg, size)
+
     monkeypatch.setattr(ImageDraw.ImageDraw, 'text', text)
     monkeypatch.setattr(ImageDraw.ImageDraw, 'rounded_rectangle', rect)
+    monkeypatch.setattr(stats_image, '_push_icon', push_icon)
     stats_image.render_stats_image(dict(_sample_stats(), push_quota=pq))
     monkeypatch.undo()
-    return texts, rects
+    return texts, rects, icons
 
 
 @pytest.mark.parametrize('is_group, label', [(True, '群总计'), (False, '私信总计')])
@@ -641,14 +647,35 @@ def test_push_quota_row_trails_the_scene_total(monkeypatch, is_group, label):
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
-    texts, _ = _quota_draw_calls(monkeypatch, {
+    texts, _, icons = _quota_draw_calls(monkeypatch, {
         'shown': True, 'is_group': is_group, 'used': 50, 'limit': 50, 'remaining': 0,
         'near_limit': False, 'exhausted': True, 'no_permission': False, 'total': 4321})
     at = {t: (xy, fill) for xy, t, _font, fill in texts}
     assert at['50 / 50'][1] == stats_image._RED
     assert at[label][1] == stats_image._TEXT_MUTED
     assert at['4,321'][1] == stats_image._ACCENT
-    assert at['50 / 50'][0][0] < at[label][0][0] < at['4,321'][0][0]
+    # 标签前是缩小版纸飞机
+    assert [(fg, size) for _x, _y, fg, size in icons] == [(stats_image._TEAL, 30)]
+    assert at['50 / 50'][0][0] < icons[0][0] < at[label][0][0] < at['4,321'][0][0]
+
+
+@pytest.mark.parametrize('is_group, scope, label', [(True, '本群', '今日群主动总计'), (False, '本私信', '今日私信主动总计')])
+def test_unlimited_push_quota_splits_into_two_tiles(monkeypatch, is_group, scope, label):
+    """★ 不限量没有进度条:拆成和上面指标卡一样的左右两张 —— 左本会话用量,右今日总计配整张纸飞机。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    texts, _, icons = _quota_draw_calls(monkeypatch, {
+        'shown': True, 'is_group': is_group, 'used': 312, 'limit': 0, 'remaining': 0,
+        'near_limit': False, 'exhausted': False, 'no_permission': False, 'total': 4321})
+    at = {t: (xy, getattr(font, 'size', None), fill) for xy, t, font, fill in texts}
+    (lx, ly), lsize, _ = at['312']
+    (rx, ry), rsize, rfill = at['4,321']
+    assert lsize == rsize == 48 and ly == ry and rfill == stats_image._ACCENT
+    # 两张的横向位置与上面 2×2 指标卡的左右两列对齐
+    assert lx == at[f'{scope}今日主动消息'][0][0] == at['今日活跃玩家'][0][0]
+    assert rx == at[label][0][0] == at['今日活跃群聊'][0][0]
+    assert [(fg, size) for _x, _y, fg, size in icons] == [(stats_image._TEAL, 52)]
 
 
 def test_quota_tip_leaves_a_gap_above_the_long_value_row(monkeypatch):
@@ -656,14 +683,14 @@ def test_quota_tip_leaves_a_gap_above_the_long_value_row(monkeypatch):
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
-    texts, rects = _quota_draw_calls(monkeypatch, {
+    texts, rects, icons = _quota_draw_calls(monkeypatch, {
         'shown': True, 'is_group': True, 'used': 20000, 'limit': 20000, 'remaining': 0,
         'near_limit': False, 'exhausted': True, 'no_permission': False, 'total': 1234567})
     tip = [box for box, fill in rects
            if fill == stats_image._tint(stats_image._RED) and box[2] - box[0] > 200]
     assert len(tip) == 1, rects
-    # 粗体描边 1px,墨迹顶端再往上算 1px
+    # 粗体描边 1px,墨迹顶端再往上算 1px;总计前的小图标同样不能顶到胶囊
     tops = [xy[1] + font.getbbox(t)[1] - 1 for xy, t, font, _fill in texts
             if t in ('20,000 / 20,000', '1,234,567')]
-    assert len(tops) == 2
-    assert tip[0][3] + 4 <= min(tops), (tip, tops)
+    assert len(tops) == 2 and len(icons) == 1
+    assert tip[0][3] + 4 <= min(tops + [icons[0][1]]), (tip, tops, icons)
