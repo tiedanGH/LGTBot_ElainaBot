@@ -33,6 +33,7 @@ import shutil
 import sys
 import time
 import urllib.request
+from urllib.parse import urlsplit
 
 from core.base.logger import get_logger, PLUGIN
 from . import _prebuilt_swap, boot
@@ -77,12 +78,11 @@ def _github_owner_repo() -> tuple[str, str]:
     except Exception:
         pass
     try:
-        s = url.rstrip('/')
-        if s.endswith('.git'):
-            s = s[:-4]
-        parts = s.split('/')
-        if len(parts) >= 5 and 'github.com' in parts[2]:
-            return parts[3], parts[4]
+        u = urlsplit(url.strip())
+        segs = [s for s in u.path.split('/') if s]
+        if (u.hostname or '') in ('github.com', 'www.github.com') and len(segs) >= 2:
+            repo = segs[1][:-4] if segs[1].endswith('.git') else segs[1]
+            return segs[0], repo
     except Exception:
         pass
     return 'tiedanGH', 'LGTBot_ElainaBot'
@@ -433,9 +433,13 @@ def _verify_manifest(root: str) -> None:
             manifest = json.load(f)
     except (OSError, ValueError) as e:
         raise ValueError(f'manifest.json 缺失或损坏: {e}')
+    base = os.path.realpath(root)
     for entry in manifest.get('files', []):
         rel, want = entry.get('path', ''), entry.get('sha256', '')
-        fp = os.path.join(root, rel.replace('/', os.sep))
+        # manifest 随包下载、不可信:../ 或绝对路径会让校验读到 staging 之外的文件
+        fp = os.path.realpath(os.path.join(base, rel.replace('/', os.sep)))
+        if not fp.startswith(base + os.sep):
+            raise ValueError(f'manifest 路径越界: {rel!r}')
         if not os.path.isfile(fp):
             raise ValueError(f'包内缺文件: {rel}')
         h = hashlib.sha256()

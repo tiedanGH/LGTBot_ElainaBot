@@ -272,6 +272,23 @@ def test_safe_members_rejects_unexpected_top(tmp_path):
             prebuilt._safe_members(zf)
 
 
+@pytest.mark.parametrize('rel', ['../outside.so', 'build/../../outside.so', 'ABS',
+                                 '../staging_evil/outside.so'])
+def test_verify_manifest_rejects_paths_outside_staging(tmp_path, rel):
+    """★ manifest 随包下载、不可信:../ 与绝对路径不能让校验读到 staging 之外的文件。"""
+    root = tmp_path / 'staging'
+    root.mkdir()
+    outside = tmp_path / 'outside.so'
+    outside.write_bytes(b'secret')
+    (tmp_path / 'staging_evil').mkdir()
+    (tmp_path / 'staging_evil' / 'outside.so').write_bytes(b'secret')
+    path = str(outside) if rel == 'ABS' else rel
+    (root / 'manifest.json').write_text(json.dumps({'files': [
+        {'path': path, 'sha256': hashlib.sha256(b'secret').hexdigest()}]}), encoding='utf-8')
+    with pytest.raises(ValueError, match='越界'):
+        prebuilt._verify_manifest(str(root))
+
+
 def test_extract_and_swap_installs(tmp_path):
     pkg = str(tmp_path / 'ok.zip')
     _build_pkg(pkg, {
