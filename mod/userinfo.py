@@ -3,7 +3,7 @@
 """主框架用户数据只读门面(替代旧 userdb 私有缓存)+ 昵称写回。
 
 数据源(全部为主框架 per-bot 库,路径 ``data/log/<appid>/``):
-  · ``data.db``       users(昵称) / members(好友) / groups_users(群内日活跃 JSON)
+  · ``data.db``       users(昵称) / members(好友) / group_members(群内活跃,一人一行;框架 2.1.0 前存在 groups_users.users JSON 列)
   · ``wakeup.db``     私信最后活跃日期(仅私信刷新)
   · ``statistics.db`` user_stats 终身消息统计(每日 04:00 聚合昨日,滞后一天)
   · ``message.db``    精确时间戳,仅日志留存期(默认 5 天)内可查
@@ -329,18 +329,42 @@ def _max_daily_key(raw) -> str:
 
 # ──────── 活跃度合并(列表 / 单用户共用口径) ──────────────────────────────
 # 最后活跃 = 三个日粒度来源取 max(均为 'YYYY-MM-DD',字典序即时间序):
-#   wakeup.last_msg_date(私信) / groups_users[].last_active(群内) /
+#   wakeup.last_msg_date(私信) / group_members.last_active(群内) /
 #   user_stats.daily_messages 最大键(统计,滞后一天)。
 # 精确时间戳仅 message.db 留存期内可得,由 last_active_exact 单用户查询。
 
-def _group_activity(bot) -> dict[str, str]:
-    """扫 groups_users 全部 JSON,反查 uid → 群内最大 last_active 日期。"""
+# 框架 query_data 出错只打 warning 并返回 [],靠异常回退旧结构不会触发,先看新表在不在
+_SQL_HAS_GROUP_MEMBERS = ("SELECT 1 FROM sqlite_master "
+                          "WHERE type = 'table' AND name = 'group_members'")
+_SQL_GROUP_ACTIVITY = ('SELECT m.user_id AS uid, MAX(m.last_active) AS day '
+                       'FROM group_members m JOIN groups_users g ON g.group_id = m.group_id '
+                       'WHERE g.in_group = 1')
+
+
+def _group_activity(bot, openid: str = '') -> dict[str, str]:
+    """uid → 群内最大 last_active 日期,只算机器人还在的群;给了 ``openid`` 就只查这一个人。"""
+    try:
+        if not bot.log_service.query_data(_SQL_HAS_GROUP_MEMBERS):
+            return _legacy_group_activity(bot, openid)
+        sql, params = _SQL_GROUP_ACTIVITY, ()
+        if openid:
+            sql, params = sql + ' AND m.user_id = ?', (openid,)
+        rows = bot.log_service.query_data(sql + ' GROUP BY m.user_id', params)
+    except Exception as e:
+        log.debug(f'userinfo._group_activity 查询异常: {e}')
+        return {}
+    return {str(r['uid']): str(r['day']) for r in rows or []
+            if r.get('uid') and r.get('day')}
+
+
+def _legacy_group_activity(bot, openid: str = '') -> dict[str, str]:
+    """框架 2.1.0 之前:成员以 JSON 存在 groups_users.users,扫全部群反查。"""
     out: dict[str, str] = {}
     try:
         rows = bot.log_service.query_data(
             'SELECT users FROM groups_users WHERE in_group = 1')
     except Exception as e:
-        log.debug(f'userinfo._group_activity 查询异常: {e}')
+        log.debug(f'userinfo._legacy_group_activity 查询异常: {e}')
         return out
     for r in rows or []:
         try:
@@ -353,6 +377,8 @@ def _group_activity(bot) -> dict[str, str]:
             if not isinstance(e, dict):
                 continue
             uid = str(e.get('userid') or '')
+            if openid and uid != openid:
+                continue
             day = str(e.get('last_active') or '')
             if uid and day > out.get(uid, ''):
                 out[uid] = day
@@ -364,7 +390,7 @@ def list_users(limit: int | None = None, offset: int = 0) -> list[dict]:
 
     基准集 = 与机器人交互过的用户(与 ``count_users`` 同口径,总数与行数一致,
     面板分页因此永远能翻到最后一名)。wakeup / 群名单 / 统计三源仅**补充**活跃
-    日期与消息数,不新增行 —— ``groups_users`` 名单含仅入群未互动的成员
+    日期与消息数,不新增行 —— 群成员名单含仅入群未互动的成员
     (GROUP_MEMBER_ADD 进群事件直接入名单,不经过 users 表的消息/按钮追踪),
     若为其建行会让列表大于「总用户」。
 
@@ -493,7 +519,7 @@ def get_user(openid: str) -> dict | None:
             last_day = str(rows[0].get('last_msg_date') or '')
     except Exception as e:
         log.debug(f'userinfo.get_user wakeup 查询异常: {e}')
-    gday = _group_activity(bot).get(openid, '')
+    gday = _group_activity(bot, openid).get(openid, '')
     if gday:
         found = True
         if gday > last_day:

@@ -32,6 +32,7 @@ class FakeLogService:
     def __init__(self, base_dir: str):
         self._base_dir = base_dir
         self.queued: list[tuple[str, tuple]] = []    # db_queue 调用记录
+        self.failed: list[tuple[str, str]] = []      # 失败的查询(框架那边每条都会打 warning)
 
     # 与框架 _base._resolve_db_path 一致:DAILY_TYPES 按日期分库,其余在根
     _DAILY = frozenset({'message', 'framework', 'error', 'lifecycle'})
@@ -49,6 +50,9 @@ class FakeLogService:
         try:
             conn.row_factory = sqlite3.Row
             return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        except sqlite3.Error as e:
+            self.failed.append((sql, str(e)))
+            return []
         finally:
             conn.close()
 
@@ -66,19 +70,39 @@ class FakeBot:
 
 # ──────── 建库 helpers(schema 对齐主框架) ────────────────────────────────
 
-def _init_data_db(base: str, users=(), members=(), groups=(), group_names=None) -> None:
+def _init_data_db(base: str, users=(), members=(), groups=(), group_names=None,
+                  legacy=False) -> None:
+    """``groups``: (群号, 成员 [{'userid', 'last_active'}], in_group)。
+    默认建框架 2.1.0 起的结构(成员一人一行存 group_members);``legacy=True`` 建旧结构,
+    成员以 JSON 存 groups_users.users,这时成员也可以直接给一段原始字符串(测坏 JSON)。
+    """
     conn = sqlite3.connect(os.path.join(base, 'data.db'))
     conn.execute('CREATE TABLE users (user_id TEXT PRIMARY KEY, '
                  "name TEXT DEFAULT '', state INTEGER DEFAULT 0)")
     conn.execute('CREATE TABLE members (user_id TEXT PRIMARY KEY)')
-    conn.execute('CREATE TABLE groups_users (group_id TEXT PRIMARY KEY, '
-                 "users TEXT DEFAULT '[]', group_name TEXT DEFAULT '', "
-                 'in_group INTEGER DEFAULT 1)')
+    if legacy:
+        conn.execute('CREATE TABLE groups_users (group_id TEXT PRIMARY KEY, '
+                     "users TEXT DEFAULT '[]', group_name TEXT DEFAULT '', "
+                     'in_group INTEGER DEFAULT 1)')
+        conn.executemany('INSERT INTO groups_users (group_id, users, in_group) VALUES (?,?,?)',
+                         [(g, m if isinstance(m, str) else json.dumps(m), i)
+                          for g, m, i in groups])
+    else:
+        conn.execute('CREATE TABLE groups_users (group_id TEXT PRIMARY KEY, '
+                     "group_name TEXT DEFAULT '', group_member_num INTEGER DEFAULT 0, "
+                     'is_admin INTEGER DEFAULT 0, is_full_access INTEGER DEFAULT 0, '
+                     'allow_proactive_msg INTEGER DEFAULT 0, in_group INTEGER DEFAULT 1)')
+        conn.execute('CREATE TABLE group_members (group_id TEXT NOT NULL, user_id TEXT NOT NULL, '
+                     "last_active TEXT NOT NULL DEFAULT '', member_role TEXT NOT NULL DEFAULT '', "
+                     "extra TEXT NOT NULL DEFAULT '', PRIMARY KEY (group_id, user_id)) WITHOUT ROWID")
+        conn.executemany('INSERT INTO groups_users (group_id, in_group) VALUES (?,?)',
+                         [(g, i) for g, _m, i in groups])
+        conn.executemany('INSERT INTO group_members (group_id, user_id, last_active) VALUES (?,?,?)',
+                         [(g, e['userid'], e.get('last_active', ''))
+                          for g, m, _i in groups for e in m])
     conn.executemany('INSERT INTO users (user_id, name) VALUES (?,?)', users)
     conn.executemany('INSERT INTO members (user_id) VALUES (?)',
                      [(m,) for m in members])
-    conn.executemany('INSERT INTO groups_users (group_id, users, in_group) '
-                     'VALUES (?,?,?)', groups)
     for gid, gname in (group_names or {}).items():
         conn.execute('INSERT INTO groups_users (group_id, group_name) VALUES (?,?) '
                      'ON CONFLICT(group_id) DO UPDATE SET group_name=excluded.group_name',
@@ -235,18 +259,20 @@ def test_avatar_url_with_and_without_appid(fake_bot, monkeypatch):
 
 # ──────── 列表合并 / 计数 ─────────────────────────────────────────────────
 
-def test_list_users_merges_three_day_sources(fake_bot):
+@pytest.mark.parametrize('legacy', [False, True])
+def test_list_users_merges_three_day_sources(fake_bot, legacy):
     base = fake_bot.log_service._base_dir
     _init_data_db(
         base,
         users=[('UA', '甲'), ('UB', '乙'), ('UC', '丙'), ('UD', '')],
-        groups=[('G1', json.dumps([
+        groups=[('G1', [
             {'userid': 'UB', 'last_active': _day(-1)},      # 乙:群内昨天
             {'userid': 'UC', 'last_active': _day(-9)},
             # 仅入群未互动的成员(进群事件入名单,不在 users 表)—— 不得进列表,
             # 否则行数会超过「总用户」并挤爆 limit(实测 923 总数 vs 1000 行)
             {'userid': 'UX_ROSTER_ONLY', 'last_active': _day(0)},
-        ]), 1)],
+        ], 1)],
+        legacy=legacy,
     )
     _init_wakeup_db(base, rows=[('UA', _day(0))])            # 甲:私信今天
     _init_stats_db(base, rows=[
@@ -291,14 +317,30 @@ def test_list_users_default_all_and_offset_blocks(fake_bot):
     assert userinfo.list_users(limit=1000, offset=2000) == []   # 越界块为空
 
 def test_list_users_corrupt_group_json_skipped(fake_bot):
+    """旧结构(框架 2.1.0 前)的成员 JSON 损坏时跳过该群。"""
     base = fake_bot.log_service._base_dir
-    _init_data_db(base, users=[('UA', '甲')],
+    _init_data_db(base, users=[('UA', '甲')], legacy=True,
                   groups=[('G1', '{not json!!', 1),
-                          ('G2', json.dumps([{'userid': 'UA',
-                                              'last_active': _day(0)}]), 1)])
+                          ('G2', [{'userid': 'UA', 'last_active': _day(0)}], 1)])
     out = userinfo.list_users()
     assert out[0]['openid'] == 'UA'
     assert out[0]['last_active_date'] == _day(0)             # 坏 JSON 不拖垮好群
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_group_activity_same_rules_on_both_member_stores(fake_bot, legacy):
+    """★ 框架 2.1.0 起成员一人一行存 group_members,之前在 groups_users.users JSON 列,两种结构同一口径。"""
+    _init_data_db(fake_bot.log_service._base_dir, legacy=legacy, groups=[
+        ('G1', [{'userid': 'U1', 'last_active': _day(-5)},
+                {'userid': 'U2', 'last_active': _day(-1)}], 1),
+        ('G2', [{'userid': 'U1', 'last_active': _day(-2)}], 1),
+        ('GLEFT', [{'userid': 'U1', 'last_active': _day(0)},
+                   {'userid': 'U3', 'last_active': _day(0)}], 0),
+    ])
+    assert userinfo._group_activity(fake_bot) == {'U1': _day(-2), 'U2': _day(-1)}
+    assert userinfo._group_activity(fake_bot, 'U1') == {'U1': _day(-2)}
+    assert userinfo._group_activity(fake_bot, 'U3') == {}
+    assert fake_bot.log_service.failed == []
 
 
 def test_count_users(fake_bot):
@@ -336,6 +378,16 @@ def test_get_user_found_and_none(fake_bot):
     assert userinfo.get_user('') is None
 
 
+@pytest.mark.parametrize('legacy', [False, True])
+def test_get_user_found_by_group_membership_alone(fake_bot, legacy):
+    """「查询id」:只在群成员名单里出现(没私信、没统计)也要查得到,日期取群内最后活跃。"""
+    _init_data_db(fake_bot.log_service._base_dir, legacy=legacy,
+                  groups=[('G1', [{'userid': 'UG', 'last_active': _day(-3)}], 1)])
+    u = userinfo.get_user('UG')
+    assert u is not None and u['last_active_date'] == _day(-3)
+    assert fake_bot.log_service.failed == []
+
+
 # ──────── 群名批量查询(仪表盘「进行中的对局」展示名用) ────────────────────
 
 def test_get_group_names_batches_and_filters(fake_bot, tmp_path):
@@ -364,8 +416,8 @@ def test_get_group_names_edge_cases(fake_bot, tmp_path):
 def test_count_groups_excludes_left_groups(fake_bot, tmp_path):
     """★ 与系统插件「用户统计」同源,但多带 in_group 过滤 —— 框架
     _handle_group_del 只把该列置 0 不删行,不过滤会把早退掉的群算进来。"""
-    _init_data_db(str(tmp_path), groups=[('G1', '[]', 1), ('G2', '[]', 1),
-                                         ('GLEFT', '[]', 0)])
+    _init_data_db(str(tmp_path), groups=[('G1', [], 1), ('G2', [], 1),
+                                         ('GLEFT', [], 0)])
     assert userinfo.count_groups() == 2
 
 

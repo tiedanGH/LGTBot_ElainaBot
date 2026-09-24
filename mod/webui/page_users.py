@@ -6,7 +6,7 @@
 HTML / JS 片段在 ``templates/users/``。本侧只:
   · 加载并暴露 ``TAB_HTML`` / ``TAB_CSS`` / ``TAB_JS``(供 ``webui/main.py`` 拼装)
   · ``get_data()`` 经 ``userinfo`` 门面读**主框架**数据库(data.db users /
-    wakeup.db / groups_users / statistics.db)序列化为可嵌入的 JSON
+    wakeup.db / group_members / statistics.db)序列化为可嵌入的 JSON
   · ``page_handler`` —— ``GET /api/ext/lgtbot/users/page?offset=N`` 取剩余全部
 
 两段式懒加载:用户数据 payload 内嵌在面板整页 HTML 里(打开任何标签都要下载),
