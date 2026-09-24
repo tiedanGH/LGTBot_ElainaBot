@@ -111,11 +111,13 @@ def test_sponsor_entry_is_callback_not_input_fill():
 
 def test_sponsor_reply_buttons_are_links():
     """回执底部两个都是 link 按钮(只有 text + link,不依赖 bot 进程存活)。"""
+    from urllib.parse import urlsplit
     row = buttons.build_sponsor_buttons()[0]
     assert len(row) == 2
     assert all(set(b) == {'text', 'link'} for b in row)
-    assert 'tiedan.site/pages/support' in row[0]['link']
-    assert 'afdian.com' in row[1]['link']
+    site, afdian = (urlsplit(b['link']) for b in row)
+    assert site.hostname == 'tiedan.site' and site.path.startswith('/pages/support')
+    assert afdian.hostname == 'afdian.com'
 
 
 # ─────────────────────────────────────────────────────────────────────────

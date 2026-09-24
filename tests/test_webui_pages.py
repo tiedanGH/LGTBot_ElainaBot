@@ -1103,21 +1103,52 @@ def test_planned_restart_dialog_defaults_to_auto():
     assert 'if (cbEl) cbEl.checked = !!checkboxChecked;' in html
 
 
+def _compile_css_math(expr: str):
+    """把只含 + - * /、数字、W 与 clamp / max / min 的表达式编成 f(W),认不出的写法直接报错。"""
+    import ast
+    import operator
+    ops = {ast.Add: operator.add, ast.Sub: operator.sub,
+           ast.Mult: operator.mul, ast.Div: operator.truediv}
+    funcs = {'clamp': lambda lo, v, hi: max(lo, min(v, hi)), 'max': max, 'min': min}
+
+    def build(n):
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+            return lambda W, c=n.value: c
+        if isinstance(n, ast.Name) and n.id == 'W':
+            return lambda W: W
+        if isinstance(n, ast.BinOp) and type(n.op) in ops:
+            op, left, right = ops[type(n.op)], build(n.left), build(n.right)
+            return lambda W: op(left(W), right(W))
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub):
+            inner = build(n.operand)
+            return lambda W: -inner(W)
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in funcs and not n.keywords):
+            fn, args = funcs[n.func.id], [build(a) for a in n.args]
+            return lambda W: fn(*(a(W) for a in args))
+        raise ValueError(f'CSS 表达式里有认不出的写法: {ast.dump(n)}')
+    return build(ast.parse(expr, mode='eval').body)
+
+
 def _fold_columns(cards: int, card_min: int):
     """把 main.css 里 .fold-grid 的列宽公式翻成 Python:返回 (容器宽 → 实际列数, gap)。"""
     import math
     css = _tab_template(_main(), 'main', 'css')
-    body = css[css.index('.fold-grid {'):]
-    decl = dict(re.findall(r'([\w-]+):\s*([^;]+);', body[:body.index('}')]))
+    body = css[css.index('.fold-grid {') + len('.fold-grid {'):]
+    decl = {}
+    for part in body[:body.index('}')].split(';'):
+        name, sep, value = part.partition(':')
+        if sep:
+            decl[name.strip()] = value.strip()
     decl.update({'--cards': str(cards), '--card-min': f'{card_min}px'})
-    expr = re.fullmatch(r'repeat\(auto-fit, minmax\((.*), 1fr\)\)',
-                        decl['grid-template-columns']).group(1)
+    head, tail = 'repeat(auto-fit, minmax(', ', 1fr))'
+    grid = decl['grid-template-columns']
+    assert grid.startswith(head) and grid.endswith(tail), grid
+    expr = grid[len(head):-len(tail)]
     while 'var(' in expr:
         expr = re.sub(r'var\((--[\w-]+)\)', lambda m: f'({decl[m.group(1)]})', expr)
-    expr = re.sub(r'(\d*\.?\d+)px', r'\1', expr.replace('100%', 'W').replace('calc(', '('))
-    assert set(re.findall(r'[A-Za-z_]+', expr)) <= {'W', 'clamp', 'max', 'min'}, expr
-    track = eval('lambda W: ' + expr,
-                 {'clamp': lambda lo, v, hi: max(lo, min(v, hi)), 'max': max, 'min': min})
+    expr = re.sub(r'(\d+(?:\.\d+)?|\.\d+)px', r'\1', expr.replace('100%', 'W').replace('calc(', '('))
+    track = _compile_css_math(expr)
     gap = float(decl['--gap'][:-2])
 
     def columns(width: float) -> int:
