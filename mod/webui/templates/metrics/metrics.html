@@ -16,7 +16,7 @@
   <!-- ──── ① 数据统计 ──── -->
   <section class="dash-section">
     <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-chart-bar"/></svg><span>数据统计</span></h2>
-    <div class="metrics-status-grid">
+    <div class="metrics-status-grid fold-grid" style="--cards: 6">
       <div class="metrics-status-card">
         <div class="metrics-status-label">用户总数</div>
         <div id="metrics-stat-user-cache" class="metrics-status-value metrics-value-big">—</div>
@@ -59,10 +59,10 @@
         <span id="metrics-path" class="dash-meta-value dash-mono">—</span>
       </div>
     </div>
-    <div class="metrics-status-grid">
+    <div class="metrics-status-grid fold-grid" style="--cards: 5">
       <div class="metrics-status-card">
         <div class="metrics-status-label metrics-label-row">
-          <span>图床上传成功率</span>
+          <span>图床成功率</span>
           <span id="metrics-hosting-badge" class="metrics-badge metrics-badge-muted" title="">—</span>
         </div>
         <div id="metrics-upload-rate" class="metrics-status-value metrics-value-big">—</div>
@@ -94,7 +94,7 @@
   <!-- ──── ③ 游戏数据 ──── -->
   <section class="dash-section">
     <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gamepad"/></svg><span>游戏数据</span></h2>
-    <div class="metrics-status-grid">
+    <div class="metrics-status-grid fold-grid" style="--cards: 6">
       <div class="metrics-status-card">
         <div class="metrics-status-label">今日对局</div>
         <div id="metrics-today-matches" class="metrics-status-value">—</div>
@@ -127,7 +127,7 @@
       </div>
     </div>
     <div id="metrics-game-errors" class="metrics-errors" style="display:none"></div>
-    <div class="metrics-tables">
+    <div class="metrics-tables fold-grid" style="--cards: 4">
       <div class="metrics-table-wrap">
         <table class="metrics-table">
           <thead><tr><th class="metrics-col-rank">#</th><th>游戏局数总榜</th><th class="metrics-col-count">局数</th></tr></thead>

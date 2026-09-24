@@ -1104,3 +1104,77 @@ def test_planned_restart_dialog_defaults_to_auto():
     html = wm._render_html()
     assert 'checkboxChecked: true' in html
     assert 'if (cbEl) cbEl.checked = !!checkboxChecked;' in html
+
+
+def _fold_columns(cards: int, card_min: int):
+    """把 main.css 里 .fold-grid 的列宽公式翻成 Python:返回 (容器宽 → 实际列数, gap)。"""
+    import math
+    css = _tab_template(_main(), 'main', 'css')
+    body = css[css.index('.fold-grid {'):]
+    decl = dict(re.findall(r'([\w-]+):\s*([^;]+);', body[:body.index('}')]))
+    decl.update({'--cards': str(cards), '--card-min': f'{card_min}px'})
+    expr = re.fullmatch(r'repeat\(auto-fit, minmax\((.*), 1fr\)\)',
+                        decl['grid-template-columns']).group(1)
+    while 'var(' in expr:
+        expr = re.sub(r'var\((--[\w-]+)\)', lambda m: f'({decl[m.group(1)]})', expr)
+    expr = re.sub(r'(\d*\.?\d+)px', r'\1', expr.replace('100%', 'W').replace('calc(', '('))
+    assert set(re.findall(r'[A-Za-z_]+', expr)) <= {'W', 'clamp', 'max', 'min'}, expr
+    track = eval('lambda W: ' + expr,
+                 {'clamp': lambda lo, v, hi: max(lo, min(v, hi)), 'max': max, 'min': min})
+    gap = float(decl['--gap'][:-2])
+
+    def columns(width: float) -> int:
+        t = math.ceil(track(width) * 64) / 64
+        return max(1, int((width + gap) // (t + gap)))
+    return columns, gap
+
+
+@pytest.mark.parametrize('cards, card_min', [
+    (6, 180), (5, 180), (4, 180),   # 指标面板状态卡 / 数据备份 / 昵称审核
+    (5, 220),                       # 崩溃转储
+    (4, 300),                       # 指标面板 4 张小表
+])
+def test_fold_grid_goes_straight_from_one_row_to_two(cards, card_min):
+    """★ 放得下就一行,放不下直接对半折(6→3+3、5→3+2、4→2+2),再窄才继续减列。"""
+    columns, gap = _fold_columns(cards, card_min)
+    steps = [cards] + list(range((cards + 1) // 2, 0, -1))      # 6 → [6, 3, 2, 1]
+    for i in range(1200, 7200):
+        w = i / 4
+        want = next(c for c in steps if c * (card_min + gap) - gap <= w or c == 1)
+        assert columns(w) == want, (cards, card_min, w)
+
+
+def test_fold_grids_declare_their_real_card_count():
+    """★ --cards 必须等于网格里实际的卡片数 —— 加了卡忘改数字,要么提前折行,要么又冒出孤卡行。"""
+    from html.parser import HTMLParser
+    void = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+            'link', 'meta', 'source', 'track', 'wbr'}
+
+    class Grids(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack, self.found = [], []
+
+        def handle_starttag(self, tag, attrs):
+            if self.stack and self.stack[-1]:
+                self.stack[-1][1] += 1
+            if tag in void:
+                return
+            a = dict(attrs)
+            m = re.search(r'--cards: (\d+)', a.get('style') or '')
+            grid = 'fold-grid' in (a.get('class') or '').split()
+            self.stack.append([int(m.group(1)) if m else None, 0] if grid else None)
+
+        def handle_endtag(self, tag):
+            if tag in void:
+                return
+            e = self.stack.pop()
+            if e:
+                self.found.append(tuple(e))
+
+    wm = _main()
+    for tab, want in (('metrics', [6, 5, 6, 4]), ('backup', [4]), ('crash', [5]), ('review', [4])):
+        p = Grids()
+        p.feed(_tab_template(wm, tab, 'html'))
+        assert [n for _d, n in p.found] == want, tab
+        assert all(d == n for d, n in p.found), (tab, p.found)

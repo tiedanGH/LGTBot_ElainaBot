@@ -10,12 +10,8 @@
 .metrics-topbar .dash-section-meta { font-size: 14px; gap: 10px; }
 .metrics-topbar .dash-btn-small { padding: 6px 14px; font-size: 13px; }
 
-/* ── 状态卡网格(三个区共用) ── */
-.metrics-status-grid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  margin-top: 12px;
-}
+/* ── 状态卡网格(三个区共用,列数走 .fold-grid) ── */
+.metrics-status-grid { margin-top: 12px; }
 .metrics-status-card {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
   padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
@@ -55,12 +51,8 @@
   color: var(--text-muted);
 }
 
-/* ── 4 张小表的两列自适应网格 ── */
-.metrics-tables {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  margin-top: 12px;
-}
+/* ── 4 张小表:一行 4 张或 2+2(.fold-grid) ── */
+.metrics-tables { --card-min: 300px; margin-top: 12px; }
 .metrics-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border); border-radius: 8px;

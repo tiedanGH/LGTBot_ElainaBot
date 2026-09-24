@@ -2,11 +2,7 @@
    特定布局:状态卡 grid + 备份表格 + 操作 toolbar。 */
 
 /* ── 顶部 4 卡状态网格(最近备份 / 总数 / 占用 / 自动间隔) ── */
-.backup-status-grid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  margin-top: 12px;
-}
+.backup-status-grid { margin-top: 12px; }
 .backup-status-card {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
   padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;

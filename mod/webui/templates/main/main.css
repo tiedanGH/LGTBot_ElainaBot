@@ -262,6 +262,17 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .dash-mono { font-family: 'Consolas', 'Menlo', monospace; }
 .dash-section-meta .dash-mono { word-break: break-all; min-width: 0; }
 
+/* ── 卡片网格:放得下 --cards 张就排一行,放不下折成 ⌈N/2⌉ 列(6→3+3、5→3+2、4→2+2),
+   不经过 5+1、4+1;再窄才按 --card-min 继续减列。 */
+.fold-grid {
+  --card-min: 180px; --gap: 12px;
+  --one-row: calc((100% + var(--gap)) / var(--cards) - var(--gap) - .1px);
+  --two-rows: max(var(--card-min), (100% + var(--gap)) * 2 / (var(--cards) + 1) - var(--gap) - .1px);
+  --need: calc(var(--cards) * (var(--card-min) + var(--gap)) - var(--gap));
+  display: grid; gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(clamp(var(--one-row), (var(--need) - 100%) * 100000, var(--two-rows)), 1fr));
+}
+
 
 /* ── 通用按钮族 ── */
 .dash-btn {

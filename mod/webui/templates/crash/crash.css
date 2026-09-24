@@ -1,9 +1,6 @@
 /* 「💥 崩溃转储」标签样式 */
 
-.crash-status-grid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
+.crash-status-grid { --card-min: 220px; }
 .crash-status-card {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
   padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
