@@ -336,18 +336,6 @@ def test_get_user_found_and_none(fake_bot):
     assert userinfo.get_user('') is None
 
 
-def test_dm_active_count_window(fake_bot):
-    base = fake_bot.log_service._base_dir
-    _init_data_db(base)
-    _init_wakeup_db(base, rows=[
-        ('U1', _day(0)),      # 今天 → 计
-        ('U2', _day(-6)),     # 窗口边界(近 7 日含今天)→ 计
-        ('U3', _day(-7)),     # 窗外 → 不计
-    ])
-    assert userinfo.dm_active_count(7) == 2
-    assert userinfo.dm_active_count(8) == 3
-
-
 # ──────── 群名批量查询(仪表盘「进行中的对局」展示名用) ────────────────────
 
 def test_get_group_names_batches_and_filters(fake_bot, tmp_path):

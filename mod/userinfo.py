@@ -520,20 +520,3 @@ def get_user(openid: str) -> dict | None:
         'total_messages': total,
         'private_messages': private,
     }
-
-
-def dm_active_count(days: int = 7) -> int:
-    """近 ``days`` 日(含今天)私信过机器人的用户数(wakeup.db,日粒度)。"""
-    bot = _bound_bot()
-    if bot is None:
-        return 0
-    cutoff = (datetime.now().date() - timedelta(days=max(1, days) - 1)
-              ).strftime('%Y-%m-%d')
-    try:
-        rows = bot.log_service.query(
-            'wakeup', 'SELECT COUNT(*) AS n FROM log WHERE last_msg_date >= ?',
-            (cutoff,))
-        return int(rows[0].get('n') or 0) if rows else 0
-    except Exception as e:
-        log.debug(f'userinfo.dm_active_count 异常: {e}')
-        return 0
