@@ -581,3 +581,34 @@ def test_unranked_tag_absent_when_flag_is_false():
     g['top_games_today'] = [dict(t, unranked=False) for t in g['top_games_today']]
     assert stats_image.render_stats_image(g, sub_title='x') == \
            stats_image.render_stats_image(_sample_stats(), sub_title='x')
+
+
+def _push_value_call(monkeypatch, limit):
+    """渲染一张带主动消息行的图,返回那一行数字的 (xy, 字号)。"""
+    calls = []
+    real = stats_image._bold_text
+
+    def spy(d, xy, text, font, fill):
+        calls.append((xy, text, getattr(font, 'size', None)))
+        return real(d, xy, text, font, fill)
+
+    monkeypatch.setattr(stats_image, '_bold_text', spy)
+    g = dict(_sample_stats(), push_quota={
+        'shown': True, 'is_group': True, 'used': 312, 'limit': limit,
+        'remaining': max(0, limit - 312), 'near_limit': False,
+        'exhausted': False, 'no_permission': False})
+    stats_image.render_stats_image(g)
+    hits = [(xy, size) for xy, text, size in calls if text.startswith('312')]
+    assert len(hits) == 1, calls
+    monkeypatch.undo()
+    return hits[0]
+
+
+def test_unlimited_push_quota_number_matches_the_other_tiles(monkeypatch):
+    """★ 不限量(limit=0)没有进度条 —— 数字要和普通指标卡一样大、一样的位置。"""
+    pytest.importorskip('PIL')
+    (x0, y0), size_unlimited = _push_value_call(monkeypatch, 0)
+    (x1, y1), size_limited = _push_value_call(monkeypatch, 1000)
+    assert size_unlimited == 48        # 普通指标卡的数字字号
+    assert size_limited == 36          # 有上限:给进度条让出底部
+    assert y0 - y1 == 6                # 不限量落回指标卡的 cy+60,而不是 cy+54

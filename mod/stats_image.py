@@ -457,7 +457,11 @@ def _render(g: dict, sub_title: str) -> bytes | None:
         d.text((cx + 96, cy + 24), f'{scope}今日主动消息',
                font=_font(24), fill=_TEXT_MUTED)
         val_txt = f'{_fmt(used)} / {_fmt(limit)}' if limit else f'{_fmt(used)}'
-        _bold_text(d, (cx + 96, cy + 54), val_txt, _font(36), fg)
+        # 有上限时数字缩小上移,把卡片底部让给进度条;不限量(limit=0)没有进度条。
+        if limit:
+            _bold_text(d, (cx + 96, cy + 54), val_txt, _font(36), fg)
+        else:
+            _bold_text(d, (cx + 96, cy + 60), val_txt, _font(48), fg)
         tip = ''
         if exhausted:
             tip = '已用满 · 改用刷新按钮，次日 0 点恢复'
