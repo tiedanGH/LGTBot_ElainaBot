@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.detect.outputs.changed }}
+      sha: ${{ steps.push.outputs.sha }}
 
     steps:
       - name: Checkout repository
@@ -49,15 +50,20 @@ jobs:
           fi
 
       - name: Commit & push
+        id: push
         if: steps.detect.outputs.changed == 'true'
         run: |
           new_hash=$(git -C lgtbot rev-parse --short HEAD)
           git commit -m "update lgtbot submodule to ${new_hash}"
           git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   # 子模块有更新 → 重打预编译包
   trigger-prebuilt:
     needs: update-lgtbot
     if: needs.update-lgtbot.outputs.changed == 'true'
     uses: ./.github/workflows/prebuilt.yml
+    with:
+      # 被调用方沿用本 run 的 github.sha
+      ref: ${{ needs.update-lgtbot.outputs.sha }}
     secrets: inherit

@@ -3,6 +3,11 @@ name: Prebuilt
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ref:
+        description: 要构建的 commit;留空则检出触发事件的 commit
+        type: string
+        default: ''
   push:
     branches: [ main ]
     paths:
@@ -51,6 +56,7 @@ jobs:
       - name: Checkout repository and submodules
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           submodules: recursive
           fetch-depth: 0
 
@@ -91,6 +97,7 @@ jobs:
       - name: Checkout tools
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           sparse-checkout: tools
 
       - name: Download all artifacts
@@ -122,7 +129,7 @@ jobs:
           body: |
             自动构建的预编译包，**滚动更新，仅保留最新的 2 个版本**。
 
-            - 最新版由 commit `${{ github.sha }}` 触发构建
+            - 最新版由 commit `${{ inputs.ref || github.sha }}` 触发构建
             - 每档 zip 对应一个发行版 + Python ABI（见 asset 名与包内 `manifest.json`）
             - 下载后在插件 Web 面板「📦 预编译部署」页安装、切换、重启即可，**无需本地编译工具链**
 
