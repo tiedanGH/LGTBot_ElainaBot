@@ -800,7 +800,7 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
         'trend_10d': [],
     }
     g.update(cfg['flags'])
-    # 总计视图带 bot 规模行:群组 / 好友总数本身就是累计值,与这一屏口径一致。
+    # 总计视图带 bot 规模行:好友 / 群聊总数本身就是累计值,与这一屏口径一致。
     # **不给增减角标** —— 角标是「今日净变化」,放在累计视图里没有意义(需求亦如此)。
     if view == 'total':
         g['bot_groups'] = userinfo.count_groups()
@@ -837,8 +837,8 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
     ]
     if view == 'total':
         # 与图片的 bot 规模行对齐
-        lines += [f'👥 群组总数: {_n(g["bot_groups"])} 个',
-                  f'👤 好友总数: {_n(g["bot_friends"])} 人']
+        lines += [f'👤 好友总数: {_n(g["bot_friends"])} 人',
+                  f'👥 群聊总数: {_n(g["bot_groups"])} 个']
     if top_games[:3]:
         lines.append(f'🔥 {period}游戏榜:')
         lines += [f'  {i}、{t["game_name"]} ({t["count"]}局)'
@@ -893,7 +893,7 @@ async def lgtbot_data_stats(event, match):
       · 「数据统计YYYY」                        某个自然年
       · 「数据统计总」                          全部历史累计
     共同口径:无涨跌标识、无主动消息、无趋势图,第 4 卡为该期对局人次,双榜 TOP10;无对局直接报错。
-    「总」额外带群组 / 好友总数一行(无增减角标)。输入今天的日期等价于无参数(仍带涨跌)。
+    「总」额外带好友 / 群聊总数一行(无增减角标)。输入今天的日期等价于无参数(仍带涨跌)。
 
     配置了图床时优先走**图片通道**: stats_image 渲染统计卡片(线程池,不阻塞事件循环)→
     uploader 上传 → markdown 内嵌图回复;渲染失败(无 PIL / 无中文字体)或上传失败时回退下方纯文本。
@@ -1003,12 +1003,12 @@ async def lgtbot_data_stats(event, match):
         v = int(v)
         return f'（↑{v}）' if v > 0 else (f'（↓{abs(v)}）' if v < 0 else '（持平）')
 
-    if g.get('bot_groups') is not None:
-        lines.append(f'🏠 群组总数: {_n(g.get("bot_groups"))} 个'
-                     f'{_net(g.get("bot_groups_delta"))}')
     if g.get('bot_friends') is not None:
         lines.append(f'🧑‍🤝‍🧑 好友总数: {_n(g.get("bot_friends"))} 人'
                      f'{_net(g.get("bot_friends_delta"))}')
+    if g.get('bot_groups') is not None:
+        lines.append(f'🏠 群聊总数: {_n(g.get("bot_groups"))} 个'
+                     f'{_net(g.get("bot_groups_delta"))}')
     top_today = (g.get('top_games_today') or [])[:3]
     if top_today:
         lines.append('🔥 今日游戏榜:')

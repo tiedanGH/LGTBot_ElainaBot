@@ -712,7 +712,7 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
 
 
 async def test_stats_shows_bot_scale_with_net_change(monkeypatch):
-    """★ bot 规模(群组 / 好友总数)只注入**今日视图**,历史日 / 月视图不带
+    """★ bot 规模(好友 / 群聊总数)只注入**今日视图**,历史日 / 月视图不带
     ——「当前总数」不是那天的事实。括号里是今日净变化本身,不是与昨日对比。"""
     from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader, userinfo
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
@@ -734,8 +734,9 @@ async def test_stats_shows_bot_scale_with_net_change(monkeypatch):
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev, None)
     txt = ev.reply.await_args.args[0]
-    assert '群组总数: 1284 个（↑7）' in txt
+    assert '群聊总数: 1284 个（↑7）' in txt
     assert '好友总数: 5391 人（↓3）' in txt
+    assert txt.index('好友总数') < txt.index('群聊总数')       # 与图片同序:好友对着玩家、群聊对着群聊
 
     # 净变化为 0 → 持平;拿不到(None)→ 不带括号
     monkeypatch.setattr(userinfo, 'today_lifecycle_delta',
@@ -744,7 +745,7 @@ async def test_stats_shows_bot_scale_with_net_change(monkeypatch):
     ev2.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev2, None)
     txt2 = ev2.reply.await_args.args[0]
-    assert '群组总数: 1284 个（持平）' in txt2
+    assert '群聊总数: 1284 个（持平）' in txt2
     assert '好友总数: 5391 人\n' in txt2 or txt2.rstrip().endswith('好友总数: 5391 人')
 
     # 历史日视图不带这两项
@@ -757,7 +758,7 @@ async def test_stats_shows_bot_scale_with_net_change(monkeypatch):
     ev3 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0102')
     ev3.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev3, _re.match(dispatcher._P_STATS, '数据统计0102'))
-    assert '群组总数' not in ev3.reply.await_args.args[0]
+    assert '群聊总数' not in ev3.reply.await_args.args[0]
 
 
 async def test_stats_date_command_views_history(monkeypatch):
@@ -1009,7 +1010,7 @@ async def test_stats_year_command_views_year(monkeypatch):
     assert '当年对局人次: 3100 人次' in txt
     assert '↑' not in txt and '↓' not in txt          # 无涨跌
     assert '主动消息' not in txt                        # 无额度行
-    assert '群组总数' not in txt                        # 顶部总数行只给今日 / 累计
+    assert '群聊总数' not in txt                        # 顶部总数行只给今日 / 累计
 
 
 async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
@@ -1049,7 +1050,7 @@ async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
 
 
 async def test_stats_total_command_views_all_history(monkeypatch):
-    """数据统计总:累计口径 + **带**群组 / 好友总数(无增减角标)。"""
+    """数据统计总:累计口径 + **带**好友 / 群聊总数(无增减角标)。"""
     import re as _re
     from plugins.LGTBot_ElainaBot.mod import uploader, userinfo
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
@@ -1079,7 +1080,8 @@ async def test_stats_total_command_views_all_history(monkeypatch):
     assert '(全部历史)' in txt
     assert '累计对局: 12345 局' in txt and '累计对局人次: 45678 人次' in txt
     assert '累计玩家: 678 人' in txt and '累计群聊: 90 个' in txt
-    assert '群组总数: 1284 个' in txt and '好友总数: 5391 人' in txt
+    assert '好友总数: 5391 人' in txt and '群聊总数: 1284 个' in txt
+    assert txt.index('好友总数') < txt.index('群聊总数')
     assert '↑' not in txt and '↓' not in txt and '持平' not in txt   # 无增减标识
     assert '主动消息' not in txt
 
@@ -1125,7 +1127,7 @@ _THIS_YEAR = __import__('datetime').date.today().year
     (f'数据统计{_THIS_YEAR}', 'year_mode'),
 ])
 async def test_period_views_other_than_total_have_no_scale_row(monkeypatch, cmd, flag):
-    """★ 顶部群组 / 好友总数只给**今日**与**累计**两个视图(用户要求):
+    """★ 顶部好友 / 群聊总数只给**今日**与**累计**两个视图(用户要求):
     按日 / 按月 / 按年都不注入 bot_groups —— 「当前总数」不是那一期的事实。"""
     import re as _re
     from plugins.LGTBot_ElainaBot.mod import uploader

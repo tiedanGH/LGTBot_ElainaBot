@@ -171,7 +171,7 @@ def test_delta_pill_flat_is_neutral_grey():
 
 
 def test_bot_scale_row_only_when_data_present():
-    """群组 / 好友总数那一行由 dispatcher 只在今日视图注入 —— 缺数据(历史日 /
+    """好友 / 群聊总数那一行由 dispatcher 只在今日视图注入 —— 缺数据(历史日 /
     月视图)时整行不画,画了就多一行高度。"""
     pytest.importorskip('PIL')
     if not stats_image._find_font():
@@ -326,6 +326,33 @@ def test_bot_scale_row_uses_friend_icon_not_person(monkeypatch):
     # 前两行已经用掉 person / group;bot 规模行必须是 group + friend
     assert kinds.count('friend') == 1, kinds
     assert kinds.count('person') == 1, kinds     # 只有「今日活跃玩家」那一张
+
+
+@pytest.mark.parametrize('view, players, groups', [
+    ({}, '今日活跃玩家', '今日活跃群聊'),
+    ({'date_mode': True, 'total_mode': True, 'attendances': 9}, '累计玩家', '累计群聊'),
+])
+def test_bot_scale_tiles_sit_above_their_columns(monkeypatch, view, players, groups):
+    """★ 好友总数在玩家卡正上方、群聊总数在群聊卡正上方(用户要求)—— 数字和角标跟着各自的卡走,不是只换了标签。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    from PIL import ImageDraw
+    texts = []
+    real = ImageDraw.ImageDraw.text
+    monkeypatch.setattr(ImageDraw.ImageDraw, 'text',
+                        lambda self, xy, t, *a, **kw: texts.append((xy, t)) or real(self, xy, t, *a, **kw))
+    stats_image.render_stats_image(
+        dict(_sample_stats(with_trend=False, with_ranks=False), **view,
+             bot_groups=1284, bot_friends=5391, bot_groups_delta=7, bot_friends_delta=-3),
+        sub_title='x')
+    monkeypatch.undo()
+    at = {t: xy for xy, t in texts if xy[0] >= 0}          # 胶囊会先在画面外量一次宽度
+    assert at['好友总数'][0] == at[players][0] < at['群聊总数'][0] == at[groups][0]
+    assert at['好友总数'][1] == at['群聊总数'][1] < at[players][1]
+    assert at['5,391'][0] == at['好友总数'][0] and at['1,284'][0] == at['群聊总数'][0]
+    assert at['↓ 3'][0] < at['群聊总数'][0] < at['↑ 7'][0]
+    assert '群组总数' not in at
 
 
 def test_period_word_matches_dispatcher_span_views():

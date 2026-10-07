@@ -6,7 +6,7 @@
 light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左侧色条标题),
 内容为 lgtbot 游戏数据:
   · 数据总览,自上而下**先累计总数、再今日数据**:
-      1. 群组总数 / 好友总数(``g['bot_groups']`` / ``['bot_friends']``)——
+      1. 好友总数 / 群聊总数(``g['bot_friends']`` / ``['bot_groups']``)——
          这一行不是今日数据,所以底色换成 accent 系浅蓝紫 ``_TOTAL_BG``、角标用**描边**
          胶囊,与下面的今日行一眼区分;角标是**今日净变化**本身,不是与昨日对比
       2. 今日活跃玩家 / 今日活跃群聊(实底胶囊,对比昨日同时段)
@@ -26,7 +26,7 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
     ``year_mode``        当年  「数据统计YYYY」
     ``total_mode``       累计  「数据统计总」(前两卡也改「累计玩家 / 累计群聊」)
 
-第一行的群组 / 好友总数只在调用方注入 ``bot_groups`` / ``bot_friends`` 时出现 ——
+第一行的好友 / 群聊总数只在调用方注入 ``bot_friends`` / ``bot_groups`` 时出现 ——
 即今日视图(带今日净变化角标)与累计总计视图(**无角标**,``*_delta`` 留空)。
 
 PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)回退纯文本输出 —— 渲染是增强,不是依赖。
@@ -336,7 +336,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     # 主动消息额度(dispatcher 按当前会话目标注入;无则不画该行)
     pq = g.get('push_quota') or {}
     show_pq = bool(pq.get('shown'))
-    # bot 规模行(群组总数 / 好友总数)—— 同样由 dispatcher 只在今日视图注入
+    # bot 规模行(好友总数 / 群聊总数)—— 同样由 dispatcher 只在今日 / 累计视图注入
     show_scale = g.get('bot_groups') is not None or g.get('bot_friends') is not None
 
     head_h = 118                                            # 顶栏
@@ -402,17 +402,17 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     tile_w = (inner_w - 28 * 2 - tile_gap) // 2
     ty0 = y + 68
 
-    # ── bot 规模:群组总数 / 好友总数 —— 排在**第一行**(标题正下方)。
+    # ── bot 规模:好友总数 / 群聊总数 —— 排在**第一行**(标题正下方)。
     # 这两个是累计总数、不是今天的数字,所以放最上面先给全局盘子,再往下看今日。
-    # 数据来自框架绑定 bot 的 data.db(userinfo.count_groups / count_friends)。
+    # 数据来自框架绑定 bot 的 data.db(userinfo.count_friends / count_groups)。
     scale_rows = 0
     if show_scale:
         scale_rows = 1
-        # 图标 / 配色与今日行错开:群组用 accent 蓝(区别于活跃群聊的橙)
-        srow = [('群组总数', g.get('bot_groups'), g.get('bot_groups_delta'),
-                 'group', _ACCENT),
-                ('好友总数', g.get('bot_friends'), g.get('bot_friends_delta'),
-                 'friend', (232, 121, 249))]
+        # 图标 / 配色与今日行错开:群聊用 accent 蓝
+        srow = [('好友总数', g.get('bot_friends'), g.get('bot_friends_delta'),
+                 'friend', (232, 121, 249)),
+                ('群聊总数', g.get('bot_groups'), g.get('bot_groups_delta'),
+                 'group', _ACCENT)]
         cy = ty0
         for i, (label, val, delta, icon, fg) in enumerate(srow):
             cx = pad + 28 + i * (tile_w + tile_gap)
