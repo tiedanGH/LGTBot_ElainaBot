@@ -871,7 +871,7 @@ def _expire_ref(key: str) -> None:
     """建一个引用后把它的过期时间推到过去 —— 次数一条没用,纯粹是时间到了。"""
     import time as _t
     quota.refresh_ref(key, 'msg_id', 'M_OLD', 'APP')
-    quota._active_ref[key]['expires_at'] = _t.time() - 1
+    quota._active_ref[key][0]['expires_at'] = _t.time() - 1
 
 
 async def test_group_drops_when_ref_expired_by_time(monkeypatch):

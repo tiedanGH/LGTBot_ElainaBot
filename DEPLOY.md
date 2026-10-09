@@ -233,7 +233,7 @@ sponsor_enabled: false
 > 注意：图床域名需先在 QQ 开放平台「消息 URL 配置」里报备，否则消息不显示（COS 自有 CDN 与 Nature 的 download.nature.qq.com 最易过审）。
 
 > 💡 **全量群（可选）**：主框架 `config/bot.yaml` 里 `non_at_message.enabled` 或 `non_at_message.group_whitelist` 配的群，本插件会自动适配——
-> 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查，日常对话不会触发引擎），且这些群里 bot 不再追加「刷新会话」按钮，被动配额耗尽时直接走主动消息。
+> 监听 `GROUP_MESSAGE_CREATE`（仍强制 `is_at_self` 检查，日常对话不会触发引擎，但其消息 ID 会用来被动回复），且这些群里 bot 不再追加「刷新会话」按钮，被动配额耗尽时直接走主动消息。
 > 改动 `non_at_message.group_whitelist` 后约 5 秒（主框架配置 mtime 缓存）即生效，无需重启。
 
 **两种填写方式（任选其一）：**

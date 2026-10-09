@@ -220,7 +220,8 @@ async def _maybe_notify_urgent(event, content: str, gid: str) -> None:
         return
     try:
         # 直接 reply 会真实吃掉一条被动引用额度,和欢迎菜单分支一样先把计数烧掉对齐。
-        quota.try_consume_ref(helpers.target_key(gid, False))
+        quota.mark_used(helpers.target_key(gid, False),
+                        (event.event_id if event.is_interaction else event.message_id) or '')
         await event.reply(md)
     except Exception as e:
         log.warning(f'紧急公告通知发送失败 ({gid}): {e}')
@@ -1186,6 +1187,11 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         text_at = (_strip_text_at_prefix(content, event.appid or '')
                    if TEXT_AT_AS_MENTION else None)
         if text_at is None:
+            # 非@全量消息不进引擎,但它的 msg_id 同样能被动回复 5 次:登记进引用池,
+            # 对局刷屏时先用这些额度,少发受 20 条/分钟频控的主动消息。别的 bot 的消息不登记。
+            if event.message_id and event.group_id and getattr(event, 'is_bot', False) is not True:
+                quota.refresh_ref(helpers.target_key(event.group_id, False), 'msg_id',
+                                  event.message_id, event.appid or '')
             return
         content = text_at
 
@@ -1243,9 +1249,9 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         # 这里先把配额计数烧掉 1 条对齐,分支条件与上方 refresh_ref 完全镜像 —— refresh 没发生就不烧。
         if event.message_id:
             if event.is_group and gid:
-                quota.try_consume_ref(helpers.target_key(gid, False))
+                quota.mark_used(helpers.target_key(gid, False), event.message_id)
             elif event.is_direct and uid:
-                quota.try_consume_ref(helpers.target_key(uid, True))
+                quota.mark_used(helpers.target_key(uid, True), event.message_id)
         await _send_welcome_menu(event)
         return
 

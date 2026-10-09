@@ -8,11 +8,15 @@ QQ 协议事实（官方文档「被动消息」表,按场景区分）：
   · 每个 event_id（INTERACTION 等）独立计一轮配额（按所在场景取上限）
   · 在消息上挂 callback 按钮，用户点击 → 新 INTERACTION_CREATE → 新 event_id
     → 又获得一轮新配额，从而绕过单引用条数的硬限制
+  · 被动回复不占主动消息频控(单群 20 条/分钟、bot 总量 60 条/分钟)
 
 本模块策略：
-  · 倒数第 2 条起自动追加「🔄 刷新」按钮（type=1 callback;群 4/5 条,单聊 3/4 条）
-  · 用户点击 → ACK + 立即刷新引用 + 唤醒可能在等待的发送协程
+  · 每个目标一个**引用池**:TTL 内的 msg_id / event_id 各自计次,发送时先用最快过期的那条。
+    新引用不覆盖旧引用剩下的次数;全量群的日常聊天也登记进来(见 dispatcher.lgtbot_dispatch)
+  · 倒数第 2 条起自动追加「🔄 刷新」按钮（type=1 callback;按池内剩余次数:剩 1 条 🔄,剩 0 条 ⚠️）
+  · 用户点击 → ACK + 立即登记新引用 + 唤醒可能在等待的发送协程
   · 发送时若配额满，最长等待 15s 等待新刷新事件再重试
+  · QQ 判某条引用已失效时,发送出口用 ``drop_ref`` 把它移出池子
 
 场景由 key 前缀判定（``helpers.target_key``:群 'g:' / 单聊 'u:'），配额与
 TTL 都经 ``ref_quota(key)`` / ``ref_ttl(key)`` 按场景取值。
@@ -36,6 +40,7 @@ REF_QUOTA_DM = 4
 REF_TTL_GROUP = 290.0
 REF_TTL_DM = 3540.0
 REFRESH_WAIT_TIMEOUT = 15.0      # 配额耗尽时等待刷新的最长秒数（可在 config.yaml 覆盖）
+REF_POOL_MAX = 32                # 单个目标同时保留的引用数;32 条 × 5 次
 RELAY_BUTTON_DATA = '__lgt_relay__'
 
 
@@ -60,13 +65,43 @@ def refresh_threshold(key: str) -> int:
 
 # ──────── 内部状态 ────────────────────────────────────────────────────────
 # key = 'g:<gid>' / 'u:<uid>'
-# value = {'ref_type': 'msg_id'|'event_id', 'ref_value', 'count', 'expires_at', 'appid'}
+# value = [ref, ...] 按登记先后(即 expires_at 升序)排列,
+#         ref = {'ref_type': 'msg_id'|'event_id', 'ref_value', 'count', 'expires_at', 'appid'}
 #
 # 跨重载共享：取自 boot._get_persistent()，挂在 C++ 扩展上常驻进程；
 # 旧 callback 与新 dispatcher 操作同一份字典，热重载不会丢配额状态。
 _p = boot._get_persistent()
-_active_ref: dict[str, dict] = _p['active_ref']
+_active_ref: dict[str, list[dict]] = _p['active_ref']
 _ref_lock = threading.Lock()
+
+
+class _Pool(list):
+    """引用池。按字符串键读写时代理到**最新**那条引用。"""
+
+    def __getitem__(self, k):
+        return self[-1][k] if isinstance(k, str) else super().__getitem__(k)
+
+    def __setitem__(self, k, v):
+        if isinstance(k, str):
+            self[-1][k] = v
+        else:
+            super().__setitem__(k, v)
+
+    def get(self, k, default=None):
+        return self[-1].get(k, default) if self else default
+
+
+def _live_pool(key: str, now: float) -> _Pool:
+    """取 key 的引用池并剔除过期项,池空时连 key 一起删。调用方须持有 ``_ref_lock``。"""
+    pool = _active_ref.get(key)
+    if isinstance(pool, dict):          # 热重载前的旧结构:每个目标只存一条引用
+        pool = [pool]
+    live = _Pool(r for r in pool or () if now <= r['expires_at'])
+    if live:
+        _active_ref[key] = live
+    else:
+        _active_ref.pop(key, None)
+    return live
 
 # 等待器：每个等待中的协程持有独立 asyncio.Event，避免共享 Event 时 ev.clear()
 # 擦掉刚到达的信号导致死等。refresh_ref 时把 list 内所有 Event 都 set。
@@ -76,21 +111,28 @@ _ref_waiters: dict[str, list[asyncio.Event]] = _p['ref_waiters']
 # ──────── 对外接口 ────────────────────────────────────────────────────────
 
 def refresh_ref(key: str, ref_type: str, ref_value: str, appid: str = ''):
-    """重置某 target 的引用配额（用户消息或按钮点击时调用）
+    """把一条新引用登记进某 target 的引用池（用户消息或按钮点击时调用）
 
-    用户消息 → 用 msg_id 刷新；INTERACTION → 用 event_id 刷新。
-    刷新会唤醒该 key 下所有正在 wait_and_consume 中阻塞的协程。
+    用户消息 → msg_id；INTERACTION → event_id。池满时挤掉最早登记的那条。
+    登记会唤醒该 key 下所有正在 wait_and_consume 中阻塞的协程。
     """
     if not ref_value:
         return
     with _ref_lock:
-        _active_ref[key] = {
+        now = time.time()
+        pool = _live_pool(key, now)
+        # 同一条消息可能被多个 handler 各登记一次;重置计数会让它多回复几次 → 被拒
+        if any(r['ref_value'] == ref_value for r in pool):
+            return
+        pool.append({
             'ref_type': ref_type,
             'ref_value': ref_value,
             'count': 0,
-            'expires_at': time.time() + ref_ttl(key),
+            'expires_at': now + ref_ttl(key),
             'appid': appid,
-        }
+        })
+        del pool[:-REF_POOL_MAX]
+        _active_ref[key] = pool
 
     # 唤醒所有等待器（asyncio.Event 跨线程 set 必须走 call_soon_threadsafe）
     waiters = list(_ref_waiters.get(key, ()))
@@ -107,44 +149,56 @@ def refresh_ref(key: str, ref_type: str, ref_value: str, appid: str = ''):
 
 
 def try_consume_ref(key: str):
-    """尝试取一次配额。
+    """尝试取一次配额:池里**最快过期**、还有次数的那条引用计一次(先把快作废的额度用掉)。
 
-    成功返回 ``(ref_type, ref_value, count_after, appid)``;
-    失败(无引用 / 已过期 / 配额已满)返回 ``None``。
+    成功返回 ``(ref_type, ref_value, used, appid)``。``used`` 按「只有一条引用」的口径折算:
+    ``ref_quota - 池内剩余次数``(下限 0)。池里只剩 1 次时为 4(群)/ 3(私信),用完时为 5 / 4,
+    调用方据此在倒数第 2 条起挂刷新按钮。
+    失败(无引用 / 全部过期 / 次数全部用完)返回 ``None``。
     """
     with _ref_lock:
-        ref = _active_ref.get(key)
-        if not ref:
-            return None
-        if time.time() > ref['expires_at']:
-            _active_ref.pop(key, None)
-            return None
-        if ref['count'] >= ref_quota(key):
-            return None
-        ref['count'] += 1
-        return (ref['ref_type'], ref['ref_value'], ref['count'], ref.get('appid', ''))
+        pool = _live_pool(key, time.time())
+        q = ref_quota(key)
+        for ref in pool:
+            if ref['count'] < q:
+                ref['count'] += 1
+                left = sum(max(0, q - r['count']) for r in pool)
+                return (ref['ref_type'], ref['ref_value'], max(0, q - left), ref.get('appid', ''))
+        return None
 
 
 def has_valid_ref(key: str) -> bool:
     """是否存在**未过期**的引用(不管配额是否已用完)。
 
     用来区分 ``try_consume_ref`` 返回 ``None`` 的两种原因:
-      · ``True``  —— 引用存在且在 TTL 内,只是 ``count`` 已达 5(配额满);
+      · ``True``  —— 池里有 TTL 内的引用,只是次数全部用完(配额满);
                     此时值得等用户刷新(私信 / 群聊都按原逻辑等待 + 超时强发)
-      · ``False`` —— 无引用 / 已过期(次数没用完也一样:QQ 只认 TTL 内的 msg_id / event_id)。
+      · ``False`` —— 无引用 / 全部过期(次数没用完也一样:QQ 只认 TTL 内的 msg_id / event_id)。
                     此时等刷新没有可续命的对象,而没有主动推送资格的目标(普通私信 / 无主动推送权限的群)
                     主动消息必被拒 → 调用方应直接丢弃,别白等 15s 也别白烧一次调用
 
     顺带清掉已过期的 ref(与 ``try_consume_ref`` 的过期处理一致)。
     """
     with _ref_lock:
-        ref = _active_ref.get(key)
-        if not ref:
-            return False
-        if time.time() > ref['expires_at']:
+        return bool(_live_pool(key, time.time()))
+
+
+def drop_ref(key: str, ref_value: str) -> None:
+    """QQ 已不认这条引用(过期 / 越权 / 次数被其他入口用掉)→ 移出池子,下次发送换下一条。"""
+    with _ref_lock:
+        pool = _live_pool(key, time.time())
+        pool[:] = [r for r in pool if r['ref_value'] != ref_value]
+        if not pool:
             _active_ref.pop(key, None)
-            return False
-        return True
+
+
+def mark_used(key: str, ref_value: str) -> None:
+    """记一次**绕过本模块**的被动回复(``event.reply``)—— QQ 按引用计总数,不区分发送入口。"""
+    with _ref_lock:
+        for ref in _live_pool(key, time.time()):
+            if ref['ref_value'] == ref_value:
+                ref['count'] = min(ref['count'] + 1, ref_quota(key))
+                return
 
 
 async def wait_and_consume(key: str, timeout: float = REFRESH_WAIT_TIMEOUT):

@@ -117,7 +117,7 @@ async def test_dispatch_group_msg_only_refreshes_group_key(patched_downstream):
     await dispatcher.lgtbot_dispatch(event, None)
 
     assert 'g:GROUP_X' in quota._active_ref
-    assert quota._active_ref['g:GROUP_X']['ref_value'] == 'MSG_AAA'
+    assert quota._active_ref['g:GROUP_X'][0]['ref_value'] == 'MSG_AAA'
     # 关键回归断言:u:USER_Y 必须不存在
     assert 'u:USER_Y' not in quota._active_ref
 
@@ -136,7 +136,7 @@ async def test_dispatch_direct_msg_only_refreshes_user_key(patched_downstream):
     await dispatcher.lgtbot_dispatch(event, None)
 
     assert 'u:USER_DM' in quota._active_ref
-    assert quota._active_ref['u:USER_DM']['ref_value'] == 'DM_MSG_BBB'
+    assert quota._active_ref['u:USER_DM'][0]['ref_value'] == 'DM_MSG_BBB'
     # 不应出现任何 g: 前缀
     assert not any(k.startswith('g:') for k in quota._active_ref)
 
@@ -179,8 +179,8 @@ async def test_interaction_relay_group_only_event_id_to_group(patched_downstream
     await dispatcher.lgtbot_interaction_relay(event, None)
 
     assert 'g:GROUP_R' in quota._active_ref
-    assert quota._active_ref['g:GROUP_R']['ref_type'] == 'event_id'
-    assert quota._active_ref['g:GROUP_R']['ref_value'] == 'EVENT_RELAY_AAA'
+    assert quota._active_ref['g:GROUP_R'][0]['ref_type'] == 'event_id'
+    assert quota._active_ref['g:GROUP_R'][0]['ref_value'] == 'EVENT_RELAY_AAA'
     assert 'u:USER_R' not in quota._active_ref
 
 
@@ -195,7 +195,7 @@ async def test_interaction_relay_direct_only_event_id_to_user(patched_downstream
     await dispatcher.lgtbot_interaction_relay(event, None)
 
     assert 'u:USER_DM_R' in quota._active_ref
-    assert quota._active_ref['u:USER_DM_R']['ref_value'] == 'EVENT_DM_RELAY'
+    assert quota._active_ref['u:USER_DM_R'][0]['ref_value'] == 'EVENT_DM_RELAY'
     assert not any(k.startswith('g:') for k in quota._active_ref)
 
 
@@ -227,8 +227,8 @@ async def test_interaction_dispatch_mutex_branches(patched_downstream):
 
 
 async def test_dispatch_at_self_guard_blocks_group_chitchat(patched_downstream):
-    """GROUP_MESSAGE_CREATE 事件 + is_at_self=False(用户没 @bot)→ 整个 handler
-    早返,refresh_ref 不应被调,引擎也不该派发。"""
+    """★ GROUP_MESSAGE_CREATE 事件 + is_at_self=False(用户没 @bot)→ 引擎不派发,
+    但这条聊天的 msg_id 登记进群引用池 —— 它同样能被动回复 5 次,对局刷屏时先用它,少发主动消息。"""
     _state.started = True
 
     event = _mock_event(
@@ -242,9 +242,32 @@ async def test_dispatch_at_self_guard_blocks_group_chitchat(patched_downstream):
 
     await dispatcher.lgtbot_dispatch(event, None)
 
-    # is_at_self 守卫应让 handler 在 refresh_ref 之前就 return
-    assert quota._active_ref == {}
     patched_downstream['thread_start'].assert_not_called()
+    assert [r['ref_value'] for r in quota._active_ref['g:FULL_GROUP']] == ['MSG_NONAT']
+    assert 'u:CHITCHAT_USER' not in quota._active_ref
+
+    # 别的 bot 发的消息不登记(不能被动回复)
+    bot_msg = _mock_event(
+        event_type=dispatcher.GROUP_MESSAGE_CREATE,
+        is_group=True, group_id='FULL_GROUP', user_id='OTHER_BOT',
+        message_id='MSG_BOT', content='自动播报', is_at_self=False)
+    bot_msg.is_bot = True
+    await dispatcher.lgtbot_dispatch(bot_msg, None)
+    assert [r['ref_value'] for r in quota._active_ref['g:FULL_GROUP']] == ['MSG_NONAT']
+
+
+async def test_welcome_menu_burns_the_replied_message_only(patched_downstream):
+    """空 @ 触发欢迎菜单:event.reply 吃掉的是这条消息自己的一次额度,池里更早的引用不受影响。"""
+    _state.started = True
+    quota.refresh_ref('g:GW', 'msg_id', 'M_EARLIER')
+    event = _mock_event(is_group=True, group_id='GW', user_id='UW',
+                        message_id='M_MENU', content='')
+
+    await dispatcher.lgtbot_dispatch(event, None)
+
+    patched_downstream['_send_welcome_menu'].assert_awaited_once()
+    assert {r['ref_value']: r['count'] for r in quota._active_ref['g:GW']} == \
+        {'M_EARLIER': 0, 'M_MENU': 1}
 
 
 async def test_group_message_event_notes_permission_change(patched_downstream,
@@ -1354,7 +1377,7 @@ async def test_match_list_relays_to_engine_with_quota_ref(patched_downstream):
     await dispatcher.lgtbot_match_list(event, None)
 
     # 配额引用已登记到群 key(不污染 u:<uid>)
-    assert quota._active_ref['g:GML']['ref_value'] == 'M_ML'
+    assert quota._active_ref['g:GML'][0]['ref_value'] == 'M_ML'
     assert 'u:UML' not in quota._active_ref
     # 已起线程把指令派进引擎(patched_downstream 把 Thread.start 换成 noop mock)
     assert patched_downstream['thread_start'].called

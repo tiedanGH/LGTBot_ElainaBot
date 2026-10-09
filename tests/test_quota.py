@@ -51,7 +51,7 @@ def test_try_consume_ref_expired_returns_none_and_reaps():
     """过期 ref 返回 None,且**自动从 _active_ref 字典里清掉**"""
     quota.refresh_ref('g:gx', 'msg_id', 'msg_x')
     # 手动把 expires_at 设到过去
-    quota._active_ref['g:gx']['expires_at'] = time.time() - 1
+    quota._active_ref['g:gx'][0]['expires_at'] = time.time() - 1
 
     assert quota.try_consume_ref('g:gx') is None
     # 过期 ref 应该被 try_consume_ref 顺手清掉
@@ -68,7 +68,7 @@ def test_try_consume_ref_quota_exhausted_returns_none():
     # 再来一次:配额耗尽 → None,但 ref 还在字典(关键,跟过期分支区分)
     assert quota.try_consume_ref('g:gy') is None
     assert 'g:gy' in quota._active_ref
-    assert quota._active_ref['g:gy']['count'] == quota.ref_quota('g:gy')
+    assert quota._active_ref['g:gy'][0]['count'] == quota.ref_quota('g:gy')
 
 
 def test_has_valid_ref_distinguishes_full_vs_missing():
@@ -93,7 +93,7 @@ def test_has_valid_ref_distinguishes_full_vs_missing():
 def test_has_valid_ref_reaps_expired():
     """has_valid_ref 调用时也清过期 ref,与 try_consume_ref 行为一致"""
     quota.refresh_ref('u:zombie', 'msg_id', 'm')
-    quota._active_ref['u:zombie']['expires_at'] = time.time() - 1
+    quota._active_ref['u:zombie'][0]['expires_at'] = time.time() - 1
 
     assert quota.has_valid_ref('u:zombie') is False
     assert 'u:zombie' not in quota._active_ref
@@ -230,12 +230,123 @@ def test_dm_ttl_survives_past_group_ttl():
     """单聊引用在群聊 TTL(290s)过后仍然有效 —— 60 分钟窗口。"""
     quota.refresh_ref('u:long', 'msg_id', 'm')
     quota.refresh_ref('g:short', 'msg_id', 'm')
-    dm_exp = quota._active_ref['u:long']['expires_at']
-    g_exp = quota._active_ref['g:short']['expires_at']
+    dm_exp = quota._active_ref['u:long'][0]['expires_at']
+    g_exp = quota._active_ref['g:short'][0]['expires_at']
     # 两者由同一时刻刷新,单聊应比群聊晚过期约 54 分钟
     assert dm_exp - g_exp == pytest.approx(quota.REF_TTL_DM - quota.REF_TTL_GROUP, abs=1.0)
 
     # 模拟 10 分钟后:群聊已过期,单聊仍可消费
-    quota._active_ref['g:short']['expires_at'] = time.time() - 1
+    quota._active_ref['g:short'][0]['expires_at'] = time.time() - 1
     assert quota.try_consume_ref('g:short') is None
     assert quota.try_consume_ref('u:long') is not None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 引用池:多条引用各自计次,新引用不覆盖旧引用剩下的次数
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _values(key):
+    return [quota.try_consume_ref(key) for _ in range(12)]
+
+
+def test_pool_keeps_the_rest_of_older_refs():
+    """★ 新消息进来不再作废旧 msg_id 剩下的次数:先用完快过期的 A,再用 B,两条合计 10 次。"""
+    quota.refresh_ref('g:pool', 'msg_id', 'A')
+    quota.try_consume_ref('g:pool')
+    quota.try_consume_ref('g:pool')
+    quota.refresh_ref('g:pool', 'msg_id', 'B')
+    got = [c[1] if c else None for c in _values('g:pool')]
+    assert got == ['A'] * 3 + ['B'] * 5 + [None] * 4
+
+
+def test_refresh_same_ref_keeps_its_count():
+    """同一条消息被多个 handler 各登记一次不能把计数清零,否则会多回复几次被 QQ 拒。"""
+    quota.refresh_ref('g:dup', 'msg_id', 'A')
+    for _ in range(3):
+        quota.try_consume_ref('g:dup')
+    quota.refresh_ref('g:dup', 'msg_id', 'A')
+    assert len(quota._active_ref['g:dup']) == 1
+    assert sum(c is not None for c in _values('g:dup')) == 2
+
+
+def test_used_counts_down_the_whole_pool():
+    """★ 折算的已用条数按整个池子算:两条引用共 10 次,只有剩 1 次时才到刷新阈值 4、用完时到 5。"""
+    quota.refresh_ref('g:used', 'msg_id', 'A')
+    quota.refresh_ref('g:used', 'msg_id', 'B')
+    used = [c[2] for c in _values('g:used') if c]
+    assert used == [0, 0, 0, 0, 0, 1, 2, 3, 4, 5]
+
+
+def test_expired_refs_in_pool_are_skipped_and_reaped():
+    quota.refresh_ref('g:mix', 'msg_id', 'OLD')
+    quota.refresh_ref('g:mix', 'msg_id', 'NEW')
+    quota._active_ref['g:mix'][0]['expires_at'] = time.time() - 1
+    assert quota.try_consume_ref('g:mix')[1] == 'NEW'
+    assert [r['ref_value'] for r in quota._active_ref['g:mix']] == ['NEW']
+
+
+def test_drop_ref_moves_on_to_the_next_ref():
+    """QQ 判失效的那条移出池子,下一次换别的引用;最后一条也移走后 key 一并清掉。"""
+    quota.refresh_ref('g:dead', 'msg_id', 'A')
+    quota.refresh_ref('g:dead', 'event_id', 'E')
+    quota.drop_ref('g:dead', 'A')
+    assert quota.try_consume_ref('g:dead')[:2] == ('event_id', 'E')
+    quota.drop_ref('g:dead', 'E')
+    assert 'g:dead' not in quota._active_ref
+    assert quota.has_valid_ref('g:dead') is False
+
+
+def test_mark_used_hits_the_named_ref_only():
+    """event.reply 吃掉的是被回复那条消息的次数,不是池里最快过期的那条。"""
+    quota.refresh_ref('g:mark', 'msg_id', 'A')
+    quota.refresh_ref('g:mark', 'msg_id', 'B')
+    quota.mark_used('g:mark', 'B')
+    assert {r['ref_value']: r['count'] for r in quota._active_ref['g:mark']} == {'A': 0, 'B': 1}
+    quota.mark_used('g:mark', 'NOT_THERE')               # 不在池里:什么都不做
+    assert sum(r['count'] for r in quota._active_ref['g:mark']) == 1
+
+
+def test_pool_is_capped_dropping_the_oldest():
+    for i in range(quota.REF_POOL_MAX + 3):
+        quota.refresh_ref('g:cap', 'msg_id', f'M{i}')
+    pool = quota._active_ref['g:cap']
+    assert len(pool) == quota.REF_POOL_MAX
+    assert pool[0]['ref_value'] == 'M3' and pool[-1]['ref_value'] == f'M{quota.REF_POOL_MAX + 2}'
+
+
+def _old_try_consume_ref(key):
+    """改版前 quota.try_consume_ref 的原样逻辑 —— 热重载复用引擎时旧 callbacks 仍在跑它。"""
+    ref = quota._active_ref.get(key)
+    if not ref:
+        return None
+    if time.time() > ref['expires_at']:
+        quota._active_ref.pop(key, None)
+        return None
+    if ref['count'] >= quota.ref_quota(key):
+        return None
+    ref['count'] += 1
+    return (ref['ref_type'], ref['ref_value'], ref['count'], ref.get('appid', ''))
+
+
+def test_pool_still_reads_as_a_single_ref_for_old_callbacks():
+    """★ 新 dispatcher 写进来的引用池,旧 callbacks 按「单条引用 dict」读写也不能炸:
+    读到的是最新那条,计数记在同一个 dict 上,新代码随后看到的次数一致。"""
+    quota.refresh_ref('g:mixed', 'msg_id', 'A', 'APP')
+    quota.refresh_ref('g:mixed', 'msg_id', 'B', 'APP')
+    assert _old_try_consume_ref('g:mixed') == ('msg_id', 'B', 1, 'APP')
+    assert {r['ref_value']: r['count'] for r in quota._active_ref['g:mixed']} == {'A': 0, 'B': 1}
+    for _ in range(4):
+        _old_try_consume_ref('g:mixed')
+    assert _old_try_consume_ref('g:mixed') is None         # B 用完,旧逻辑看不到 A —— 与改版前一致
+    assert quota.try_consume_ref('g:mixed')[1] == 'A'      # 新逻辑照样把 A 用上
+
+
+def test_legacy_single_ref_survives_hot_reload():
+    """热重载后持久 dict 里还可能是旧结构(每个目标一个 dict),要能照常消费并转成池子。"""
+    quota._active_ref['g:legacy'] = {'ref_type': 'msg_id', 'ref_value': 'L', 'count': 4,
+                                     'expires_at': time.time() + 60, 'appid': 'APP'}
+    assert quota.has_valid_ref('g:legacy') is True
+    assert quota.try_consume_ref('g:legacy') == ('msg_id', 'L', 5, 'APP')
+    assert quota.try_consume_ref('g:legacy') is None
+    assert isinstance(quota._active_ref['g:legacy'], list)
