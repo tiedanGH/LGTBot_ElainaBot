@@ -65,7 +65,7 @@ jobs:
           ${{ matrix.sudo }} apt-get update
           ${{ matrix.sudo }} apt-get remove -y libunwind-14 || true
           ${{ matrix.sudo }} apt-get install -y \
-            build-essential cmake zip patch \
+            build-essential cmake zip \
             libcurl4-openssl-dev \
             libboost-python-dev libboost-system-dev \
             libgoogle-glog-dev libgflags-dev libsqlite3-dev \
