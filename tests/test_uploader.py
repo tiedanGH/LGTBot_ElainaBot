@@ -133,7 +133,6 @@ def test_get_image_size_bad_data_returns_default():
 async def test_upload_image_inflight_dedup(mock_backend):
     """同一份 data ×10 并发 → backend 只被调用 1 次,所有协程拿到同一 URL"""
     _, calls = mock_backend
-    uploader.SELECTED_BACKEND = 'cos'
 
     data = b'PNG_SAMEDATA' + b'\x00' * 100
     results = await asyncio.gather(*[

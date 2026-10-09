@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  BUILD_TYPE: Release
-
 jobs:
   build-on-ubuntu:
     runs-on: ubuntu-latest

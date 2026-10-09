@@ -96,11 +96,12 @@ def test_resolve_framework_root():
 
 
 def test_create_backup_produces_zip_with_expected_content():
-    # 造源数据(user_cache.db 不入备份范围,无需造)
     _make_dummy_sqlite(boot.DB_PATH)
     _make_plain_file(boot.CONF_PATH, '{"k":"v"}')
     _make_plain_file(os.path.join(boot.DATA_DIR, 'config.yaml'), 'admin_uids: []\n')
     _make_plain_file(os.path.join(boot.DATA_DIR, 'update_notice.txt'), 'hello')
+    # 已停用的私有昵称缓存:文件还留在 data/ 里也不该入包
+    _make_dummy_sqlite(os.path.join(boot.DATA_DIR, 'user_cache.db'))
 
     result = backup.create_backup()
 
