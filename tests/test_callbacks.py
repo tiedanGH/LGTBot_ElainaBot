@@ -943,6 +943,170 @@ async def test_image_path_drops_on_expired_ref_too(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 发送结果处理:主动消息频控(40034100)退避重发 / 被动引用失效换下一条
+# ─────────────────────────────────────────────────────────────────────────
+
+_OK = (True, {'id': 'SENT'}, {})
+
+
+def _err(code):
+    return (False, {'code': code, 'message': 'x'}, {})
+
+
+@pytest.fixture
+def push_env(monkeypatch):
+    """可主动推送的群 GPUSH + 记录指标 / 退避等待的桩;wait_and_consume 默认立即超时(不真等)。"""
+    seen = {'active': [], 'rate': [], 'waits': []}
+    monkeypatch.setattr(callbacks.metrics, 'record_active_push', lambda t, u: seen['active'].append(t))
+    monkeypatch.setattr(callbacks.metrics, 'record_rate_limit',
+                        lambda dropped: seen['rate'].append(dropped))
+    monkeypatch.setattr(callbacks.metrics, 'active_push_used', lambda t, u: 0)
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+
+    async def _wait(key, timeout):
+        seen['waits'].append(timeout)
+        return None
+
+    monkeypatch.setattr(callbacks.quota, 'wait_and_consume', _wait)
+    mark_push_group('GPUSH')
+    return seen
+
+
+def test_send_result_reads_only_an_explicit_failure():
+    assert callbacks._send_result(_err(40034100)) == (False, 40034100)
+    assert callbacks._send_result((False, {'err_code': '40034128'}, {})) == (False, 40034128)
+    assert callbacks._send_result((False, 'boom', {})) == (False, None)
+    assert callbacks._send_result(_OK) == (True, None)
+    assert callbacks._send_result(None) == (True, None)          # 框架老版本 / mock:不猜
+    assert callbacks._send_result(MagicMock()) == (True, None)
+
+
+async def test_rate_limited_push_backs_off_until_delivered(monkeypatch, push_env):
+    """★ 主动消息撞 40034100 不再丢:按退避表等待后重发,送达后才计主动消息用量。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(side_effect=[_err(40034100), _err(40034100), _OK])
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+
+    await callbacks._send_text_quota_managed('GPUSH', False, '第 21 条', None)
+
+    assert sender.send_to_group.await_count == 3
+    waits, backoff = push_env['waits'], callbacks._RATE_LIMIT_BACKOFF
+    assert len(waits) == 2 and all(b <= w <= b * 1.2 for w, b in zip(waits, backoff))
+    assert push_env['active'] == ['GPUSH']           # 只计真正送达的那一次
+    assert push_env['rate'] == [False]               # 补发成功
+
+
+async def test_rate_limited_push_dropped_after_the_last_backoff(monkeypatch, push_env):
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(return_value=_err(40034100))
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+
+    await callbacks._send_text_quota_managed('GPUSH', False, 'hi', None)
+
+    backoff = callbacks._RATE_LIMIT_BACKOFF
+    assert sender.send_to_group.await_count == 1 + len(backoff)
+    assert len(push_env['waits']) == len(backoff)
+    assert sum(backoff) > 60                         # 至少等满一个完整的 60 秒窗口
+    assert push_env['active'] == [] and push_env['rate'] == [True]
+
+
+async def test_rate_limit_wait_switches_to_a_fresh_passive_ref(monkeypatch, push_env):
+    """★ 退避期间有人说话 / 点按钮 → 立刻用新引用被动发出,不必等主动消息名额。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(side_effect=[_err(40034100), _OK])
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks.quota, 'wait_and_consume',
+                        AsyncMock(return_value=('msg_id', 'M_FRESH', 1, 'APP')))
+
+    await callbacks._send_text_quota_managed('GPUSH', False, 'hi', None)
+
+    assert 'msg_id' not in sender.send_to_group.await_args_list[0].kwargs
+    assert sender.send_to_group.await_args_list[1].kwargs['msg_id'] == 'M_FRESH'
+    assert push_env['active'] == []                  # 最后走的是被动,不占主动额度
+    assert push_env['rate'] == [False]
+
+
+async def test_forced_send_without_push_permission_is_not_retried(monkeypatch, push_env):
+    """没有主动推送资格的超时强发撞上频控不重试 —— 再等也没有名额可等(照旧只发一次)。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(return_value=_err(40034100))
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: None)
+    monkeypatch.setattr(callbacks.metrics, 'record_quota_wait_timeout', lambda: None)
+    _exhaust_ref(callbacks.helpers.target_key('GNOPUSH', False))
+
+    await callbacks._send_text_quota_managed('GNOPUSH', False, 'hi', None)
+
+    assert sender.send_to_group.await_count == 1
+    assert push_env['rate'] == []
+
+
+async def test_dead_passive_ref_is_dropped_and_the_next_one_used(monkeypatch):
+    """★ 引用被 QQ 判失效(别的插件也回复了同一条消息,次数被用掉)→ 移出池子换下一条重发。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(side_effect=[_err(40034128), _OK])
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    key = callbacks.helpers.target_key('GDEAD', False)
+    quota.refresh_ref(key, 'msg_id', 'M_A', 'APP')
+    quota.refresh_ref(key, 'msg_id', 'M_B', 'APP')
+
+    await callbacks._send_text_quota_managed('GDEAD', False, 'hi', None)
+
+    calls = sender.send_to_group.await_args_list
+    assert [c.kwargs['msg_id'] for c in calls] == ['M_A', 'M_B']
+    assert [r['ref_value'] for r in quota._active_ref[key]] == ['M_B']
+
+
+async def test_dead_ref_falls_back_to_active_push(monkeypatch, push_env):
+    """可推送的群:池里唯一的引用失效后,与次数用完一样改走主动消息。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(side_effect=[_err(40034005), _OK])
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    quota.refresh_ref(callbacks.helpers.target_key('GPUSH', False), 'msg_id', 'M_OLD', 'APP')
+
+    await callbacks._send_text_quota_managed('GPUSH', False, 'hi', None)
+
+    calls = sender.send_to_group.await_args_list
+    assert calls[0].kwargs['msg_id'] == 'M_OLD' and 'msg_id' not in calls[1].kwargs
+    assert push_env['active'] == ['GPUSH']
+
+
+@pytest.mark.parametrize('with_ref', [False, True])
+async def test_other_send_errors_are_not_retried(monkeypatch, push_env, with_ref):
+    """其他错误(如内容违规)照旧只发一次,由框架记错误日志。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(return_value=_err(40034006))
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    if with_ref:
+        quota.refresh_ref(callbacks.helpers.target_key('GPUSH', False), 'msg_id', 'M', 'APP')
+
+    await callbacks._send_text_quota_managed('GPUSH', False, 'hi', None)
+
+    assert sender.send_to_group.await_count == 1
+    assert push_env['active'] == [] and push_env['waits'] == []
+
+
+@pytest.mark.parametrize('hosted', [True, False])
+async def test_image_retry_reuses_the_upload(monkeypatch, push_env, hosted):
+    """图片重发不重复上传:图床 URL / 媒体 file_info 第一次拿到后复用。"""
+    sender = _fake_sender()
+    sender.send_to_group = AsyncMock(side_effect=[_err(40034100), _OK])
+    monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
+    upload = AsyncMock(return_value='http://bed/x.png' if hosted else None)
+    monkeypatch.setattr(callbacks.uploader, 'upload_image', upload)
+    media = AsyncMock(return_value={'file_info': 'FI'})
+    import core.message.media as _media
+    monkeypatch.setattr(_media, 'upload_media_bytes', media)
+
+    await callbacks._send_image_quota_managed('GPUSH', False, _PNG_1x1, '赛况', 'x.png')
+
+    assert sender.send_to_group.await_count == 2
+    assert upload.await_count == 1
+    assert media.await_count == (0 if hosted else 1)
+    assert push_env['rate'] == [False]
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # 等待中房间 + 重启通知
 # ─────────────────────────────────────────────────────────────────────────
 

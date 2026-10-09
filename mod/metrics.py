@@ -16,8 +16,9 @@
     「无事件上下文」与「真耗尽」,也拿不到全量群 / 沙箱判定,且 wait_and_consume
     内部重复调 try_consume 会重计,故不挂 quota.py。
   · 今日主动消息:群聊 / 私信分开按日分桶(跨天自动清零),并按目标计数,
-    供「平均每群 / 每用户」展示。挂 callbacks 两条发送路径的主动分支
+    供「平均每群 / 每用户」展示。挂 callbacks._deliver 的主动分支,只计送达的
     (无 msg_id/event_id 的推送:全量直推 / 沙箱直推 / 超时强发)。
+  · 主动消息频控(40034100):退避后补发成功 / 等满上限仍被拒而丢弃的条数(挂 callbacks._deliver)。
 
 持久化照 mod/audit.py 模式:threading.Lock + 整文件原子重写(tmp + os.replace)
 + 损坏改名 ``.corrupt_<ts>`` 留证 + **record 永不抛异常**(指标失败绝不影响
@@ -63,6 +64,8 @@ _DEFAULTS = {
     'send_fail_total': 0,
     'send_fail_all': 0,
     'send_fail_by_code': {},
+    'rate_limit_recovered': 0,
+    'rate_limit_dropped': 0,
 }
 
 _lock = threading.Lock()
@@ -244,10 +247,11 @@ def record_quota_wait_timeout() -> None:
     _bump(_m)
 
 
-# 不计入主数值的返回码:40034105 = 被动配额超时强发时的「无主动消息权限」拒绝
-# 刷新等待超时兜底的**预期**失败,反映的是配额压力(已有独立计数),不算发送链路异常。
-# 这些码仍计入 ``send_fail_all`` 与 by_code 分布留证。
-SEND_FAIL_IGNORED_CODES = frozenset({40034105})
+# 不计入主数值的返回码(仍计入 ``send_fail_all`` 与 by_code 分布留证):
+#   · 40034105 = 被动配额超时强发时的「无主动消息权限」拒绝 —— 刷新等待超时兜底的**预期**失败,
+#     反映的是配额压力(已有独立计数),不算发送链路异常
+#   · 40034100 = 主动消息频控 —— 发送出口会退避重发,单次被拒不算丢;真丢掉的由 record_rate_limit 计入主数值
+SEND_FAIL_IGNORED_CODES = frozenset({40034105, 40034100})
 
 
 def record_send_failure(code) -> None:
@@ -256,7 +260,7 @@ def record_send_failure(code) -> None:
     挂 callbacks 各出站调用点(``_note_send_result``):被动引用回复与主动
     直推同一条 ``_send_push`` 链路,两类失败都计。双口径:
 
-      · ``send_fail_total``   非预期失败(面板大数字;排除 IGNORED_CODES)
+      · ``send_fail_total``   非预期失败(面板大数字;排除 IGNORED_CODES,另加频控重发后仍丢弃的条数)
       · ``send_fail_all``     全部失败,含预期拒绝(面板小字)
       · ``send_fail_by_code`` 全部失败按返回码分布(文件留证,面板不展开)
 
@@ -278,6 +282,19 @@ def record_send_failure(code) -> None:
         key = str(code) if code is not None else 'unknown'
         by[key] = int(by.get(key) or 0) + 1
         d['send_fail_by_code'] = by
+    _bump(_m)
+
+
+def record_rate_limit(dropped: bool) -> None:
+    """一条主动消息撞上 40034100 之后的结局:退避后补发成功,或等满上限仍被拒而丢弃。
+
+    丢弃同时计入 ``send_fail_total`` —— 每次被拒本身已被 IGNORED_CODES 排除,面板大数字只认真丢掉的。
+    """
+    def _m(d: dict) -> None:
+        k = 'rate_limit_dropped' if dropped else 'rate_limit_recovered'
+        d[k] = int(d.get(k) or 0) + 1
+        if dropped:
+            d['send_fail_total'] = int(d.get('send_fail_total') or 0) + 1
     _bump(_m)
 
 

@@ -157,7 +157,8 @@ def test_snapshot_without_file_returns_all_zero():
                     'restart_total': 0, 'last_restart_ts': 0,
                     'quota_exhausted': 0, 'quota_wait_timeout': 0,
                     'send_fail_total': 0, 'send_fail_all': 0,
-                    'send_fail_by_code': {}}
+                    'send_fail_by_code': {},
+                    'rate_limit_recovered': 0, 'rate_limit_dropped': 0}
 
 
 def test_corrupt_file_renamed_and_recovers():
@@ -300,6 +301,19 @@ def test_record_send_failure_counts_and_ignores_expected_code():
     assert snap['send_fail_all'] == 6
     assert snap['send_fail_by_code'] == {'40034102': 2, '22009': 1,
                                          'unknown': 1, '40034105': 2}
+
+
+def test_rate_limit_counts_only_the_messages_really_lost():
+    """★ 40034100 每次被拒都留证,但会退避重发,不进面板大数字;真正丢掉的才计入 total,补发成功另记。"""
+    for _ in range(3):
+        metrics.record_send_failure(40034100)
+    metrics.record_rate_limit(dropped=False)
+    metrics.record_rate_limit(dropped=False)
+    metrics.record_rate_limit(dropped=True)
+    snap = metrics.snapshot()
+    assert snap['send_fail_all'] == 3 and snap['send_fail_by_code'] == {'40034100': 3}
+    assert snap['send_fail_total'] == 1
+    assert snap['rate_limit_recovered'] == 2 and snap['rate_limit_dropped'] == 1
 
 
 def test_yesterday_same_span_counts_only_matching_window():

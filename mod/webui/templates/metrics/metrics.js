@@ -72,7 +72,7 @@ function metricsRenderRuntime(rt) {
   document.getElementById('metrics-quota-sub').textContent =
     '配额耗尽 ' + (r.quota_exhausted || 0) + ' 次';
 
-  /* 异常发送失败:大数字 = 非预期的 API 拒绝(排除 40034105 配额超时的无权限主动拒绝),
+  /* 异常发送失败:大数字 = 非预期的 API 拒绝(排除 40034105 配额超时的无权限主动拒绝;40034100 频控按重发后仍丢弃的条数计),
   小字 = 全部失败次数(含预期拒绝)。按码分布只留存 metrics.json,不上 UI —— 码一多会把卡片挤破。 */
   document.getElementById('metrics-send-fail').textContent =
     (r.send_fail_total || 0) + ' 次';

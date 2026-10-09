@@ -11,9 +11,10 @@
 发送流程（跑在 asyncio loop,per-target Lock 串行）：
   · _serialized_text_send            Lock → _send_text_quota_managed → 消费教学标记
   · _serialized_mixed_send           Lock → _send_mixed_message → 消费教学标记
-  · _send_text_quota_managed         配额管理 + 自动追加刷新按钮
+  · _send_text_quota_managed         自动追加刷新按钮,交给 _deliver 发送
   · _send_mixed_message              图文混排:全图上传成功 → 单条 markdown 排版内联;否则退回逐图媒体通道
-  · _send_image_quota_managed        配额管理 + 上传 + media 字段（支持 event_id）
+  · _send_image_quota_managed        上传 + markdown / media 二选一,交给 _deliver 发送
+  · _deliver                         选通道(_pick_route:被动引用 / 主动 / 丢弃)+ 发送失败的换引用 / 频控退避重发
 
 设计要点：cb_send_text/image_message 不阻塞 C++ 调用线程
 lgtbot 的 read thread 在 OnPost 里只持 Match.mutex_ 几十 µs。
@@ -23,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import os
+import random
 import re
 import sys
 import time
@@ -1245,109 +1247,189 @@ def _no_ref_reason(key: str) -> str:
     return f'{key} 无有效消息ID（未登记或已超 {quota.ref_ttl(key) / 60:.0f} 分钟）'
 
 
-async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
-    """文本发送核心：配额管理 + 自动追加刷新按钮 + 配额满时等待续命
+# 被动引用已失效:QQ 不再认这条 msg_id / event_id → 移出引用池,换下一条重发。
+_DEAD_REF_CODES = frozenset({
+    40034005,   # 回复消息 msg_id 已过期
+    304103,     # 消息 ID 已过期,不能回复
+    40034024,   # msg_id 无效或越权
+    40034025,   # event_id 无效
+    40034026,   # event_id 已过期
+    40034027,   # 该事件不支持回复消息
+    40034128,   # 被动回复时间或次数超限
+})
+_DEAD_REF_RETRIES = 3
 
-    全量群分支:配额耗尽时不再阻塞等刷新按钮,直接走主动消息(``kwargs={}``);
-    且整个生命周期不追加 ``build_refresh_button``,因为全量群里 bot 不被
-    被动回复条数限制,这个教学按钮没有意义。
+# 40034100 = 主动消息超过频控(官方:单群 / 单个好友 20 条/分钟,bot 群消息总量 60 条/分钟)。
+# 文档未说明按滑动 60 秒还是自然分钟计;退避累计略超 60 秒,两种算法下都至少会等到一次名额空出来。
+_RATE_LIMIT_CODE = 40034100
+_RATE_LIMIT_BACKOFF = (5.0, 10.0, 15.0, 15.0, 20.0)
 
-    ``try_consume_ref`` 返回 None 的三种去向(``has_valid_ref`` 区分前两者):
+
+def _send_result(ret) -> tuple[bool, object]:
+    """``send_to_*`` 的返回值 ``(ok, data, payload)`` → ``(ok, code)``。
+
+    只有明确的 ``ok=False`` 才算失败(mock / 未知形状按成功,同 log_attribution._note_push_result)。
+    """
+    try:
+        if ret[0] is False:
+            data = ret[1]
+            code = (data.get('code') or data.get('err_code')) if isinstance(data, dict) else None
+            try:
+                return False, int(code)
+            except (TypeError, ValueError):
+                return False, code
+    except Exception:
+        pass
+    return True, None
+
+
+async def _pick_route(key: str, target_id: str, is_uid: bool, what: str, *, retry: bool = False):
+    """选这条消息的发送通道:被动引用 / 主动消息 / 丢弃。
+
+    返回 ``(consumed, is_active_push)``:``consumed`` 是 ``quota.try_consume_ref`` 的四元组,
+    ``None`` 表示走主动消息;整条丢弃时返回 ``None``(日志已记)。
+
+    主动直推资格(可推送群 / 沙箱私信)不代表跳过被动配额 —— 引用池还有次数照常先走被动;
+    次数用完才直接主动消息、不挂刷新按钮。今日主动消息额度用满的目标**失去该资格**,
+    退回刷新按钮机制(见 _active_push_allowed;跨天自动恢复)。
+
+    引用池取不到次数时的三种去向(``has_valid_ref`` 区分前两者):
       · 有主动直推资格          → 直接主动消息
       · 无有效引用(未登记 / 超 TTL)→ **直接丢弃**(等刷新与主动消息都是死路)
       · TTL 内次数用完          → 阻塞等刷新 ≤15s,超时再看主动额度
-    """
-    key = helpers.target_key(target_id, is_uid)
-    msg_preview = (msg or '')[:30].replace('\n', ' ')
 
-    # 直推私信(all 模式全员 / 白名单沙箱用户):逻辑与全量群完全一致 ——
-    # 前 5 次仍用 msg_id 被动回复(消耗配额),仅配额耗尽后才直接主动消息。
+    ``retry=True``(上次发送被拒后重选)不再重复记配额耗尽。
+    """
+    # 直推私信(all 模式全员 / 白名单沙箱用户):逻辑与全量群完全一致。
     is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
     # 群的主动推送资格:全量群 ∪ QQ 后台开了 allow_proactive_msg 的群(两种权限分别开通,见 helpers.can_push_group)。
-    # 两个集合都只认落实过的事实,不看框架 non_at_message.* 配置 —— 配置可能与 QQ 后台权限不同步,
-    # 误判会让没权限的群也走主动消息(QQ 必拒,把 bot 的配额烧掉)。
+    # 两个集合都只认落实过的事实,不看框架 non_at_message.* 配置 —— 可能真实权限不同步,会让没权限的群也走主动消息(必拒)。
     is_full = (not is_uid) and helpers.can_push_group(target_id)
-    # 主动直推资格(可推送群 / 沙箱私信):配额满后可直接主动消息、不挂刷新按钮。
-    # 注意"资格"不代表跳过被动配额 —— 前 5 次照常 try_consume_ref 走 msg_id。
-    # 今日主动消息额度用满的目标**失去该资格**,退回刷新按钮机制(见 _active_push_allowed;跨天自动恢复)。
     is_active_push = (is_full or is_sandbox_dm) and _active_push_allowed(target_id, is_uid)
 
     consumed = quota.try_consume_ref(key)
-    if consumed is None:
-        # 指标:「真耗尽」= TTL 内引用的被动条数真用完(has_valid_ref True);
-        # 无引用 / 已过期的场景(无事件上下文的推送、私信丢弃)不算配额压力。
-        # 且仅统计**无主动直推资格**的目标:全量群 / 沙箱私信配额满后可无缝转主动消息、消息照常送达,没有实际影响,不计入配额压力。
-        had_valid_ref = quota.has_valid_ref(key)
-        if had_valid_ref and not is_active_push:
-            metrics.record_quota_exhausted()
-        if is_active_push:
-            # 全量群 / 沙箱私信:配额满 → 直接主动消息,不等刷新按钮
-            tag = '私信直推' if is_sandbox_dm else '全量直推'
-            log.info(f'⚡ [{tag}] {key} 配额已满，走主动消息: {msg_preview!r}')
-        elif not had_valid_ref:
-            # **无有效引用**:要么从未登记,要么已过 TTL(群 5 分钟 / 私信 60 分钟)。
-            # → 直接丢弃,不白等、不白烧一次必失败的调用。典型场景:冷群里超时触发的「游戏解散」广播。
-            log.info(f'🗑️ [{_drop_scope(is_uid)}丢弃] {_no_ref_reason(key)}，丢弃: {msg_preview!r}')
-            return
-        else:
-            # 群聊配额满 / 普通私信配额满(TTL 内仍有引用) → 阻塞等待刷新,
-            # 不预先尝试发送(直接发也会被 QQ 拒)。
-            wait_start = time.monotonic()
-            q = quota.ref_quota(key)
-            log.info(f'⏳ [配额已满] {key} 已用 {q}/{q}，'
-                     f'阻塞等待刷新按钮 ≤{quota.REFRESH_WAIT_TIMEOUT:.0f}s | 待发: {msg_preview!r}')
-            consumed = await quota.wait_and_consume(key, quota.REFRESH_WAIT_TIMEOUT)
-            elapsed = time.monotonic() - wait_start
-            if consumed is None:
-                # 等待超时 → 改走主动消息(无 msg_id/event_id)。bot 若在该群/用户上有主动 quota 还能落地,语义更干净。
-                # 但今日主动额度已用满时**不再强发**:QQ 必拒,发了只是白烧一次调用并让日志误报成功 —— 直接丢弃,等用户点刷新或次日重置。
-                if not _active_push_allowed(target_id, is_uid):
-                    metrics.record_quota_wait_timeout()
-                    log.warning(f'🚫 [主动额度已满] {key} 经 {elapsed:.1f}s 无刷新，'
-                                f'且今日主动消息已达上限 {ACTIVE_PUSH_DAILY_LIMIT}，'
-                                f'丢弃: {msg_preview!r}')
-                    return
-                metrics.record_quota_wait_timeout()
-                log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送主动消息')
-            else:
-                log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发文本')
-
-    # 准备 sender / kwargs。consumed 仍为 None 即主动路径(全量直推 / 沙箱直推 / 刷新超时兜底)。
     if consumed is not None:
-        ref_type, ref_value, count, ref_appid = consumed
-        sender = helpers.get_sender(ref_appid)
-        kwargs = {ref_type: ref_value}
-    else:
-        # 主动路径:无 ref / 无 appid;用任一可用 sender,kwargs 空
-        sender = helpers.get_sender('')
-        count = 0
-        kwargs = {}
-    if sender is None:
-        log.warning(f'无可用 sender，丢弃文本消息 → {target_id}')
+        return consumed, is_active_push
+    # 指标:「真耗尽」= TTL 内引用的被动条数真用完(has_valid_ref True);
+    # 无引用 / 已过期的场景(无事件上下文的推送、私信丢弃)不算配额压力。
+    # 且仅统计**无主动直推资格**的目标:全量群 / 沙箱私信配额满后可无缝转主动消息、消息照常送达,没有实际影响,不计入配额压力。
+    had_valid_ref = quota.has_valid_ref(key)
+    if had_valid_ref and not is_active_push and not retry:
+        metrics.record_quota_exhausted()
+    if is_active_push:
+        tag = '私信直推' if is_sandbox_dm else '全量直推'
+        log.info(f'⚡ [{tag}] {key} 配额已满，走主动消息: {what}')
+        return None, True
+    if not had_valid_ref:
+        # **无有效引用**:要么从未登记,要么已过 TTL(群 5 分钟 / 私信 60 分钟)。
+        # → 直接丢弃,不白等、不白烧一次必失败的调用。典型场景:冷群里超时触发的「游戏解散」广播。
+        log.info(f'🗑️ [{_drop_scope(is_uid)}丢弃] {_no_ref_reason(key)}，丢弃: {what}')
+        return None
+    # 群聊配额满 / 普通私信配额满(TTL 内仍有引用) → 阻塞等待刷新,不预先尝试发送(直接发也会被 QQ 拒)。
+    wait_start = time.monotonic()
+    q = quota.ref_quota(key)
+    log.info(f'⏳ [配额已满] {key} 已用 {q}/{q}，'
+             f'阻塞等待刷新按钮 ≤{quota.REFRESH_WAIT_TIMEOUT:.0f}s | 待发: {what}')
+    consumed = await quota.wait_and_consume(key, quota.REFRESH_WAIT_TIMEOUT)
+    elapsed = time.monotonic() - wait_start
+    if consumed is not None:
+        log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发: {what}')
+        return consumed, False
+    metrics.record_quota_wait_timeout()
+    # 等待超时 → 改走主动消息(无 msg_id/event_id)。bot 若在该群/用户上有主动 quota 还能落地,语义更干净。
+    # 但今日主动额度已用满时**不再强发**:QQ 必拒,发了只是白烧一次调用并让日志误报成功 —— 直接丢弃,等用户点刷新或次日重置。
+    if not _active_push_allowed(target_id, is_uid):
+        log.warning(f'🚫 [主动额度已满] {key} 经 {elapsed:.1f}s 无刷新，'
+                    f'且今日主动消息已达上限 {ACTIVE_PUSH_DAILY_LIMIT}，丢弃: {what}')
+        return None
+    log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送主动消息: {what}')
+    return None, False
+
+
+async def _deliver(target_id: str, is_uid: bool, what: str, send) -> None:
+    """选通道 + 发送 + 失败处理,文本与图片共用。
+
+    ``send(sender, kwargs, used, is_active_push)`` 发一次并返回 ``(ok, code)``(``used`` 见 quota.try_consume_ref)。
+    失败时:
+      · 被动引用已失效(``_DEAD_REF_CODES``)→ 移出引用池,重新选通道(下一条引用 / 主动 / 丢弃)
+      · 主动直推撞频控(40034100)→ 按 ``_RATE_LIMIT_BACKOFF`` 退避重发,等待中来了新引用就改走被动
+      · 其他错误照旧不重试(框架已记错误日志)
+    调用方持有 per-target Lock,退避期间同一目标的后续消息排在后面,顺序不乱。
+    """
+    key = helpers.target_key(target_id, is_uid)
+    route = await _pick_route(key, target_id, is_uid, what)
+    dead = waits = 0
+    while route is not None:
+        consumed, is_active_push = route
+        if consumed is not None:
+            ref_type, ref_value, used, ref_appid = consumed
+            sender, kwargs = helpers.get_sender(ref_appid), {ref_type: ref_value}
+        else:
+            # 主动路径:无 ref / 无 appid;用任一可用 sender,kwargs 空
+            sender, kwargs, used = helpers.get_sender(''), {}, 0
+        if sender is None:
+            log.warning(f'无可用 sender，丢弃 → {target_id}: {what}')
+            return
+
+        ok, code = await send(sender, kwargs, used, is_active_push)
+        if ok:
+            if consumed is None:
+                # 指标:无 ref 即主动消息(全量直推 / 沙箱直推 / 超时强发),按日分桶计数;被拒的不算
+                metrics.record_active_push(target_id, is_uid)
+            if waits:
+                metrics.record_rate_limit(dropped=False)
+                log.info(f'✅ [频控补发] {key} 退避 {waits} 次后送达: {what}')
+            return
+        if consumed is not None and code in _DEAD_REF_CODES and dead < _DEAD_REF_RETRIES:
+            dead += 1
+            quota.drop_ref(key, ref_value)
+            log.info(f'♻️ [引用失效] {key} 的 {ref_type} 被拒({code})，换下一条: {what}')
+            route = await _pick_route(key, target_id, is_uid, what, retry=True)
+            continue
+        if consumed is None and is_active_push and code == _RATE_LIMIT_CODE:
+            if waits >= len(_RATE_LIMIT_BACKOFF):
+                metrics.record_rate_limit(dropped=True)
+                log.warning(f'🚫 [频控丢弃] {key} 退避 {waits} 次仍超频控，丢弃: {what}')
+                return
+            # 往上抖 0~20%:bot 总量撞线时各群别在同一时刻一起重发
+            delay = _RATE_LIMIT_BACKOFF[waits] * (1 + random.random() * 0.2)
+            waits += 1
+            log.warning(f'🐢 [频控退避] {key} 主动消息超频控，{delay:.0f}s 后第 {waits} 次重发: {what}')
+            fresh = await quota.wait_and_consume(key, delay)
+            route = ((fresh, True) if fresh is not None
+                     else await _pick_route(key, target_id, is_uid, what, retry=True))
+            continue
         return
 
-    # 指标:无 ref 即主动消息(全量直推 / 沙箱直推 / 超时强发),按日分桶计数
-    if consumed is None:
-        metrics.record_active_push(target_id, is_uid)
 
-    # 倒数第 2 条起追加刷新按钮(群 4/5 条,私信 3/4 条);最后一条用「⚠️ 最终刷新」。
-    # 主动直推(全量群 / 沙箱私信)从不追加(不受被动回复条数限制)。
-    btns = list(extra_buttons) if extra_buttons else []
-    if not is_active_push and count >= quota.refresh_threshold(key):
-        is_last = (count >= quota.ref_quota(key))
-        btns.append(quota.build_refresh_button(is_last=is_last))
-        tag = '⚠️' if is_last else '🔄'
-        log.info(f'📊 [配额追踪] {key} 已用 {count}/{quota.ref_quota(key)} → {tag}')
-    btns_arg = btns if btns else None
+async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
+    """文本发送核心:自动追加刷新按钮,选通道与失败重发见 ``_deliver``。
 
-    try:
-        with log_attribution.mark_outbound():
-            if is_uid:
-                await sender.send_to_user(target_id, msg, buttons=btns_arg, **kwargs)
-            else:
-                await sender.send_to_group(target_id, msg, buttons=btns_arg, **kwargs)
-    except Exception as e:
-        log.warning(f'发送文本失败 ({target_id}): {e}')
+    全量群 / 沙箱私信(主动直推)整个生命周期不追加 ``build_refresh_button``:
+    它们次数用完直接走主动消息,不被被动回复条数限制,这个教学按钮没有意义。
+    """
+    key = helpers.target_key(target_id, is_uid)
+
+    async def _send(sender, kwargs, used, is_active_push):
+        # 倒数第 2 条起追加刷新按钮(群 4/5 条,私信 3/4 条);最后一条用「⚠️ 最终刷新」。
+        btns = list(extra_buttons) if extra_buttons else []
+        if not is_active_push and used >= quota.refresh_threshold(key):
+            is_last = (used >= quota.ref_quota(key))
+            btns.append(quota.build_refresh_button(is_last=is_last))
+            tag = '⚠️' if is_last else '🔄'
+            log.info(f'📊 [配额追踪] {key} 已用 {used}/{quota.ref_quota(key)} → {tag}')
+        try:
+            with log_attribution.mark_outbound():
+                if is_uid:
+                    ret = await sender.send_to_user(target_id, msg, buttons=btns or None, **kwargs)
+                else:
+                    ret = await sender.send_to_group(target_id, msg, buttons=btns or None, **kwargs)
+        except Exception as e:
+            log.warning(f'发送文本失败 ({target_id}): {e}')
+            return False, None
+        return _send_result(ret)
+
+    await _deliver(target_id, is_uid, repr((msg or '')[:30].replace('\n', ' ')), _send)
 
 
 # ──────── 图片发送 ────────────────────────────────────────────────────────
@@ -1532,7 +1614,7 @@ async def _send_mixed_message(target_id: str, is_uid: bool, segs, images: dict,
 
 async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filename,
                                     *, pre_url: str | None = None):
-    """图片发送核心：配额管理 + 优先图床+markdown，失败回退 media
+    """图片发送核心：优先图床+markdown，失败回退 media;选通道与失败重发见 ``_deliver``
 
     发送通道二选一：
       A. 图床 markdown：通过 image_hosting 上传图片得到 URL，用 markdown
@@ -1540,96 +1622,35 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
       B. 媒体兜底：图床未启用 / 上传失败时走原有 msg_type=7 路径（content
          字段需 humanize mentions，无法挂按钮）
 
-    主动直推(全量群 / 沙箱私信)时不等刷新按钮,直接主动消息(``ref_type=''``
-    透传到下游)。无有效引用(未登记 / 已过 TTL)且无直推资格时直接丢弃(同 _send_text_quota_managed)。
-
     ``pre_url`` 是上游(``_send_mixed_message`` 的媒体兜底分支)已经拿到的上传结果:
     非空 = 直接用该 URL,``''`` = 已知上传失败、跳过重传直接走媒体,``None``(默认)= 本函数自己上传。
     """
-    key = helpers.target_key(target_id, is_uid)
-    # 直推私信 / 全量群:前 5 次仍走 msg_id 被动回复,仅配额耗尽后主动直推
-    # (逻辑同 _send_text_quota_managed,详见那里的注释)
-    is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
-    is_full = (not is_uid) and helpers.can_push_group(target_id)
-    # 今日主动消息额度用满 → 失去直推资格,退回刷新按钮机制(同文本路径)
-    is_active_push = (is_full or is_sandbox_dm) and _active_push_allowed(target_id, is_uid)
+    # 上传只做一次:换引用重发、频控退避重发都复用同一个 URL / file_info
+    up = {'url': pre_url, 'media': None}
 
-    consumed = quota.try_consume_ref(key)
-    if consumed is None:
-        # 指标口径同 _send_text_quota_managed:仅 TTL 内引用真用完、且无主动直推资格(全量群 / 沙箱私信可转主动消息,无影响,不计)才算配额压力。
-        had_valid_ref = quota.has_valid_ref(key)
-        if had_valid_ref and not is_active_push:
-            metrics.record_quota_exhausted()
-        if is_active_push:
-            tag = '私信直推' if is_sandbox_dm else '全量直推'
-            log.info(f'⚡ [{tag}] {key} 配额已满，图片走主动消息')
-        elif not had_valid_ref:
-            # 无有效引用 → 直接丢弃(判定与理由见 _send_text_quota_managed 同位分支)
-            log.info(f'🗑️ [{_drop_scope(is_uid)}丢弃] {_no_ref_reason(key)}，丢弃图片')
-            return
-        else:
-            wait_start = time.monotonic()
-            q = quota.ref_quota(key)
-            log.info(f'⏳ [配额已满] {key} 已用 {q}/{q}，'
-                     f'阻塞等待刷新按钮 ≤{quota.REFRESH_WAIT_TIMEOUT:.0f}s | 待发: [图片]')
-            consumed = await quota.wait_and_consume(key, quota.REFRESH_WAIT_TIMEOUT)
-            elapsed = time.monotonic() - wait_start
-            if consumed is None:
-                # 等待超时 → 改走主动消息(理由同 _send_text_quota_managed:
-                # 过期 msg_id 强发必拒,主动消息至少留一条出路)。
-                # 今日主动额度已满则不强发(QQ 必拒),丢弃等刷新 / 次日重置。
-                if not _active_push_allowed(target_id, is_uid):
-                    metrics.record_quota_wait_timeout()
-                    log.warning(f'🚫 [主动额度已满] {key} 经 {elapsed:.1f}s 无刷新，'
-                                f'且今日主动消息已达上限 {ACTIVE_PUSH_DAILY_LIMIT}，丢弃图片')
-                    return
-                metrics.record_quota_wait_timeout()
-                log.warning(f'⏰ [超时强发] {key} 经 {elapsed:.1f}s 无刷新，尝试发送图片主动消息')
-            else:
-                log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发图片')
+    async def _send(sender, kwargs, used, is_active_push):
+        if up['url'] is None:
+            # target 一并透传:qq_file 图床用当前消息目标作上传作用域(其余图床忽略)
+            up['url'] = await uploader.upload_image(
+                data, filename, user_id=target_id if is_uid else '',
+                target_id=target_id, target_is_uid=is_uid) or ''
+        if up['url']:
+            res = await _send_markdown_image(sender, target_id, is_uid, kwargs, raw_content,
+                                             up['url'], data, used, is_full=is_active_push)
+            if res is not None:
+                return res
+            # markdown 发送抛异常（极少见）→ 落回 media
+        return await _send_media_fallback(sender, target_id, is_uid, kwargs, raw_content, data, up)
 
-    # 准备 sender / ref tuple。consumed 仍为 None 即主动路径(全量直推 / 沙箱
-    # 直推 / 刷新超时兜底),用空 ref_type/ref_value 透传到下游,下游靠 ref_type
-    # 为空切换 kwargs={}。
-    if consumed is not None:
-        ref_type, ref_value, count, ref_appid = consumed
-        sender = helpers.get_sender(ref_appid)
-    else:
-        ref_type, ref_value, count = '', '', 0
-        sender = helpers.get_sender('')
-    if sender is None:
-        log.warning(f'无可用 sender，丢弃图片 → {target_id}')
-        return
-
-    # 指标:ref_type 为空即主动消息(同文本路径口径),按日分桶计数
-    if not ref_type:
-        metrics.record_active_push(target_id, is_uid)
-
-    # ── 通道 A：尝试图床 → markdown 内嵌 ─────────────────────────────────
-    # target 一并透传:qq_file 图床用当前消息目标作上传作用域(其余图床忽略)
-    user_id_for_cos = target_id if is_uid else ''
-    image_url = pre_url if pre_url is not None else await uploader.upload_image(
-        data, filename, user_id=user_id_for_cos,
-        target_id=target_id, target_is_uid=is_uid)
-    if image_url:
-        if await _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
-                                      raw_content, image_url, data, count,
-                                      is_full=is_active_push):
-            return
-        # markdown 发送失败（极少见，比如域名未报备被 QQ 拒）→ 落回 media
-
-    # ── 通道 B：媒体兜底（msg_type=7）────────────────────────────────────
-    await _send_media_fallback(sender, target_id, is_uid, ref_type, ref_value, raw_content, data)
+    await _deliver(target_id, is_uid, '[图片]', _send)
 
 
-async def _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
-                               raw_content, image_url, data, count,
-                               *, is_full: bool = False) -> bool:
-    """构造 markdown 文本 + 图片 + 按钮，调 send_to_*。成功返回 True。
+async def _send_markdown_image(sender, target_id, is_uid, kwargs, raw_content,
+                               image_url, data, used, *, is_full: bool = False):
+    """构造 markdown 文本 + 图片 + 按钮，调 send_to_*。返回 ``(ok, code)``,发送抛异常时返回 None(调用方退回媒体消息)。
 
-    ``ref_type=''`` 表示主动消息(全量群 / 沙箱私信 / 配额耗尽超时路径):
-    kwargs 留空,不带 msg_id/event_id。``is_full=True``(调用方传 is_active_push,
-    即全量群或沙箱私信)时同样跳过刷新按钮追加。
+    ``kwargs`` 为空即主动消息(全量群 / 沙箱私信 / 配额耗尽超时路径),不带 msg_id/event_id。
+    ``is_full=True``(调用方传 is_active_push,即全量群或沙箱私信)时跳过刷新按钮追加。
     """
     width, height = uploader.get_image_size(data)
     parts = []
@@ -1642,54 +1663,55 @@ async def _send_markdown_image(sender, target_id, is_uid, ref_type, ref_value,
     # 阈值按场景取(群 4/5 条,私信 3/4 条),同 _send_text_quota_managed。
     btns: list = []
     key = helpers.target_key(target_id, is_uid)
-    if not is_full and count >= quota.refresh_threshold(key):
-        is_last = (count >= quota.ref_quota(key))
+    if not is_full and used >= quota.refresh_threshold(key):
+        is_last = (used >= quota.ref_quota(key))
         btns.append(quota.build_refresh_button(is_last=is_last))
     btns_arg = btns if btns else None
 
-    kwargs = {ref_type: ref_value} if ref_type else {}
     try:
         with log_attribution.mark_outbound():
             if is_uid:
-                await sender.send_to_user(target_id, md, buttons=btns_arg, **kwargs)
+                ret = await sender.send_to_user(target_id, md, buttons=btns_arg, **kwargs)
             else:
-                await sender.send_to_group(target_id, md, buttons=btns_arg, **kwargs)
-        return True
+                ret = await sender.send_to_group(target_id, md, buttons=btns_arg, **kwargs)
     except Exception as e:
         log.warning(f'markdown 图片发送失败 ({target_id}): {e}, 回退到媒体消息')
-        return False
+        return None
+    return _send_result(ret)
 
 
-async def _send_media_fallback(sender, target_id, is_uid, ref_type, ref_value,
-                               raw_content, data):
-    """msg_type=7 媒体消息兜底：上传 file_info → send_to_* with media。
+async def _send_media_fallback(sender, target_id, is_uid, kwargs, raw_content, data, up):
+    """msg_type=7 媒体消息兜底：上传 file_info → send_to_* with media,返回 ``(ok, code)``。
     media 不解析 <@openid>，content 这里要先 humanize 成可读 @昵称。
 
-    ``ref_type=''`` 表示主动消息(全量群配额耗尽路径):kwargs 留空。
+    ``kwargs`` 为空即主动消息。``up['media']`` 缓存 ``(sender, file_info)``:file_info 归上传它的 bot 所有,
+    换了 sender(被动引用的 appid 与主动路径的不同)才重新上传。
     """
     from core.message.media import upload_media_bytes  # 延迟导入
 
-    prefix = 'users' if is_uid else 'groups'
-    upload_ep = f"/v2/{prefix}/{target_id}/files"
-    try:
-        file_info = await upload_media_bytes(sender, data, 1, upload_ep)
-    except Exception as e:
-        log.warning(f'图片上传异常: {e}')
-        return
-    if not file_info:
-        log.warning(f'图片上传失败 → {target_id}')
-        return
+    if not up['media'] or up['media'][0] is not sender:
+        prefix = 'users' if is_uid else 'groups'
+        try:
+            file_info = await upload_media_bytes(sender, data, 1, f"/v2/{prefix}/{target_id}/files")
+        except Exception as e:
+            log.warning(f'图片上传异常: {e}')
+            return False, None
+        if not file_info:
+            log.warning(f'图片上传失败 → {target_id}')
+            return False, None
+        up['media'] = (sender, file_info)
 
     # msg_type=7 的 content 是纯文本(QQ 不按 markdown 解析):humanize 提及后
     # 再把源头(cb_get_user_name)给昵称加的 md 转义还原,避免露出反斜杠
     rendered_content = helpers.strip_md_escapes(helpers.humanize_mentions(raw_content))
-    media_dict = {'file_info': file_info}
-    kwargs = {ref_type: ref_value} if ref_type else {}
+    media_dict = {'file_info': up['media'][1]}
     try:
         with log_attribution.mark_outbound():
             if is_uid:
-                await sender.send_to_user(target_id, rendered_content, media=media_dict, **kwargs)
+                ret = await sender.send_to_user(target_id, rendered_content, media=media_dict, **kwargs)
             else:
-                await sender.send_to_group(target_id, rendered_content, media=media_dict, **kwargs)
+                ret = await sender.send_to_group(target_id, rendered_content, media=media_dict, **kwargs)
     except Exception as e:
         log.warning(f'发送图片失败 ({target_id}): {e}')
+        return False, None
+    return _send_result(ret)
