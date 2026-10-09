@@ -101,7 +101,8 @@ _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启(?:\s+(.+))?$'
 _P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
-_P_STATS    = r'^/?数据统计\s*(总|\d{8}|\d{6}|\d{4}|\d{2})?$'
+# 参数照单全收(单行):日期、总,其余一律当游戏名 —— 对不上的由 handler 报错并给出用法,不落进引擎
+_P_STATS    = r'^/?数据统计\s*(\S[^\n]*?)?\s*$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 _P_SPONSOR  = r'^/?赞助支持$'
@@ -685,6 +686,15 @@ async def lgtbot_update_notice(event, match):
 # 「数据统计YYYY」可查的最早年份
 _MIN_STATS_YEAR = 2026
 
+# 参数既不是日期、也对不上游戏名时附在报错下方 —— 用户也可能是想查日期但写错了格式
+_STATS_DATE_USAGE = (
+    '📅 按日期查询：\n'
+    '· 某日 数据统计MMDD（或 YYYYMMDD）\n'
+    '· 某月 数据统计MM（或 YYYYMM）\n'
+    '· 某年 数据统计YYYY\n'
+    '· 累计 数据统计总'
+)
+
 _SPAN_VIEWS = {
     'date':  {'period': '当日', 'who': '活跃', 'flags': {}, 'empty': '该日期没有已完成的对局'},
     'month': {'period': '当月', 'who': '活跃', 'flags': {'month_mode': True}, 'empty': '该月份没有已完成的对局'},
@@ -701,7 +711,7 @@ def _stats_image_md(uid: str, w: int, h: int, url: str) -> str:
     return f'<@{uid}>\n![数据统计 #{w}px #{h}px]({url})'
 
 
-def _parse_stats_date(year: int, mm: str, dd: str, arg: str, today, hint: str) -> tuple:
+def _parse_stats_date(year: int, mm: str, dd: str, today, hint: str) -> tuple:
     """把 (年, MM, DD) 解析成目标日期;非法日期 → 报错项。
 
     输入的就是今天 → 返回 ``'today'``:等价于无参数,仍走带涨跌 / 额度 / 趋势的
@@ -710,15 +720,15 @@ def _parse_stats_date(year: int, mm: str, dd: str, arg: str, today, hint: str) -
     try:
         target = _date(year, int(mm), int(dd))
     except ValueError:
-        return 'error', None, f'日期无效：{arg}（格式 {hint}）'
+        return 'error', None, f'日期无效（格式 {hint}）'
     return ('today', None, '') if target == today else ('date', target, '')
 
 
 def _parse_stats_arg(arg: str, today) -> tuple:
     """解析「数据统计」的参数,返回 ``(kind, payload, error)``。
 
-    ``kind`` ∈ ``today`` / ``total`` / ``year`` / ``month`` / ``date`` / ``error``;
-    payload 依次为 None / None / 年 / (年, 月) / ``date`` 对象 / None。
+    ``kind`` ∈ ``today`` / ``total`` / ``year`` / ``month`` / ``date`` / ``game`` / ``error``;
+    payload 依次为 None / None / 年 / (年, 月) / ``date`` 对象 / 游戏名原文 / None。
 
         (无)        今日
         总          全部历史累计
@@ -727,31 +737,37 @@ def _parse_stats_arg(arg: str, today) -> tuple:
         YYYY        某年                如 2026
         YYYYMM      某年某月            如 202608
         YYYYMMDD    某年某日            如 20260803
+        其他        单个游戏            如 天赋云巢(纯数字只按日期解析)
 
     **4 位参数的年份与 MMDD 不会撞车**:MMDD 的前两位必须是合法月份 01-12,而 2000-2099 的年份前两位恒为 20,
     所以前两位是合法月份 → 按 MMDD,否则按年份。6 / 8 位只可能带年份。
 
     纯函数(时间从 ``today`` 传入),错误文案在这里一处产出 —— handler 只负责回。
+    官方 bot 不能回显用户消息,报错只点明是年 / 月 / 日哪一段错,不复述输入的参数。
     """
     if not arg:
         return 'today', None, ''
     if arg == '总':
         return 'total', None, ''
+    if not arg.isdecimal():
+        return 'game', arg, ''
     n, this_year = len(arg), today.year
+    if n not in (2, 4, 6, 8):
+        return 'error', None, f'日期格式无效\n\n{_STATS_DATE_USAGE}'
 
     if n == 2:                                            # MM —— 当年某月
         month = int(arg)
         if not 1 <= month <= 12:
-            return 'error', None, f'月份无效：{arg}（格式 MM，如 数据统计08 查看 8月）'
+            return 'error', None, '月份无效（格式 MM，如 数据统计08 查看 8月）'
         return 'month', (this_year, month), ''
     if n == 4 and 1 <= int(arg[:2]) <= 12:                # MMDD —— 当年某日
-        return _parse_stats_date(this_year, arg[:2], arg[2:], arg, today,
+        return _parse_stats_date(this_year, arg[:2], arg[2:], today,
                                  'MMDD，如 数据统计0802 查看 8月2日')
     if n == 4:                                            # YYYY —— 某年
         year = int(arg)
         if not _MIN_STATS_YEAR <= year <= this_year:
             return ('error', None,
-                    f'参数无效：{arg}（按年 YYYY 如 数据统计{this_year}，'
+                    f'参数无效（按年 YYYY 如 数据统计{this_year}，'
                     f'可查 {_MIN_STATS_YEAR}-{this_year}；按日 MMDD 如 数据统计0802）')
         return 'year', year, ''
 
@@ -759,14 +775,14 @@ def _parse_stats_arg(arg: str, today) -> tuple:
     year = int(arg[:4])
     if not _MIN_STATS_YEAR <= year <= this_year:
         return ('error', None,
-                f'年份无效：{arg[:4]}（可查 {_MIN_STATS_YEAR}-{this_year}）')
+                f'年份无效（可查 {_MIN_STATS_YEAR}-{this_year}）')
     if n == 6:                                            # YYYYMM —— 某年某月
         month = int(arg[4:])
         if not 1 <= month <= 12:
             return ('error', None,
-                    f'月份无效：{arg}（格式 YYYYMM，如 数据统计{this_year}08）')
+                    f'月份无效（格式 YYYYMM，如 数据统计{this_year}08）')
         return 'month', (year, month), ''
-    return _parse_stats_date(year, arg[4:6], arg[6:], arg, today,   # YYYYMMDD
+    return _parse_stats_date(year, arg[4:6], arg[6:], today,   # YYYYMMDD
                             f'YYYYMMDD，如 数据统计{this_year}0802')
 
 
@@ -851,7 +867,8 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
                   for i, t in enumerate(top_games[:3], 1)]
     if top_players[:3]:
         lines.append('👑 玩家参与榜:')
-        lines += [f'  {i}、{p["display"]} ({p["count"]}局)'
+        # 昵称是用户可控文本,文本回复按 markdown 发送
+        lines += [f'  {i}、{helpers.sanitize_md_name(p["display"])} ({p["count"]}局)'
                   for i, p in enumerate(top_players[:3], 1)]
     await event.reply('\n'.join(lines))
 
@@ -884,9 +901,116 @@ async def _reply_total_stats(event) -> None:
                               f'累计总统计 · 截至{time.strftime("%Y-%m-%d")}')
 
 
+def _delta_suffix(cur, base) -> str:
+    """文本保底的增减后缀(同图片卡的涨跌胶囊;任一缺数据不显示)。"""
+    if cur is None or base is None:
+        return ''
+    diff = int(cur) - int(base)
+    if diff > 0:
+        return f'（↑{diff}）'
+    if diff < 0:
+        return f'（↓{abs(diff)}）'
+    return '（持平）'
+
+
+def _game_not_found_md(uid: str, suggestions: list) -> str:
+    """游戏名对不上:报错 + 候选 + 日期查询用法。
+
+    官方 bot 不能回显用户消息,报错里不复述输入的游戏名;候选取自库里的游戏名(可控白名单),可以列出来。
+    """
+    lines = [f'<@{uid}>', '❌ 游戏不存在或暂无计分对局']
+    if suggestions:
+        lines.append('💡 你要找的可能是：'
+                     + '、'.join(helpers.sanitize_md_name(s) for s in suggestions))
+    lines += ['', _STATS_DATE_USAGE]
+    return '\n'.join(lines)
+
+
+def _game_stats_text(uid: str, gs: dict) -> str:
+    """单游戏统计的文本保底;榜单 TOP3 控制消息长度,换算文案与图片同源(stats_image.game_labels)。"""
+    lab = stats_image.game_labels(gs)
+    md = helpers.sanitize_md_name
+
+    def _n(v):
+        return '—' if v is None else v
+
+    def _paren(s: str) -> str:
+        return f'（{s}）' if s else ''
+
+    att, gm, wr = gs.get('attendances'), gs.get('group_matches'), gs.get('week_rank')
+    gp = gs.get('group_players')
+    lines = [
+        f'<@{uid}>',
+        f'🎮 《{md(gs.get("game_name") or "")}》游戏统计 (截至{time.strftime("%H:%M")})',
+        f'🎲 累计对局: {_n(gs.get("matches"))} 局{_paren("" if att is None else f"{att} 人次")}',
+        f'👤 累计玩家: {_n(gs.get("players"))} 人{_paren("" if gp is None else f"本群 {gp} 人")}',
+        f'📅 近7日对局: {_n(gs.get("week_matches"))} 局'
+        f'{_delta_suffix(gs.get("week_matches"), gs.get("prev_week_matches"))}',
+        f'🕹️ 近7日玩家: {_n(gs.get("week_players"))} 人'
+        f'{_delta_suffix(gs.get("week_players"), gs.get("prev_week_players"))}',
+        f'👥 平均人数: {lab["avg"]} 人{_paren(lab["range"])}',
+        f'💬 游戏群聊: {_n(gs.get("groups"))} 个{_paren("" if gm is None else f"本群 {gm} 局")}',
+        f'🏆 热度排名: 第 {_n(gs.get("rank"))} / {_n(gs.get("game_count"))}'
+        f'{_paren(f"近7日第 {wr}" if wr else "")}',
+        f'🕒 最后一局: {lab["last_full"]}{_paren(lab["ago"])}',
+    ]
+    tops = (gs.get('top_players') or [])[:3]
+    if tops:
+        lines.append('👑 局数排行:')
+        lines += [f'  {i}、{md(p["display"])} ({p["count"]}局)' for i, p in enumerate(tops, 1)]
+    power = (gs.get('top_power') or [])[:3]
+    if power:
+        lines.append(f'🏅 实力排行（≥{gs.get("power_min")}局）:')
+        lines += [f'  {i}、{md(p["display"])} ({stats_image.fmt_power(p["rate"], p["count"])})'
+                  for i, p in enumerate(power, 1)]
+    me = gs.get('me')
+    if me:
+        power_rank = (f'第 {me["power_rank"]} 名' if me['power_rank']
+                      else f'未满 {gs.get("power_min")} 局')
+        lines.append(f'🙋 我的: {me["matches"]} 局（第 {me["rank"]} 名）'
+                     f'· 实力 {stats_image.fmt_rate(me["rate"])}（{power_rank}）')
+    return '\n'.join(lines)
+
+
+async def _reply_game_stats(event, query: str) -> None:
+    """「数据统计<游戏名>」单游戏统计:对上了 → 统计卡片(图片优先,失败回退文本);对不上 → 报错 + 候选按钮。
+
+    走到这里只说明参数不是日期格式,用户也可能是日期写错了,所以报错里同时给出日期查询的用法。
+    """
+    uid = event.user_id or ''
+    gid = event.group_id or event.channel_id or ''
+    is_group = bool(event.is_group and gid)
+    loop = asyncio.get_running_loop()
+    # 玩家侧各项要扫整张 user_with_match,放进线程池,不卡事件循环
+    gs = await loop.run_in_executor(
+        None, metrics.query_game_detail, query, uid, gid if is_group else '')
+    if not gs.get('available'):
+        await event.reply(f'<@{uid}>\n❌ 数据统计暂不可用，请稍后再试')
+        return
+    if not gs.get('found'):
+        sugg = gs.get('suggestions') or []
+        await event.reply(_game_not_found_md(uid, sugg),
+                          buttons=buttons.build_game_suggest_buttons(sugg))
+        return
+    if uploader.SELECTED_BACKEND:
+        img = await loop.run_in_executor(
+            None, stats_image.render_game_stats_image, gs,
+            f'游戏统计 · 截至 {time.strftime("%H:%M")}')
+        if img:
+            url = await uploader.upload_image(
+                img, 'lgtbot_game_stats.png',
+                target_id=(gid if is_group else uid),
+                target_is_uid=not is_group)
+            if url:
+                w, h = uploader.get_image_size(img)
+                await event.reply(_stats_image_md(uid, w, h, url))
+                return
+    await event.reply(_game_stats_text(uid, gs))
+
+
 @handler(_P_STATS,
          name='数据统计',
-         desc='数据统计/游戏榜/玩家参与榜/近期趋势，可按日(MMDD/YYYYMMDD)、按月(MM/YYYYMM)、按年(YYYY)、累计(总)查询',
+         desc='数据统计/游戏榜/玩家参与榜/近期趋势，可按日(MMDD/YYYYMMDD)、按月(MM/YYYYMM)、按年(YYYY)、累计(总)查询，跟游戏名查单个游戏',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
@@ -900,6 +1024,8 @@ async def lgtbot_data_stats(event, match):
       · 「数据统计总」                          全部历史累计
     共同口径:无涨跌标识、无主动消息、无趋势图,第 4 卡为该期对局人次,双榜 TOP10;无对局直接报错。
     「总」额外带好友 / 群聊总数一行(无增减角标)。输入今天的日期等价于无参数(仍带涨跌)。
+
+    单游戏视图:「数据统计<游戏名>」(不是纯数字、也不是「总」的参数),见 _reply_game_stats。
 
     配置了图床时优先走**图片通道**: stats_image 渲染统计卡片(线程池,不阻塞事件循环)→
     uploader 上传 → markdown 内嵌图回复;渲染失败(无 PIL / 无中文字体)或上传失败时回退下方纯文本。
@@ -925,6 +1051,9 @@ async def lgtbot_data_stats(event, match):
     kind, payload, err = _parse_stats_arg(arg, _date.today())
     if err:
         await event.reply(f'<@{event.user_id}>\n❌ {err}')
+        return
+    if kind == 'game':
+        await _reply_game_stats(event, payload)
         return
     if kind == 'total':
         await _reply_total_stats(event)
@@ -981,26 +1110,16 @@ async def lgtbot_data_stats(event, match):
     def _n(v):
         return '—' if v is None else v
 
-    def _delta(cur, yday):
-        """较昨日同时段的增减后缀(同图片卡的涨跌胶囊;任一缺数据不显示)。"""
-        if cur is None or yday is None:
-            return ''
-        diff = int(cur) - int(yday)
-        if diff > 0:
-            return f'（↑{diff}）'
-        if diff < 0:
-            return f'（↓{abs(diff)}）'
-        return '（持平）'
-
+    # 涨跌对比昨日同时段
     lines = [
         f'<@{event.user_id}>',
         f'📈 LGT-Bot 数据统计 (截至{time.strftime("%H:%M")})',
         f'🎮 今日对局: {_n(g.get("today_matches"))} 局'
-        f'{_delta(g.get("today_matches"), g.get("yesterday_matches_same_span"))}',
+        f'{_delta_suffix(g.get("today_matches"), g.get("yesterday_matches_same_span"))}',
         f'👤 活跃玩家: {_n(g.get("today_players"))} 人'
-        f'{_delta(g.get("today_players"), g.get("yesterday_players_same_span"))}',
+        f'{_delta_suffix(g.get("today_players"), g.get("yesterday_players_same_span"))}',
         f'👥 活跃群聊: {_n(g.get("today_groups"))} 个'
-        f'{_delta(g.get("today_groups"), g.get("yesterday_groups_same_span"))}',
+        f'{_delta_suffix(g.get("today_groups"), g.get("yesterday_groups_same_span"))}',
     ]
     # bot 规模 —— 括号里是今日净变化(不是与昨日对比),0 显示「持平」
     def _net(v):
@@ -1023,14 +1142,14 @@ async def lgtbot_data_stats(event, match):
     top_players = (g.get('top_players_today') or [])[:3]
     if top_players:
         lines.append('👑 玩家参与榜:')
-        lines += [f'  {i}、{p["display"]} ({p["count"]}局)'
+        lines += [f'  {i}、{helpers.sanitize_md_name(p["display"])} ({p["count"]}局)'
                   for i, p in enumerate(top_players, 1)]
     trend = g.get('trend_10d') or []
     if trend:
         # 近10日的涨跌对比「上一个 10 日」整期(prev10_matches,不做时段对齐)
         total10 = sum(t['count'] for t in trend)
         lines.append(f'📅 近10日对局: {total10} 局'
-                     f'{_delta(total10, g.get("prev10_matches"))}')
+                     f'{_delta_suffix(total10, g.get("prev10_matches"))}')
     pq = g.get('push_quota') or {}
     if pq.get('shown'):
         if pq.get('no_permission'):

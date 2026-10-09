@@ -32,6 +32,7 @@ lgtbot.db 统计严格只读(``file:...?mode=ro`` URI,不产生 -wal/-shm 旁路
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import sqlite3
@@ -836,4 +837,223 @@ def query_game_stats_for_date(date_str: str) -> dict:
     out = _prefixed(_span_stats(day.strftime(fmt),
                                 (day + timedelta(days=1)).strftime(fmt)), 'day')
     out['date'] = date_str
+    return out
+
+
+# ── 单游戏统计:「数据统计<游戏名>」 ──────────────────────────────────────────
+# 同窗口视图只读数据库、不掺不计分账本。可查的游戏名就是 match 表里出现过的那些:
+# 引擎已加载的游戏列表不经桥接层导出,还没有计分对局的游戏在这里查不到。
+# 「近 7 日」同本周榜口径(含今天,本地 00:00 边界),「上一个 7 日」是紧挨着的前 7 个整天;
+# 趋势按 7 天一桶往前滚,最新一桶就是「近 7 日」。
+
+GAME_TREND_WEEKS = 12
+GAME_RANK_LIMIT = 10
+# 实力排行的上榜门槛(局数):从高往低试,够格的凑满 GAME_RANK_LIMIT 人就用这一档,都凑不满用最后一档
+POWER_MIN_TIERS = (10, 5, 3)
+# 与候选按钮的容量一致:QQ 键盘最多 5 排,末排是「游戏列表」,候选最多 4 排 × 3 个
+_GAME_SUGGEST_LIMIT = 12
+# 输入超过这个长度就不可能是游戏名,只截前段去比,免得超长文本拖慢 difflib
+_GAME_QUERY_MAX = 30
+
+# 比对时忽略空白与书名号 / 引号:按钮文案里的游戏名带《》,用户常照抄过来
+_GAME_NAME_NOISE = str.maketrans('', '', ' \t　 《》〈〉「」『』“”"\'‘’')
+
+# 游戏名表(按累计局数降序)+ 每款游戏的近 7 日局数,同时供名字匹配与热度排名
+_GAME_LIST_SQL = ('SELECT game_name, COUNT(*) c, SUM(finish_time >= ?) FROM match '
+                  'GROUP BY game_name ORDER BY c DESC, game_name')
+_GAME_MATCH_SQL = ('SELECT COUNT(*), SUM(user_count), MIN(user_count), MAX(user_count), '
+                   "COUNT(DISTINCT NULLIF(group_id, '')), MAX(finish_time), "
+                   'SUM(finish_time >= ? AND finish_time < ?), SUM(group_id = ?) '
+                   'FROM match WHERE game_name = ?')
+# 距今第几个 7 天桶(0 = 近 7 日);参数是今天的日期串
+_WEEK_IDX = 'CAST((julianday(?) - julianday(date({col}))) / 7 AS INTEGER)'
+_GAME_WEEKS_SQL = (f'SELECT {_WEEK_IDX.format(col="finish_time")} wk, COUNT(*) FROM match '
+                   'WHERE game_name = ? AND finish_time >= ? GROUP BY wk')
+# 玩家侧各项(人数 / 本群人数 / 每周活跃 / 两张榜 / 我的名次)都从这一条出:user_with_match 没有 match_id 索引,
+# 每条 JOIN 都要扫整表。趋势窗口外的对局归到 -1 桶,只计入累计。
+# 第 4 列是各局「击败对手比例」之和:引擎的 rank_score 按得分升序给每组同分玩家记「之前的人数 × 2 + 本组人数」,
+# n 人局从末名 1 到头名 2n-1,(rank_score - 1) / (2n - 2) 正好是击败的对手占比,同分的对手各算一半(score_calculation.cc::CalLevelScoreRank)。
+_GAME_PLAYERS_SQL = (
+    'SELECT uwm.user_id, CASE WHEN m.finish_time >= ? '
+    f'THEN {_WEEK_IDX.format(col="m.finish_time")} ELSE -1 END wk, '
+    'COUNT(*), SUM((uwm.rank_score - 1) * 1.0 / MAX(1, 2 * m.user_count - 2)), MAX(m.group_id = ?) '
+    'FROM user_with_match uwm JOIN match m ON m.match_id = uwm.match_id '
+    'WHERE m.game_name = ? GROUP BY uwm.user_id, wk')
+
+
+def _norm_game_name(s: str) -> str:
+    return str(s or '').translate(_GAME_NAME_NOISE).casefold()
+
+
+def resolve_game_name(query: str, names) -> tuple:
+    """把用户输入对到库里的游戏名,返回 ``(游戏名, 候选列表)``;没对上时游戏名为 ``''``。
+
+    ``names`` 按热度降序。先原样比,再忽略大小写 / 空白 / 书名号比;都不中时给最多 12 个候选:
+    名字互相包含的按热度排在前,再补字面相近的(错一两个字这类,difflib)。
+    """
+    names = [str(n) for n in names or () if n]
+    q = str(query or '').strip()[:_GAME_QUERY_MAX]
+    if q in names:
+        return q, []
+    nq = _norm_game_name(q)
+    if not nq:
+        return '', []
+    by_norm: dict = {}
+    for n in names:
+        by_norm.setdefault(_norm_game_name(n), n)
+    if nq in by_norm:
+        return by_norm[nq], []
+    out = [n for n in names if nq in _norm_game_name(n) or _norm_game_name(n) in nq]
+    for k in difflib.get_close_matches(nq, list(by_norm), n=_GAME_SUGGEST_LIMIT, cutoff=0.5):
+        if by_norm[k] not in out:
+            out.append(by_norm[k])
+    return '', out[:_GAME_SUGGEST_LIMIT]
+
+
+def _blank_game_detail(*errors: str) -> dict:
+    """单游戏统计的完整键集(查不到 / 查失败的项为 None 或空)。"""
+    return {
+        'available': False, 'errors': list(errors), 'found': False, 'suggestions': [],
+        'game_name': '', 'game_count': None, 'rank': None, 'week_rank': None,
+        'matches': None, 'attendances': None, 'avg_players': None,
+        'min_players': None, 'max_players': None,
+        'groups': None, 'group_matches': None, 'last_time': '',
+        'week_matches': None, 'prev_week_matches': None,
+        'players': None, 'group_players': None, 'week_players': None, 'prev_week_players': None,
+        'trend_weeks': [], 'top_players': [], 'top_power': [], 'power_min': None, 'me': None,
+    }
+
+
+def _power_min(counts) -> int:
+    """实力排行这次用哪一档门槛(见 POWER_MIN_TIERS)。"""
+    counts = list(counts)
+    for n in POWER_MIN_TIERS:
+        if sum(1 for c in counts if c >= n) >= GAME_RANK_LIMIT:
+            return n
+    return POWER_MIN_TIERS[-1]
+
+
+def _power_order(per_user: dict, need: int) -> tuple:
+    """实力排行:``per_user`` 是 ``uid → [局数, 击败比例之和]``,返回 ``(uid → 比例, 排好序的 uid)``。
+
+    只算局数满 ``need`` 的;比例按显示用的 1 位小数比较,显示相同的局数多的在前 ——
+    按看不见的尾数排,会出现两行比例一样、局数少的反而在上面。
+    """
+    rate = {u: round(b / n * 100, 1) for u, (n, b) in per_user.items() if n >= need}
+    return rate, sorted(rate, key=lambda u: (-rate[u], -per_user[u][0], u))
+
+
+def query_game_detail(query: str, uid: str = '', gid: str = '',
+                      now: datetime | None = None) -> dict:
+    """「数据统计<游戏名>」的单游戏统计(只读)。失败语义同 ``_span_stats``。
+
+    游戏名没对上 → ``found=False`` + ``suggestions``;对上了 → ``found=True``,``game_name`` 是库里的写法。
+    ``uid`` / ``gid`` 是查询者与所在群(私信传空):``me``(查询者在两张榜上的名次,没玩过为 None)
+    与 ``group_matches`` / ``group_players``(本群局数 / 人数)只在给了时才有;两张榜的条目带 ``me`` 标志。
+    实力排行按场均击败对手比例(``rate``,百分数,1 位小数)排,局数满 ``power_min`` 才上榜,同比例局数多的在前
+    (见 _power_order);查询者没满门槛时 ``me['power_rank']`` 为 None。
+    ``trend_weeks`` 恒 ``GAME_TREND_WEEKS`` 项,新→旧,``start`` 是该桶第一天。
+    """
+    if not os.path.isfile(boot.DB_PATH):
+        return _blank_game_detail(f'lgtbot.db 不存在:{boot.DB_PATH}')
+    now = now or datetime.now()
+    today0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    fmt = '%Y-%m-%d %H:%M:%S'
+    week0 = (today0 - timedelta(days=6)).strftime(fmt)
+    prev0 = (today0 - timedelta(days=13)).strftime(fmt)
+    since = (today0 - timedelta(days=GAME_TREND_WEEKS * 7 - 1)).strftime(fmt)
+    today = today0.strftime('%Y-%m-%d')
+    out = _blank_game_detail()
+    conn = None
+    try:
+        conn = sqlite3.connect(f'file:{boot.DB_PATH}?mode=ro', uri=True, timeout=2.0)
+        # 游戏名表都查不出来就没法判断游戏在不在,整体按不可用处理
+        games = conn.execute(_GAME_LIST_SQL, (week0,)).fetchall()
+        out['available'] = True
+        name, out['suggestions'] = resolve_game_name(query, [g for g, _c, _w in games])
+        if not name:
+            return out
+        out['found'], out['game_name'] = True, name
+
+        counts = {str(g): (int(c), int(w or 0)) for g, c, w in games}
+        mine_c, mine_w = counts[name]
+        out['game_count'] = len(counts)
+        out['rank'] = 1 + sum(1 for c, _w in counts.values() if c > mine_c)
+        out['week_rank'] = (1 + sum(1 for _c, w in counts.values() if w > mine_w)) if mine_w else None
+        out['week_matches'] = mine_w
+
+        def _rows(sql: str, args: tuple, tag: str):
+            """失败返回 None(区别于没有行的 []),对应各项留 None。"""
+            try:
+                return conn.execute(sql, args).fetchall()
+            except sqlite3.OperationalError as e:
+                out['errors'].append(f'{tag}:{e}')
+                return None
+
+        row = _rows(_GAME_MATCH_SQL, (prev0, week0, gid or None, name), 'game_matches')
+        if row:
+            m, att, lo, hi, groups, last, prev, here = row[0]
+            out.update(matches=int(m), attendances=int(att or 0),
+                       min_players=lo, max_players=hi, groups=int(groups or 0),
+                       last_time=str(last or ''), prev_week_matches=int(prev or 0),
+                       group_matches=int(here or 0) if gid else None)
+            out['avg_players'] = round(out['attendances'] / out['matches'], 2) if m else None
+
+        wk_rows = _rows(_GAME_WEEKS_SQL, (today, name, since), 'game_trend')
+        p_rows = _rows(_GAME_PLAYERS_SQL, (since, today, gid or None, name), 'game_players')
+        per_user: dict = {}                 # uid → [局数, 击败比例之和]
+        wk_players: dict = {}               # 桶号 → 去重玩家
+        here_players: set = set()           # 在本群玩过的
+        for u, k, n, beat, here in p_rows or []:
+            u = str(u)
+            acc = per_user.setdefault(u, [0, 0.0])
+            acc[0] += int(n)
+            acc[1] += float(beat or 0)
+            if int(k) >= 0:
+                wk_players.setdefault(int(k), set()).add(u)
+            if here:
+                here_players.add(u)
+
+        if wk_rows is not None:
+            wk_matches = {int(k): int(c) for k, c in wk_rows}
+            out['trend_weeks'] = [
+                {'start': (today0 - timedelta(days=7 * i + 6)).strftime('%Y-%m-%d'),
+                 'matches': wk_matches.get(i, 0),
+                 'players': None if p_rows is None else len(wk_players.get(i, ()))}
+                for i in range(GAME_TREND_WEEKS)]
+        if p_rows is None:
+            return out
+
+        out['players'] = len(per_user)
+        out['group_players'] = len(here_players) if gid else None
+        out['week_players'] = len(wk_players.get(0, ()))
+        out['prev_week_players'] = len(wk_players.get(1, ()))
+
+        def _who(u: str) -> str:
+            return userinfo.display_name(u) or mask_id(u)
+
+        by_count = sorted(per_user.items(), key=lambda kv: (-kv[1][0], kv[0]))
+        out['top_players'] = [{'display': _who(u), 'count': n, 'me': u == uid}
+                              for u, (n, _b) in by_count[:GAME_RANK_LIMIT]]
+        need = out['power_min'] = _power_min(n for n, _b in per_user.values())
+        rate, by_rate = _power_order(per_user, need)
+        out['top_power'] = [{'display': _who(u), 'rate': rate[u], 'count': per_user[u][0], 'me': u == uid}
+                            for u in by_rate[:GAME_RANK_LIMIT]]
+        if uid and uid in per_user:
+            n, b = per_user[uid]
+            out['me'] = {
+                'display': _who(uid), 'matches': n, 'rate': round(b / n * 100, 1),
+                # 局数排行并列同名次:名次 = 比自己多的人数 + 1;实力排行就是榜上的先后
+                'rank': 1 + sum(1 for c, _b in per_user.values() if c > n),
+                'power_rank': by_rate.index(uid) + 1 if uid in rate else None,
+            }
+    except Exception as e:
+        out['errors'].append(f'打开 lgtbot.db 失败:{e}')
+        out['available'] = False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
     return out

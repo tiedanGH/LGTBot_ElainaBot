@@ -189,6 +189,39 @@ def build_game_list_buttons() -> list[list[dict]]:
     return [[BTN_GAME_LIST]]
 
 
+# 候选游戏按钮最多 4 排:QQ 键盘上限 5 排,末排留给「游戏列表」
+_SUGGEST_ROWS_MAX = 4
+_SUGGEST_BUTTONS_MAX = _SUGGEST_ROWS_MAX * 3
+
+
+def _suggest_row_sizes(n: int) -> list[int]:
+    """候选按钮每排几个:优先 2 个一排,多出来的从最后一排往前补成 3 个。
+
+    排数封顶后多出的继续往前补,12 个正好 3+3+3+3;再多由调用方截断。
+    """
+    if n <= 2:
+        return [n] if n > 0 else []
+    rows = min(n // 2, _SUGGEST_ROWS_MAX)
+    extra = n - rows * 2
+    return [2] * (rows - extra) + [3] * extra
+
+
+def build_game_suggest_buttons(names) -> list[list[dict]]:
+    """「数据统计<游戏名>」对不上游戏名时:每个候选游戏一颗(type=1,点击直接查)+ 末排「🎲 游戏列表」。
+
+    只有一个候选时带 emoji,多个时省掉给游戏名留地方;超过 ``_SUGGEST_BUTTONS_MAX`` 的截掉。
+    """
+    names = list(names or [])[:_SUGGEST_BUTTONS_MAX]
+    rows: list[list[dict]] = []
+    i = 0
+    for k in _suggest_row_sizes(len(names)):
+        rows.append([btn(f'📈 {n}' if len(names) == 1 else n, f'数据统计 {n}', type=1, style=1)
+                     for n in names[i:i + k]])
+        i += k
+    rows.append([BTN_GAME_LIST])
+    return rows
+
+
 def build_full_volume_apply_button() -> list[list[dict]]:
     """单按钮一行:「全量申请」(type=2,回填到输入框,用户自行补群号再发送)。
 

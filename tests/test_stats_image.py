@@ -701,3 +701,285 @@ def test_quota_tip_leaves_a_gap_above_the_long_value_row(monkeypatch):
             if t in ('20,000 / 20,000', '1,234,567')]
     assert len(tops) == 2 and len(icons) == 1
     assert tip[0][3] + 4 <= min(tops + [icons[0][1]]), (tip, tops, icons)
+
+
+# ──────── 单游戏统计卡片(数据统计<游戏名>)────────────────────────────────
+
+def _game_sample(**over) -> dict:
+    today = datetime.now().date()
+    gs = {
+        'available': True, 'found': True, 'game_name': '天赋云巢', 'game_count': 45,
+        'rank': 2, 'week_rank': 3, 'matches': 635, 'attendances': 2706, 'avg_players': 4.26,
+        'min_players': 2, 'max_players': 8, 'groups': 16, 'group_matches': 120,
+        'group_players': 23, 'last_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'week_matches': 110, 'prev_week_matches': 115,
+        'players': 105, 'week_players': 52, 'prev_week_players': 54,
+        'trend_weeks': [{'start': (today - timedelta(days=7 * i + 6)).strftime('%Y-%m-%d'),
+                         'matches': 10 * i, 'players': 3 * i} for i in range(12)],
+        'top_players': [{'display': f'玩家{i}', 'count': 100 - i, 'me': False} for i in range(10)],
+        'top_power': [{'display': f'玩家{i}', 'rate': 80.5 - i, 'count': 20 + i, 'me': False}
+                      for i in range(10)],
+        'power_min': 10,
+        'me': {'display': '我自己', 'matches': 6, 'rate': 66.7, 'rank': 37, 'power_rank': None},
+    }
+    gs.update(over)
+    return gs
+
+
+def _need_font():
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+
+
+def test_render_game_card_png():
+    _need_font()
+    png = stats_image.render_game_stats_image(_game_sample(), '游戏统计 · 截至 12:34')
+    assert png and png[:8] == b'\x89PNG\r\n\x1a\n'
+    w, h = uploader.get_image_size(png)
+    assert w == 1000 and h > 1500
+
+
+def test_game_card_me_row_only_when_off_the_boards():
+    """★ 查询者不在 TOP10 → 两张榜底部补一行(图变高);两张榜上都有他 → 就地高亮,不补行。"""
+    _need_font()
+    base = _game_sample()
+    on = _game_sample(
+        top_players=[dict(p, me=(i == 3)) for i, p in enumerate(base['top_players'])],
+        top_power=[dict(p, me=(i == 3)) for i, p in enumerate(base['top_power'])])
+
+    def _h(gs):
+        return uploader.get_image_size(stats_image.render_game_stats_image(gs))[1]
+
+    assert _h(base) > _h(on) == _h(_game_sample(me=None))
+
+
+def test_game_board_rows_carry_my_row():
+    count, power = stats_image._board_rows(_game_sample())
+    assert (count['title'], count['tag']) == ('局数排行', '')
+    assert (power['title'], power['tag']) == ('实力排行', '≥10局')
+    assert count['full'] is None and power['full'] == 100     # 实力条按 0–100% 画,局数条以榜首为满格
+    assert count['rows'][0] == (1, '玩家0', 100, '100局', False)
+    assert power['rows'][0] == (1, '玩家0', 80.5, '80.5% · 20局', False)
+    assert count['me_row'] == (37, '我自己', 6, '6局', True)
+    assert power['me_row'] == (None, '我自己', 66.7, '66.7% · 6局', True)   # 没满门槛:名次画「—」
+
+
+def test_game_overview_tiles(monkeypatch):
+    """总览 4×2 的标签顺序与角标:人次挂在累计对局上,累计玩家与游戏群聊挂本群人数 / 局数,私信里这两个不挂。"""
+    _need_font()
+    seen = []
+    real = stats_image._game_tile
+
+    def spy(d, box, label, value, icon, fg, **kw):
+        seen.append((label, kw.get('pill')))
+        return real(d, box, label, value, icon, fg, **kw)
+
+    monkeypatch.setattr(stats_image, '_game_tile', spy)
+    stats_image.render_game_stats_image(_game_sample())
+    assert [label for label, _p in seen] == ['累计对局', '累计玩家', '近7日对局', '近7日玩家',
+                                            '平均人数', '游戏群聊', '热度排名', '最后一局']
+    pills = dict(seen)
+    assert pills['累计对局'] == ('info', '2,706 人次')
+    assert pills['累计玩家'] == ('info', '本群 23 人')
+    assert pills['游戏群聊'] == ('info', '本群 120 局')
+
+    seen.clear()
+    stats_image.render_game_stats_image(_game_sample(group_matches=None, group_players=None))
+    pills = dict(seen)
+    assert pills['累计玩家'] == ('info', '') and pills['游戏群聊'] == ('info', '')
+
+
+def test_power_board_shows_its_threshold_tag(monkeypatch):
+    """实力排行标题后要画出这次的上榜门槛,局数排行不画。"""
+    _need_font()
+    seen = []
+    real = stats_image._tag
+    monkeypatch.setattr(stats_image, '_tag',
+                        lambda d, x, y, text, *a, **kw: seen.append(text) or real(d, x, y, text, *a, **kw))
+    stats_image.render_game_stats_image(_game_sample(power_min=5))
+    assert seen.count('≥5局') == 1
+
+
+def test_game_card_without_trend_is_shorter():
+    _need_font()
+    full = stats_image.render_game_stats_image(_game_sample())
+    bare = stats_image.render_game_stats_image(_game_sample(trend_weeks=[]))
+    assert uploader.get_image_size(bare)[1] < uploader.get_image_size(full)[1]
+
+
+def test_game_tile_value_fits_and_clears_the_pill(monkeypatch):
+    """★ 「最后一局」的日期时间最长,会伸到右上角胶囊正下方:不能出卡,胶囊底边也不能贴着数字墨迹顶端。"""
+    _need_font()
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new('RGB', (500, 200)))
+    seen = []
+    real = stats_image._bold_text
+
+    def spy(d_, xy, text, font, fill):
+        seen.append((xy, text, font))
+        return real(d_, xy, text, font, fill)
+
+    monkeypatch.setattr(stats_image, '_bold_text', spy)
+    # 427 是总览卡的实际宽度;380 窄到 48 号字放不下,验证逐级缩字号
+    for tile_w in (427, 380):
+        for value in ('12-31 23:59', '2025-12-31', '昨天 23:59'):
+            seen.clear()
+            stats_image._game_tile(d, (0, 0, tile_w, 138), '最后一局', value, 'clock',
+                                   stats_image._PINK, pill=('info', '11 个月前'))
+            (x, y), _t, f = seen[0]
+            assert x + stats_image._text_w(d, value, f) <= tile_w - 24, (tile_w, value)
+            # 胶囊占 24..64;粗体描边 1px,墨迹顶端再往上算 1px
+            assert 24 + 40 + 4 <= y + f.getbbox(value)[1] - 1, (tile_w, value)
+
+
+class _DrawRecorder:
+    """包一层 ImageDraw,记下画过的文字 / 圆角矩形,其余调用原样转发。"""
+
+    def __init__(self, d):
+        self._d, self.texts, self.rects = d, [], []
+
+    def __getattr__(self, name):
+        return getattr(self._d, name)
+
+    def text(self, xy, text, font=None, fill=None, **kw):
+        self.texts.append((xy, text, font, fill))
+        return self._d.text(xy, text, font=font, fill=fill, **kw)
+
+    def rounded_rectangle(self, box, *a, **kw):
+        self.rects.append((box, kw.get('fill')))
+        return self._d.rounded_rectangle(box, *a, **kw)
+
+
+def _ink_box(xy, text, font):
+    x0, top, x1, bottom = font.getbbox(text)
+    return (xy[0] + x0, xy[1] + top, xy[0] + x1, xy[1] + bottom)
+
+
+def _overlap(a, b) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _draw_trend(trend):
+    from PIL import Image, ImageDraw
+    rec = _DrawRecorder(ImageDraw.Draw(Image.new('RGB', (1000, 400))))
+    stats_image._game_trend(rec, (36, 0, 964, stats_image._GAME_TREND_H), trend)
+    base_y = stats_image._BAR_BASE
+    bars = [(box, fill) for box, fill in rec.rects if box[3] == base_y]
+    # 标题行(含图例)在 y < 56,日期在柱底之下,都不算
+    nums = [(_ink_box(xy, t, f), t) for xy, t, f, _fill in rec.texts if 56 < xy[1] < base_y]
+    return bars, nums
+
+
+def test_game_trend_pairs_share_one_axis_and_numbers_stay_clear():
+    """★ 双柱:一桶一对,两组共用纵轴(最高的那根顶满);柱顶数字不压到任何柱子,也不互相叠
+    —— 矮柱上的四位数最容易探到旁边那根高柱上(第 2 桶:1000 局 / 1500 人)。"""
+    _need_font()
+    matches = [5, 1000, 100, 7, 0, 64, 100, 12, 33, 80, 1, 58]      # 新→旧
+    players = [9, 1500, 120, 3, 0, 60, 2, 12, 40, 7, 1, 999]
+    trend = [{'start': f'2026-07-{i + 1:02d}', 'matches': m, 'players': p}
+             for i, (m, p) in enumerate(zip(matches, players))]
+    bars, nums = _draw_trend(trend)
+    assert len(bars) == 24 and len(nums) == 24
+    heights = [box[3] - box[1] for box, _f in bars]
+    assert max(heights) == stats_image._BAR_H                         # 1500 那根顶满
+    for box, t in nums:
+        for bar, _f in bars:
+            assert not _overlap(box, bar), (t, box, bar)
+        for other, t2 in nums:
+            assert other is box or not _overlap(box, other), (t, t2)
+
+
+def test_game_trend_without_players_draws_only_match_bars():
+    """玩家侧查询失败(players 为 None):只画对局柱,不出现绿色柱子和数字。"""
+    _need_font()
+    trend = [{'start': '2026-07-01', 'matches': 3, 'players': None} for _ in range(12)]
+    bars, nums = _draw_trend(trend)
+    assert len(bars) == 12 and len(nums) == 12
+    green = (stats_image._GREEN, stats_image._tint(stats_image._GREEN, base=stats_image._PANEL, alpha=0.35))
+    assert not [f for _b, f in bars if f in green]
+
+
+def test_render_game_swallows_exceptions(monkeypatch):
+    monkeypatch.setattr(stats_image, '_render_game',
+                        lambda g, s: (_ for _ in ()).throw(RuntimeError('boom')))
+    assert stats_image.render_game_stats_image({}, '') is None
+
+
+_NOW = datetime(2026, 8, 8, 18, 0, 0)
+
+
+@pytest.mark.parametrize('ts, want', [
+    ('2026-08-08 15:52:10', '今天 15:52'),
+    ('2026-08-07 23:59:00', '昨天 23:59'),
+    ('2026-01-02 03:04:05', '01-02 03:04'),
+    ('2025-12-31 23:00:00', '2025-12-31'),
+    ('garbage', 'garbage'),
+])
+def test_fmt_when(ts, want):
+    assert stats_image.fmt_when(ts, _NOW) == want
+
+
+@pytest.mark.parametrize('ts, want', [
+    ('2026-08-08 17:59:30', '刚刚'),
+    ('2026-08-08 19:00:00', '刚刚'),          # 时钟回拨导致的未来时间不出负数
+    ('2026-08-08 17:59:00', '1 分钟前'),
+    ('2026-08-08 17:00:00', '1 小时前'),
+    ('2026-08-07 18:00:00', '1 天前'),
+    ('2026-07-01 18:00:00', '1 个月前'),
+    ('2025-08-01 18:00:00', '1 年前'),
+    ('', ''),
+])
+def test_fmt_ago(ts, want):
+    assert stats_image.fmt_ago(ts, _NOW) == want
+
+
+def test_game_labels_avg_and_range():
+    two = stats_image.game_labels({'avg_players': 2.0, 'min_players': 2, 'max_players': 2})
+    assert (two['avg'], two['range']) == ('2', '固定 2 人')          # 固定人数不带小数
+    many = stats_image.game_labels({'avg_players': 4.26, 'min_players': 2, 'max_players': 8})
+    assert (many['avg'], many['range']) == ('4.26', '2–8 人')
+    assert stats_image.game_labels({}) == {'last': '—', 'last_full': '—',
+                                           'ago': '', 'avg': '—', 'range': ''}
+
+
+async def test_game_stats_command_replies_markdown_image(monkeypatch):
+    """配了图床 + 渲染上传成功 → 与其他视图同一个 markdown 出口(@ 与图片之间换行)。"""
+    import re as _re
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_detail',
+                        lambda q, uid, gid: _game_sample())
+    png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + \
+        (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
+    monkeypatch.setattr(dispatcher.stats_image, 'render_game_stats_image',
+                        lambda gs, sub: png)
+    seen = {}
+
+    async def fake_upload(data, filename, user_id='', *, target_id='', target_is_uid=False):
+        seen.update(filename=filename, target_id=target_id, target_is_uid=target_is_uid)
+        return 'https://cdn.example/game.png'
+    monkeypatch.setattr(dispatcher.uploader, 'upload_image', fake_upload)
+
+    ev = _fake_event()
+    await dispatcher.lgtbot_data_stats(
+        ev, _re.search(dispatcher._P_STATS, '数据统计 天赋云巢', _re.DOTALL))
+    assert ev.reply.await_args.args[0] == \
+        '<@USER1>\n![数据统计 #640px #480px](https://cdn.example/game.png)'
+    assert seen == {'filename': 'lgtbot_game_stats.png',
+                    'target_id': 'GROUP1', 'target_is_uid': False}
+
+
+async def test_game_stats_command_falls_back_to_text_when_render_fails(monkeypatch):
+    import re as _re
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_detail',
+                        lambda q, uid, gid: _game_sample())
+    monkeypatch.setattr(dispatcher.stats_image, 'render_game_stats_image',
+                        lambda gs, sub: None)
+    ev = _fake_event()
+    await dispatcher.lgtbot_data_stats(
+        ev, _re.search(dispatcher._P_STATS, '数据统计天赋云巢', _re.DOTALL))
+    txt = ev.reply.await_args.args[0]
+    assert '《天赋云巢》游戏统计' in txt and '![' not in txt

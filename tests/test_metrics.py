@@ -237,22 +237,25 @@ def _ts(days_ago: int = 0) -> str:
 def _make_db(matches: list) -> None:
     """matches: [(game, days_ago | 'YYYY-MM-DD HH:MM:SS', group_id, players[])]
     → 建库插数。第二项传 int 走 _ts(当天中午);传 str 作为 finish_time 原样落库
-    (「昨日同时段」窗口测试要用精确到时分秒的时间戳)。"""
+    (「昨日同时段」窗口测试要用精确到时分秒的时间戳)。
+    players 的元素可以写成 ``(uid, rank_score)``(引擎口径:n 人局末名 1、头名 2n-1),
+    只写 uid 时按全员同分记 rank_score = n。"""
     conn = sqlite3.connect(boot.DB_PATH)
     try:
         for sql in _SCHEMA:
             conn.execute(sql)
         for i, (game, when, group_id, players) in enumerate(matches, start=1):
             ts = when if isinstance(when, str) else _ts(when)
+            ranked = [(p, len(players)) if isinstance(p, str) else p for p in players]
             conn.execute(
                 'INSERT INTO match(match_id, game_name, finish_time, group_id,'
                 ' host_user_id, user_count, multiple) VALUES (?,?,?,?,?,?,1)',
-                (i, game, ts, group_id, players[0] if players else 'U0',
-                 len(players)))
-            for p in players:
+                (i, game, ts, group_id, ranked[0][0] if ranked else 'U0',
+                 len(ranked)))
+            for p, rank_score in ranked:
                 conn.execute(
-                    'INSERT INTO user_with_match VALUES (?,0,?,0,0,0,0.0,0)',
-                    (p, i))
+                    'INSERT INTO user_with_match VALUES (?,0,?,0,0,0,0.0,?)',
+                    (p, i, rank_score))
         conn.commit()
     finally:
         conn.close()
@@ -793,3 +796,184 @@ def test_unranked_corrupt_ledger_renamed_and_recovers():
     metrics.record_unranked_match('五子棋', ['U1'], 'G1')
     assert glob.glob(metrics.UNRANKED_PATH + '.corrupt_*')
     assert len(_unranked_file()[_day(0)]) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 单游戏统计组(数据统计<游戏名>)
+# ─────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize('query, want', [
+    ('天赋云巢', '天赋云巢'),
+    ('  天赋云巢 ', '天赋云巢'),
+    ('《天赋云巢》', '天赋云巢'),           # 照抄按钮文案带的书名号
+    ('天赋 云巢', '天赋云巢'),
+    ('lie', 'LIE'),                       # 忽略大小写
+    ('e卡', 'E卡'),
+])
+def test_resolve_game_name_normalizes_the_input(query, want):
+    assert metrics.resolve_game_name(query, ['天赋云巢', 'LIE', 'E卡']) == (want, [])
+
+
+def test_resolve_game_name_suggests_in_popularity_order():
+    """★ 互相包含的候选按传入顺序(热度)排,再补字面相近的。"""
+    names = ['十二将棋', '困兽棋', '五子棋', '六贯棋', '天赋云巢']
+    assert metrics.resolve_game_name('棋', names) == ('', ['十二将棋', '困兽棋', '五子棋', '六贯棋'])
+    assert metrics.resolve_game_name('五子棋游戏', names) == ('', ['五子棋'])
+    assert metrics.resolve_game_name('天赋云朝', names) == ('', ['天赋云巢'])
+    assert metrics.resolve_game_name('完全无关', names) == ('', [])
+    assert metrics.resolve_game_name('《》', names) == ('', [])
+
+
+def test_resolve_game_name_caps_suggestions_at_the_button_capacity():
+    """候选最多 12 个,正好放满候选按钮的 4 排。"""
+    names = [f'棋{i}' for i in range(20)]
+    assert metrics.resolve_game_name('棋', names) == ('', names[:12])
+
+
+def _detail_db():
+    """天赋云巢 5 局铺在两个 7 日窗口内外,另配两款游戏供热度排名。"""
+    _make_db([
+        ('天赋云巢', 0, 'G1', [('U1', 3), ('U2', 1)]),               # 今天
+        ('天赋云巢', 6, 'G1', ['U1', 'U2', 'U3']),                    # 近 7 日最早一天,全员同分
+        ('天赋云巢', 7, 'G2', [('U3', 3), ('U4', 1)]),               # 上一个 7 日最晚一天
+        ('天赋云巢', 13, None, [('U5', 3), ('U1', 1)]),              # 上一个 7 日最早一天,私聊局
+        ('天赋云巢', 14, 'G3', [('U6', 3), ('U1', 1)]),              # 两个窗口都不含
+        *[('五子棋', d, 'G1', ['U1', 'U2']) for d in (0, 1, 2, 20, 30, 40)],
+        ('大富翁', 3, 'G1', ['U7', 'U8']),
+    ])
+
+
+def test_game_detail_overview_windows_and_rank():
+    _detail_db()
+    gs = metrics.query_game_detail('天赋云巢', uid='U3', gid='G1')
+    assert gs['available'] and gs['found'] and gs['game_name'] == '天赋云巢'
+    assert gs['matches'] == 5
+    assert gs['attendances'] == 11                       # 人次不去重
+    assert gs['avg_players'] == 2.2
+    assert (gs['min_players'], gs['max_players']) == (2, 3)
+    assert gs['groups'] == 3                             # 私聊局不计
+    assert gs['group_matches'] == 2                      # 本群 G1
+    assert gs['group_players'] == 3                      # 在 G1 玩过的 U1/U2/U3
+    assert (gs['week_matches'], gs['prev_week_matches']) == (2, 2)
+    assert gs['players'] == 6
+    assert gs['week_players'] == 3                       # U1/U2/U3
+    assert gs['prev_week_players'] == 4                  # U1/U3/U4/U5
+    assert gs['last_time'] == _ts(0)
+    # 累计五子棋 6 局居首;近 7 日五子棋 3 > 天赋云巢 2 > 大富翁 1
+    assert (gs['rank'], gs['game_count'], gs['week_rank']) == (2, 3, 2)
+
+
+def test_game_detail_count_board_and_my_rank():
+    """局数相同按 uid 定序;我的名次 = 局数比我多的人数 + 1。"""
+    _detail_db()
+    gs = metrics.query_game_detail('天赋云巢', uid='U3', gid='G1')
+    assert [(p['display'], p['count']) for p in gs['top_players']] == \
+           [('U1', 4), ('U2', 2), ('U3', 2), ('U4', 1), ('U5', 1), ('U6', 1)]
+    assert [p['display'] for p in gs['top_players'] if p['me']] == ['U3']
+    assert gs['me']['matches'] == 2 and gs['me']['rank'] == 2
+
+
+def test_game_detail_dm_has_no_group_side():
+    _detail_db()
+    gs = metrics.query_game_detail('天赋云巢', uid='U2')
+    assert gs['me']['matches'] == 2
+    assert gs['group_matches'] is None and gs['group_players'] is None
+
+
+@pytest.mark.parametrize('counts, want', [
+    ([10] * 10, 10),
+    ([10] * 9 + [9], 5),              # 满 10 局的凑不满 10 人 → 降一档
+    ([10] * 9 + [5], 5),
+    ([4] * 10, 3),
+    ([2] * 30, 3),                    # 最后一档都凑不满也用最后一档
+    ([], 3),
+])
+def test_power_min_tiers(counts, want):
+    assert metrics._power_min(counts) == want
+
+
+def test_game_detail_power_board():
+    """★ 实力 = 场均击败对手比例:3 人局头名 100%、第二 50%、末名 0%,同分的对手各算一半;
+    满门槛才上榜,同比例局数多的在前;没满门槛的查询者没有名次。"""
+    _make_db([
+        *[('天赋云巢', 1, 'G1', [('A', 5), ('B', 3), ('C', 1)]) for _ in range(3)],
+        ('天赋云巢', 1, 'G1', [('D', 4), ('E', 4), ('C', 1)]),     # D、E 并列头名:各 75%
+        ('天赋云巢', 1, 'G1', [('D', 4), ('E', 4), ('B', 1)]),
+        ('天赋云巢', 1, 'G1', [('D', 5), ('F', 3), ('E', 1)]),
+        *[('天赋云巢', 1, 'G1', [('G', 2), ('H', 2)]) for _ in range(4)],   # 两人平局:各 50%
+    ])
+    gs = metrics.query_game_detail('天赋云巢', uid='F')
+    assert gs['power_min'] == 3                          # 各档都凑不满 10 人 → 最后一档
+    assert [(p['display'], p['rate'], p['count']) for p in gs['top_power']] == [
+        ('A', 100.0, 3), ('D', 83.3, 3), ('G', 50.0, 4), ('H', 50.0, 4), ('E', 50.0, 3),
+        ('B', 37.5, 4), ('C', 0.0, 4)]
+    assert gs['me'] == {'display': 'F', 'matches': 1, 'rate': 50.0, 'rank': 8, 'power_rank': None}
+    as_e = metrics.query_game_detail('天赋云巢', uid='E')
+    assert as_e['me']['power_rank'] == 5                 # 榜上的先后:同为 50% 的 G、H 局数多,排在 E 前面
+    assert [p['display'] for p in as_e['top_power'] if p['me']] == ['E']
+
+
+def test_power_order_breaks_display_ties_by_match_count():
+    """★ 比例按显示的 1 位小数比:66.67% 与 66.66% 都显示 66.7%,这时局数多的在前,
+    不能按看不见的尾数把 3 局的排到 30 局前面。"""
+    per_user = {'P': [3, 2.0], 'Q': [30, 19.998], 'R': [9, 9.0], 'S': [2, 2.0]}
+    rate, order = metrics._power_order(per_user, need=3)
+    assert rate == {'P': 66.7, 'Q': 66.7, 'R': 100.0}    # S 不满门槛
+    assert order == ['R', 'Q', 'P']
+
+
+def test_game_detail_trend_is_twelve_weekly_buckets():
+    _detail_db()
+    conn = sqlite3.connect(boot.DB_PATH)
+    conn.execute(
+        "INSERT INTO match(game_name, finish_time, group_id, host_user_id, user_count, multiple)"
+        " VALUES ('天赋云巢', ?, 'G1', 'U9', 1, 1)", (_ts(90),))   # 趋势窗口外,只进累计
+    conn.commit()
+    conn.close()
+    gs = metrics.query_game_detail('天赋云巢')
+    trend = gs['trend_weeks']
+    assert len(trend) == metrics.GAME_TREND_WEEKS
+    today = datetime.now().date()
+    assert trend[0]['start'] == (today - timedelta(days=6)).strftime('%Y-%m-%d')
+    assert trend[1]['start'] == (today - timedelta(days=13)).strftime('%Y-%m-%d')
+    assert [(t['matches'], t['players']) for t in trend[:3]] == [(2, 3), (2, 4), (1, 2)]
+    assert sum(t['matches'] for t in trend) == 5 and gs['matches'] == 6
+    assert gs['me'] is None and not any(p['me'] for p in gs['top_players'])
+
+
+def test_game_detail_not_found_gives_suggestions():
+    _detail_db()
+    gs = metrics.query_game_detail('天赋')
+    assert gs['available'] is True and gs['found'] is False
+    assert gs['suggestions'] == ['天赋云巢']
+    assert gs['matches'] is None
+
+
+def test_game_detail_missing_db_or_match_table_is_unavailable():
+    gs = metrics.query_game_detail('天赋云巢')
+    assert gs['available'] is False and gs['errors']
+    conn = sqlite3.connect(boot.DB_PATH)
+    conn.execute(_SCHEMA[2])                             # 只有 user 表
+    conn.commit()
+    conn.close()
+    gs = metrics.query_game_detail('天赋云巢')
+    assert gs['available'] is False and gs['errors']
+
+
+def test_game_detail_player_side_failure_keeps_the_match_side():
+    """只有 match 表:玩家侧各项留 None(不是 0),对局侧照常。"""
+    conn = sqlite3.connect(boot.DB_PATH)
+    conn.execute(_SCHEMA[0])
+    conn.execute("INSERT INTO match(game_name, finish_time, group_id, host_user_id,"
+                 " user_count, multiple) VALUES ('五子棋', ?, 'G1', 'U1', 2, 1)", (_ts(0),))
+    conn.commit()
+    conn.close()
+    gs = metrics.query_game_detail('五子棋', uid='U1')
+    assert gs['available'] and gs['found']
+    assert gs['matches'] == 1 and gs['week_matches'] == 1
+    assert gs['players'] is None and gs['week_players'] is None
+    assert gs['group_players'] is None
+    assert gs['top_players'] == [] and gs['me'] is None
+    assert gs['trend_weeks'][0] == {'start': gs['trend_weeks'][0]['start'],
+                                    'matches': 1, 'players': None}
+    assert any('game_players' in e for e in gs['errors'])

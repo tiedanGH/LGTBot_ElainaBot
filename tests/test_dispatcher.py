@@ -369,10 +369,13 @@ def test_config_blocked_commands_keep_strict_slash(monkeypatch):
 
 
 def test_data_stats_command_is_exclusive():
-    """/数据统计 必须在独占表内 —— 否则 catch-all 会把它二次派发进引擎。"""
+    """/数据统计 必须在独占表内 —— 否则 catch-all 会把它二次派发进引擎。
+    带什么参数(日期 / 游戏名 / 写错的)都由本插件回复,一律不进引擎。"""
     assert dispatcher._is_exclusive_command('数据统计')
     assert dispatcher._is_exclusive_command('/数据统计')
-    assert not dispatcher._is_exclusive_command('数据统计2')   # 不误伤带参形态
+    assert dispatcher._is_exclusive_command('数据统计2')
+    assert dispatcher._is_exclusive_command('数据统计 天赋云巢')
+    assert not dispatcher._is_exclusive_command('天赋云巢数据统计')
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -889,6 +892,9 @@ _D = __import__('datetime').date
     (f'{_MIN_Y + 1}0803',      ('date', _D(_MIN_Y + 1, 8, 3))),
     ('0820',                   ('today', None)),   # 就是今天 → 等价无参数(仍带涨跌)
     (f'{_MIN_Y + 1}0820',      ('today', None)),   # 带年份的今天,同上
+    ('天赋云巢',                ('game', '天赋云巢')),   # 不是纯数字 → 游戏名(原文交给查询去匹配)
+    ('总计',                    ('game', '总计')),
+    (f'{_MIN_Y}-08-03',        ('game', f'{_MIN_Y}-08-03')),   # 带分隔符的日期也落到这里,由报错附上日期用法
 ])
 def test_parse_stats_arg_table(arg, expected):
     """★ 参数解析表(纯函数,不碰事件 / 不碰库):七种形态各自落到哪个视图。
@@ -912,13 +918,39 @@ def test_parse_stats_arg_table(arg, expected):
     (f'{_MIN_Y}0231',          '日期无效'),   # 8 位:非法日期
     (f'{_MIN_Y - 1}0803',      '年份无效'),   # 8 位:年份早于下界
     (f'{_MIN_Y + 2}0101',      '年份无效'),   # 8 位:未来年份
+    ('1',                      '日期格式无效'),   # 位数不对的纯数字
+    ('123',                    '日期格式无效'),
+    ('1234567',                '日期格式无效'),
 ])
 def test_parse_stats_arg_errors(arg, frag):
-    """非法参数一律在解析阶段拦下(不查库),且措辞点明是年 / 月 / 日哪一段错。"""
+    """★ 非法参数一律在解析阶段拦下(不查库),措辞点明是年 / 月 / 日哪一段错,
+    但不复述用户输入的参数 —— 官方 bot 不能以任何形式回显用户消息。"""
     kind, payload, err = dispatcher._parse_stats_arg(arg, _FAKE_TODAY)
     assert kind == 'error' and payload is None
     assert frag in err, err
-    assert arg[:4] in err or arg in err          # 把用户输的原值回显出来
+    assert arg not in err, err
+
+
+@pytest.mark.parametrize('a, b', [
+    ('13', '14'),
+    ('0231', '0230'),
+    ('1899', '1900'),
+    (f'{_MIN_Y - 1}08', f'{_MIN_Y - 3}05'),          # 6 位:年份越界
+    (f'{_MIN_Y}13', f'{_MIN_Y + 1}00'),              # 6 位:月份越界
+    (f'{_MIN_Y}0231', f'{_MIN_Y + 1}0431'),          # 8 位:非法日期
+    (f'{_MIN_Y - 1}0803', f'{_MIN_Y - 2}0101'),      # 8 位:年份越界
+    ('1', '123'),
+])
+def test_parse_stats_arg_errors_do_not_depend_on_the_input(a, b):
+    """★ 同一类错误不管输入什么,报错一字不差 —— 文案里只要带出输入的任何一段(哪怕只是年份),两条就不一样。"""
+    assert dispatcher._parse_stats_arg(a, _FAKE_TODAY)[2] == \
+        dispatcher._parse_stats_arg(b, _FAKE_TODAY)[2]
+
+
+def test_parse_stats_arg_wrong_length_digits_show_the_date_usage():
+    """位数对不上任何日期格式时说不清错在哪一段,直接给完整的日期用法。"""
+    _kind, _payload, err = dispatcher._parse_stats_arg('123', _FAKE_TODAY)
+    assert err.endswith(dispatcher._STATS_DATE_USAGE)
 
 
 @pytest.mark.parametrize('cmd,group', [
@@ -930,21 +962,24 @@ def test_parse_stats_arg_errors(arg, frag):
     ('数据统计202608', '202608'),
     ('数据统计20260803', '20260803'),
     ('/数据统计 20260803', '20260803'),
+    ('数据统计天赋云巢', '天赋云巢'),
+    ('/数据统计 E卡', 'E卡'),
+    ('数据统计  天赋 云巢  ', '天赋 云巢'),      # 首尾空白不进参数,中间的留给游戏名匹配去忽略
+    ('数据统计123', '123'),                     # 位数不对也收下,由解析报错
+    ('数据统计总计', '总计'),
 ])
 def test_stats_pattern_captures_every_form(cmd, group):
     import re as _re
-    m = _re.match(dispatcher._P_STATS, cmd)
+    m = _re.search(dispatcher._P_STATS, cmd, _re.DOTALL)    # 框架同款匹配方式
     assert m is not None, cmd
     assert m.group(1) == group
 
 
-@pytest.mark.parametrize('cmd', ['数据统计1', '数据统计123', '数据统计12345',
-                                 '数据统计1234567', '数据统计123456789',
-                                 '数据统计总计', '数据统计abc'])
+@pytest.mark.parametrize('cmd', ['数据统计 天赋\n云巢', '查看数据统计', '数据 统计'])
 def test_stats_pattern_rejects_other_shapes(cmd):
-    """位数不对的参数不进本 handler —— 保持原样落进引擎的 catch-all。"""
+    """多行内容、不以「数据统计」开头的消息不进本 handler。"""
     import re as _re
-    assert _re.match(dispatcher._P_STATS, cmd) is None, cmd
+    assert _re.search(dispatcher._P_STATS, cmd, _re.DOTALL) is None, cmd
 
 
 async def test_stats_with_year_queries_that_year(monkeypatch):
@@ -1340,6 +1375,157 @@ async def test_stats_command_warns_when_group_lacks_full_volume(monkeypatch):
     assert '⚠️' in txt and '未开启全量消息权限' in txt
     assert '全量申请' in txt
     assert '今日主动消息:' not in txt          # 不展示额度数字
+
+
+# ──────── 数据统计<游戏名> ────────────────────────────────────────────────
+
+def _game_detail(**over) -> dict:
+    """metrics.query_game_detail 的一份查到了的结果。"""
+    d = {'available': True, 'errors': [], 'found': True, 'suggestions': [],
+         'game_name': '天赋云巢', 'game_count': 45, 'rank': 2, 'week_rank': 3,
+         'matches': 635, 'attendances': 2706, 'avg_players': 4.26,
+         'min_players': 2, 'max_players': 8, 'groups': 16, 'group_matches': 120,
+         'group_players': 23, 'last_time': '2026-08-08 15:52:10',
+         'week_matches': 110, 'prev_week_matches': 115,
+         'players': 105, 'week_players': 52, 'prev_week_players': 50,
+         'trend_weeks': [],
+         'top_players': [{'display': '铁蛋', 'count': 317, 'me': False},
+                         {'display': '<@U9>', 'count': 174, 'me': False}],
+         'top_power': [{'display': '铁蛋', 'rate': 78.3, 'count': 11, 'me': False}],
+         'power_min': 10,
+         'me': {'display': '我', 'matches': 36, 'rate': 52.0, 'rank': 21, 'power_rank': 37}}
+    d.update(over)
+    return d
+
+
+async def _run_game_stats(monkeypatch, cmd, result, *, is_group=True):
+    """以文本通道跑一条「数据统计<游戏名>」,返回 (回复参数, 查询收到的参数)。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    seen = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_detail',
+                        lambda q, uid, gid: seen.append((q, uid, gid)) or result)
+    # 频道私信也带 channel_id:私信与否看 is_group,不看有没有群号
+    ev = (_mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd) if is_group
+          else _mock_event(is_direct=True, user_id='U1', channel_id='DMC', content=cmd))
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, _re.search(dispatcher._P_STATS, cmd, _re.DOTALL))
+    ev.reply.assert_awaited_once()
+    return ev.reply.await_args, seen
+
+
+async def test_game_stats_text_fallback(monkeypatch):
+    """★ 文本保底:总览各项 + 双榜 TOP3 + 我的名次;近 7 日的涨跌对比上一个 7 日。"""
+    call, seen = await _run_game_stats(monkeypatch, '数据统计 天赋云巢', _game_detail())
+    assert seen == [('天赋云巢', 'U1', 'G1')]
+    txt = call.args[0]
+    assert txt.startswith('<@U1>\n🎮 《天赋云巢》游戏统计')
+    for frag in ('累计对局: 635 局（2706 人次）', '累计玩家: 105 人（本群 23 人）',
+                 '近7日对局: 110 局（↓5）', '近7日玩家: 52 人（↑2）',
+                 '平均人数: 4.26 人（2–8 人）', '游戏群聊: 16 个（本群 120 局）',
+                 '热度排名: 第 2 / 45（近7日第 3）', '最后一局: 2026-08-08 15:52',
+                 '👑 局数排行:\n  1、铁蛋 (317局)',
+                 '🏅 实力排行（≥10局）:\n  1、铁蛋 (78.3% · 11局)',
+                 '我的: 36 局（第 21 名）· 实力 52.0%（第 37 名）'):
+        assert frag in txt, frag
+    assert '<@U9>' not in txt and '\\<@U9\\>' in txt      # 昵称按 markdown 转义
+
+    # 没满门槛:实力没有名次
+    call, _seen = await _run_game_stats(
+        monkeypatch, '数据统计 天赋云巢',
+        _game_detail(me={'display': '我', 'matches': 3, 'rate': 66.7, 'rank': 90, 'power_rank': None}))
+    assert '我的: 3 局（第 90 名）· 实力 66.7%（未满 10 局）' in call.args[0]
+
+
+async def test_game_stats_dm_queries_without_a_group(monkeypatch):
+    """私信:不带群去查(没有本群局数 / 本群人数)。"""
+    call, seen = await _run_game_stats(monkeypatch, '数据统计天赋云巢',
+                                       _game_detail(group_matches=None, group_players=None, me=None),
+                                       is_group=False)
+    assert seen == [('天赋云巢', 'U1', '')]
+    txt = call.args[0]
+    assert '累计玩家: 105 人\n' in txt and '游戏群聊: 16 个\n' in txt and '我的:' not in txt
+
+
+async def test_game_stats_not_found_shows_suggestions_and_date_usage(monkeypatch):
+    """★ 对不上游戏名:报错 + 候选 + 日期查询用法(也可能是日期写错了),候选各挂一颗直查按钮。"""
+    call, _seen = await _run_game_stats(
+        monkeypatch, '数据统计 天赋云朝',
+        {'available': True, 'found': False, 'suggestions': ['天赋云巢']})
+    txt = call.args[0]
+    assert txt.startswith('<@U1>\n❌ 游戏不存在或暂无计分对局\n💡 你要找的可能是：天赋云巢\n')
+    assert txt.endswith(dispatcher._STATS_DATE_USAGE)
+    assert call.kwargs['buttons'][-1] == [dispatcher.buttons.BTN_GAME_LIST]
+
+
+async def test_game_stats_not_found_never_echoes_the_input(monkeypatch):
+    """★ 官方 bot 不能以任何形式回显用户消息:报错里一个字都不复述,候选只来自库里的游戏名。"""
+    call, _seen = await _run_game_stats(
+        monkeypatch, '数据统计 天赋云朝<@everyone>[x](http://a)',
+        {'available': True, 'found': False, 'suggestions': []})
+    txt = call.args[0]
+    for frag in ('天赋云朝', 'everyone', 'http', '[x]'):
+        assert frag not in txt, frag
+    assert '💡' not in txt
+    assert call.kwargs['buttons'] == [[dispatcher.buttons.BTN_GAME_LIST]]
+
+
+@pytest.mark.parametrize('n, sizes', [
+    (1, [1]), (2, [2]), (3, [3]), (4, [2, 2]), (5, [2, 3]), (6, [2, 2, 2]),
+    (7, [2, 2, 3]), (8, [2, 2, 2, 2]), (9, [2, 2, 2, 3]), (10, [2, 2, 3, 3]),
+    (11, [2, 3, 3, 3]), (12, [3, 3, 3, 3]),
+])
+def test_game_suggest_button_rows(n, sizes):
+    """★ 候选按钮优先 2 个一排,多出来的从最后一排往前补成 3 个;末排固定是「游戏列表」。"""
+    rows = dispatcher.buttons.build_game_suggest_buttons([f'游戏{i}' for i in range(n)])
+    assert [len(r) for r in rows[:-1]] == sizes
+    assert rows[-1] == [dispatcher.buttons.BTN_GAME_LIST]
+
+
+def test_game_suggest_buttons_style_emoji_and_cap():
+    """回调按钮 + style 1;只有一个候选时带 emoji,多个时省掉;超过 12 个截掉,键盘不超过 5 排。"""
+    b = dispatcher.buttons
+    one = b.build_game_suggest_buttons(['天赋云巢'])[0][0]
+    assert one == {'text': '📈 天赋云巢', 'data': '数据统计 天赋云巢', 'type': 1, 'style': 1}
+    many = b.build_game_suggest_buttons(['五子棋', '困兽棋'])[0]
+    assert [x['text'] for x in many] == ['五子棋', '困兽棋']
+    assert all(x['type'] == 1 and x['style'] == 1 for x in many)
+    rows = b.build_game_suggest_buttons([f'游戏{i}' for i in range(15)])
+    assert len(rows) == 5
+    assert [x['text'] for r in rows[:-1] for x in r] == [f'游戏{i}' for i in range(12)]
+    assert b.build_game_suggest_buttons([]) == [[b.BTN_GAME_LIST]]
+
+
+async def test_game_stats_unavailable(monkeypatch):
+    call, _seen = await _run_game_stats(monkeypatch, '数据统计 五子棋',
+                                        {'available': False, 'found': False})
+    assert '数据统计暂不可用' in call.args[0]
+
+
+async def test_stats_text_fallbacks_escape_nicknames(monkeypatch):
+    """★ 今日视图与窗口视图的文本保底按 markdown 发送,玩家参与榜里的昵称同样要转义。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    nick = [{'display': '<@U9>**粗**', 'count': 3}]
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: {'available': True, 'today_matches': 1, 'today_players': 1,
+                                 'today_groups': 1, 'top_games_today': [],
+                                 'top_players_today': nick, 'trend_10d': []})
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_total',
+                        lambda: {'available': True, 'total_matches': 5, 'total_players': 4,
+                                 'total_groups': 3, 'total_attendances': 9,
+                                 'top_games_total': [], 'top_players_total': nick})
+    for cmd in ('数据统计', '数据统计总'):
+        ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+        ev.reply = AsyncMock()
+        await dispatcher.lgtbot_data_stats(ev, _re.search(dispatcher._P_STATS, cmd, _re.DOTALL))
+        txt = ev.reply.await_args.args[0]
+        assert '1、\\<@U9\\>\\*\\*粗\\*\\* (3局)' in txt, cmd
+        assert '<@U9>' not in txt, cmd
 
 
 def test_match_list_is_exclusive_command():
