@@ -229,3 +229,16 @@ def test_sig_name_fallback():
     assert corefile.sig_name(11) == 'SIGSEGV'
     assert corefile.sig_name(99) == 'sig99'
     assert corefile.sig_name(None) == ''
+
+
+@pytest.mark.parametrize('sig, code, name, meaning', [
+    (11, 1, 'SEGV_MAPERR', '未映射'),
+    (11, 2, 'SEGV_ACCERR', '无访问权限'),
+    (7, 1, 'BUS_ADRALN', '不对齐'),
+    (7, 2, 'BUS_ADRERR', '物理地址不存在'),
+    (7, 3, 'BUS_OBJERR', '硬件错误'),
+])
+def test_sig_detail_matches_kernel_si_code(sig, code, name, meaning):
+    """si_code 取值见 include/uapi/asm-generic/siginfo.h:中文解释必须与括号里的常量名对得上。"""
+    detail = corefile._sig_detail(sig, code)
+    assert name in detail and meaning in detail

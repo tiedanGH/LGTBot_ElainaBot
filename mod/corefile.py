@@ -71,7 +71,7 @@ _SIG_NAMES = {
 }
 # SIGSEGV / SIGBUS 的 si_code → 人话(include/uapi/asm-generic/siginfo.h)
 _SEGV_CODES = {1: '地址未映射 (SEGV_MAPERR)', 2: '无访问权限 (SEGV_ACCERR)'}
-_BUS_CODES = {1: '物理地址不存在 (BUS_ADRALN)', 2: '地址不对齐 (BUS_ADRERR)',
+_BUS_CODES = {1: '地址不对齐 (BUS_ADRALN)', 2: '物理地址不存在 (BUS_ADRERR)',
               3: '硬件错误 (BUS_OBJERR)'}
 
 # 游戏 .so 路径 → 游戏目录名(引擎按 build/plugins/<game>/libgame.so 布局加载)
