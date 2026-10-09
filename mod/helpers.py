@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""通用辅助：sender 查找 / 跨线程协程执行 / target_key / mention 美化 / 群权限集合"""
+"""通用辅助：sender 查找 / target_key / mention 美化 / 群主动推送权限"""
 
 from __future__ import annotations
 import os
@@ -290,38 +290,6 @@ def get_sender(appid: str = ''):
         return None
 
 
-def run_coro_blocking(coro, timeout: float = 15.0):
-    """C++ 工作线程 → asyncio 事件循环 的安全桥接（阻塞等待结果）"""
-    loop = state.event_loop
-    if loop is None or loop.is_closed():
-        log.warning('事件循环不可用，丢弃协程')
-        return None
-    try:
-        fut = asyncio.run_coroutine_threadsafe(coro, loop)
-        return fut.result(timeout=timeout)
-    except Exception as e:
-        log.warning(f'协程执行异常: {e}')
-        return None
-
-
-def is_full_volume_group(gid: str) -> bool:
-    """判断 ``gid`` 是否有「全量消息」权限 —— 只信任**运行时观测**到的事实。
-
-    ⚠️ 这只回答「bot 收得到该群的全部消息吗」。**能不能主动发消息是另一回事**,
-    由 ``can_push_group`` 按 ``allow_proactive_msg`` 判定,不要拿本函数当推送资格用。
-
-    唯一依据是 ``state.full_volume_groups``(dispatcher 见到 ``GROUP_MESSAGE_CREATE`` 时填入):
-    QQ 后台开了全量权限才会投递该事件;框架 ``non_at_message.*`` 配置与 QQ 后台权限不同步,不能当真值。
-    进程启动后、该群第一条 non-AT 消息到达前暂时返回 False。
-    """
-    if not gid:
-        return False
-    try:
-        return gid in state.full_volume_groups
-    except Exception:
-        return False
-
-
 # ──── 主动推送资格:按群号点查 + TTL 缓存 ────────────────────────────────
 # 只为**真正在用**的群付费:缓存条目数取决于活跃群数而非总群数。冷启动 bot 未就绪只是一次短 TTL 的 miss,群主新授予的权限最迟一个 TTL 后生效。
 _SQL_GROUP_PUSH = ('SELECT allow_proactive_msg FROM groups_users '
@@ -427,15 +395,13 @@ async def _do_probe(sender, gid: str) -> None:
 
 
 def note_group_message(gid: str) -> None:
-    """收到 ``GROUP_MESSAGE_CREATE`` 时调用 —— 全量消息权限的直接证据。
+    """收到 ``GROUP_MESSAGE_CREATE`` 时调用 —— 借机探一次主动推送权限。
 
-    除了记进 ``full_volume_groups``,还借机探一次主动推送权限:两个权限通常
-    在同一次授权流程里一起变动,这个事件是我们能拿到的**最快**的变动信号
-    (否则要等 DB 被别的路径刷新)。节流由 ``refresh_group_push_permission`` 负责。
+    这个事件说明群里开了全量消息,而全量与主动推送通常在同一次授权流程里一起变动,
+    它是我们能拿到的**最快**的变动信号(否则要等 DB 被别的路径刷新)。节流由 ``refresh_group_push_permission`` 负责。
     """
     if not gid:
         return
-    state.full_volume_groups.add(gid)
     refresh_group_push_permission(gid)
 
 

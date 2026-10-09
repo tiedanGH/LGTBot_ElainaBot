@@ -199,7 +199,6 @@ _PERSIST_DEFAULTS: dict = {
     'current_game':            {},
     'active_matches':          {},
     'pending_new_game_name':   {},
-    'full_volume_groups':      set(),
     'group_push_cache':        {},
     'log_attribution_ctxvar':  None,
     'mention_rewrites':        {},

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""helpers 模块测试 —— markdown 转义 / mention 美化 / bot 绑定解析 / 推送资格与全量群判定 / 跨线程协程桥接。
+"""helpers 模块测试 —— markdown 转义 / mention 美化 / bot 绑定解析 / 主动推送资格与权限探测。
 
 框架侧依赖用替身注入,helpers 全部是**函数内延迟 import**,所以替换生效无需重载 helpers:
   · ``core.bot.manager`` 整个模块塞 ``sys.modules`` 桩(同 conftest 处理 boot)
@@ -348,16 +348,6 @@ def test_can_push_group_false_paths(monkeypatch):
     assert helpers.can_push_group('') is False
 
 
-def test_can_push_group_full_access_does_not_grant_push(monkeypatch):
-    """★ 语义回归:只开全量消息不等于能主动推送 —— 点查只看
-    allow_proactive_msg,运行时观测到的全量群集合不参与判定。"""
-    state.full_volume_groups.add('GF')
-    _set_bots(monkeypatch, {'A': _FakeBot('A', rows={
-        'groups_users': [{'allow_proactive_msg': 0}]})})
-    assert helpers.is_full_volume_group('GF') is True
-    assert helpers.can_push_group('GF') is False
-
-
 def test_can_push_group_unknown_state_uses_short_ttl(monkeypatch):
     """★ bot 未就绪时**不能**把「未知」当「无权限」钉死 —— 冷启动(框架先 load
     插件、后启 BotRegistry)必然撞上这一刻,长 TTL 会让整个进程都推不出消息。
@@ -464,22 +454,20 @@ async def test_probe_is_throttled_per_group(monkeypatch):
     assert sender.calls == ['GP', 'GP']
 
 
-async def test_group_message_event_marks_full_volume_and_probes(monkeypatch):
-    """★ GROUP_MESSAGE_CREATE 是权限变动最快的信号:记全量群 + 顺带探一次推送权限。已确知可推送的群跳过探测。"""
+async def test_group_message_event_probes_push_permission(monkeypatch):
+    """★ GROUP_MESSAGE_CREATE 是权限变动最快的信号:顺带探一次推送权限。已确知可推送的群跳过探测。"""
     sender = _ProbeSender()
     monkeypatch.setattr(state, 'event_loop', asyncio.get_running_loop())
     _set_bots(monkeypatch, {'A': _bot_with_sender(sender, {'groups_users': []})})
     helpers.note_group_message('GNEW')
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert 'GNEW' in state.full_volume_groups
     assert sender.calls == ['GNEW']
 
     helpers._push_cache()['GOK'] = (True, time.time() + 999)
     helpers.note_group_message('GOK')
     await asyncio.sleep(0)
     assert sender.calls == ['GNEW']              # 已确知可推送 → 不探
-    assert 'GOK' in state.full_volume_groups
 
     helpers.note_group_message('')               # 空 gid 不炸也不探
     assert sender.calls == ['GNEW']
@@ -518,83 +506,6 @@ def test_push_cache_prunes_expired_entries(monkeypatch):
     time.sleep(0.06)                                  # 全部过期
     helpers.can_push_group('GNEW')
     assert len(helpers._push_cache()) == 1            # 过期项被清掉,只剩新的
-
-
-def test_is_full_volume_group_trusts_runtime_set_only():
-    """判定唯一依据是运行时观测集合 —— 不查框架 non_at_message 配置
-    (配置与 QQ 后台权限不同步,信配置会把非全量群误判为全量)。"""
-    state.full_volume_groups.add('G1')
-    assert helpers.is_full_volume_group('G1') is True
-    assert helpers.is_full_volume_group('G2') is False
-    assert helpers.is_full_volume_group('') is False
-    assert helpers.is_full_volume_group(None) is False
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# 跨线程协程桥接
-# ─────────────────────────────────────────────────────────────────────────
-
-def test_run_coro_blocking_returns_result():
-    """C++ 工作线程调用形态:从**非 loop 线程**提交协程并阻塞取结果。"""
-    import threading
-
-    async def _work():
-        return 42
-
-    loop = asyncio.new_event_loop()
-    t = threading.Thread(target=loop.run_forever, daemon=True)
-    t.start()
-    old = state.event_loop
-    state.event_loop = loop
-    try:
-        assert helpers.run_coro_blocking(_work()) == 42
-    finally:
-        state.event_loop = old
-        loop.call_soon_threadsafe(loop.stop)
-        t.join(timeout=5)
-        loop.close()
-
-
-def test_run_coro_blocking_none_when_loop_unavailable():
-    """loop 未就绪 / 已关闭 → 丢弃协程返回 None,绝不抛给 C++ 调用方。"""
-    async def _work():
-        return 1
-
-    old = state.event_loop
-    try:
-        state.event_loop = None
-        c1 = _work()
-        assert helpers.run_coro_blocking(c1) is None
-        c1.close()
-        closed = asyncio.new_event_loop()
-        closed.close()
-        state.event_loop = closed
-        c2 = _work()
-        assert helpers.run_coro_blocking(c2) is None
-        c2.close()
-    finally:
-        state.event_loop = old
-
-
-def test_run_coro_blocking_swallows_coroutine_exception():
-    """协程内部抛异常 → None(引擎线程不该被 Python 异常打断)。"""
-    import threading
-
-    async def _boom():
-        raise RuntimeError('boom')
-
-    loop = asyncio.new_event_loop()
-    t = threading.Thread(target=loop.run_forever, daemon=True)
-    t.start()
-    old = state.event_loop
-    state.event_loop = loop
-    try:
-        assert helpers.run_coro_blocking(_boom()) is None
-    finally:
-        state.event_loop = old
-        loop.call_soon_threadsafe(loop.stop)
-        t.join(timeout=5)
-        loop.close()
 
 
 def test_mentioned_ids_extracts_in_order_without_duplicates():

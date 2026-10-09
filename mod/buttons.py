@@ -380,8 +380,6 @@ MENU_TEXT_HEADER = (
 MENU_TEXT_BODY = (
     ''
 )
-# 兼容旧引用：拼接版
-MENU_TEXT = MENU_TEXT_HEADER + MENU_TEXT_BODY
 
 
 # ──────── markdown 内联指令链接(<qqbot-cmd-input>)生成工具 ─────────────────

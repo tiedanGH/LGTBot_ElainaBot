@@ -47,10 +47,6 @@ pending_new_game_name: dict[str, str] = _p['pending_new_game_name']
 # 群管刚发过 `/中断` 的群(target_key → 过期时间戳),由 dispatcher 写入、callbacks 在引擎那条「还差 N 人确定中断」的广播上消费一次(挂「强制中断游戏」按钮)。
 # 一次性 + 短 TTL:没等到那条广播(如全员已确定直接中断)就自然过期,不留悬挂标记。
 force_interrupt_hints: dict[str, float] = _p['force_interrupt_hints']
-# 运行时观测到 ``GROUP_MESSAGE_CREATE`` 的群 openid 集合 —— 由 dispatcher 填入。
-# 这是全量群的唯一判定信号:QQ 后台开了全量权限才会投递该事件;框架 ``non_at_message.*`` 配置与 QQ 后台权限不同步,不能当真值。
-# 进程重启即丢,首次在某全量群收到 non-AT 消息前按非全量兜底。
-full_volume_groups: set[str] = _p['full_volume_groups']
 
 
 

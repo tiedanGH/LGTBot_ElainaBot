@@ -147,6 +147,11 @@ def _init_message_db(base: str, date: str, rows=()) -> None:
     conn.close()
 
 
+def _reset_caches() -> None:
+    userinfo._NAME_CACHE.clear()
+    userinfo._LAST_WRITE_TS.clear()
+
+
 @pytest.fixture()
 def fake_bot(tmp_path, monkeypatch):
     """空库的 FakeBot + 注入绑定;各测试按需再灌数据。"""
@@ -154,9 +159,9 @@ def fake_bot(tmp_path, monkeypatch):
     bot = FakeBot(base)
     monkeypatch.setattr(helpers, 'get_bound_bot', lambda: bot)
     monkeypatch.setattr(helpers, 'get_bound_appid', lambda: 'APP123')
-    userinfo.clear_cache()
+    _reset_caches()
     yield bot
-    userinfo.clear_cache()
+    _reset_caches()
 
 
 # ──────── 昵称读取 / 缓存 ─────────────────────────────────────────────────
@@ -185,13 +190,13 @@ def test_get_name_caches_nonempty(fake_bot):
     conn.commit()
     conn.close()
     assert userinfo.get_name('U1') == '爱丽丝'
-    userinfo.clear_cache()
+    _reset_caches()
     assert userinfo.get_name('U1') == '别名'
 
 
 def test_get_name_without_bot_returns_empty(monkeypatch):
     monkeypatch.setattr(helpers, 'get_bound_bot', lambda: None)
-    userinfo.clear_cache()
+    _reset_caches()
     assert userinfo.get_name('U1') == ''
 
 

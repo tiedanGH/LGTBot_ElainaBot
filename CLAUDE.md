@@ -144,7 +144,7 @@ mod/quota: fix race                            # 不要带路径
 | `state`           | 共享可变全局状态容器（`pending_buttons` / `event_loop` / `started` 等）                       |
 | `boot`            | C++ 扩展加载（顺序敏感：`chdir` + `RTLD_GLOBAL` + `ctypes.CDLL` 预加载）                       |
 | `buttons`         | 按钮模板 + 组装函数                                                                      |
-| `helpers`         | 通用工具（sender / coro / mention / target_key）                                       |
+| `helpers`         | 通用工具（sender / mention / target_key / 主动推送权限）                                 |
 | `quota`           | 被动消息引用配额管理                                                                       |
 | `callbacks`       | C++ 引擎回调实现（`cb_*` 入口 + 异步发送）                                                     |
 | `dispatcher`      | `@handler` 注册（消息派发 + INTERACTION）                                                |

@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -263,9 +262,8 @@ async def test_welcome_menu_burns_the_replied_message_only(patched_downstream):
 
 async def test_group_message_event_notes_permission_change(patched_downstream,
                                                            monkeypatch):
-    """★ GROUP_MESSAGE_CREATE 必须走 ``helpers.note_group_message`` 而不是只往
-    full_volume_groups 里塞 —— 这是权限变动最快的信号,要借它顺带探一次主动推送
-    权限(群主在 QQ 后台授权不产生任何事件,光等 DB 会拖很久)。
+    """★ GROUP_MESSAGE_CREATE 必须走 ``helpers.note_group_message`` —— 这是权限变动最快的信号,
+    要借它顺带探一次主动推送权限(群主在 QQ 后台授权不产生任何事件,光等 DB 会拖很久)。
     非 GROUP_MESSAGE_CREATE 的事件不触发。"""
     _state.started = True
     seen: list = []
@@ -1570,7 +1568,7 @@ async def test_match_list_replies_when_engine_not_ready(patched_downstream):
 
 async def test_welcome_menu_full_volume_cmd_line(monkeypatch):
     """欢迎菜单:非全量群追加「全量申请」内联指令行;全量群 / 私信不追加。"""
-    from plugins.LGTBot_ElainaBot.mod import buttons, state
+    from plugins.LGTBot_ElainaBot.mod import buttons
     monkeypatch.setattr(dispatcher, '_resolve_menu_logo', AsyncMock(return_value=None))
 
     async def _menu_md(ev):

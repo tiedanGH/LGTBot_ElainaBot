@@ -417,13 +417,6 @@ def _meta_set(k: str, v: str) -> None:
 # 热路径判定
 # ─────────────────────────────────────────────────────────────────────────
 
-def is_flagged(name: str) -> bool:
-    """这个昵称是否已被判违规。**热路径,只读内存**。总开关关闭时恒为 False。"""
-    if not ENABLED or not name:
-        return False
-    return normalize(name) in _flagged
-
-
 def should_mask(name: str) -> bool:
     """是否该把这个昵称换成匿名。fail-open(默认)只查 L0;fail-closed 还要知道「审过没有」,多走 L1 → L2。"""
     if not ENABLED or not name:

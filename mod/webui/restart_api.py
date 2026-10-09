@@ -34,9 +34,6 @@ from .build_api import _check_auth, _err
 
 log = get_logger(PLUGIN, 'LGTBot')
 
-_ROUTE_RESTART = '/api/ext/lgtbot/restart'
-_ROUTE_PLANNED = '/api/ext/lgtbot/planned-restart'
-
 _REASON_MAX = 200      # 与面板 ?reason= 的截断一致
 
 

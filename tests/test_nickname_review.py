@@ -146,7 +146,7 @@ def test_store_failures_never_raise(monkeypatch):
     assert nr.pending_count() == 0
     assert nr.list_flagged() == []
     assert nr.stats() == {'total': 0, 'flagged': 0, 'pending': 0, 'allowed': 0}
-    assert nr.is_flagged('anything') is False
+    assert nr.should_mask('anything') is False
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -157,7 +157,6 @@ def test_disabled_switch_is_equivalent_to_no_feature(monkeypatch):
     """★ 总开关关闭 = 这个功能不存在:不遮蔽、不入队,连内存集合都不查。"""
     nr.put_verdict(nr.normalize('坏名字'), '坏名字', True, nr.SRC_LLM)
     monkeypatch.setattr(nr, 'ENABLED', False)
-    assert nr.is_flagged('坏名字') is False
     assert nr.should_mask('坏名字') is False
     assert nr.enqueue('全新的名字') is False and not nr._queue
     assert nr.pending_count() == 0                    # 角标也不亮
@@ -187,8 +186,8 @@ def test_fail_closed_masks_until_reviewed_safe(monkeypatch):
 def test_flagged_lookup_is_normalized(monkeypatch):
     """判定走归一化键 —— 换个全角写法就绕过遮蔽的话,这层防护形同虚设。"""
     nr.put_verdict(nr.normalize('BadName'), 'BadName', True, nr.SRC_LLM)
-    assert nr.is_flagged('ＢａｄＮａｍｅ') is True
-    assert nr.is_flagged('bad​name') is True
+    assert nr.should_mask('ＢａｄＮａｍｅ') is True
+    assert nr.should_mask('bad​name') is True
 
 
 # ─────────────────────────────────────────────────────────────────────────

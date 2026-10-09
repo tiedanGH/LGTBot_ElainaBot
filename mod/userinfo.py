@@ -50,6 +50,7 @@ _AVATAR_URL_TPL = 'https://q.qlogo.cn/qqapp/{appid}/{openid}/{size}'
 
 # 昵称缓存:仅存非空名。框架不再改写非空的 users.name,最新值由 note_username 同步刷进来,可长期持有;
 # 空名不缓存:用户首个事件可能漏 username,之后补上时必须能查到。
+# 换绑 bot 不用清:openid 按 bot 隔离,旧 bot 留下的条目不会被新 bot 的 id 命中。
 _NAME_CACHE: dict[str, str] = {}
 _NAME_CACHE_MAX = 4096          # 超限整体清空(重查便宜)
 
@@ -72,12 +73,6 @@ def _cache_put(openid: str, name: str) -> None:
     if len(_NAME_CACHE) >= _NAME_CACHE_MAX:
         _NAME_CACHE.clear()
     _NAME_CACHE[openid] = name
-
-
-def clear_cache() -> None:
-    """清空昵称缓存与写回冷却记录(测试 / 换绑 bot 时用)。"""
-    _NAME_CACHE.clear()
-    _LAST_WRITE_TS.clear()
 
 
 # ──────── 读路径 ──────────────────────────────────────────────────────────

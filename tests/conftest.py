@@ -43,7 +43,6 @@ _persistent: dict = {
     'current_game': {},
     'active_matches': {},
     'pending_new_game_name': {},
-    'full_volume_groups': set(),
     'group_push_cache': {},
     'group_push_probe_at': {},
     'mention_rewrites': {},
@@ -103,7 +102,6 @@ def _clean_runtime_state():
     _persistent['current_game'].clear()
     _persistent['active_matches'].clear()
     _persistent['pending_new_game_name'].clear()
-    _persistent['full_volume_groups'].clear()
     _persistent['group_push_cache'].clear()
     _persistent['group_push_probe_at'].clear()
     _persistent['mention_rewrites'].clear()

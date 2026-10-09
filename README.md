@@ -145,7 +145,7 @@ cd ../.. && python3 main.py
 - [x] **Web 面板图标 SVG 化** —— 把面板内**全部 emoji 图标**换成 SVG，摆脱各平台 emoji 字形不一致（Windows / macOS / 移动端差异明显）、无法随主题换色的问题
 - [x] **CI 预编译产物** —— GitHub Actions 三发行版矩阵编译引擎核心 + 50+ 游戏插件，发布到滚动 `prebuilt` release；面板「📦 预编译部署」下载切换，用户无需本地搭 Boost.Python / C++20 工具链
 - [x] **复用主框架用户数据** —— 昵称 / 头像 / 活跃 / 消息统计全部改读 ElainaBot 主框架数据库（data.db / wakeup.db / statistics.db），插件私有的 `data/user_cache.db` 完全停用；昵称变化由插件比对后经框架写队列回写保持最新
-- [x] **测试覆盖补齐** —— 裸奔模块补上单测防回归：`helpers`（转义 / 绑定解析 / 全量群集合 / 协程桥接）、`config`（全部可调字段下发 + 配置读写）、`audit`（类别登记漂移闸），以及 `webui/` 各 page 的数据组装与 action 端点（fragment 协议 / 注册对称性 / 惰性 HTML）
+- [x] **测试覆盖补齐** —— 裸奔模块补上单测防回归：`helpers`（转义 / 绑定解析 / 主动推送权限）、`config`（全部可调字段下发 + 配置读写）、`audit`（类别登记漂移闸），以及 `webui/` 各 page 的数据组装与 action 端点（fragment 协议 / 注册对称性 / 惰性 HTML）
 
 ## QQ 协议相关限制（已知）
 
@@ -178,7 +178,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── state.py             共享运行时状态容器（含跨重载持久化）
 │   ├── boot.py              C++ 扩展加载（chdir + lib*.so 预加载 + RTLD_GLOBAL）
 │   ├── buttons.py           按钮模板 + 命令触发正则
-│   ├── helpers.py           通用工具（sender / coro / mention / target_key）
+│   ├── helpers.py           通用工具（sender / mention / target_key / 主动推送权限）
 │   ├── quota.py             被动消息引用池（每条引用按场景：群 5 次/5 分钟，私信 4 次/60 分钟）
 │   ├── callbacks.py         C++ 引擎回调（cb_* 入口 + 异步发送实现）
 │   ├── dispatcher.py        @handler 注册（消息派发 + INTERACTION 处理）

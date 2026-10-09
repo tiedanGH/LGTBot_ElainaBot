@@ -448,8 +448,7 @@ def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
 def test_reply_limit_tip_targets_only_targets_without_push_permission(monkeypatch):
     """★「消息回复限制」教学的投递面 —— 只发给**发不出主动消息**的目标:
 
-      · 群聊看 ``allow_proactive_msg``(DB 权限位)。**只开全量
-        消息不算** —— 那只管收得到什么,配额耗尽照样推不出去,仍要教学。
+      · 群聊看 ``allow_proactive_msg``(DB 权限位)。
       · 私信没有平台侧权限位可查(框架 users 表没有该字段),沿用沙箱名单,
         ``sandbox_dm_users: ["all"]`` 即全员有权限。
     """
@@ -463,12 +462,10 @@ def test_reply_limit_tip_targets_only_targets_without_push_permission(monkeypatc
         callbacks._consume_pending_tip(key, target_id, is_uid)
 
     try:
-        state.full_volume_groups.add('gFullOnly')     # 全量,但没主动推送权限
-        mark_push_group('gPush')           # 非全量,有主动推送权限
-        _consume('gFullOnly', False)
+        mark_push_group('gPush')                      # 有主动推送权限
         _consume('gPush', False)
-        _consume('gPlain', False)                     # 两种权限都没有
-        assert sent == [('gFullOnly', False), ('gPlain', False)]
+        _consume('gPlain', False)                     # 没有主动推送权限
+        assert sent == [('gPlain', False)]
 
         # 私信:白名单内跳过、白名单外照发
         sent.clear()
@@ -485,22 +482,18 @@ def test_reply_limit_tip_targets_only_targets_without_push_permission(monkeypatc
         assert sent == []
     finally:
         callbacks._pending_tip_keys.clear()
-        state.full_volume_groups.discard('gFullOnly')
         mark_push_group('gPush', False)
 
 
 def test_active_push_eligibility_requires_push_permission(monkeypatch):
-    """配额耗尽后能否转主动消息,同样只认主动推送权限 —— 只开全量的群
-    仍走「等刷新按钮」路径,不能往没权限的群硬推(QQ 必拒且烧配额)。"""
-    assert callbacks.helpers.can_push_group('gFullOnly') is False
-    state.full_volume_groups.add('gFullOnly')
-    assert callbacks.helpers.can_push_group('gFullOnly') is False
-    mark_push_group('gFullOnly')
+    """配额耗尽后能否转主动消息,同样只认主动推送权限 —— 没权限的群
+    仍走「等刷新按钮」路径,不能硬推(QQ 必拒且烧配额)。"""
+    assert callbacks.helpers.can_push_group('gNoPush') is False
+    mark_push_group('gNoPush')
     try:
-        assert callbacks.helpers.can_push_group('gFullOnly') is True
+        assert callbacks.helpers.can_push_group('gNoPush') is True
     finally:
-        state.full_volume_groups.discard('gFullOnly')
-        mark_push_group('gFullOnly', False)
+        mark_push_group('gNoPush', False)
 
 
 def test_single_player_game_over_restart_button_has_name():
