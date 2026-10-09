@@ -1438,13 +1438,15 @@ async def test_game_stats_text_fallback(monkeypatch):
 
 
 async def test_game_stats_dm_queries_without_a_group(monkeypatch):
-    """私信:不带群去查(没有本群局数 / 本群人数)。"""
+    """私信:不带群去查(没有本群局数 / 本群人数)。近 7 日没有对局时热度排名也写明。"""
     call, seen = await _run_game_stats(monkeypatch, '数据统计天赋云巢',
-                                       _game_detail(group_matches=None, group_players=None, me=None),
+                                       _game_detail(group_matches=None, group_players=None, me=None,
+                                                    week_rank=None),
                                        is_group=False)
     assert seen == [('天赋云巢', 'U1', '')]
     txt = call.args[0]
     assert '累计玩家: 105 人\n' in txt and '游戏群聊: 16 个\n' in txt and '我的:' not in txt
+    assert '热度排名: 第 2 / 45（近7日无对局）' in txt
 
 
 async def test_game_stats_not_found_shows_suggestions_and_date_usage(monkeypatch):

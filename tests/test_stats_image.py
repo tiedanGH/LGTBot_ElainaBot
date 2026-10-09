@@ -740,17 +740,19 @@ def test_render_game_card_png():
 
 
 def test_game_card_me_row_only_when_off_the_boards():
-    """★ 查询者不在 TOP10 → 两张榜底部补一行(图变高);两张榜上都有他 → 就地高亮,不补行。"""
+    """★ 查询者两张榜都在 TOP10 → 就地高亮,不补行;只在一张或都不在 → 两张榜底部都补一行(图一样高,不留空白)。"""
     _need_font()
     base = _game_sample()
-    on = _game_sample(
+    both = _game_sample(
         top_players=[dict(p, me=(i == 3)) for i, p in enumerate(base['top_players'])],
         top_power=[dict(p, me=(i == 3)) for i, p in enumerate(base['top_power'])])
+    one = _game_sample(
+        top_players=[dict(p, me=(i == 3)) for i, p in enumerate(base['top_players'])])
 
     def _h(gs):
         return uploader.get_image_size(stats_image.render_game_stats_image(gs))[1]
 
-    assert _h(base) > _h(on) == _h(_game_sample(me=None))
+    assert _h(base) == _h(one) > _h(both) == _h(_game_sample(me=None))
 
 
 def test_game_board_rows_carry_my_row():
@@ -764,8 +766,87 @@ def test_game_board_rows_carry_my_row():
     assert power['me_row'] == (None, '我自己', 66.7, '66.70% · 6局', True)   # 没满门槛:名次画「—」
 
 
+def test_game_board_row_uses_the_tight_insets():
+    """★ 游戏卡双榜:名次章贴左内边距、计数右对齐到右内边距;比统计卡的榜两侧都收窄,同样的计数文案下名字放得下更多字。"""
+    _need_font()
+    from PIL import Image, ImageDraw
+    rec = _DrawRecorder(ImageDraw.Draw(Image.new('RGB', (600, 200))))
+    long_name, cnt = '蕾米莉亚斯卡雷特大小姐的女仆长', '80.00% · 179局'
+    stats_image._board_row(rec, 0, 10, 453, (4, long_name, 60, cnt, False), 100, stats_image._ORANGE)
+    texts = {t: xy for xy, t, _f, _fill in rec.texts}
+    shown = next(t for t in texts if t.startswith('蕾米'))
+    f22, f24 = stats_image._font(22), stats_image._font(24)
+    assert texts['179局'][0] + stats_image._text_w(rec, '179局', f22) == 453 - stats_image._BOARD_INSET
+    assert texts[shown][0] == stats_image._BOARD_INSET + 38 + 12
+    old_name_x, old_w, old_cnt_x = stats_image._rank_row_layout(rec, 0, 453, cnt, f22, False)
+    assert texts[shown][0] < old_name_x and texts['80.00%'][0] > old_cnt_x
+    assert len(shown.rstrip('…')) > len(stats_image._fit_name(rec, long_name, old_w, f24).rstrip('…'))
+
+
+def test_power_count_dot_gets_a_narrow_gap():
+    """★ 实力排行的「比例 · 局数」:图里中点两侧各留 _DOT_GAP,比整个空格窄、又不贴着字;量宽与画法一致。"""
+    _need_font()
+    from PIL import Image, ImageDraw
+    rec = _DrawRecorder(ImageDraw.Draw(Image.new('RGB', (600, 100))))
+    f = stats_image._font(22)
+    txt = stats_image.fmt_power(80, 179)
+    assert txt == '80.00% · 179局'
+    stats_image._dot_text(rec, (10, 10), txt, f, stats_image._ORANGE)
+    assert [t for _xy, t, _f, _fill in rec.texts] == ['80.00%', '·', '179局']
+    (x0, _y0), (xd, _yd), (x1, _y1) = [xy for xy, _t, _f, _fill in rec.texts]
+    gap = stats_image._DOT_GAP
+    w = lambda s: stats_image._text_w(rec, s, f)        # noqa: E731
+    assert xd - (x0 + w('80.00%')) == gap == x1 - (xd + w('·'))
+    assert 0 < gap < w(' ')
+    assert x1 + w('179局') - 10 == stats_image._dot_text_w(rec, txt, f)
+    assert stats_image._dot_text_w(rec, '179局', f) == w('179局')       # 没有中点的计数照常量宽
+
+
+def test_zero_weeks_are_a_thin_line_and_low_weeks_stay_visible():
+    """★ 0 只画一条细线;非零最矮也有 6px,两者一眼分得开(游戏卡双柱)。"""
+    _need_font()
+    trend = [{'start': '2026-07-01', 'matches': m, 'players': p}
+             for m, p in zip([0, 1, 1000] + [0] * 9, [0, 1, 900] + [0] * 9)]
+    bars, _nums = _draw_trend(trend)
+    heights = [box[3] - box[1] for box, _f in bars]
+    assert heights.count(stats_image._ZERO_BAR_H) == 20                     # 只有 0 那 10 周
+    assert min(h for h in heights if h != stats_image._ZERO_BAR_H) == 6     # 1 对 1000 也有 6px
+
+
+def test_old_trend_zero_days_are_a_thin_line(monkeypatch):
+    """统计卡的近 10 日趋势同样:0 是细线,1 局对 500 局也有 6px。"""
+    _need_font()
+    from collections import Counter
+    from PIL import ImageDraw
+    recs = []
+    real = ImageDraw.Draw
+    monkeypatch.setattr(ImageDraw, 'Draw', lambda im: recs.append(_DrawRecorder(real(im))) or recs[-1])
+    g = _sample_stats()
+    g['trend_10d'] = [dict(t, count=c) for t, c in zip(g['trend_10d'], [0, 1] + [500] * 8)]
+    assert stats_image.render_stats_image(g, 'x')
+    dim = stats_image._tint(stats_image._ACCENT, base=stats_image._PANEL, alpha=0.35)
+    cand = [box for box, fill in recs[0].rects if fill in (stats_image._ACCENT, dim)]
+    base_y = Counter(b[3] for b in cand).most_common(1)[0][0]
+    hs = [b[3] - b[1] for b in cand if b[3] == base_y]
+    assert len(hs) == 10
+    assert hs[-1] == stats_image._ZERO_BAR_H and hs[-2] == 6        # 今天 0 局在最右,昨天 1 局
+
+
+def test_my_row_on_both_boards_when_only_one_lists_me():
+    """★ 只在一张榜上时两张榜底部都补行;在榜的那张写榜上的名次(前三照样画奖牌色)。"""
+    base = _game_sample()
+    gs = _game_sample(top_players=[dict(p, me=(i == 1)) for i, p in enumerate(base['top_players'])])
+    count, power = stats_image._board_rows(gs)
+    assert count['me_row'][0] == 2                           # 榜上第 2,不是 me['rank'] 的 37
+    assert power['me_row'][0] is None
+    gs = _game_sample(top_power=[dict(p, me=(i == 0)) for i, p in enumerate(base['top_power'])])
+    count, power = stats_image._board_rows(gs)
+    assert (count['me_row'][0], power['me_row'][0]) == (37, 1)
+
+
 def test_game_overview_tiles(monkeypatch):
-    """总览 4×2 的标签顺序与角标:人次挂在累计对局上,累计玩家与游戏群聊挂本群人数 / 局数,私信里这两个不挂。"""
+    """总览 4×2 的标签顺序与角标:人次挂在累计对局上,累计玩家与游戏群聊挂本群人数 / 局数,私信里这两个不挂。
+    角标里的数字 / 名次单独成段加粗;平均人数与最后一局的角标整段不加粗。"""
     _need_font()
     seen = []
     real = stats_image._game_tile
@@ -779,14 +860,41 @@ def test_game_overview_tiles(monkeypatch):
     assert [label for label, _p in seen] == ['累计对局', '累计玩家', '近7日对局', '近7日玩家',
                                             '平均人数', '游戏群聊', '热度排名', '最后一局']
     pills = dict(seen)
-    assert pills['累计对局'] == ('info', '2,706 人次')
-    assert pills['累计玩家'] == ('info', '本群 23 人')
-    assert pills['游戏群聊'] == ('info', '本群 120 局')
+    assert pills['累计对局'] == ('info', ('', '2,706', ' 人次'))     # 奇数位的段加粗
+    assert pills['累计玩家'] == ('info', ('本群 ', '23', ' 人'))
+    assert pills['游戏群聊'] == ('info', ('本群 ', '120', ' 局'))
+    assert pills['热度排名'] == ('info', ('近7日 ', '#3'))
+    assert pills['平均人数'] == ('info', '2–8 人') and isinstance(pills['最后一局'][1], str)
 
     seen.clear()
-    stats_image.render_game_stats_image(_game_sample(group_matches=None, group_players=None))
+    stats_image.render_game_stats_image(_game_sample(group_matches=None, group_players=None,
+                                                     week_rank=None))
     pills = dict(seen)
     assert pills['累计玩家'] == ('info', '') and pills['游戏群聊'] == ('info', '')
+    assert pills['热度排名'] == ('info', ('近7日 ', '无对局'))   # 近 7 日没有对局也挂胶囊
+
+
+@pytest.mark.parametrize('parts', [('近7日 ', '无对局'), ('本群 ', '23', ' 人'), ('', '2,706', ' 人次')])
+def test_info_pill_bolds_odd_segments(monkeypatch, parts):
+    """胶囊分段画,奇数位的段加粗:粗体描边多出的那点算进占宽,段与段首尾相接不重叠,两端仍各留 13px。"""
+    _need_font()
+    from PIL import Image, ImageDraw
+    rec = _DrawRecorder(ImageDraw.Draw(Image.new('RGB', (400, 100))))
+    bold = []
+    real = stats_image._bold_text
+    monkeypatch.setattr(stats_image, '_bold_text',
+                        lambda d_, xy, t, f, fill: bold.append(t) or real(d_, xy, t, f, fill))
+    stats_image._info_pill(rec, 10, 10, parts)
+    assert bold == list(parts[1::2])
+    f = stats_image._font(22)
+    want, x = [], 10 + 13
+    for i, p in enumerate(parts):
+        if p:
+            want.append((x + 1 if i % 2 else x, p))
+        x += stats_image._text_w(rec, p, f) + (2 if i % 2 else 0)
+    assert [(xy[0], t) for xy, t, _f, _fill in rec.texts] == want
+    pill_w = stats_image._pill_w(rec, parts)
+    assert x + 13 == 10 + pill_w and rec.rects[0][0][2] == 10 + pill_w
 
 
 def test_power_board_shows_its_threshold_tag(monkeypatch):
@@ -955,6 +1063,24 @@ _NOW = datetime(2026, 8, 8, 18, 0, 0)
 ])
 def test_fmt_when(ts, want):
     assert stats_image.fmt_when(ts, _NOW) == want
+
+
+def test_last_match_from_a_past_year_shows_only_the_date(monkeypatch):
+    """★ 跨年只给日期、不带时分(只有「昨天」这种相对说法带时间);数值和右上角胶囊都不出卡、不重叠。"""
+    _need_font()
+    now = datetime(2026, 1, 1, 10, 0, 0)
+    assert stats_image.fmt_when('2025-12-31 23:00:00', now) == '昨天 23:00'
+    assert stats_image.fmt_when('2025-12-30 21:14:00', now) == '2025-12-30'
+    from PIL import Image, ImageDraw
+    rec = _DrawRecorder(ImageDraw.Draw(Image.new('RGB', (500, 200))))
+    labels = stats_image.game_labels({'last_time': '2024-03-02 21:14:00'}, datetime(2026, 10, 9, 22, 0, 0))
+    assert (labels['last'], labels['ago']) == ('2024-03-02', '2 年前')
+    stats_image._game_tile(rec, (0, 0, 427, 138), '最后一局', labels['last'], 'clock',
+                           stats_image._PINK, pill=('info', labels['ago']))
+    (vx, vy), _t, vf, _fill = next(t for t in rec.texts if t[1] == '2024-03-02')
+    assert vx + stats_image._text_w(rec, '2024-03-02', vf) <= 427 - 24
+    pill = next(box for box, fill in rec.rects if fill == stats_image._TAG_BG)
+    assert pill[2] <= 427 - 24 and pill[3] + 4 <= vy + vf.getbbox('2024-03-02')[1] - 1
 
 
 @pytest.mark.parametrize('ts, want', [

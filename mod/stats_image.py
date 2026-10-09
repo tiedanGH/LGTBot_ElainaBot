@@ -233,17 +233,40 @@ def _fit_name(d, full: str, max_w: int, font) -> str:
     return name + ('…' if name != full else '')
 
 
+# 榜单计数里的「 · 」不画整个空格,中点两侧各留 4px:给昵称省位置,中点也不会挤得看不见
+_DOT_SEP, _DOT_GAP = ' · ', 4
+
+
+def _dot_text_w(d, text: str, font) -> int:
+    parts = text.split(_DOT_SEP)
+    return (sum(_text_w(d, p, font) for p in parts)
+            + (len(parts) - 1) * (_text_w(d, '·', font) + 2 * _DOT_GAP))
+
+
+def _dot_text(d, xy, text: str, font, fill) -> None:
+    """粗体画榜单计数,``_DOT_SEP`` 按窄间距画,占宽同 ``_dot_text_w``。"""
+    x, y = xy
+    for i, part in enumerate(text.split(_DOT_SEP)):
+        if i:
+            _bold_text(d, (x + _DOT_GAP, y), '·', font, fill)
+            x += _text_w(d, '·', font) + 2 * _DOT_GAP
+        _bold_text(d, (x, y), part, font, fill)
+        x += _text_w(d, part, font)
+
+
 def _rank_row_layout(d, cx: int, half_w: int, cnt_txt: str, cnt_font, tagged: bool,
-                     tag_w: int | None = None):
+                     tag_w: int | None = None, *, inset: int = 28, name_gap: int = 18,
+                     cnt_gap: int = 12):
     """一行榜单的横向布局 → ``(名字起点, 名字可用宽, 计数起点)``。
 
-    ``tagged`` 时给名字后的胶囊留位,``tag_w`` 缺省按「不计分」胶囊算。
+    ``tagged`` 时给名字后的胶囊留位,``tag_w`` 缺省按「不计分」胶囊算。``inset`` 是左右内边距(名次章贴左边),
+    ``name_gap`` / ``cnt_gap`` 是名次章与名字、名字与计数之间的空隙。计数按 ``_dot_text`` 的画法量宽。
     """
-    name_x = cx + 84
-    cnt_x = cx + half_w - 28 - _text_w(d, cnt_txt, cnt_font)
+    name_x = cx + inset + 38 + name_gap
+    cnt_x = cx + half_w - inset - _dot_text_w(d, cnt_txt, cnt_font)
     if tag_w is None:
         tag_w = _unranked_tag_w(d)
-    right = cnt_x - 12 - ((tag_w + 10) if tagged else 0)
+    right = cnt_x - cnt_gap - ((tag_w + 10) if tagged else 0)
     return name_x, max(0, right - name_x), cnt_x
 
 
@@ -265,6 +288,20 @@ def _rank_bar(d, x: int, y: int, w: int, ratio: float, fg) -> None:
     """榜单行下方的比例条(满长 = 榜首;再小也留 10px 起步,零值行也看得出在榜上)。"""
     d.rounded_rectangle((x, y, x + w, y + 10), radius=5, fill=_TAG_BG)
     d.rounded_rectangle((x, y, x + max(10, int(w * ratio)), y + 10), radius=5, fill=fg)
+
+
+# 趋势图里 0 只画一条细线:非零柱最矮也有 6px,两者一眼分得开
+_ZERO_BAR_H = 2
+
+
+def _vbar(d, x: int, base_y: int, w: int, v, top, full: int, fill, radius: int) -> int:
+    """从 ``base_y`` 往上画一根柱(``top`` 对应满高 ``full``),返回画出的高度,柱顶数字据此定位。"""
+    if not v:
+        d.rounded_rectangle((x, base_y - _ZERO_BAR_H, x + w, base_y), radius=1, fill=fill)
+        return _ZERO_BAR_H
+    h = max(6, int(full * (v / top)))
+    d.rounded_rectangle((x, base_y - h, x + w, base_y), radius=radius, fill=fill)
+    return h
 
 
 def _push_icon(d, ix: int, iy: int, fg, size: int = 52) -> None:
@@ -590,10 +627,8 @@ def _render(g: dict, sub_title: str, elapsed_ms: int | None = None) -> bytes | N
                fill=_BORDER, width=1)
         for j, t in enumerate(bars):
             bx = area_x + j * slot + (slot - bw) // 2
-            bh = max(6, int(area_h * (t['count'] / max_c))) if t['count'] else 6
             color = _ACCENT if j == len(bars) - 1 else dim
-            d.rounded_rectangle((bx, base_y - bh, bx + bw, base_y), radius=6,
-                                fill=color)
+            bh = _vbar(d, bx, base_y, bw, t['count'], max_c, area_h, color, 6)
             cnt = str(t['count'])
             d.text((bx + (bw - _text_w(d, cnt, nf)) // 2, base_y - bh - 28),
                    cnt, font=nf, fill=_TEXT_MUTED)
@@ -717,8 +752,8 @@ def fmt_rate(rate) -> str:
 
 
 def fmt_power(rate, n) -> str:
-    """实力排行一行右侧的文案:比例 + 局数。"""
-    return f'{fmt_rate(rate)} · {_fmt(n)}局'
+    """实力排行一行右侧的文案:比例 · 局数(图里中点两侧按 ``_DOT_GAP`` 的窄间距画)。"""
+    return f'{fmt_rate(rate)}{_DOT_SEP}{_fmt(n)}局'
 
 
 def render_game_stats_image(gs: dict, sub_title: str = '',
@@ -741,22 +776,36 @@ def _fit_font(d, text: str, max_w: int, sizes=(48, 42, 36, 30)):
     return _font(sizes[-1])
 
 
-def _pill_w(d, text: str) -> int:
-    return _text_w(d, text, _font(22)) + 26
+def _pill_parts(text) -> tuple:
+    return (text,) if isinstance(text, str) else tuple(text)
 
 
-def _info_pill(d, x, y, text: str, bg=_TAG_BG, h: int = 40) -> None:
-    """说明胶囊:与涨跌胶囊同尺寸同位置,灰字,不带涨跌色。"""
+def _pill_w(d, text) -> int:
+    f = _font(22)
+    # 加粗靠 1px 描边,每段粗体左右各多出 1px
+    return sum(_text_w(d, p, f) + (2 if i % 2 else 0) for i, p in enumerate(_pill_parts(text))) + 26
+
+
+def _info_pill(d, x, y, text, bg=_TAG_BG, h: int = 40) -> None:
+    """说明胶囊:与涨跌胶囊同尺寸同位置,灰字,不带涨跌色。``text`` 可以是分段元组,奇数位的段加粗。"""
+    f = _font(22)
     d.rounded_rectangle((x, y, x + _pill_w(d, text), y + h), radius=h // 2, fill=bg)
-    d.text((x + 13, y + (h - 22) // 2 - 4), text, font=_font(22), fill=_TEXT_MUTED)
+    tx, ty = x + 13, y + (h - 22) // 2 - 4
+    for i, part in enumerate(_pill_parts(text)):
+        if i % 2:
+            _bold_text(d, (tx + 1, ty), part, f, _TEXT_MUTED)
+            tx += _text_w(d, part, f) + 2
+        elif part:
+            d.text((tx, ty), part, font=f, fill=_TEXT_MUTED)
+            tx += _text_w(d, part, f)
 
 
 def _game_tile(d, box, label: str, value: str, icon: str, fg, *, suffix: str = '',
                pill=None, total: bool = False) -> None:
     """总览小卡:图标 + 标签 + 大号数值(可跟灰色后缀)+ 右上角胶囊。
 
-    ``pill`` 是 ``('delta', 差值)`` 或 ``('info', 文案)``,值为 None / 空串时不画;``total`` 真时用累计数的浅蓝紫底。
-    数值放不下时逐级缩小字号(「最后一局」的日期时间最长)。
+    ``pill`` 是 ``('delta', 差值)`` 或 ``('info', 文案)``,值为 None / 空串时不画;文案可以是
+    分段元组(奇数位的段加粗)。``total`` 真时用累计数的浅蓝紫底。数值放不下时逐级缩小字号(「最后一局」的日期时间最长)。
     """
     x0, y0, x1, y1 = box
     fill, outline = (_TOTAL_BG, _TOTAL_BORDER) if total else (_PANEL2, _BORDER)
@@ -841,9 +890,8 @@ def _game_trend(d, box, trend: list) -> None:
                 bx = mid - _PAIR_BW // 2
             else:
                 bx = mid - _PAIR_GAP // 2 - _PAIR_BW if k == 0 else mid + _PAIR_GAP // 2
-            bh = max(5, int(_BAR_H * v / top)) if v else 5
-            d.rounded_rectangle((bx, base_y - bh, bx + _PAIR_BW, base_y), radius=5,
-                                fill=fg if latest else _tint(fg, base=_PANEL, alpha=0.35))
+            bh = _vbar(d, bx, base_y, _PAIR_BW, v, top, _BAR_H,
+                       fg if latest else _tint(fg, base=_PANEL, alpha=0.35), 5)
             # 数字不能宽过「柱宽 + 柱间距」,否则会探到旁边那根柱子上方
             s = str(v)
             nf = _fit_font(d, s, _PAIR_BW + _PAIR_GAP, sizes=(16, 14, 12))
@@ -858,64 +906,74 @@ def _board_rows(gs: dict) -> list:
 
     行是 ``(名次, 名字, 比例条取值, 右侧文案, 是不是查询者)``;``full`` 是比例条满格对应的值,None 表示以榜首为满格;
     ``tag`` 跟在标题后(实力排行的上榜门槛)。
-    补行是查询者自己那行,只在他玩过这个游戏、又不在该榜 TOP10 里时才有,实力排行没满门槛时名次为 None。
+    补行是查询者自己那行:两张榜 TOP10 里都有查询者时不补;否则两张榜底部都补,左右对齐、不留空白 ——
+    在榜的那张写榜上的名次(前三照样是奖牌色),实力排行没满门槛时名次为 None。
     """
     me = gs.get('me')
     players = gs.get('top_players') or []
     power = gs.get('top_power') or []
     need = gs.get('power_min')
+    pos_c = next((j for j, it in enumerate(players, 1) if it.get('me')), None)
+    pos_p = next((j for j, it in enumerate(power, 1) if it.get('me')), None)
+    add_me = bool(me) and (pos_c is None or pos_p is None)
     return [
         {'title': '局数排行', 'fg': _ACCENT, 'tag': '', 'full': None,
          'rows': [(j, it.get('display', ''), it.get('count', 0), f'{_fmt(it.get("count", 0))}局',
                    bool(it.get('me'))) for j, it in enumerate(players, 1)],
-         'me_row': ((me['rank'], me['display'], me['matches'], f'{_fmt(me["matches"])}局', True)
-                    if me and not any(it.get('me') for it in players) else None)},
+         'me_row': ((pos_c or me['rank'], me['display'], me['matches'], f'{_fmt(me["matches"])}局', True)
+                    if add_me else None)},
         {'title': '实力排行', 'fg': _ORANGE, 'tag': f'≥{need}局' if need else '', 'full': 100,
          'rows': [(j, it.get('display', ''), it.get('rate', 0),
                    fmt_power(it.get('rate', 0), it.get('count', 0)), bool(it.get('me')))
                   for j, it in enumerate(power, 1)],
-         'me_row': ((me.get('power_rank'), me['display'], me['rate'],
+         'me_row': ((pos_p or me.get('power_rank'), me['display'], me['rate'],
                      fmt_power(me['rate'], me['matches']), True)
-                    if me and not any(it.get('me') for it in power) else None)},
+                    if add_me else None)},
     ]
+
+
+# 游戏卡双榜的左右内边距:半宽榜放双列数字,边距收窄些,把位置让给昵称
+_BOARD_INSET = 20
 
 
 def _board_row(d, cx: int, ry: int, half_w: int, row: tuple, max_c: int, fg) -> None:
     rank, name, cnt, cnt_txt, is_me = row
     if is_me:
-        d.rounded_rectangle((cx + 14, ry - 12, cx + half_w - 14, ry + 60), radius=10, fill=_ME_BG)
-    _rank_badge(d, cx + 28, ry, rank)
+        d.rounded_rectangle((cx + _BOARD_INSET - 12, ry - 12, cx + half_w - _BOARD_INSET + 12, ry + 60),
+                            radius=10, fill=_ME_BG)
+    _rank_badge(d, cx + _BOARD_INSET, ry, rank)
     nf, cf = _font(24), _font(22)
-    name_x, name_w, cnt_x = _rank_row_layout(d, cx, half_w, cnt_txt, cf, is_me,
-                                             tag_w=_tag_w(d, _ME_TAG))
+    name_x, name_w, cnt_x = _rank_row_layout(d, cx, half_w, cnt_txt, cf, is_me, tag_w=_tag_w(d, _ME_TAG),
+                                             inset=_BOARD_INSET, name_gap=12, cnt_gap=8)
     shown = _fit_name(d, str(name or ''), name_w, nf)
     d.text((name_x, ry), shown, font=nf, fill=_TEXT)
     if is_me:
         _tag(d, name_x + _text_w(d, shown, nf) + 10, ry + 2, _ME_TAG, fg=_ACCENT, bg=_ME_TAG_BG)
-    _bold_text(d, (cnt_x, ry + 2), cnt_txt, cf, fg)
-    _rank_bar(d, cx + 84, ry + 40, half_w - 84 - 28, min(1.0, (cnt or 0) / max_c), fg)
+    _dot_text(d, (cnt_x, ry + 2), cnt_txt, cf, fg)
+    _rank_bar(d, name_x, ry + 40, cx + half_w - _BOARD_INSET - name_x, min(1.0, (cnt or 0) / max_c), fg)
 
 
 def _game_boards(d, x0: int, y: int, inner_w: int, gap: int, h: int, boards: list, rows: int) -> None:
     half_w = (inner_w - gap) // 2
+    inset = _BOARD_INSET
     for i, b in enumerate(boards):
         cx, fg, items = x0 + i * (half_w + gap), b['fg'], b['rows']
         _section(d, (cx, y, cx + half_w, y + h))
-        d.rounded_rectangle((cx + 28, y + 26, cx + 36, y + 56), radius=4, fill=fg)
+        d.rounded_rectangle((cx + inset, y + 26, cx + inset + 8, y + 56), radius=4, fill=fg)
         tf = _font(28)
-        _bold_text(d, (cx + 50, y + 24), b['title'], tf, _TEXT)
+        _bold_text(d, (cx + inset + 22, y + 24), b['title'], tf, _TEXT)
         if b['tag']:
-            _tag(d, cx + 50 + _text_w(d, b['title'], tf) + 12, y + 30, b['tag'])
+            _tag(d, cx + inset + 22 + _text_w(d, b['title'], tf) + 12, y + 30, b['tag'])
         if not items:
-            d.text((cx + 28, y + 92), '暂无数据', font=_font(24), fill=_TEXT_FAINT)
+            d.text((cx + inset, y + 92), '暂无数据', font=_font(24), fill=_TEXT_FAINT)
         max_c = b['full'] or max([int(it[2] or 0) for it in items] + [1])
         for j, row in enumerate(items):
             _board_row(d, cx, y + 88 + j * 74, half_w, row, max_c, fg)
         if b['me_row']:
             # 补行钉在两张榜共同的底部(左右对齐),上方一条虚线与 TOP10 隔开
             sep_y = y + 88 + rows * 74 - 8
-            for sx in range(cx + 28, cx + half_w - 28, 12):
-                d.line([(sx, sep_y), (min(sx + 6, cx + half_w - 28), sep_y)], fill=_BORDER2, width=2)
+            for sx in range(cx + inset, cx + half_w - inset, 12):
+                d.line([(sx, sep_y), (min(sx + 6, cx + half_w - inset), sep_y)], fill=_BORDER2, width=2)
             _board_row(d, cx, sep_y + 26, half_w, b['me_row'], max_c, fg)
 
 
@@ -957,18 +1015,18 @@ def _render_game(gs: dict, sub_title: str, elapsed_ms: int | None = None) -> byt
     att, gp = gs.get('attendances'), gs.get('group_players')
     tiles = [
         ('累计对局', _fmt(gs.get('matches')), '', 'die', _ACCENT,
-         ('info', f'{_fmt(att)} 人次' if att is not None else ''), True),
+         ('info', ('', _fmt(att), ' 人次') if att is not None else ''), True),
         ('累计玩家', _fmt(gs.get('players')), '', 'person', _GREEN,
-         ('info', f'本群 {_fmt(gp)} 人' if gp is not None else ''), True),
+         ('info', ('本群 ', _fmt(gp), ' 人') if gp is not None else ''), True),
         ('近7日对局', _fmt(gs.get('week_matches')), '', 'calendar', _PINK,
          ('delta', _diff(gs.get('week_matches'), gs.get('prev_week_matches'))), False),
         ('近7日玩家', _fmt(gs.get('week_players')), '', 'person', _TEAL,
          ('delta', _diff(gs.get('week_players'), gs.get('prev_week_players'))), False),
         ('平均人数', lab['avg'], '', 'ticket', _ACCENT, ('info', lab['range']), False),
         ('游戏群聊', _fmt(gs.get('groups')), '', 'group', _ORANGE,
-         ('info', f'本群 {_fmt(gm)} 局' if gm is not None else ''), False),
+         ('info', ('本群 ', _fmt(gm), ' 局') if gm is not None else ''), False),
         ('热度排名', f'#{rank}' if rank else '—', f'/ {n_games}' if rank and n_games else '',
-         'trophy', _RANK_COLORS[0], ('info', f'近7日 #{wr}' if wr else ''), False),
+         'trophy', _RANK_COLORS[0], ('info', ('近7日 ', f'#{wr}' if wr else '无对局')), False),
         ('最后一局', lab['last'], '', 'clock', _PINK, ('info', lab['ago']), False),
     ]
     tile_w = (inner_w - 28 * 2 - tile_gap) // 2
