@@ -138,13 +138,12 @@ async function backupCallRoute(path, params) {
   const url = path + (qs ? '?' + qs : '');
   const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) {
-    /* 4xx / 5xx 时仍尝试解 json 拿后端 message */
+    /* 4xx / 5xx 时仍尝试解 json 拿后端 message;body 不是 json 才退回状态码 */
+    let msg = '';
     try {
-      const d = await r.json();
-      throw new Error(d.message || ('HTTP ' + r.status));
-    } catch (_) {
-      throw new Error('HTTP ' + r.status);
-    }
+      msg = (await r.json()).message || '';
+    } catch (_) { /* 非 json body */ }
+    throw new Error(msg || ('HTTP ' + r.status));
   }
   return await r.json();
 }
