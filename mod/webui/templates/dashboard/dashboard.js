@@ -594,7 +594,7 @@ function dashRenderSubmoduleStatus(sub) {
       btn.style.display = 'none';
       return;
     }
-    const reason = sub.status === 'missing' ? '文件夹不存在' : '文件夹为空';
+    const reason = sub.status === 'missing' ? '文件夹不存在' : '文件夹为空或缺少 .git';
     detail.innerHTML = '<span class="dash-msg-err">❌ 子模块未初始化 (' + reason + ')</span>' + link;
     setBtnIcon(btn, '#i-download', '初始化子模块');
     btn.style.display = '';
@@ -667,11 +667,12 @@ async function dashDoUpdate() {
     if (data.success) dashMarkBridgeUpdated();
     if (data.stdout) html += '<pre class="dash-pre">stdout:\n' + escapeHtml(data.stdout) + '</pre>';
     if (data.stderr) html += '<pre class="dash-pre">stderr:\n' + escapeHtml(data.stderr) + '</pre>';
-    /* 失败时附加「💥 强制更新」按钮 —— 工作区脏 / 本地与远端分叉无法 ff 时的兜底 */
+    /* 失败时附加「强制更新」按钮 —— 工作区脏 / 本地与远端分叉无法 ff 时的兜底 */
     if (!data.success) {
       html += '<div class="dash-update-force-row" style="margin-top:10px">' +
               '<button id="dash-do-update-force" class="dash-btn dash-btn-warn">' +
-              '💥 强制更新 (丢弃本地修改)' +
+              '<svg class="ui-icon btn-icon"><use href="#i-crash"/></svg>' +
+              '<span class="btn-label">强制更新 (丢弃本地修改)</span>' +
               '</button>' +
               '<span class="dash-msg-warn" style="margin-left:8px;font-size:12px">' +
               '会执行 git reset --hard origin/main，本地未提交的代码改动将丢失' +

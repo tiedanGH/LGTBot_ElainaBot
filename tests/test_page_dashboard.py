@@ -247,3 +247,16 @@ def test_waiting_rooms_ride_along_with_the_matches_payload(monkeypatch):
     # 首屏 payload —— 整页刷新走这条,少了它展开按钮第一眼是空的
     first = json.loads(pd.get_data().replace(chr(92) + '/', '/'))
     assert [m['id'] for m in first['waiting']] == ['G2']
+
+
+def test_submodule_status_without_git_is_empty_either_way(monkeypatch, tmp_path):
+    """子模块目录缺 .git 都算未初始化(``empty``),不管里面有没有文件;目录不存在是 ``missing``。"""
+    pd = _pd()
+    monkeypatch.setattr(boot, 'PLUGIN_DIR', str(tmp_path))
+    monkeypatch.setattr(pd, '_local_submodule_commit', lambda p: pytest.fail('未 init 时不该读 HEAD'))
+    assert pd._get_submodule_info()['status'] == 'missing'
+    sub = tmp_path / 'lgtbot'
+    sub.mkdir()
+    assert pd._get_submodule_info()['status'] == 'empty'
+    (sub / 'CMakeLists.txt').write_text('x')
+    assert pd._get_submodule_info()['status'] == 'empty'

@@ -424,6 +424,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   .config-tab,
   .backup,
   .audit,
+  .review,
+  .crash,
   .metrics,
   .prebuilt { gap: 10px; }
 }

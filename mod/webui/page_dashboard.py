@@ -462,12 +462,8 @@ def _get_submodule_info(query_remote: bool = False) -> dict:
         # 目录是否为「子模块已 init」的标志:lgtbot/.git 存在(子模块下是文件,
         # 指向父仓库 .git/modules/lgtbot;非子模块独立 clone 则是目录)
         if not os.path.exists(os.path.join(sub_abs, '.git')):
-            # 目录有内容但没 .git —— 可能是 git submodule deinit 后空架子
-            try:
-                entries = list(os.scandir(sub_abs))
-            except OSError:
-                entries = []
-            info['status'] = 'empty' if not entries else 'empty'
+            # 空目录(如 git submodule deinit 后的空架子)与有内容但缺 .git 的目录都算未 init
+            info['status'] = 'empty'
         else:
             short, full = _local_submodule_commit(sub_path)
             info['local_commit'] = short
