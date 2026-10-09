@@ -22,18 +22,43 @@
 ## 2. Git 提交规范
 
 ### Commit Message
-- **小写开头**（`move ...` / `add ...`，不要 `Move ...`）
-- **全英文**，标题简短（≤60 字符）
-- **不写动作类前缀** `feat:` / `fix:` / `refactor:` / `chore:` 等约定式前缀
+
+**标题英文，正文中文。**
+
+```
+<前缀>: <英文标题>
+
+- <改动条目>
+- <改动条目>
+
+Co-Authored-By: <协作模型> <noreply@anthropic.com>
+```
+
+#### 标题
+- **全英文**，冒号后**小写开头**（`move ...` / `add ...`，不要 `Move ...`），用祈使句说明这次改动做了什么
+- 简短（≤60 字符），单行，不加句号
+- **不写动作类前缀** `feat:` / `fix:` / `refactor:` / `chore:` 等约定式前缀；功能域前缀见下「功能域前缀规则」
+
+#### 正文
+- 用**中文**写，只说**改了什么、怎么改的**
+- 可以逐条列点（`- ` 开头），也可以分成多个自然段；一条 / 一段只说一件事，顺带完成的次要改动（如 README / DEPLOY 同步）各占一条
+- **每条、每段写成一行，不在句中换行**；内容多就拆成多条或多段，不要把一大段文字折成多行
+- 以下内容一律不写：
+  - **修改前的表现**：不出现「原先」「此前」「之前会」这类表述，也不描述旧的实现方式
+  - **举例**：不放输入输出样例、前后对照、示意代码
+  - **具体数据**：不写条数、字节数、行号、用户 ID 等实测数值
+
+#### 结尾
+保留 `Co-Authored-By` trailer，署名填本次实际使用的模型，不写死某个版本。
 
 ### 正文（body）使用规则
 
-| 改动类型                            | 是否写正文                             |
-|---------------------------------|-----------------------------------|
-| 单文件简单调整（修个 typo、调一行常量、调一个文案）    | **只写标题**，不要正文                     |
-| 单文件改动但行为上有非平凡影响（修 bug、加配置项、加日志） | 视情况：行为变化能从 diff 一眼看懂就只写标题；否则简短补一段 |
-| 跨多文件、跨多模块、影响多种行为                | **必须写正文**：分点说明改了什么、为什么、有什么连带影响    |
-| 复杂的设计权衡 / 历史踩坑总结                | 正文充分展开，给后人留下"为什么这么做"的线索           |
+| 改动类型                            | 是否写正文                            |
+|---------------------------------|----------------------------------|
+| 单文件简单调整（修个 typo、调一行常量、调一个文案）    | **只写标题**，不要正文                    |
+| 单文件改动但行为上有非平凡影响（修 bug、加配置项、加日志） | 视情况：行为变化能从 diff 一眼看懂就只写标题；否则补一两条 |
+| 跨多文件、跨多模块、影响多种行为                | **必须写正文**：分点说明改了什么、怎么改的、有什么连带影响  |
+| 复杂的设计取舍                         | 写清采用的做法和它依赖的约束（写约束本身，不复述修改前的表现）  |
 
 ✅ 简单改动只标题：
 ```
@@ -45,11 +70,11 @@ disable AddressSanitizer in build script
 ```
 survive hot-reload with active games and improve quota logic
 
-- Detect engine still running on @on_load via persistent attribute on
-  the C++ extension module (survives plugin reload). When games are
-  in progress, skip LGTBot_ElainaBot.start() ...
-- Share mutable state via the same persistent dict ...
-- Replace shared asyncio.Event with per-waiter Events ...
+- @on_load 通过 C++ 扩展模块上的持久属性判断引擎是否仍在运行，有进行中的对局时跳过 LGTBot_ElainaBot.start()，复用现有引擎
+- 需要跨重载共享的可变状态统一挂到同一个持久 dict
+- 配额等待给每个等待者分配独立的 asyncio.Event
+
+Co-Authored-By: <协作模型> <noreply@anthropic.com>
 ```
 
 ### 功能域前缀规则
@@ -118,7 +143,7 @@ mod/quota: fix race                            # 不要带路径
 |-------------------|----------------------------------------------------------------------------------|
 | `state`           | 共享可变全局状态容器（`pending_buttons` / `event_loop` / `started` 等）                       |
 | `boot`            | C++ 扩展加载（顺序敏感：`chdir` + `RTLD_GLOBAL` + `ctypes.CDLL` 预加载）                       |
-| `buttons`         | 按钮模板 + 命令触发正则                                                                    |
+| `buttons`         | 按钮模板 + 组装函数                                                                      |
 | `helpers`         | 通用工具（sender / coro / mention / target_key）                                       |
 | `quota`           | 被动消息引用配额管理                                                                       |
 | `callbacks`       | C++ 引擎回调实现（`cb_*` 入口 + 异步发送）                                                     |
@@ -131,10 +156,18 @@ mod/quota: fix race                            # 不要带路径
 
 新增功能时优先选最契合的现有模块，**只有职责明显独立时才新建文件**。
 
+### 引擎回调（`cb_*`）
+
+- 引擎 → Python 的回调（`cb_match_event` / `cb_send_text_message` / `cb_send_image_message` 等）都在引擎持有 `Match::mutex_` 的 C++ 栈内同步触发，例如 `Match::GameStart` 全程持锁直到发出开局广播
+- 回调里**不能**调用任何会再次获取该锁的引擎方法（枚举 `MatchManager::Matches()` 后读 `HostUserId()` / `UserNum()` 等），否则同一把非递归锁自锁，整个引擎卡死
+- 需要「进行中对局」这类引擎状态时，在 `cb_match_event` 里用纯 Python 事件流维护（`game_started` 加入，`game_over` / `all_left` / `terminate` 移除），不回引擎查询；dispatcher 用 fire-and-forget 线程派发引擎，没有能在回调之后安全查询引擎的栈外钩子
+
 ### 注释与 docstring
 
 - 每个 `.py` 顶部必须有简明 docstring 说明职责
-- 关键设计决策（特别是绕过 QQ 协议限制 / C++ 副作用顺序）必须用注释说明 *why*
+- 注释只写代码本身看不出来的原因（non-obvious reason）；关键设计决策（特别是绕过 QQ 协议限制 / C++ 副作用顺序）必须写清 *why*
+- 描述只写最终行为；不保留中间尝试（试过又放弃的写法、排查过程），diff 里看不出来的取舍一律不提
+- 不提老版本的行为，只有老版本的重要改动或踩过的坑可以提
 - 中文注释 OK，与现有风格一致即可
 
 ---
@@ -173,8 +206,11 @@ PluginManager 文件保存触发热重载时：
 - Python 子模块（`plugins.LGTBot_ElainaBot.mod.*`）会被销毁重建
 - 要跨重载共享的可变状态都挂在 C++ 扩展属性上（`boot._get_persistent()`）
 - 检测到引擎已运行 + 有进行中的游戏时，**不要再调 `LGTBot_ElainaBot.start()`**（会覆盖 `g_bot_core`，所有活跃 match 失联）
+- 复用引擎时回调不会重新注册：C++ 继续调用**旧模块**的 `cb_*`，旧 callbacks 连同它 import 时绑定的旧 quota / metrics 等模块一直运行到引擎下次真正重启，与新代码共用 `_get_persistent()` 里的同一份 dict
 
 任何新增的需要跨重载持久的状态，都要走 `_get_persistent()` 路径。
+
+改动持久 dict 里值的**形状**（不只是新增 key）时，新形状必须让旧代码照原样读写也不出错（如 `quota._Pool` 按字符串键代理到最新一条引用），并补一条按旧代码原样逻辑读写新数据的测试。新加的行为在新旧代码混跑期间不生效，要等引擎重启。
 
 ---
 
@@ -199,3 +235,5 @@ PluginManager 文件保存触发热重载时：
 - 改动可能影响生产数据（`data/lgtbot.db` / 已编译 `build/`）时，**先确认**再动
 - 涉及编译重启（修改 `LGTBot_ElainaBot.cc` / `CMakeLists.txt`）的改动，明确告诉用户需要 `bash build.sh --clean`
 - 长篇技术分析可以输出在对话里，但**不要**默默写到代码注释里 —— 注释要简洁可维护
+- 用户常在 IDE 里同时编辑工作区文件：动手前先看 `git diff`，用户的删改一律保留，不要覆盖回去
+- 变异测试这类需要临时改源码的实验，在工作区之外的副本上做，不要原地改工作区再还原（用户并发保存会把临时改动存回磁盘）
