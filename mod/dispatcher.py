@@ -410,6 +410,35 @@ def _is_blocked_command(text: str) -> bool:
     return False
 
 
+# ──────── 发送者身份为空的问题消息 ──────────────────────────────────────────
+# 平台偶发推送 author 的 id / member_openid / union_openid 全为空串的消息事件,解析出的 user_id 为空
+# 转给引擎就会以空 uid 建档、写进战绩库 —— 所有转发引擎的入口都必须先过 _reject_anonymous
+_ANONYMOUS_NOTICE = (
+    '## ⚠️ 消息身份异常\n'
+    '\n'
+    '平台推送的消息**缺少发送者身份**，为保护数据安全已拦截。\n'
+    '\n'
+    '> 💡 这不是您的问题，请尝试重新发送'
+)
+
+
+async def _reject_anonymous(event, content: str) -> bool:
+    """发送者身份为空 → 拦下并提示,返回 True。私信没有可回复的对象,只记日志。"""
+    if (event.user_id or '').strip():
+        return False
+    gid = event.group_id or event.channel_id or ''
+    in_group = bool(event.is_group and gid)
+    log.warning(f'🚫 [身份异常] 事件缺少发送者身份,已拦截不转发引擎 | 群 {gid or "-"} | {content[:30]!r}')
+    page_logs.log_incoming('', gid if in_group else '', content)
+    if in_group:
+        page_logs.log_outgoing(gid, False, '[身份异常提示]')
+        try:
+            await event.reply(_ANONYMOUS_NOTICE, buttons=buttons.build_support_buttons())
+        except Exception as e:
+            log.warning(f'身份异常提示发送失败 ({gid}): {e}')
+    return True
+
+
 # ──────── 用户查询(所有人可用) ────────────────────────────────────────────
 
 @handler(_P_QUERY_ID,
@@ -1175,6 +1204,10 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         log.info(f'🚫 [屏蔽指令] 命中屏蔽指令表，跳过引擎派发: {content[:30]!r}')
         return
 
+    # 身份异常闸:放在专属 / 屏蔽两道闸之后,免得与专属 handler 的回复重复;在登记被动引用之前。
+    if await _reject_anonymous(event, content):
+        return
+
     # 超级管理员权限闸:群管理员执行**非 %中断** 的管理指令 → 插件明确拒绝,不派发给引擎。
     if _deny_super_admin_cmd(event, content, uid):
         log.info(f'🔒 [超管拒绝] 群管 {uid} 无超级管理员权限: {content[:30]!r}')
@@ -1320,6 +1353,10 @@ async def lgtbot_interaction_dispatch(event, match):
     # 屏蔽指令闸(内置 + 配置)—— 其他插件的 callback 按钮 data 也会落进本 catch-all,与 lgtbot_dispatch 的闸对称。
     if _is_blocked_command(content):
         log.info(f'🚫 [屏蔽指令] 按钮回调命中屏蔽指令表，跳过引擎派发: {content[:30]!r}')
+        return
+
+    # 身份异常闸(与 lgtbot_dispatch 对称)
+    if await _reject_anonymous(event, content):
         return
 
     uid = event.user_id or ''
@@ -1631,6 +1668,8 @@ async def lgtbot_match_list(event, match):
     if not state.started:
         await event.reply('⏳ LGTBot 引擎尚未就绪，请稍后再试')
         return
+    if await _reject_anonymous(event, (event.content or '').strip()):
+        return
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
     # 本 handler block=True 抢在 catch-all 之前,catch-all 里的 refresh_ref 不会执行,
@@ -1692,6 +1731,9 @@ async def lgtbot_admin_interrupt(event, match):
             pass
     if not state.started:
         await event.reply('⏳ LGTBot 引擎尚未就绪，请稍后再试')
+        return
+    # 身份为空时 member_role 同样不可信,不能借引擎管理员身份代为中断
+    if await _reject_anonymous(event, (event.content or '').strip()):
         return
 
     uid = event.user_id or ''

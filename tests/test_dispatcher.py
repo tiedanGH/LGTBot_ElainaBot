@@ -1700,3 +1700,101 @@ async def test_dispatch_hooks_the_push_permission_prewarm(patched_downstream, mo
         content='/新游戏 决胜五子'), None)
 
     assert seen == ['GNEWGAME']
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 身份异常:发送者 id 为空的事件绝不进引擎
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def engine_calls(monkeypatch):
+    """记下真正派进引擎的调用(派发线程改成同步执行 target)。"""
+    from plugins.LGTBot_ElainaBot.mod import boot
+    sent = []
+    monkeypatch.setattr(boot.LGTBot_ElainaBot, 'on_public_message', lambda *a: sent.append(a))
+    monkeypatch.setattr(boot.LGTBot_ElainaBot, 'on_private_message', lambda *a: sent.append(a))
+    monkeypatch.setattr(dispatcher.threading, 'Thread',
+                        lambda target, args, daemon=True: type(
+                            'T', (), {'start': lambda s: target(*args)})())
+    return sent
+
+
+def _anon(user_id='', **kw):
+    ev = _mock_event(user_id=user_id, **kw)
+    ev.reply = AsyncMock()
+    return ev
+
+
+@pytest.mark.parametrize('user_id', ['', '   '])
+async def test_anonymous_group_message_never_reaches_engine(patched_downstream, engine_calls, user_id):
+    """★ 群里身份为空的 @ 消息:不进引擎、不登记被动引用、不写回昵称,回一条提示并挂官方群 / 问题反馈按钮。"""
+    _state.started = True
+    ev = _anon(user_id, is_group=True, group_id='G_ANON', message_id='M_ANON', content='/新游戏 决胜五子')
+
+    await dispatcher.lgtbot_dispatch(ev, None)
+
+    assert engine_calls == []
+    assert quota._active_ref == {}
+    patched_downstream['note_username'].assert_not_called()
+    ev.reply.assert_awaited_once_with(dispatcher._ANONYMOUS_NOTICE,
+                                      buttons=dispatcher.buttons.build_support_buttons())
+
+
+async def test_anonymous_dm_is_dropped_without_reply(patched_downstream, engine_calls):
+    """私信里身份为空:没有可回复的对象,只拦不回。"""
+    _state.started = True
+    ev = _anon(event_type=dispatcher.C2C_MESSAGE_CREATE, is_direct=True,
+               message_id='M_DM', content='/新游戏 决胜五子')
+
+    await dispatcher.lgtbot_dispatch(ev, None)
+
+    assert engine_calls == []
+    ev.reply.assert_not_awaited()
+
+
+async def test_anonymous_button_click_never_reaches_engine(patched_downstream, engine_calls):
+    _state.started = True
+    ev = _anon(is_group=True, group_id='G_ANON', event_id='E_ANON', content='/加入')
+
+    await dispatcher.lgtbot_interaction_dispatch(ev, None)
+
+    ev.ack_interaction.assert_awaited()
+    assert engine_calls == [] and quota._active_ref == {}
+    ev.reply.assert_awaited_once()
+
+
+async def test_anonymous_admin_interrupt_cannot_borrow_the_engine_admin(patched_downstream, engine_calls, monkeypatch):
+    """★ 身份为空时 member_role 同样不可信:标着群管理也不能换成引擎管理员身份去中断对局。"""
+    from plugins.LGTBot_ElainaBot.mod import config as _config
+    _state.started = True
+    monkeypatch.setattr(_config, 'ADMIN_UIDS', ('OWNER_UID',))
+    ev = _anon(is_group=True, group_id='G_ANON', message_id='M_ANON', content='%中断')
+    ev.member_role = 'admin'
+
+    await dispatcher.lgtbot_admin_interrupt(ev, None)
+
+    assert engine_calls == []
+    ev.reply.assert_awaited_once()
+
+
+async def test_anonymous_match_list_never_reaches_engine(patched_downstream, engine_calls):
+    _state.started = True
+    ev = _anon(is_group=True, group_id='G_ANON', message_id='M_ANON', content='赛事列表')
+
+    await dispatcher.lgtbot_match_list(ev, None)
+
+    assert engine_calls == []
+
+
+def test_every_engine_entry_rejects_anonymous_first():
+    """★ 每个把消息派进引擎的 handler 都要先过身份异常闸 —— 新加的入口漏了它,空 uid 就会写进战绩库。"""
+    import inspect
+    entries = [name for name, fn in inspect.getmembers(dispatcher, inspect.iscoroutinefunction)
+               if fn.__module__ == dispatcher.__name__ and 'on_public_message' in inspect.getsource(fn)]
+    assert set(entries) >= {'lgtbot_dispatch', 'lgtbot_interaction_dispatch',
+                            'lgtbot_match_list', 'lgtbot_admin_interrupt'}
+    for name in entries:
+        src = inspect.getsource(getattr(dispatcher, name))
+        assert '_reject_anonymous(' in src, name
+        assert src.index('_reject_anonymous(') < src.index('on_public_message'), name
