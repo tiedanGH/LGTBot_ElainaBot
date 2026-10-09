@@ -316,7 +316,7 @@ def snapshot() -> dict:
 
 
 def mask_id(s: str, n: int = 3) -> str:
-    """openid 脱敏(同主框架 dau):前 n 位 + **** + 后 n 位;过短原样返回。"""
+    """openid 脱敏:前 n 位 + **** + 后 n 位;过短原样返回。"""
     s = str(s or '')
     return s if len(s) <= n * 2 else f'{s[:n]}****{s[-n:]}'
 
@@ -842,15 +842,13 @@ def query_game_stats_for_date(date_str: str) -> dict:
 
 # ── 单游戏统计:「数据统计<游戏名>」 ──────────────────────────────────────────
 # 同窗口视图只读数据库、不掺不计分账本。可查的游戏名就是 match 表里出现过的那些:
-# 引擎已加载的游戏列表不经桥接层导出,还没有计分对局的游戏在这里查不到。
-# 「近 7 日」同本周榜口径(含今天,本地 00:00 边界),「上一个 7 日」是紧挨着的前 7 个整天;
-# 趋势按 7 天一桶往前滚,最新一桶就是「近 7 日」。
+# 「近 7 日」同本周榜(含今天),上一个 7 日是紧挨着的前 7 天;趋势按 7 天一桶往前滚,最新一桶就是「近 7 日」。
 
 GAME_TREND_WEEKS = 12
 GAME_RANK_LIMIT = 10
 # 实力排行的上榜门槛(局数):从高往低试,够格的凑满 GAME_RANK_LIMIT 人就用这一档,都凑不满用最后一档
 POWER_MIN_TIERS = (10, 5, 3)
-# 与候选按钮的容量一致:QQ 键盘最多 5 排,末排是「游戏列表」,候选最多 4 排 × 3 个
+# 与候选按钮的容量一致:按钮最多 5 排,末排是「游戏列表」,候选最多 4 排 × 3 个
 _GAME_SUGGEST_LIMIT = 12
 # 输入超过这个长度就不可能是游戏名,只截前段去比,免得超长文本拖慢 difflib
 _GAME_QUERY_MAX = 30
@@ -869,8 +867,8 @@ _GAME_MATCH_SQL = ('SELECT COUNT(*), SUM(user_count), MIN(user_count), MAX(user_
 _WEEK_IDX = 'CAST((julianday(?) - julianday(date({col}))) / 7 AS INTEGER)'
 _GAME_WEEKS_SQL = (f'SELECT {_WEEK_IDX.format(col="finish_time")} wk, COUNT(*) FROM match '
                    'WHERE game_name = ? AND finish_time >= ? GROUP BY wk')
-# 玩家侧各项(人数 / 本群人数 / 每周活跃 / 两张榜 / 我的名次)都从这一条出:user_with_match 没有 match_id 索引,
-# 每条 JOIN 都要扫整表。趋势窗口外的对局归到 -1 桶,只计入累计。
+# 玩家侧各项(人数 / 本群人数 / 每周活跃 / 两张榜 / 我的名次)都从这一条出:
+# user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表。趋势窗口外的对局归到 -1 桶,只计入累计。
 # 第 4 列是各局「击败对手比例」之和:引擎的 rank_score 按得分升序给每组同分玩家记「之前的人数 × 2 + 本组人数」,
 # n 人局从末名 1 到头名 2n-1,(rank_score - 1) / (2n - 2) 正好是击败的对手占比,同分的对手各算一半(score_calculation.cc::CalLevelScoreRank)。
 _GAME_PLAYERS_SQL = (
@@ -936,10 +934,10 @@ def _power_min(counts) -> int:
 def _power_order(per_user: dict, need: int) -> tuple:
     """实力排行:``per_user`` 是 ``uid → [局数, 击败比例之和]``,返回 ``(uid → 比例, 排好序的 uid)``。
 
-    只算局数满 ``need`` 的;比例按显示用的 1 位小数比较,显示相同的局数多的在前 ——
-    按看不见的尾数排,会出现两行比例一样、局数少的反而在上面。
+    只算局数满 ``need`` 的;比例按显示用的 2 位小数比较,显示相同的局数多的在前。
+    不能按看不见的尾数排,会出现两行比例一样、局数少的反而在上面。
     """
-    rate = {u: round(b / n * 100, 1) for u, (n, b) in per_user.items() if n >= need}
+    rate = {u: round(b / n * 100, 2) for u, (n, b) in per_user.items() if n >= need}
     return rate, sorted(rate, key=lambda u: (-rate[u], -per_user[u][0], u))
 
 
@@ -950,7 +948,7 @@ def query_game_detail(query: str, uid: str = '', gid: str = '',
     游戏名没对上 → ``found=False`` + ``suggestions``;对上了 → ``found=True``,``game_name`` 是库里的写法。
     ``uid`` / ``gid`` 是查询者与所在群(私信传空):``me``(查询者在两张榜上的名次,没玩过为 None)
     与 ``group_matches`` / ``group_players``(本群局数 / 人数)只在给了时才有;两张榜的条目带 ``me`` 标志。
-    实力排行按场均击败对手比例(``rate``,百分数,1 位小数)排,局数满 ``power_min`` 才上榜,同比例局数多的在前
+    实力排行按场均击败对手比例(``rate``,百分数,2 位小数)排,局数满 ``power_min`` 才上榜,同比例局数多的在前
     (见 _power_order);查询者没满门槛时 ``me['power_rank']`` 为 None。
     ``trend_weeks`` 恒 ``GAME_TREND_WEEKS`` 项,新→旧,``start`` 是该桶第一天。
     """
@@ -1042,7 +1040,7 @@ def query_game_detail(query: str, uid: str = '', gid: str = '',
         if uid and uid in per_user:
             n, b = per_user[uid]
             out['me'] = {
-                'display': _who(uid), 'matches': n, 'rate': round(b / n * 100, 1),
+                'display': _who(uid), 'matches': n, 'rate': round(b / n * 100, 2),
                 # 局数排行并列同名次:名次 = 比自己多的人数 + 1;实力排行就是榜上的先后
                 'rank': 1 + sum(1 for c, _b in per_user.values() if c > n),
                 'power_rank': by_rate.index(uid) + 1 if uid in rate else None,

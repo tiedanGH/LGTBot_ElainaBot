@@ -101,7 +101,6 @@ _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启(?:\s+(.+))?$'
 _P_PLANNED  = r'^/?计划重启(?:\s+(.+))?$'
-# 参数照单全收(单行):日期、总,其余一律当游戏名 —— 对不上的由 handler 报错并给出用法,不落进引擎
 _P_STATS    = r'^/?数据统计\s*(\S[^\n]*?)?\s*$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
@@ -686,7 +685,7 @@ async def lgtbot_update_notice(event, match):
 # 「数据统计YYYY」可查的最早年份
 _MIN_STATS_YEAR = 2026
 
-# 参数既不是日期、也对不上游戏名时附在报错下方 —— 用户也可能是想查日期但写错了格式
+# 参数既不是日期、也对不上游戏名时附在报错下方（可能是想查日期但写错了格式）
 _STATS_DATE_USAGE = (
     '📅 按日期查询：\n'
     '· 某日 数据统计MMDD（或 YYYYMMDD）\n'
@@ -743,7 +742,6 @@ def _parse_stats_arg(arg: str, today) -> tuple:
     所以前两位是合法月份 → 按 MMDD,否则按年份。6 / 8 位只可能带年份。
 
     纯函数(时间从 ``today`` 传入),错误文案在这里一处产出 —— handler 只负责回。
-    官方 bot 不能回显用户消息,报错只点明是年 / 月 / 日哪一段错,不复述输入的参数。
     """
     if not arg:
         return 'today', None, ''
@@ -786,14 +784,22 @@ def _parse_stats_arg(arg: str, today) -> tuple:
                             f'YYYYMMDD，如 数据统计{this_year}0802')
 
 
-async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
+def _elapsed_ms(t0: float) -> int:
+    """查询耗时(毫秒),起点是 ``time.perf_counter()``;只计查数据,不含渲染与上传。"""
+    return round((time.perf_counter() - t0) * 1000)
+
+
+async def _reply_period_stats(event, view: str, query, prefix: str,
                               label: str, sub_title: str) -> None:
-    """窗口视图的统一实现:``stats`` 是 metrics 的窗口查询结果,``prefix`` 是它的键前缀。
+    """窗口视图的统一实现:``query()`` 返回 metrics 的窗口查询结果,``prefix`` 是它的键前缀。
 
     ``label`` 进文本首行与报错提示(如 ``2026-08-02`` / ``2026`` / ``全部历史``),
     ``sub_title`` 是图片顶栏标题右侧的小标签。图片优先(线程池渲染 → 图床 →
     markdown 内嵌),渲染 / 上传失败回退纯文本(榜单文本仍 TOP3 控制消息长度)。
+    查询交给本函数调用,查询耗时才能和今日视图一样从查库算起。
     """
+    t0 = time.perf_counter()
+    stats = query()
     if not stats.get('available'):
         await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
         return
@@ -827,6 +833,7 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
     if view == 'total':
         g['bot_groups'] = userinfo.count_groups()
         g['bot_friends'] = userinfo.count_friends()
+    elapsed = _elapsed_ms(t0)
 
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
@@ -834,7 +841,7 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
     if uploader.SELECTED_BACKEND:
         loop = asyncio.get_running_loop()
         img = await loop.run_in_executor(
-            None, stats_image.render_stats_image, g, sub_title)
+            None, stats_image.render_stats_image, g, sub_title, elapsed)
         if img:
             url = await uploader.upload_image(
                 img, 'lgtbot_stats.png',
@@ -870,13 +877,14 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
         # 昵称是用户可控文本,文本回复按 markdown 发送
         lines += [f'  {i}、{helpers.sanitize_md_name(p["display"])} ({p["count"]}局)'
                   for i, p in enumerate(top_players[:3], 1)]
+    lines.append(f'🕒 查询耗时: {elapsed}ms')
     await event.reply('\n'.join(lines))
 
 
 async def _reply_date_stats(event, target_day) -> None:
     """「数据统计MMDD」历史日期视图。"""
     ds = target_day.strftime('%Y-%m-%d')
-    await _reply_period_stats(event, 'date', metrics.query_game_stats_for_date(ds),
+    await _reply_period_stats(event, 'date', lambda: metrics.query_game_stats_for_date(ds),
                               'day', ds, ds)
 
 
@@ -884,19 +892,19 @@ async def _reply_month_stats(event, year: int, month: int) -> None:
     """「数据统计MM」按月视图(默认今年)。"""
     ym = f'{year:04d}-{month:02d}'
     await _reply_period_stats(event, 'month',
-                              metrics.query_game_stats_for_month(year, month),
+                              lambda: metrics.query_game_stats_for_month(year, month),
                               'month', ym, f'{ym} 月度统计')
 
 
 async def _reply_year_stats(event, year: int) -> None:
     """「数据统计YYYY」按年视图。"""
-    await _reply_period_stats(event, 'year', metrics.query_game_stats_for_year(year),
+    await _reply_period_stats(event, 'year', lambda: metrics.query_game_stats_for_year(year),
                               'year', f'{year:04d}', f'{year:04d} 年度统计')
 
 
 async def _reply_total_stats(event) -> None:
     """「数据统计总」全部历史累计视图 —— 唯一额外带 bot 规模行的窗口视图。"""
-    await _reply_period_stats(event, 'total', metrics.query_game_stats_total(),
+    await _reply_period_stats(event, 'total', metrics.query_game_stats_total,
                               'total', '全部历史',
                               f'累计总统计 · 截至{time.strftime("%Y-%m-%d")}')
 
@@ -914,19 +922,15 @@ def _delta_suffix(cur, base) -> str:
 
 
 def _game_not_found_md(uid: str, suggestions: list) -> str:
-    """游戏名对不上:报错 + 候选 + 日期查询用法。
-
-    官方 bot 不能回显用户消息,报错里不复述输入的游戏名;候选取自库里的游戏名(可控白名单),可以列出来。
-    """
+    """游戏名对不上:报错 + 候选 + 日期查询用法。候选取自库里的游戏名(可控白名单),可以列出来。"""
     lines = [f'<@{uid}>', '❌ 游戏不存在或暂无计分对局']
     if suggestions:
-        lines.append('💡 你要找的可能是：'
-                     + '、'.join(helpers.sanitize_md_name(s) for s in suggestions))
+        lines.append('💡 你要找的可能是：' + '、'.join(helpers.sanitize_md_name(s) for s in suggestions))
     lines += ['', _STATS_DATE_USAGE]
     return '\n'.join(lines)
 
 
-def _game_stats_text(uid: str, gs: dict) -> str:
+def _game_stats_text(uid: str, gs: dict, elapsed_ms: int) -> str:
     """单游戏统计的文本保底;榜单 TOP3 控制消息长度,换算文案与图片同源(stats_image.game_labels)。"""
     lab = stats_image.game_labels(gs)
     md = helpers.sanitize_md_name
@@ -969,6 +973,7 @@ def _game_stats_text(uid: str, gs: dict) -> str:
                       else f'未满 {gs.get("power_min")} 局')
         lines.append(f'🙋 我的: {me["matches"]} 局（第 {me["rank"]} 名）'
                      f'· 实力 {stats_image.fmt_rate(me["rate"])}（{power_rank}）')
+    lines.append(f'🕒 查询耗时: {elapsed_ms}ms')
     return '\n'.join(lines)
 
 
@@ -981,9 +986,11 @@ async def _reply_game_stats(event, query: str) -> None:
     gid = event.group_id or event.channel_id or ''
     is_group = bool(event.is_group and gid)
     loop = asyncio.get_running_loop()
+    t0 = time.perf_counter()
     # 玩家侧各项要扫整张 user_with_match,放进线程池,不卡事件循环
     gs = await loop.run_in_executor(
         None, metrics.query_game_detail, query, uid, gid if is_group else '')
+    elapsed = _elapsed_ms(t0)
     if not gs.get('available'):
         await event.reply(f'<@{uid}>\n❌ 数据统计暂不可用，请稍后再试')
         return
@@ -995,7 +1002,7 @@ async def _reply_game_stats(event, query: str) -> None:
     if uploader.SELECTED_BACKEND:
         img = await loop.run_in_executor(
             None, stats_image.render_game_stats_image, gs,
-            f'游戏统计 · 截至 {time.strftime("%H:%M")}')
+            f'游戏统计 · 截至 {time.strftime("%H:%M")}', elapsed)
         if img:
             url = await uploader.upload_image(
                 img, 'lgtbot_game_stats.png',
@@ -1005,12 +1012,12 @@ async def _reply_game_stats(event, query: str) -> None:
                 w, h = uploader.get_image_size(img)
                 await event.reply(_stats_image_md(uid, w, h, url))
                 return
-    await event.reply(_game_stats_text(uid, gs))
+    await event.reply(_game_stats_text(uid, gs, elapsed))
 
 
 @handler(_P_STATS,
          name='数据统计',
-         desc='数据统计/游戏榜/玩家参与榜/近期趋势，可按日(MMDD/YYYYMMDD)、按月(MM/YYYYMM)、按年(YYYY)、累计(总)查询，跟游戏名查单个游戏',
+         desc='数据统计/游戏榜/玩家参与榜/近期趋势，可按日(MMDD/YYYYMMDD)、按月(MM/YYYYMM)、按年(YYYY)、累计(总)查询，或使用游戏名查询游戏统计',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
@@ -1069,6 +1076,7 @@ async def lgtbot_data_stats(event, match):
         return
     # kind == 'today' —— 无参数,或输入的就是今天(等价于无参数,仍带涨跌 / 额度 / 趋势)
 
+    t0 = time.perf_counter()
     g = metrics.query_game_stats()
     if not g.get('available'):
         await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
@@ -1086,13 +1094,14 @@ async def lgtbot_data_stats(event, match):
     _gid = event.group_id or event.channel_id or ''
     _is_group = bool(event.is_group and _gid)
     g['push_quota'] = _push_quota_view(_gid if _is_group else _uid, not _is_group)
+    elapsed = _elapsed_ms(t0)
 
     # ── 图片通道 ──────────────────────────────────────────────────────────
     if uploader.SELECTED_BACKEND:
         sub = f'截至 {time.strftime("%H:%M")}'
         loop = asyncio.get_running_loop()
         img = await loop.run_in_executor(
-            None, stats_image.render_stats_image, g, sub)
+            None, stats_image.render_stats_image, g, sub, elapsed)
         if img:
             uid = event.user_id or ''
             gid = event.group_id or event.channel_id or ''
@@ -1171,6 +1180,7 @@ async def lgtbot_data_stats(event, match):
                              f'{pq["used"]}/{pq["limit"]} 条{tail}{total}')
             else:
                 lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条{total}')
+    lines.append(f'🕒 查询耗时: {elapsed}ms')
     await event.reply('\n'.join(lines))
 
 

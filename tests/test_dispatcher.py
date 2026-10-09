@@ -921,8 +921,7 @@ def test_parse_stats_arg_table(arg, expected):
     ('1234567',                '日期格式无效'),
 ])
 def test_parse_stats_arg_errors(arg, frag):
-    """★ 非法参数一律在解析阶段拦下(不查库),措辞点明是年 / 月 / 日哪一段错,
-    但不复述用户输入的参数 —— 官方 bot 不能以任何形式回显用户消息。"""
+    """★ 非法参数一律在解析阶段拦下(不查库),措辞点明是年 / 月 / 日哪一段错"""
     kind, payload, err = dispatcher._parse_stats_arg(arg, _FAKE_TODAY)
     assert kind == 'error' and payload is None
     assert frag in err, err
@@ -1149,7 +1148,7 @@ async def test_stats_total_image_carries_scale_row_without_delta(monkeypatch):
                         lambda: {'group': 7, 'friend': -3})
     seen = {}
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
-                        lambda g, sub: seen.update(g=g, sub=sub) or None)
+                        lambda g, sub, elapsed_ms=None: seen.update(g=g, sub=sub) or None)
     ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计总')
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, '数据统计总'))
@@ -1194,7 +1193,7 @@ async def test_period_views_other_than_total_have_no_scale_row(monkeypatch, cmd,
                                    'top_games_year': [], 'top_players_year': []})
     seen = {}
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
-                        lambda g, sub: seen.update(g=g) or None)
+                        lambda g, sub, elapsed_ms=None: seen.update(g=g) or None)
     ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, cmd))
@@ -1425,16 +1424,17 @@ async def test_game_stats_text_fallback(monkeypatch):
                  '平均人数: 4.26 人（2–8 人）', '游戏群聊: 16 个（本群 120 局）',
                  '热度排名: 第 2 / 45（近7日第 3）', '最后一局: 2026-08-08 15:52',
                  '👑 局数排行:\n  1、铁蛋 (317局)',
-                 '🏅 实力排行（≥10局）:\n  1、铁蛋 (78.3% · 11局)',
-                 '我的: 36 局（第 21 名）· 实力 52.0%（第 37 名）'):
+                 '🏅 实力排行（≥10局）:\n  1、铁蛋 (78.30% · 11局)',
+                 '我的: 36 局（第 21 名）· 实力 52.00%（第 37 名）'):
         assert frag in txt, frag
     assert '<@U9>' not in txt and '\\<@U9\\>' in txt      # 昵称按 markdown 转义
+    assert re.fullmatch(r'🕒 查询耗时: \d+ms', txt.split('\n')[-1])
 
     # 没满门槛:实力没有名次
     call, _seen = await _run_game_stats(
         monkeypatch, '数据统计 天赋云巢',
         _game_detail(me={'display': '我', 'matches': 3, 'rate': 66.7, 'rank': 90, 'power_rank': None}))
-    assert '我的: 3 局（第 90 名）· 实力 66.7%（未满 10 局）' in call.args[0]
+    assert '我的: 3 局（第 90 名）· 实力 66.70%（未满 10 局）' in call.args[0]
 
 
 async def test_game_stats_dm_queries_without_a_group(monkeypatch):
@@ -1524,6 +1524,7 @@ async def test_stats_text_fallbacks_escape_nicknames(monkeypatch):
         txt = ev.reply.await_args.args[0]
         assert '1、\\<@U9\\>\\*\\*粗\\*\\* (3局)' in txt, cmd
         assert '<@U9>' not in txt, cmd
+        assert _re.fullmatch(r'🕒 查询耗时: \d+ms', txt.split('\n')[-1]), cmd
 
 
 def test_match_list_is_exclusive_command():

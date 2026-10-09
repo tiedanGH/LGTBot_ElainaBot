@@ -144,8 +144,7 @@ def _pill_colors(diff: int) -> set:
     (-20, '_GREEN', '_RED'),       # 跌 → 绿
 ])
 def test_delta_pill_is_up_red_down_green(diff, want, other):
-    """★ 配色契约:涨跌胶囊同 dau 卡片取**涨红跌绿**(证券风格),与这两个常量
-    在图标 / 配额处的语义正好相反 —— 极易被"顺手改回来"。"""
+    """★ 配色契约:涨跌胶囊取**涨红跌绿**,与这两个常量在图标 / 配额处的语义相反。"""
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
@@ -393,7 +392,7 @@ def test_total_mode_still_draws_the_scale_row():
 def test_render_swallows_exceptions(monkeypatch):
     """渲染内部异常 → None(调用方回退文本),不抛。"""
     monkeypatch.setattr(stats_image, '_render',
-                        lambda g, s: (_ for _ in ()).throw(RuntimeError('boom')))
+                        lambda *a: (_ for _ in ()).throw(RuntimeError('boom')))
     assert stats_image.render_stats_image({}, '') is None
 
 
@@ -424,7 +423,7 @@ async def test_stats_command_replies_markdown_image(monkeypatch, _stats_env):
     png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + \
         (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
-                        lambda g, sub: png)
+                        lambda g, sub, elapsed_ms=None: png)
     seen = {}
 
     async def fake_upload(data, filename, user_id='', *, target_id='', target_is_uid=False):
@@ -446,7 +445,7 @@ async def test_stats_command_falls_back_to_text(monkeypatch, _stats_env):
     """渲染失败(无 PIL / 字体)→ 回退文本输出。"""
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
-                        lambda g, sub: None)
+                        lambda g, sub, elapsed_ms=None: None)
     ev = _fake_event()
     await dispatcher.lgtbot_data_stats(ev, None)
     text = ev.reply.await_args.args[0]
@@ -458,14 +457,14 @@ async def test_stats_command_text_when_no_backend(monkeypatch, _stats_env):
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     called = []
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
-                        lambda g, sub: called.append(1) or b'x')
+                        lambda g, sub, elapsed_ms=None: called.append(1) or b'x')
     ev = _fake_event()
     await dispatcher.lgtbot_data_stats(ev, None)
     assert called == []
     assert '今日对局' in ev.reply.await_args.args[0]
 
 
-# ──────── @ 与图片之间的换行(对齐主框架 dau 的回执格式)────────────────────
+# ──────── @ 与图片之间的换行 ────────────────────
 
 def test_stats_image_md_separates_mention_from_image():
     """★ @ 与图片之间空一行 —— 紧贴时 QQ 客户端会把两者挤成一块。"""
@@ -486,7 +485,7 @@ async def test_today_view_image_reply_has_the_newline(monkeypatch, _stats_env):
     png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + \
         (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
-                        lambda g, sub: png)
+                        lambda g, sub, elapsed_ms=None: png)
 
     async def fake_upload(data, filename, user_id='', *, target_id='', target_is_uid=False):
         return 'https://cdn.example/stats.png'
@@ -504,7 +503,7 @@ async def test_window_view_image_reply_has_the_newline(monkeypatch, _stats_env):
     png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + \
         (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
-                        lambda g, sub: png)
+                        lambda g, sub, elapsed_ms=None: png)
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_total',
                         lambda: {'available': True, 'total_matches': 5,
                                  'total_players': 4, 'total_groups': 3,
@@ -760,9 +759,9 @@ def test_game_board_rows_carry_my_row():
     assert (power['title'], power['tag']) == ('实力排行', '≥10局')
     assert count['full'] is None and power['full'] == 100     # 实力条按 0–100% 画,局数条以榜首为满格
     assert count['rows'][0] == (1, '玩家0', 100, '100局', False)
-    assert power['rows'][0] == (1, '玩家0', 80.5, '80.5% · 20局', False)
+    assert power['rows'][0] == (1, '玩家0', 80.5, '80.50% · 20局', False)
     assert count['me_row'] == (37, '我自己', 6, '6局', True)
-    assert power['me_row'] == (None, '我自己', 66.7, '66.7% · 6局', True)   # 没满门槛:名次画「—」
+    assert power['me_row'] == (None, '我自己', 66.7, '66.70% · 6局', True)   # 没满门槛:名次画「—」
 
 
 def test_game_overview_tiles(monkeypatch):
@@ -902,8 +901,46 @@ def test_game_trend_without_players_draws_only_match_bars():
 
 def test_render_game_swallows_exceptions(monkeypatch):
     monkeypatch.setattr(stats_image, '_render_game',
-                        lambda g, s: (_ for _ in ()).throw(RuntimeError('boom')))
+                        lambda *a: (_ for _ in ()).throw(RuntimeError('boom')))
     assert stats_image.render_game_stats_image({}, '') is None
+
+
+def test_footer_carries_query_time():
+    assert stats_image._footer_text('X', None) == 'X'
+    assert stats_image._footer_text('X', 1234) == 'X · 查询耗时 1,234ms'
+
+
+def test_cards_write_the_query_time_into_the_footer(monkeypatch):
+    """★ 两种卡片都把查询耗时写进底部署名行;游戏卡底部只剩署名和耗时。"""
+    _need_font()
+    seen = []
+    real = stats_image._footer_text
+    monkeypatch.setattr(stats_image, '_footer_text',
+                        lambda base, ms: seen.append((base, ms)) or real(base, ms))
+    stats_image.render_stats_image(_sample_stats(), '截至 12:34', 12)
+    stats_image.render_game_stats_image(_game_sample(), '游戏统计', 345)
+    assert seen == [('LGTBot × ElainaBot · 数据统计', 12), ('LGTBot × ElainaBot · 游戏统计', 345)]
+
+
+async def test_stats_views_pass_the_query_time_to_the_renderer(monkeypatch, _stats_env):
+    """今日视图、窗口视图、游戏统计都把查询耗时(整数毫秒)交给渲染。"""
+    import re as _re
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    got = []
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
+                        lambda g, sub, elapsed_ms=None: got.append(elapsed_ms))
+    monkeypatch.setattr(dispatcher.stats_image, 'render_game_stats_image',
+                        lambda gs, sub, elapsed_ms=None: got.append(elapsed_ms))
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_total',
+                        lambda: {'available': True, 'total_matches': 5, 'total_players': 4,
+                                 'total_groups': 3, 'total_attendances': 9,
+                                 'top_games_total': [], 'top_players_total': []})
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_detail',
+                        lambda q, uid, gid: _game_sample())
+    for cmd in ('数据统计', '数据统计总', '数据统计 天赋云巢'):
+        await dispatcher.lgtbot_data_stats(
+            _fake_event(), _re.search(dispatcher._P_STATS, cmd, _re.DOTALL))
+    assert len(got) == 3 and all(isinstance(ms, int) and ms >= 0 for ms in got)
 
 
 _NOW = datetime(2026, 8, 8, 18, 0, 0)
@@ -953,7 +990,7 @@ async def test_game_stats_command_replies_markdown_image(monkeypatch):
     png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + \
         (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
     monkeypatch.setattr(dispatcher.stats_image, 'render_game_stats_image',
-                        lambda gs, sub: png)
+                        lambda gs, sub, elapsed_ms=None: png)
     seen = {}
 
     async def fake_upload(data, filename, user_id='', *, target_id='', target_is_uid=False):
@@ -977,7 +1014,7 @@ async def test_game_stats_command_falls_back_to_text_when_render_fails(monkeypat
     monkeypatch.setattr(dispatcher.metrics, 'query_game_detail',
                         lambda q, uid, gid: _game_sample())
     monkeypatch.setattr(dispatcher.stats_image, 'render_game_stats_image',
-                        lambda gs, sub: None)
+                        lambda gs, sub, elapsed_ms=None: None)
     ev = _fake_event()
     await dispatcher.lgtbot_data_stats(
         ev, _re.search(dispatcher._P_STATS, '数据统计天赋云巢', _re.DOTALL))

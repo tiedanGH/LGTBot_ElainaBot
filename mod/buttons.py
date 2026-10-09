@@ -189,16 +189,13 @@ def build_game_list_buttons() -> list[list[dict]]:
     return [[BTN_GAME_LIST]]
 
 
-# 候选游戏按钮最多 4 排:QQ 键盘上限 5 排,末排留给「游戏列表」
+# 候选游戏按钮最多 4 排:按钮上限 5 排,末排留给「游戏列表」
 _SUGGEST_ROWS_MAX = 4
 _SUGGEST_BUTTONS_MAX = _SUGGEST_ROWS_MAX * 3
 
 
 def _suggest_row_sizes(n: int) -> list[int]:
-    """候选按钮每排几个:优先 2 个一排,多出来的从最后一排往前补成 3 个。
-
-    排数封顶后多出的继续往前补,12 个正好 3+3+3+3;再多由调用方截断。
-    """
+    """候选按钮每排几个:优先 2 个一排,多出来的从最后一排往前补成 3 个。排数封顶后多出的继续往前补;再多由调用方截断。"""
     if n <= 2:
         return [n] if n > 0 else []
     rows = min(n // 2, _SUGGEST_ROWS_MAX)

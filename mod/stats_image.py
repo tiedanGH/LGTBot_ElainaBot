@@ -29,7 +29,7 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
 第一行的好友 / 群聊总数只在调用方注入 ``bot_friends`` / ``bot_groups`` 时出现 ——
 即今日视图(带今日净变化角标)与累计总计视图(**无角标**,``*_delta`` 留空)。
 
-「数据统计<游戏名>」的单游戏卡片由 ``render_game_stats_image`` 渲染,版式沿用上面这套(见文件末尾一节)。
+「数据统计<游戏名>」的单游戏卡片由 ``render_game_stats_image`` 渲染,版式沿用。
 
 PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)回退纯文本输出。
 """
@@ -175,7 +175,7 @@ def _sec_title(d, x, y, text):
 
 
 def _delta_pill(d, x, y, diff, h=40, *, outline=False, bg=None) -> int:
-    """涨跌胶囊,返回宽度。配色照搬主框架 dau 卡片:**涨红跌绿**、平灰。
+    """涨跌胶囊,返回宽度。配色:**涨红跌绿**、平灰。
 
     两种形态,区分两类不同口径的角标:
       · 实底(默认)—— 今日指标 vs「昨日同时段 / 上个区间」
@@ -342,13 +342,13 @@ def _icon(d, kind: str, ix: int, iy: int, fg) -> None:
                                 radius=2, fill=fg)
 
 
-def render_stats_image(g: dict, sub_title: str = '') -> bytes | None:
-    """把 ``metrics.query_game_stats()`` 的结果渲染成统计卡片 PNG。
+def render_stats_image(g: dict, sub_title: str = '', elapsed_ms: int | None = None) -> bytes | None:
+    """把 ``metrics.query_game_stats()`` 的结果渲染成统计卡片 PNG;``elapsed_ms`` 写进底部署名行。
 
     PIL 未安装 / 无中文字体 / 渲染异常 → 返回 None(调用方回退文本)。
     """
     try:
-        return _render(g, sub_title)
+        return _render(g, sub_title, elapsed_ms)
     except ImportError:
         return None
     except Exception as e:
@@ -370,7 +370,12 @@ def _period_word(g: dict) -> str:
     return '当日'
 
 
-def _render(g: dict, sub_title: str) -> bytes | None:
+def _footer_text(base: str, elapsed_ms: int | None) -> str:
+    """底部署名行,给了查询耗时就跟在后面。"""
+    return base if elapsed_ms is None else f'{base} · 查询耗时 {_fmt(elapsed_ms)}ms'
+
+
+def _render(g: dict, sub_title: str, elapsed_ms: int | None = None) -> bytes | None:
     from PIL import Image, ImageDraw
     if not _find_font():
         return None
@@ -628,7 +633,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             _rank_bar(d, cx + 84, ry + 40, half_w - 84 - 28, cnt / max_c, fg)
     y += rank_h
 
-    footer = 'LGTBot × ElainaBot · 数据统计'
+    footer = _footer_text('LGTBot × ElainaBot · 数据统计', elapsed_ms)
     ff = _font(20)
     d.text(((width - _text_w(d, footer, ff)) // 2, y + 18), footer, font=ff,
            fill=_TEXT_FAINT)
@@ -639,11 +644,10 @@ def _render(g: dict, sub_title: str) -> bytes | None:
 
 
 # ──────── 单游戏统计卡片(「数据统计<游戏名>」)──────────────────────────────
-# 数据来自 metrics.query_game_detail,版式沿用上面的统计卡片:顶栏 + 数据总览(2 列小卡)+ 趋势 + 双榜。
+# 数据来自 metrics.query_game_detail,版式沿用统计卡片:顶栏 + 数据总览(2 列小卡)+ 趋势 + 双榜。
 #   · 总览第一行是累计数(浅蓝紫底,同 bot 规模行);右上角的灰色胶囊只补充事实,涨跌只出现在近 7 日两卡
 #   · 趋势每 7 天一组两根柱:对局与活跃玩家并排,共用一个纵轴,高度可以直接比
-#   · 局数排行 / 实力排行(场均击败对手比例,标题后标出上榜门槛):查询者在 TOP10 里时那一行浅底高亮并跟「我」胶囊,
-#     不在时钉在两张榜底部单独补一行
+#   · 局数排行 / 实力排行(场均击败对手比例,标题后标出上榜门槛):查询者在 TOP10 里时那一行浅底高亮并跟「我」胶囊
 
 _PINK = (232, 121, 249)
 _ME_TAG = '我'
@@ -708,8 +712,8 @@ def game_labels(gs: dict, now: datetime | None = None) -> dict:
 
 
 def fmt_rate(rate) -> str:
-    """击败比例保留 1 位小数(图片与文本保底共用)。"""
-    return f'{float(rate):.1f}%'
+    """击败比例保留 2 位小数(图片与文本保底共用)。"""
+    return f'{float(rate):.2f}%'
 
 
 def fmt_power(rate, n) -> str:
@@ -717,10 +721,11 @@ def fmt_power(rate, n) -> str:
     return f'{fmt_rate(rate)} · {_fmt(n)}局'
 
 
-def render_game_stats_image(gs: dict, sub_title: str = '') -> bytes | None:
-    """把 ``metrics.query_game_detail()`` 的结果渲染成游戏统计卡片 PNG(失败语义同 render_stats_image)。"""
+def render_game_stats_image(gs: dict, sub_title: str = '',
+                            elapsed_ms: int | None = None) -> bytes | None:
+    """把 ``metrics.query_game_detail()`` 的结果渲染成游戏统计卡片 PNG(失败语义、``elapsed_ms`` 同 render_stats_image)。"""
     try:
-        return _render_game(gs, sub_title)
+        return _render_game(gs, sub_title, elapsed_ms)
     except ImportError:
         return None
     except Exception as e:
@@ -852,8 +857,8 @@ def _board_rows(gs: dict) -> list:
     """两张榜的绘制数据,每张 ``{title, fg, tag, full, rows, me_row}``。
 
     行是 ``(名次, 名字, 比例条取值, 右侧文案, 是不是查询者)``;``full`` 是比例条满格对应的值,None 表示以榜首为满格;
-    ``tag`` 跟在标题后(实力排行的上榜门槛)。补行是查询者自己那行,只在他玩过这个游戏、又不在该榜 TOP10 里时才有,
-    实力排行没满门槛时名次为 None。
+    ``tag`` 跟在标题后(实力排行的上榜门槛)。
+    补行是查询者自己那行,只在他玩过这个游戏、又不在该榜 TOP10 里时才有,实力排行没满门槛时名次为 None。
     """
     me = gs.get('me')
     players = gs.get('top_players') or []
@@ -914,7 +919,7 @@ def _game_boards(d, x0: int, y: int, inner_w: int, gap: int, h: int, boards: lis
             _board_row(d, cx, sep_y + 26, half_w, b['me_row'], max_c, fg)
 
 
-def _render_game(gs: dict, sub_title: str) -> bytes | None:
+def _render_game(gs: dict, sub_title: str, elapsed_ms: int | None = None) -> bytes | None:
     from PIL import Image, ImageDraw
     if not _find_font():
         return None
@@ -981,7 +986,7 @@ def _render_game(gs: dict, sub_title: str) -> bytes | None:
     _game_boards(d, pad, y, inner_w, gap, rank_h, boards, rows)
     y += rank_h
 
-    footer = 'LGTBot × ElainaBot · 游戏统计 · 仅含计分对局'
+    footer = _footer_text('LGTBot × ElainaBot · 游戏统计', elapsed_ms)
     ff = _font(20)
     d.text(((width - _text_w(d, footer, ff)) // 2, y + 18), footer, font=ff, fill=_TEXT_FAINT)
 

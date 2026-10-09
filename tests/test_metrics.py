@@ -905,7 +905,7 @@ def test_game_detail_power_board():
     gs = metrics.query_game_detail('天赋云巢', uid='F')
     assert gs['power_min'] == 3                          # 各档都凑不满 10 人 → 最后一档
     assert [(p['display'], p['rate'], p['count']) for p in gs['top_power']] == [
-        ('A', 100.0, 3), ('D', 83.3, 3), ('G', 50.0, 4), ('H', 50.0, 4), ('E', 50.0, 3),
+        ('A', 100.0, 3), ('D', 83.33, 3), ('G', 50.0, 4), ('H', 50.0, 4), ('E', 50.0, 3),
         ('B', 37.5, 4), ('C', 0.0, 4)]
     assert gs['me'] == {'display': 'F', 'matches': 1, 'rate': 50.0, 'rank': 8, 'power_rank': None}
     as_e = metrics.query_game_detail('天赋云巢', uid='E')
@@ -914,11 +914,11 @@ def test_game_detail_power_board():
 
 
 def test_power_order_breaks_display_ties_by_match_count():
-    """★ 比例按显示的 1 位小数比:66.67% 与 66.66% 都显示 66.7%,这时局数多的在前,
+    """★ 比例按显示的 2 位小数比:66.6667% 与 66.666% 都显示 66.67%,这时局数多的在前,
     不能按看不见的尾数把 3 局的排到 30 局前面。"""
-    per_user = {'P': [3, 2.0], 'Q': [30, 19.998], 'R': [9, 9.0], 'S': [2, 2.0]}
+    per_user = {'P': [3, 2.0], 'Q': [30, 19.9998], 'R': [9, 9.0], 'S': [2, 2.0]}
     rate, order = metrics._power_order(per_user, need=3)
-    assert rate == {'P': 66.7, 'Q': 66.7, 'R': 100.0}    # S 不满门槛
+    assert rate == {'P': 66.67, 'Q': 66.67, 'R': 100.0}    # S 不满门槛
     assert order == ['R', 'Q', 'P']
 
 
