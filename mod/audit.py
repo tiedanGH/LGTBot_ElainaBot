@@ -3,21 +3,15 @@
 """破坏性 / 状态变更操作审计 —— 持久化最近一个月到 ``data/audit/audit.json``。
 
 谁在写:各状态变更端点的**入口层**(webui page_* 按钮端点、dispatcher 的 /重启 与 /计划重启 指令、backup 的自动备份),
-每个入口一行 ``audit.record(cat, action, detail, ok, src)``;共享 helper 保持纯函数不挂钩,
-由入口标注来源(面板 / 指令 / 自动)。谁在读:``webui/page_audit``(只读展示)。
+每个入口一行 ``audit.record(cat, action, detail, ok, src)`` 并标注来源;共享 helper 不挂钩。
+谁在读:``webui/page_audit``(只读展示)。
 
 设计:
-  · **文件即真相源** —— 热重载后重读文件即可,不走 boot._get_persistent();
-    重启(os.execv)不丢:record() 是同步写盘,返回即已持久化。
-  · **整文件原子重写**(tmp + os.replace,照 page_config._atomic_write):
-    操作全是人工触发,一个月的量级(几十 KB)全量重写无成本,换来任意时刻
-    (包括 execv 瞬间)读到的都是完整 JSON,没有追加式的撕裂行问题;
-    过期清理也顺手完成。
-  · **record() 永不抛异常** —— 审计失败绝不影响业务动作本身,调用方零负担。
+  · **文件即真相源**,不走 boot._get_persistent();record() 同步写盘,返回即已持久化,os.execv 也不丢。
+  · **整文件原子重写**(tmp + os.replace):任意时刻(包括 execv 瞬间)读到的都是完整 JSON,过期清理顺手完成。
+  · **record() 永不抛异常** —— 审计失败绝不影响业务动作本身。
   · 损坏容错:audit.json 解析失败时尽力改名 ``.corrupt_<ts>`` 留证,从空续记。
-  · 放 ``data/audit/`` 子目录:框架配置入口非递归扫 data/ 根,子目录不可见
-    不污染配置列表;backup 的打包白名单不含此目录 → 恢复旧备份不会把审计
-    历史一起回滚(防"恢复备份抹掉审计"的自毁路径)。
+  · 放 ``data/audit/`` 子目录:框架配置入口看不到;backup 的打包白名单不含此目录,恢复旧备份不会把审计历史一起回滚。
   · **不提供任何清空 API / 端点**(防自毁审计);容量靠保留期到点清理,不限条数。
 """
 
@@ -47,8 +41,7 @@ SRC_CMD = '指令'
 SRC_AUTO = '自动'
 SRC_API = 'API'      # 编译 API 等对其他插件开放的 HTTP 接口触发
 
-# cat 短码 → (图标 id, 中文标签)。单一真相源:后端只存短码,page_audit 把此映射随 payload 下发,
-# 前端据此渲染类别徽标与筛选按钮。图标 id 指向面板 sprite,与同名功能的标签共用图元。
+# cat 短码 → (图标 id, 中文标签)。后端只存短码,page_audit 把此映射随 payload 下发,前端据此渲染类别徽标与筛选按钮。
 CATEGORIES = {
     'build':   ('#i-build', '引擎编译'),
     'restart': ('#i-restart', '重启'),
@@ -60,7 +53,7 @@ CATEGORIES = {
     'bind':    ('#i-bot', '机器人绑定'),
 }
 
-# 单 asyncio loop 下各入口天然串行;锁防未来从引擎工作线程记录(对齐 page_logs 的 threading.Lock 先例),成本可忽略。
+# 单 asyncio loop 下各入口天然串行;锁防从引擎工作线程记录。
 _lock = threading.Lock()
 
 

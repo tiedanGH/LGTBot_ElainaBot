@@ -2,10 +2,8 @@
 # -*- coding: utf-8 -*-
 """dispatcher 测试 —— 核心是 refresh_ref 三处互斥分支(msg_id 越权 fix 回归保障)。
 
-历史 bug:消息派发 + INTERACTION relay + INTERACTION dispatch 三处的 refresh_ref
-逻辑曾用「两个独立 if」(群分支 + 用户分支),导致群里 @bot 产生的 msg_id 也被写
-进 ``u:<uid>``,后续给该用户私信尝试用该(实际属于群场景的)凭据被 QQ 拒绝。
-修复后改成 ``if event.is_group ... elif event.is_direct ...`` 互斥 + 显式守卫。
+消息派发 + INTERACTION relay + INTERACTION dispatch 三处的 refresh_ref 必须按群 / 私信互斥:
+群里 @bot 的 msg_id 一旦写进 ``u:<uid>``,之后给该用户的私信用它会被 QQ 拒绝。
 
 本测试覆盖:
   · 群消息事件 → 只刷 g:<gid>,**不污染 u:<uid>**(关键)
@@ -33,8 +31,7 @@ from plugins.LGTBot_ElainaBot.mod import dispatcher, quota, state as _state
 def mark_push_group(gid: str, ok: bool = True) -> None:
     """把某群标记成(不)可主动推送 —— 直接写 helpers 的 TTL 缓存。
 
-    ``can_push_group`` 改成按群点查 DB + 缓存后,没有集合可写;这里预置一条
-    远期不过期的缓存项,等价于「DB 里该群 allow_proactive_msg 是 ok」。
+    预置一条远期不过期的缓存项,等价于「DB 里该群 allow_proactive_msg 是 ok」。
     """
     import time as _t
     from plugins.LGTBot_ElainaBot.mod import helpers as _h
@@ -78,9 +75,7 @@ def patched_downstream():
     关键点:**不 patch quota.refresh_ref**(那是被测目标),其他副作用(userinfo
     写回 / page_logs / _send_welcome_menu / threading.Thread)全 patch 成 noop。
     """
-    # threading.Thread 起线程跑 boot.LGTBot_ElainaBot.on_public_message 等
-    # —— boot 已是 fake (conftest),on_public_message 是 MagicMock,调用安全;
-    # 但起真线程拖慢测试,直接 patch Thread.start 为 noop
+    # Thread.start 换成 noop:派发目标是 fake boot 的 MagicMock,跑了也安全,但起真线程拖慢测试
     with patch.object(dispatcher, '_send_welcome_menu', new=AsyncMock()) as _swm, \
          patch.object(dispatcher.userinfo, 'note_username') as _nu, \
          patch.object(dispatcher.page_logs, 'log_incoming') as _li, \
@@ -99,11 +94,7 @@ def patched_downstream():
 
 
 async def test_dispatch_group_msg_only_refreshes_group_key(patched_downstream):
-    """群消息 @bot → 只刷 g:<gid>,**绝不污染 u:<uid>**。
-
-    复现回归:若旧 bug 回来(两个独立 if 而非 elif),u:USER_Y 也会出现 ref,
-    导致后续给 USER_Y 发私信用群 msg_id 被 QQ 拒。
-    """
+    """群消息 @bot → 只刷 g:<gid>,**绝不污染 u:<uid>**(否则之后给该用户发私信会拿群 msg_id 被 QQ 拒)。"""
     _state.started = True
 
     event = _mock_event(
@@ -361,7 +352,7 @@ def test_builtin_blocked_commands_cover_all_plugin_forms():
 
 
 def test_config_blocked_commands_keep_strict_slash(monkeypatch):
-    """配置追加项维持原严格语义:斜杠按配置原样匹配,不做互换;
+    """配置追加项是严格语义:斜杠按配置原样匹配,不做互换;
     「指令 + 空白 + 参数」命中,数字连写**不**命中(与内置项的宽松规则区分)。"""
     monkeypatch.setattr(dispatcher, 'BLOCKED_COMMANDS', ('帮助', '/规则'))
 
@@ -385,7 +376,7 @@ def test_data_stats_command_is_exclusive():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 9. _capture_pending_game_name:单机局游戏名兜底(供 dashboard / 重开按钮)
+# 9. lgtbot_admin_interrupt:群管 %中断 受限代理
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -489,7 +480,7 @@ async def test_admin_interrupt_audit_distinguishes_no_game(patched_downstream, m
         await dispatcher.lgtbot_admin_interrupt(ev, None)
         return audits[-1]
 
-    # ① 群里没有任何对局 → 无游戏(回归:以前一律写「未知游戏」,会误导)
+    # ① 群里没有任何对局 → 无游戏
     assert '无游戏' in await _interrupt('G_EMPTY')
     # ② 有对局但游戏名未知 → 未知游戏
     _state.active_matches['g:G_UNK'] = {'target_id': 'G_UNK', 'is_uid': False,
@@ -566,7 +557,7 @@ async def test_dispatch_plain_user_super_cmd_goes_to_engine(patched_downstream, 
 
 
 def test_admin_interrupt_pattern_scope():
-    """%中断 被登记为专属指令(catch-all 不再重复派发);玩家投票的 /中断 与
+    """%中断 被登记为专属指令(catch-all 不重复派发);玩家投票的 /中断 与
     其他管理指令(%清除战绩)**不**被抢占。"""
     assert dispatcher._is_exclusive_command('%中断')
     assert dispatcher._is_exclusive_command('%中断 42')
@@ -618,7 +609,7 @@ def test_planned_restart_notice_shows_reason_and_remaining():
 
 
 async def test_planned_restart_command_accepts_reason(monkeypatch):
-    """「计划重启 <原因>」记录原因并在回执里回显;不带原因时同旧行为。"""
+    """「计划重启 <原因>」记录原因并在回执里回显。"""
     from plugins.LGTBot_ElainaBot.mod import state as st
     st.active_matches.clear()
     st.set_planned_restart(False)
@@ -879,8 +870,8 @@ async def test_stats_month_command_views_month(monkeypatch):
     assert txt3.startswith('<@U1>\n') and '月份无效' in txt3
 
 
-# 年份用例一律相对 _MIN_STATS_YEAR 取 —— 那个下界是可调策略(部署方按自己建库时间填),
-# 写死年份会让调一下常量就红一片。假"今天"取下界的次年,于是下界与下界+1 两个年份都在可查范围内。
+# 年份用例一律相对 _MIN_STATS_YEAR 取:下界是部署方可调的策略,写死年份一调常量就红一片。
+# 假"今天"取下界的次年,下界与下界+1 两个年份都在可查范围内。
 _MIN_Y = dispatcher._MIN_STATS_YEAR
 _FAKE_TODAY = __import__('datetime').date(_MIN_Y + 1, 8, 20)
 _D = __import__('datetime').date
@@ -1037,10 +1028,7 @@ async def test_stats_year_command_views_year(monkeypatch):
 
 
 async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
-    """★ 4 位参数的路由:前两位是合法月份 → MMDD,否则按年份。
-
-    两个取值域天然不相交(年份 20xx 的前两位恒为 20,不是合法月份),所以「数据统计0818」永远是 8月18日、「数据统计2026」永远是 2026 年。
-    """
+    """★ 4 位参数的路由:前两位是合法月份 → MMDD,否则按年份(年份 20xx 的前两位恒为 20,两个取值域天然不相交)。"""
     import re as _re
     from plugins.LGTBot_ElainaBot.mod import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
@@ -1123,7 +1111,7 @@ async def test_stats_total_image_carries_scale_row_without_delta(monkeypatch):
                                  'top_games_total': [], 'top_players_total': []})
     monkeypatch.setattr(userinfo, 'count_groups', lambda: 1284)
     monkeypatch.setattr(userinfo, 'count_friends', lambda: 5391)
-    # 今日净变化查得到**真数字** —— 否则"顺手把 delta 也注入"的写法会因为拿不到 bot 而恰好返回 None,这条断言就白设了
+    # 今日净变化给**真数字**:否则误注入 delta 的写法也会因为拿不到 bot 恰好是 None,断言测不出来
     monkeypatch.setattr(userinfo, 'today_lifecycle_delta',
                         lambda: {'group': 7, 'friend': -3})
     seen = {}
@@ -1351,12 +1339,12 @@ async def test_stats_command_warns_when_group_lacks_full_volume(monkeypatch):
     txt = ev.reply.await_args.args[0]
     assert '⚠️' in txt and '未开启全量消息权限' in txt
     assert '全量申请' in txt
-    assert '今日主动消息:' not in txt          # 额度数字不再展示
+    assert '今日主动消息:' not in txt          # 不展示额度数字
 
 
 def test_match_list_is_exclusive_command():
-    """「赛事列表」已登记进专属指令表 → catch-all 不再派发给引擎(否则普通玩家
-    仍能通过 catch-all 拿到全部公开 + 私密赛事)。带 / 与不带 / 两种输入都要挡。"""
+    """「赛事列表」登记在专属指令表 → catch-all 不派发给引擎(否则普通玩家
+    能通过 catch-all 拿到全部公开 + 私密赛事)。带 / 与不带 / 两种输入都要挡。"""
     assert dispatcher._is_exclusive_command('赛事列表')
     assert dispatcher._is_exclusive_command('/赛事列表')
     # 前缀相同但不是本指令的文本不受影响
@@ -1508,8 +1496,8 @@ def test_restart_pattern_captures_optional_reason(cmd, want):
 async def test_restart_command_notifies_rooms_except_origin(monkeypatch):
     """★ 指令重启:带上更新内容通知等待中房间,**排除发起群**(回执就在眼前)。
 
-    ``check_and_prepare_restart`` 在这里模拟真实副作用 —— 释放引擎会把等待中房间全部解散(上游 Terminate 后回调清表)。
-    房间必须在这之**前**就被快照下来,否则通知拿到的永远是空表(线上实测症状:只收到游戏解散消息)。
+    释放引擎会把等待中房间全部解散(上游 Terminate 后回调清表),房间必须在 ``check_and_prepare_restart``
+    之**前**快照,否则通知拿到的永远是空表。
     """
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     _state.waiting_rooms['g:GWAIT'] = {'target_id': 'GWAIT', 'is_uid': False,
@@ -1577,12 +1565,10 @@ async def test_restart_command_rejected_sends_nothing(monkeypatch):
 
 
 def test_auto_restart_skips_already_notified_groups():
-    """★ 自动重启:通知群刚收过一条自动重启说明,房间通知要跳过它们,
-    避免同一个群连收两条。手动重启不推通知群,所以那条路径不跳(见指令用例)。
+    """★ 自动重启:通知群刚收过一条自动重启说明,房间通知要跳过它们,避免同一个群连收两条。
 
-    行为级断言在 test_restart_api 的 watcher 用例里(那边有驱动 watcher 的夹具);
-    这里只钉住调用顺序:通知群那条**先发**,房间通知随后 —— 反过来的话
-    通知群会先收到"你群有等待中房间"再收到重启说明,顺序读起来是乱的。"""
+    跳过的行为级断言在 test_restart_api 的 watcher 用例里;这里只钉住调用顺序:通知群那条**先发**,
+    反过来通知群会先收到房间通知再收到重启说明。"""
     import inspect
     src = inspect.getsource(dispatcher._auto_restart_watcher)
     assert src.index('_notify_auto_restart') < src.index('_notify_restart_rooms')
@@ -1603,7 +1589,7 @@ def _bot_named(monkeypatch):
 
 
 def test_text_at_as_mention_module_default_is_on():
-    """★ 配置加载整个失败时兑底的就是这个模块默认值。"""
+    """★ 配置加载整个失败时兜底的就是这个模块默认值。"""
     assert dispatcher.TEXT_AT_AS_MENTION is True
 
 

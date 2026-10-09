@@ -56,22 +56,19 @@ TAB_CSS = _load('crash/crash.css')
 TAB_JS = _load('crash/crash.js')
 
 # dump 目录 + 文件命名(与桥接层 DumpCrashToFile 的 crash_<sec>_<pid>_<tid>.log 一致)。
-# 桥接层 DeriveCrashDumpDir 已把 dump 目录**固定为插件根** LGTBot_CRASH_DUMPS(本地 / 预编译统一),故这里只读这一个规范目录。
+# 桥接层 DeriveCrashDumpDir 把 dump 目录**固定为插件根** LGTBot_CRASH_DUMPS(本地 / 预编译同一处),只读这一个目录即可。
 CRASH_DIR = os.path.join(boot.PLUGIN_DIR, 'LGTBot_CRASH_DUMPS')
 _DUMP_RE = re.compile(r'^crash_\d+_\d+_\d+\.log$')
-_MAX_VIEW_BYTES = 256 * 1024        # 查看 / 下载读取上限,防异常超大文件撑爆内存
+_MAX_VIEW_BYTES = 256 * 1024        # 查看正文的读取上限,防异常超大文件撑爆内存
 # 信号号 → 名称(与 callbacks._SIG_NAMES 同源:引擎只可能落这几种)
 _SIG_NAMES = {4: 'SIGILL', 6: 'SIGABRT', 7: 'SIGBUS', 8: 'SIGFPE', 11: 'SIGSEGV'}
 
 
 # ──────── 游戏子进程 core 文件 ────────────────────────────────────────────
-# 游戏崩溃只打死 fork 出来的 match_game_runner 子进程,主进程无感、也不会留 crash_*.log(那是桥接层信号处理器写的,只覆盖主进程)。
-# 内核按 core_pattern 把 core 落在子进程 cwd —— boot._make_runner_wrapper 的 wrapper 会先 `cd "$BUILD_DIR"`,所以 core 就在编译产物目录里。
-#
-# **两种部署的目录不同**,而且切换模式后旧 core 还留在另一边,所以两个都扫:
-#   · 本地编译  <plugin>/build/
-#   · 预编译包  <plugin>/build_prebuilt/build/   ← 包内保留了 build/ 前缀
-# 列表用「目录下标 + 文件名」定位(同名 core 可能两边都有),下标越界即拒。
+# 游戏崩溃只打死 match_game_runner 子进程,不会留 crash_*.log(桥接层信号处理器只覆盖主进程)。
+# 内核按 core_pattern 把 core 落在子进程 cwd —— boot._make_runner_wrapper 会先 `cd "$BUILD_DIR"`,即编译产物目录。
+# 切换部署模式后旧 core 还留在另一边,所以本地 <plugin>/build/ 与预编译 <plugin>/build_prebuilt/build/
+# (包内保留了 build/ 前缀)都扫;同名 core 可能两边都有,故用「目录下标 + 文件名」定位,下标越界即拒。
 _CORE_DIRS = []
 for _d in (getattr(boot, 'LOCAL_BUILD_DIR', ''),
            os.path.join(getattr(boot, 'PREBUILT_DIR', ''), 'build'),
@@ -79,8 +76,7 @@ for _d in (getattr(boot, 'LOCAL_BUILD_DIR', ''),
     if _d and _d not in _CORE_DIRS:
         _CORE_DIRS.append(_d)
 CORE_DIRS = tuple(_CORE_DIRS)
-# 内核默认 `core`、常见 `core.<pid>`,以及本项目实测的 `core-%e-%p-%t`
-# (如 core-match_game_runn-42418-1786852068)。收紧到 core 开头 + 无路径分隔符。
+# 内核默认 `core`、常见 `core.<pid>`,以及 `core-%e-%p-%t`;收紧到 core 开头 + 无路径分隔符。
 _CORE_RE = re.compile(r'^core(?:[.-][A-Za-z0-9._-]+)?$')
 # core-<exe>-<pid>-<秒>:从名字里取 pid / 时间(比 mtime 更贴近崩溃时刻)
 _CORE_NAME_RE = re.compile(r'^core-(?P<exe>[^-]+)-(?P<pid>\d+)-(?P<ts>\d+)$')
@@ -240,7 +236,7 @@ def _payload() -> dict:
         'count': len(dumps),
         'total_bytes': sum(d['size'] for d in dumps),
         'crash_dir': CRASH_DIR,
-        # 游戏子进程 core:数量 / 总占用进顶部统计,列表进「转储列表」下方新栏目
+        # 游戏子进程 core:数量 / 总占用进顶部统计,列表进「转储列表」下方的单独栏目
         'cores': cores,
         'core_count': len(cores),
         'core_bytes': sum(c['size'] for c in cores),

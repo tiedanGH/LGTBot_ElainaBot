@@ -50,9 +50,7 @@
   padding: 48px; text-align: center; color: var(--text-faint); font-size: 13px;
 }
 
-/* 移动端:窄屏下 4 列网格挤不下(76+56+200 = 332px,留给 content 的空间为负),
-   重排为两行 —— 第一行 time / dir / who 平铺,第二行 content 独占整宽。
-   分隔线沿用 .log-row 自带的 border-bottom,无需额外加。 */
+/* 移动端:4 列网格的定宽列已吃掉窄屏宽度,重排为两行 —— time / dir / who 一行,content 独占第二行。 */
 @media (max-width: 600px) {
   .log-row {
     grid-template-columns: auto auto 1fr;

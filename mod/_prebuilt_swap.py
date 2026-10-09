@@ -2,16 +2,13 @@
 # -*- coding: utf-8 -*-
 """build_prebuilt/ 的暂存换入(staged install)helper —— boot 与 prebuilt 共用。
 
-引擎运行中安装新预编译包时,原子换入的整目录 rename(build_prebuilt → .old)
-在 WSL /mnt、Windows 语义文件系统上会因「进程加载中的 .so 锁住目录」而 EACCES
-(纯 ext4 上 rename 打开中的文件是允许的,无此问题)。此时降级:
-新版本暂存为 ``build_prebuilt.pending``,由 boot 在**进程启动最早期**
-(尚未加载任何 .so,无占用)调用 ``finalize_pending`` 完成换入 ——
-预编译包本就需要重启才生效,时机完全契合。
+引擎运行中安装新预编译包时,整目录 rename(build_prebuilt → .old)在 WSL /mnt、Windows 语义
+文件系统上会因加载中的 .so 锁住目录而 EACCES。此时新版本暂存为 ``build_prebuilt.pending``,
+由 boot 在**进程启动最早期**(尚未加载任何 .so)调用 ``finalize_pending`` 完成换入 ——
+预编译包本就需要重启才生效。
 
-独立成零依赖小模块的原因:完成换入必须发生在 boot 预加载 .so **之前**,
-而 boot 不能 import prebuilt(prebuilt 顶部 import boot,会循环);
-两边共用同一套路径与状态机,只能放在这个不 import 任何插件模块的文件里。
+独立成零依赖小模块:换入必须发生在 boot 预加载 .so **之前**,而 prebuilt 顶部 import boot,
+boot 不能反过来 import prebuilt。
 """
 
 from __future__ import annotations

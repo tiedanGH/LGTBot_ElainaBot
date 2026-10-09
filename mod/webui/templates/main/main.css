@@ -55,14 +55,12 @@ body {
   padding: 0; margin: 0; height: 100vh;
   display: flex; flex-direction: column;
   background: var(--bg); color: var(--text);
-  overflow: hidden;       /* body 不滚 */
+  overflow: hidden;
   transition: background .25s, color .25s;
 }
 
 /* ───── 顶部锁定区 + 内容滚动区 ─────
-   通过 flex 布局让顶部条 (flex:0 0 auto) 占用自己的高度,内容区
-   (flex:1 + overflow-y:auto) 吃掉剩下的视口高度并成为唯一的滚动容器。
-   滚动条出现在 .page-content 内部,而不是整个 iframe / 视口。 */
+   .page-content 是唯一的滚动容器,滚动条在它内部而不是整个 iframe / 视口。 */
 .sticky-top {
   flex: 0 0 auto;
   background: var(--bg);
@@ -72,7 +70,6 @@ body {
 .page-content {
   flex: 1 1 auto;
   overflow-y: auto;
-  /* 防整页横向溢出 */
   overflow-x: hidden;
   padding: 0 24px 24px;
 }
@@ -86,8 +83,7 @@ body {
 
 /* 超链接统一主题蓝(--accent 随明暗主题切换) */
 a, a:visited { color: var(--accent); }
-/* 链接型按钮(如「前往主框架插件模块编辑」)不吃全局链接色 —— 强制按钮白字,
-   :visited 也要写:伪类 (0,1,1) 比 .dash-btn-primary (0,1,0) 优先级更高 */
+/* 链接型按钮不吃全局链接色;:visited 也要写,a:visited (0,1,1) 比 .dash-btn-primary (0,1,0) 优先级高 */
 a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 
 /* ───── SVG 图标 ─────  */
@@ -113,14 +109,12 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .topbar h1 {
   font-size: 18px; color: var(--accent);
   display: inline-flex; align-items: center; gap: 9px;
-  /* 站标不贴着滚动区左沿:下面标签的图标本身还有一层按钮内边距,不补这点
-     缩进的话标题会比标签行更靠左 */
+  /* 补上标签按钮的内边距,标题才不会比下面的标签行更靠左 */
   padding-left: 14px;
 }
-/* 站标内联成 data URI(见 webui/main.py):面板 HTML 由框架路由吐出,
-   相对路径取不到插件目录里的图片,单为一张图注册静态路由不值当。 */
+/* 站标内联成 data URI(见 webui/main.py):面板 HTML 由框架路由吐出,相对路径取不到插件目录里的图片。 */
 .topbar-logo { width: 26px; height: 26px; border-radius: 6px; flex: 0 0 auto; }
-/* 「实时」标签 —— 仅该标签聚焦(.active)时显示,其余标签聚焦时隐藏。透明度由消息日志页「⏸ 自动」开关经 #live-badge 控制。 */
+/* 「实时」标签 —— 仅所在标签选中时显示,透明度由消息日志页「自动」开关经 #live-badge 控制。 */
 .tabs .tab .tab-live-badge {
   display: none;
   margin-left: 6px; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 500;
@@ -158,7 +152,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .topbar-actions {
   display: flex; align-items: center; gap: 8px;
 }
-/* 通用图标按钮(主题切换等),32×32 方形带圆角 */
+/* 通用图标按钮(主题切换等) */
 .icon-btn {
   background: var(--panel); color: var(--text);
   border: 1px solid var(--border);
@@ -175,7 +169,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .tabs {
   display: flex; gap: 4px; margin-bottom: 14px;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;                    /* 横向溢出可滚动 */
+  overflow-x: auto;
   overflow-y: hidden;                  /* 显式锁定纵向不滚动 */
   flex-wrap: nowrap;
   -webkit-overflow-scrolling: touch;   /* iOS Safari 惯性滚动 */
@@ -192,8 +186,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   cursor: pointer; font-size: 13px; color: var(--text-muted);
   border-bottom: 2px solid transparent; margin-bottom: -1px;
   transition: color .15s, border-color .15s;
-  /* 关键两条:在窄屏 flex 收缩时,标签不被压扁也不内部换行,而是触发外层
-     .tabs 的横向滚动 —— 用户可拖动看后面的标签 */
+  /* 窄屏时标签不被压扁也不换行,而是触发外层 .tabs 的横向滚动 */
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -201,18 +194,14 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .tabs .tab.active {
   color: var(--accent); border-bottom-color: var(--accent); font-weight: 600;
 }
-/* 窄屏(手机)适配的样式集中在本文件末尾的 @media 块中 —— 必须在所有 desktop
-   规则之后,否则后写的非媒体查询规则(同 specificity)会反向覆盖 mobile。
-   见文件底部 ``@media (max-width: 600px)``。 */
+/* 窄屏(手机)适配集中在文件末尾的 @media 块,必须在所有桌面规则之后(见文件底部)。 */
 
 /* ───── 标签内容容器 ───── */
 .tab-pane { display: none; }
 .tab-pane.active { display: block; }
 
 /* ───── 子页面内顶部工具栏(.filters / .users-toolbar)二级吸顶 ─────
-   .page-content 是滚动容器,这两条 sticky 让各标签的顶部工具栏在
-   子页面内部滚动时也始终可见。z-index 比外层 .sticky-top(=10)低,
-   两者不在同一栈,实际不会重叠。背景必须不透明,否则滚过的内容会透出。 */
+   背景必须不透明,否则滚过的内容会透出。 */
 .filters, .users-toolbar {
   position: sticky;
   top: 0;
@@ -223,10 +212,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
-   Dashboard 标签 —— 版本/统计/引擎配置/缓存
-   设计语言:用 .dash-section 把四个区块包成卡片,内部小卡(stats / cache)再
-   做一层 grid。配色完全走全局 --bg/--panel/--accent 变量,light/dark 主题
-   自动适配。所有 dash-* class 都加前缀,避免和其它标签的类名冲突。
+   各标签共用的 dash-* 卡片 / 按钮族
+   配色只走全局 --bg/--panel/--accent 变量,light/dark 主题自动适配。
    ═════════════════════════════════════════════════════════════════════════ */
 
 .dashboard,
@@ -262,8 +249,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .dash-mono { font-family: 'Consolas', 'Menlo', monospace; }
 .dash-section-meta .dash-mono { word-break: break-all; min-width: 0; }
 
-/* ── 卡片网格:放得下 --cards 张就排一行,放不下折成 ⌈N/2⌉ 列(6→3+3、5→3+2、4→2+2),
-   不经过 5+1、4+1;再窄才按 --card-min 继续减列。 */
+/* ── 卡片网格:放得下 --cards 张就排一行,放不下直接折成 ⌈N/2⌉ 列(不出现 5+1 这种孤卡行),再窄才按 --card-min 继续减列。 */
 .fold-grid {
   --card-min: 180px; --gap: 12px;
   --one-row: calc((100% + var(--gap)) / var(--cards) - var(--gap) - .1px);
@@ -324,12 +310,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
    全局自定义弹窗(替代浏览器 confirm/alert/prompt)
    ─────────────────────────────────────────────────────────────────────────
    骨架在 main.html 末尾,JS API 在 main.js(dashConfirm/dashAlert/dashPrompt)。
-   .level-info / .level-warn / .level-danger 三档对应不同的视觉权重:
-     · info  —— 常规操作(默认):无顶部 banner,确定按钮 primary 蓝
-     · warn  —— 常规风险:橙色顶 banner,消息字色橙,确定按钮 warn 橙
-     · danger —— 严重风险 / 不可逆:红色顶 banner,消息字色红 + 粗体,
-                确定按钮 danger 红
-   背景遮罩点空白处 = 取消;键盘 Enter = 确认,Esc = 取消(main.js 绑定)。
+   .level-info / .level-warn / .level-danger 三档:常规操作(默认)/ 常规风险 / 严重风险或不可逆。
    ═════════════════════════════════════════════════════════════════════════ */
 .dash-modal-backdrop {
   position: fixed; inset: 0;
@@ -369,7 +350,6 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .dash-modal-message {
   font-size: 13px; color: var(--text); line-height: 1.6;
   white-space: pre-wrap; word-break: break-word;
-  /* 保留 \n,长内容自动换行;不溢出 modal */
 }
 .dash-modal.level-warn   .dash-modal-message { color: var(--img); }
 .dash-modal.level-danger .dash-modal-message { color: #dc3545; font-weight: 600; }
@@ -412,8 +392,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   background: color-mix(in srgb, #dc3545 20%, var(--panel));
   border-color: color-mix(in srgb, #dc3545 60%, var(--border));
 }
-/* .dash-btn-success:绿色调,用于「快速 / 增量」类操作 —— 区别于 primary
-   (蓝色,常规)和 major(渐变,重型);让用户一眼能区分按钮成本量级 */
+/* .dash-btn-success:绿色调,用于「快速 / 增量」类操作,与 primary(常规)区分按钮成本量级 */
 .dash-btn-success {
   background: color-mix(in srgb, var(--in) 12%, var(--panel));
   border: 1px solid color-mix(in srgb, var(--in) 35%, var(--border));
@@ -427,12 +406,8 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 /* ═════════════════════════════════════════════════════════════════════════
    窄屏(手机)适配
    ─────────────────────────────────────────────────────────────────────────
-   理由:CSS cascade 同 specificity 走 source order,后写者赢。因此移动端
-   ``@media`` 必须出现在被覆写的 desktop 规则**之后**,否则像
-   ``.dash-section { padding: 16px 18px }`` 这种放在文件中段的桌面规则会
-   反向把 ``@media { .dash-section { padding: 12px 14px } }`` 覆盖掉。
-   本块统一处理跨 tab 通用的窄屏调整;子文件(dashboard.css / logs.css /
-   等)内的 @media 只管该 tab 自己的细节(如 .log-row 重排)。
+   同 specificity 后写者赢,所以本块必须在被覆写的桌面规则之后。
+   这里只放跨 tab 通用的窄屏调整,各 tab 自己的细节写在各自 CSS 的 @media 里。
    ═════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 600px) {
   /* 顶部导航 / 内容滚动区:padding 收紧 */
@@ -444,9 +419,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
   .dash-section { padding: 12px 14px; }
   .dash-section-meta { flex-wrap: wrap; font-size: 11px; }
 
-  /* 通用 tab 容器(.dashboard / .config-tab / .backup 共享同款 flex column 布局)
-     —— section 之间的垂直间距桌面 24px → 移动 10px,任何新 tab 容器只要
-     套用同款 selector list,会自动跟着收紧。 */
+  /* 通用 tab 容器的 section 间距收紧 */
   .dashboard,
   .config-tab,
   .backup,

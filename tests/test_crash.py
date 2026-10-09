@@ -193,7 +193,7 @@ def test_render_list_fragment_shape(tmp_path):
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 游戏子进程 core 文件(转储列表下方的新栏目)
+# 游戏子进程 core 文件(转储列表下方的栏目)
 # ─────────────────────────────────────────────────────────────────────────
 
 class _FakeCoreReq:
@@ -388,7 +388,7 @@ def test_list_cores_attaches_analysis(tmp_path, monkeypatch):
 
 
 def test_core_section_frontend_contract():
-    """前端契约:新栏目在转储列表下方,统计卡 + 两列(游戏 / 崩溃模块)+ 下载 / 批量删除,
+    """前端契约:core 栏目在转储列表下方,统计卡 + 两列(游戏 / 崩溃模块)+ 下载 / 批量删除,
     且明确写了「完整调用栈要 gdb」。"""
     pc = _crash()
     html, js, css = pc.TAB_HTML, pc.TAB_JS, pc.TAB_CSS
@@ -409,15 +409,12 @@ def test_core_section_frontend_contract():
     assert re.findall(r'crash-col-(\w+)', core_fn) == \
         ['chk', 'time', 'sig', 'size', 'name', 'mod', 'game', 'act']
 
-    # ★ 光同序不够:两张表是独立 table,auto 布局下各按内容算宽,左侧仍对不齐。
-    # 共享列必须写死宽度 + table-layout: fixed,宽度才由 CSS 说了算。
+    # ★ 光同序不够:两张独立 table 在 auto 布局下各按内容算宽,共享列必须写死宽度 + table-layout: fixed 才对得齐。
     assert re.search(r'\.crash-table\s*\{[^}]*table-layout:\s*fixed', css)
     for cls in ('chk', 'time', 'sig', 'size', 'name', 'act'):
         assert re.search(r'\.crash-col-%s\s*\{[^}]*width:\s*\d+px' % cls, css), cls
-    # ★ 尾部两列也要上下对齐:fixed 布局下**未指定宽度**的列均分富余空间,
-    # 所以两张表必须**各留恰好两列**不给宽度(转储 uid/gid、core mod/game),
-    # 它们才会各占一半且逐像素同宽。多一列少一列都会让两表的尾部错开;
-    # 一列都不留则富余按比例摊回共享列,连前四列都跟着跑偏。
+    # ★ 尾部两列也要对齐:fixed 布局下**未指定宽度**的列均分富余空间,两张表必须**各留恰好两列**不给宽度
+    # (转储 uid/gid、core mod/game);一列都不留则富余按比例摊回共享列,连前四列都跟着跑偏。
     def _has_width(cls):
         return bool(re.search(r'\.crash-col-%s\b[^{]*\{[^}]*width:' % cls, css))
 
@@ -454,7 +451,7 @@ def _mobile_css(css: str) -> str:
 
 
 def test_tables_size_columns_to_content_on_mobile():
-    """★ 窄屏下两张表的列宽按内容算,不再用宽屏那套固定像素。"""
+    """★ 窄屏下两张表的列宽按内容算,不沿用宽屏那套固定像素。"""
     css = _crash().TAB_CSS
     m = _mobile_css(css)
     assert re.search(r'\.crash-table\s*\{[^}]*table-layout:\s*fixed', css)

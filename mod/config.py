@@ -24,8 +24,7 @@ from . import state, boot
 
 log = get_logger(PLUGIN, 'LGTBot')
 
-# 默认游戏快捷按钮列表 —— 与 buttons.DEFAULT_MENU_GAMES 同源,这里复制一份是
-# 为了让 ensure_config 写出 config.yaml 模板时直接呈现给用户。
+# 与 buttons.DEFAULT_MENU_GAMES 同源;复制一份是为了让 ensure_config 写出的 config.yaml 模板直接呈现给用户。
 _DEFAULT_MENU_GAMES = [
     '数字蜂巢', '天赋云巢', '炼金术士',
     '差值投标', '决胜五子', '彩虹奇兵',
@@ -90,9 +89,8 @@ def _get_ctx():
         return None
 
 
-# 解析后的引擎管理员 openid 列表(与传给 LGTBot_ElainaBot.start 的 admins 串同源)。
-# 由 load_plugin_config 每次 @on_load 覆写;dispatcher 的「%中断」代理需要用其中
-# 一个身份替换请求者 uid(引擎 HasAdmin 只认这个集合),故在此暴露给同包模块。
+# 解析后的引擎管理员 openid 列表(与传给 LGTBot_ElainaBot.start 的 admins 串同源),每次 @on_load 覆写。
+# dispatcher 的「%中断」代理要用其中一个身份替换请求者 uid(引擎 HasAdmin 只认这个集合)。
 ADMIN_UIDS: tuple[str, ...] = ()
 
 
@@ -127,8 +125,7 @@ def load_plugin_config() -> str:
     if admins_str:
         log.info(f'LGTBot 管理员配置：{len(clean_uids)} 人')
 
-    # 把运行时可调字段套用到 quota 模块（每次 @on_load 都重新读取，
-    # 改完 config.yaml 在 Web UI reload 插件即生效，无需重启进程）
+    # 每次 @on_load 都重新下发，改完 config.yaml 在 Web UI reload 插件即生效，无需重启进程
     _apply_runtime_tunables(cfg)
 
     return admins_str
@@ -138,21 +135,15 @@ def _apply_runtime_tunables(cfg: dict):
     """把 config.yaml 中的可调字段下发到对应运行时模块。
 
     下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
-    ``load_plugin_config`` 处理,不在此函数内):
-      bind_bot_appid → image_hosting → refresh_wait_timeout →
-      active_push_daily_limit → text_at_as_mention → image_upload_dedup_ttl →
-      notify_groups → blocked_commands →
-      sandbox_dm_users → menu_game_buttons → sponsor_enabled
+    ``load_plugin_config`` 处理,不在此函数内)。
     """
     from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
     from . import dispatcher as _dispatcher
 
     # ── bind_bot_appid ────────────────────────────────────────────────────
-    # 绑定机器人:所有出站消息 / 数据读取固定走该 bot,其他 bot 的事件被 dispatcher 静默忽略。
     # 这里只落配置原值到 state,真正解析(在线校验 / 回退第一个)由 helpers.get_bound_appid() 每次调用惰性完成。
     raw_bind = cfg.get('bind_bot_appid', '')
-    # appid 是纯数字,不带引号时 yaml 解析成 int(手工 / 框架通用编辑器写入的
-    # 常见形态)—— 按字符串接受;若直接忽略,绑定会在重启后静默回退第一个 bot
+    # appid 是纯数字,不带引号时 yaml 解析成 int —— 按字符串接受;若直接忽略,绑定会在重启后静默回退第一个 bot
     if isinstance(raw_bind, int) and not isinstance(raw_bind, bool):
         raw_bind = str(raw_bind)
     if not isinstance(raw_bind, str):
@@ -164,14 +155,12 @@ def _apply_runtime_tunables(cfg: dict):
         new = bind_appid or '(自动第一个)'
         log.info(f'bind_bot_appid: {old} → {new}')
         state.bind_bot_appid = bind_appid
-    # 主动推送权限按群点查 + TTL 缓存(见 helpers.can_push_group),这里只需在
-    # 绑定可能变化时把缓存打掉 —— 权限是 per-bot 的,换个 bot 结论全变。
+    # 主动推送权限是 per-bot 的,绑定可能变化时把 helpers.can_push_group 的 TTL 缓存打掉
     helpers.invalidate_push_cache()
 
     # ── image_hosting ─────────────────────────────────────────────────────
-    # 图床名单**动态**取自主框架模块 status()(≥2.0.0 beds/ 自动发现);模块
-    # 未加载时无法校验,保留原值 —— 运行时 _do_upload 会按 status 早退,
-    # 可用性徽章也会如实显示 unknown / module_off。'any' 恒为合法值。
+    # 图床名单**动态**取自主框架模块 status();模块未加载时无法校验,保留原值 ——
+    # 运行时 _do_upload 会按 status 早退。'any' 恒为合法值。
     backend = cfg.get('image_hosting', '')
     if not isinstance(backend, str):
         log.warning(f'image_hosting 应为字符串，已忽略 (got {backend!r})')
@@ -209,8 +198,7 @@ def _apply_runtime_tunables(cfg: dict):
             quota.REFRESH_WAIT_TIMEOUT = timeout_f
 
     # ── active_push_daily_limit ───────────────────────────────────────────
-    # 单群 / 单用户每日主动消息上限(QQ 官方接口限制)。用满后该目标当日退回「刷新按钮」被动机制
-    # (callbacks._active_push_allowed),次日 0 点随日分桶自动重置。0 = 不限制;非法值忽略并保留现值。
+    # 用满后该目标当日退回「刷新按钮」被动机制(callbacks._active_push_allowed),次日 0 点随日分桶自动重置。
     limit = cfg.get('active_push_daily_limit', 1000)
     try:
         limit_i = int(limit)
@@ -241,8 +229,7 @@ def _apply_runtime_tunables(cfg: dict):
         _dispatcher.TEXT_AT_AS_MENTION = text_at_on
 
     # ── image_upload_dedup_ttl ────────────────────────────────────────────
-    # 同份图片重复上传去重 TTL。0 = 关闭去重(每次都重新上传,仍保留 filename
-    # 唯一化避免 cos_key 冲突);负数自动归 0;非数值忽略保留旧值。
+    # 0 = 关闭去重(每次都重新上传,仍保留 filename 唯一化避免 cos_key 冲突)。
     raw_ttl = cfg.get('image_upload_dedup_ttl', 60.0)
     try:
         ttl_f = float(raw_ttl)
@@ -259,9 +246,7 @@ def _apply_runtime_tunables(cfg: dict):
             uploader.URL_CACHE_TTL = ttl_f
 
     # ── notify_groups ─────────────────────────────────────────────────────
-    # 通知消息(崩溃报告 / 崩溃熔断告警 / 自动重启说明)的推送目标,可填多个群 ——
-    # 三类通知都会向**全部**群推送(见 callbacks.broadcast_notify)。
-    # 规范化:strip + 去空 + 去重保序;非列表 / 缺失 → 空(不推送)。
+    # 崩溃报告 / 崩溃熔断告警 / 自动重启说明都向**全部**群推送(见 callbacks.broadcast_notify)。
     # 纯数字群 id 不带引号时 yaml 解析成 int,str() 统一收下(同 bind_bot_appid)。
     raw_groups = cfg.get('notify_groups', None)
     groups: list = []
@@ -274,8 +259,7 @@ def _apply_runtime_tunables(cfg: dict):
                 groups.append(gid)
     elif raw_groups not in (None, ''):
         log.warning(f'notify_groups 应为列表，已忽略 (got {type(raw_groups).__name__})')
-    # 旧字段名兼容:crash_notify_group 是单个群的字符串。
-    # 新字段留空而旧字段有值时沿用旧值并提示迁移 —— 否则老部署升级后通知会**静默消失**,而这几条恰恰是最不能漏的消息。
+    # 兼容旧字段名 crash_notify_group(单个群):否则老部署升级后这几条最不能漏的通知会**静默消失**。
     if not groups:
         legacy = cfg.get('crash_notify_group', '')
         legacy = '' if isinstance(legacy, bool) else str(legacy).strip()
@@ -291,8 +275,7 @@ def _apply_runtime_tunables(cfg: dict):
         _callbacks.NOTIFY_GROUPS = new_groups
 
     # ── blocked_commands ──────────────────────────────────────────────────
-    # 追加屏蔽指令:与 dispatcher.BUILTIN_BLOCKED_COMMANDS 共同组成屏蔽表(两个 catch-all 派发前调 _is_blocked_command 检查)。
-    # 规范化:strip + 去空 + 去重保序;严格按配置匹配。非法 / 缺失 → 空表(仅内置屏蔽项生效)。
+    # 与 dispatcher.BUILTIN_BLOCKED_COMMANDS 共同组成屏蔽表;斜杠原样保留,严格按配置匹配(见 _is_blocked_command)。
     raw_blocked = cfg.get('blocked_commands', None)
     if isinstance(raw_blocked, list):
         seen: set = set()
@@ -313,10 +296,8 @@ def _apply_runtime_tunables(cfg: dict):
         _dispatcher.BLOCKED_COMMANDS = blocked_t
 
     # ── sandbox_dm_users ──────────────────────────────────────────────────
-    # 列表内用户私信跳过被动配额,直接主动直推。非法 / 缺失 → 空集合(所有私信按正式环境规则:无有效 msg_id 直接丢弃)。
-    # 特例:恰好只有一项 'all' → 全员直推模式(callbacks.DM_PUSH_ALL),对全部用户主动私信、不再丢弃。
-    # 白名单老语义原样保留,官方收回权限时把配置改回白名单即可整体还原。
-    # 混入其他项(如 ['all', openid])按普通白名单处理:字面 'all' 不匹配任何真实 openid,等于无效项。
+    # 列表内用户私信跳过被动配额直接主动推送;恰好只有一项 'all' → 全员直推模式(callbacks.DM_PUSH_ALL)。
+    # 混入其他项时按普通白名单处理:字面 'all' 不匹配任何真实 openid,等于无效项。
     raw_sandbox = cfg.get('sandbox_dm_users', None)
     if isinstance(raw_sandbox, list):
         cleaned = [str(u).strip() for u in raw_sandbox if str(u).strip()]
@@ -334,7 +315,6 @@ def _apply_runtime_tunables(cfg: dict):
         _callbacks.SANDBOX_DM_USERS = sandbox_set
 
     # ── menu_game_buttons ─────────────────────────────────────────────────
-    # 非法 / 缺失时回退到默认 6 个;
     # buttons.build_menu_buttons() 每次调用都读这个列表,所以下发后下一次回欢迎菜单即生效。
     raw_games = cfg.get('menu_game_buttons', None)
     if raw_games is None:
@@ -349,8 +329,7 @@ def _apply_runtime_tunables(cfg: dict):
         _buttons.MENU_GAMES = games
 
     # ── sponsor_enabled ───────────────────────────────────────────────────
-    # 赞助功能总开关,**默认关闭**(插件市场里的第三方部署看不到任何收款引导)。
-    # 关闭时:三个入口都不生成「赞助支持」按钮,「赞助支持」指令转发给引擎。
+    # **默认关闭**:插件市场里的第三方部署看不到任何收款引导。
     # 只接受真正的布尔值 —— yaml 里写 'true' / 1 这类近似值一律按非法忽略并保留现值。
     raw_sponsor = cfg.get('sponsor_enabled', None)
     if raw_sponsor is None:
@@ -371,7 +350,7 @@ def persist_bind_bot_appid(appid: str) -> tuple[bool, str]:
 
     用**行级文本替换**而非 yaml 全量重写 —— 保住 ensure_config 生成的注释和
     用户手写内容。key 不存在(老配置文件)时带注释追加到文件末尾。写盘成功后
-    同步 ``state.bind_bot_appid`` + 从新绑定 bot 的 data.db 重载全量群集合。
+    同步 ``state.bind_bot_appid`` 并作废主动推送权限缓存。
     """
     import os
     import re as _re

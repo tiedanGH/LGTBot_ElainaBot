@@ -1,10 +1,8 @@
 /* ───── 指标面板 tab 专属样式 ─────
-   顶部独立标题栏(统一刷新按钮 + 查询时间)+ 三个区共用状态卡 grid;游戏数据区另有 4 张小表的两列自适应网格。 */
+   顶部独立标题栏(统一刷新按钮 + 查询时间)+ 三个区共用状态卡 grid;游戏数据区另有 4 张小表。 */
 
 /* ── 顶部标题栏 ──
-   header 是本区块唯一内容(action-msg 通常为空且 :empty 隐藏),归零它的margin-bottom,
-   否则下方 = padding-bottom + header margin,比上方 padding 大;
-   同时把标题 / 查询时间 / 刷新按钮整体放大一档。action-msg 出现时靠自身 margin-top 分隔,不受影响。 */
+   header 是本区块唯一内容,归零它的 margin-bottom 才上下对称;action-msg 出现时靠自身 margin-top 分隔。 */
 .metrics-topbar .dash-section-header { margin-bottom: 0; }
 .metrics-topbar .dash-section-title { font-size: 18px; }
 .metrics-topbar .dash-section-meta { font-size: 14px; gap: 10px; }

@@ -72,8 +72,7 @@ def test_audit_render_list_is_success_fragment(tmp_path, monkeypatch):
 
 
 def test_audit_module_exposes_no_mutation_endpoint():
-    """★ 安全约束:审计流**不提供**清空 / 删除端点(防自毁审计)。
-    有人日后加了 render_clear / delete_handler,这里立刻变红。"""
+    """★ 安全约束:审计流**不提供**清空 / 删除端点(防自毁审计)。"""
     page_audit, _m, _l = _pages()
     public = {n for n in dir(page_audit) if not n.startswith('_')}
     assert not {n for n in public
@@ -109,7 +108,7 @@ def test_audit_get_data_escapes_script_close(tmp_path, monkeypatch):
 
 @pytest.fixture
 def _metrics_env(monkeypatch):
-    """把 page_metrics 依赖的四个数据源全部替换成可控替身。"""
+    """把 page_metrics 依赖的数据源全部替换成可控替身。"""
     _a, page_metrics, _l = _pages()
     monkeypatch.setattr(page_metrics.metrics, 'query_game_stats',
                         lambda **_: {'available': True, 'errors': [],
@@ -236,8 +235,7 @@ def test_log_ring_buffer_drops_oldest(_logs):
 
 
 def test_log_buffer_lives_in_persistent_dict(_logs):
-    """★ 跨热重载:deque 必须挂在 boot._get_persistent() 上
-    旧 callbacks 写的日志要能被新注册的页面读到。这里直接核对是同一个对象。"""
+    """★ 跨热重载:deque 必须挂在 boot._get_persistent() 上 —— 旧 callbacks 写的日志要能被新注册的页面读到。"""
     from plugins.LGTBot_ElainaBot.mod import boot
     assert _logs._logs is boot._get_persistent()['logs_deque']
     _logs.log_incoming('U1', 'G1', 'via module')
@@ -272,8 +270,7 @@ def _page_config():
 def test_config_layout_yaml_full_width_rest_in_grid():
     """插件配置通栏在最上,其余编辑器全在 .cfg-grid 里,且**顺序即行序**。
 
-    grid 靠 DOM 顺序自动配对左右两栏,所以挪动任何一块都会改变分行 ——
-    这条断言就是那份"重要更新|更新公告 / 紧急公告|疑难解答 / …"的版式说明书。
+    grid 靠 DOM 顺序自动配对左右两栏,所以挪动任何一块都会改变分行。
     """
     pc = _page_config()
     html = pc.TAB_HTML
@@ -306,8 +303,7 @@ def test_config_grid_is_two_columns_only_on_wide_screens():
 def test_config_html_div_balance_survives_section_strip(monkeypatch, sponsor_on):
     """★ 分栏包了一层 div,``<div>`` / ``</div>`` 必须始终配平 —— 两态都要。
 
-    真实风险:若 SPONSOR 标记一头在分栏内、一头在分栏外,服务端整段切除会顺手吃掉 grid 的收尾 ``</div>``,
-    整个页面结构塌掉(浏览器容错后表现为版式乱掉,没有任何报错)。
+    若 SPONSOR 标记一头在分栏内、一头在分栏外,服务端整段切除会顺手吃掉 grid 的收尾 ``</div>``,版式无声乱掉。
     """
     pc = _page_config()
     from plugins.LGTBot_ElainaBot.mod import buttons
@@ -334,8 +330,7 @@ def _main():
 def _clean_registry(monkeypatch):
     """给 web_pages 换上干净的 _registry / _routes + **未包装**的 get_pages。
 
-    ``register()`` 装的过滤 wrap 是故意不解的(见 unregister 尾注),会跨测试残留;
-    这里退回链条最内层,让每个用例都从同一个起点开始,与执行顺序无关。
+    ``register()`` 装的过滤 wrap 故意不解,会跨测试残留;这里退回链条最内层,用例与执行顺序无关。
     """
     pytest.importorskip('aiohttp')
     from core.plugin import web_pages
@@ -373,8 +368,7 @@ def test_all_action_keys_are_hidden_from_sidebar(_clean_registry):
 
 def test_lazy_html_dict_defers_provider_until_getitem():
     """★ 双取值防护:框架 get_page_html 先 ``.get('html')`` 做 truthy 检查再 ``[...]`` 取值。
-    provider 有副作用(重启端点会释放 C++ 引擎),跑两遍就是对已 freed 的 g_bot_core 二次 deref → tcache double-free。
-    所以 .get 只能返回占位,provider 只在 __getitem__ 时调用一次。"""
+    provider 有副作用(重启端点会释放 C++ 引擎),跑两遍会对已释放的 g_bot_core 二次 deref,所以 .get 只返回占位。"""
     wm = _main()
     calls = []
     d = wm._LazyHtmlDict({'key': 'k', 'label': 'L'}, lambda: calls.append(1) or '<b>x</b>')
@@ -479,7 +473,7 @@ async def test_panel_restart_rejected_does_not_notify(monkeypatch):
 
 
 def test_panel_restart_route_registered(_clean_registry):
-    """按钮改走 register_route 后,注册 / 注销都要跟上(漏了按钮直接 404)。"""
+    """面板重启按钮走 register_route,注册 / 注销都要跟上(漏了按钮直接 404)。"""
     wm = _main()
     wm.register()
     assert ('GET', wm._RESTART_PANEL_ROUTE) in _clean_registry._routes
@@ -593,7 +587,7 @@ def test_button_and_title_icons_line_up_with_their_text():
 
 
 def test_icons_follow_the_current_text_colour():
-    """★ 换 SVG 的目的之一就是跟着主题 / 选中态换色 —— 图元里写死颜色就白换了。"""
+    """★ 图标要跟着主题 / 选中态换色 —— 图元里不能写死颜色。"""
     wm = _main()
     html = wm._render_html()
     css = html[:html.index('</style>')]
@@ -606,7 +600,7 @@ def test_icons_follow_the_current_text_colour():
 
 
 def test_theme_button_swaps_the_use_href_not_the_button_text():
-    """★ 按钮里现在是 SVG,写 textContent 会把它整个冲掉,图标从此消失。"""
+    """★ 按钮里是 SVG,写 textContent 会把它整个冲掉,图标从此消失。"""
     wm = _main()
     html = wm._render_html()
     assert ("const THEME_ICON = {auto: '#i-theme-auto', light: '#i-theme-light', "
@@ -625,8 +619,7 @@ def test_planned_restart_rewrites_only_its_label_span():
 
 
 def test_title_carries_the_inlined_site_logo():
-    """★ 站标走 data URI:面板 HTML 由框架路由吐出,页面里的相对路径落不到插件
-    目录,单为一张图开一条静态路由不值当。"""
+    """★ 站标走 data URI:面板 HTML 由框架路由吐出,页面里的相对路径落不到插件目录。"""
     wm = _main()
     html = wm._render_html()
     assert re.search(r'<h1><img class="topbar-logo" src="data:image/png;base64,[A-Za-z0-9+/=]+"'
@@ -669,9 +662,8 @@ def test_restart_icon_is_drawn_heavier_but_smaller_than_the_rest():
 def test_theme_toggle_is_tri_state_and_defaults_to_auto():
     """★ 主题三态:自动 → 浅色 → 深色 → 自动,默认自动。
 
-    「自动」= 跟随主框架面板的夜间模式。框架把开关写在同源 localStorage 的
-    ``elaina_dark``('1' = 夜间),本页是框架面板 iframe 里的一块,只能靠这个键跟随
-    键名写错的话自动模式永远停在浅色,而且不会报任何错。
+    「自动」= 跟随主框架面板的夜间模式:本页在框架面板的 iframe 里,只能靠同源 localStorage 的
+    ``elaina_dark``('1' = 夜间)跟随,键名写错的话自动模式永远停在浅色。
     """
     wm = _main()
     html = wm._render_html()
@@ -681,9 +673,9 @@ def test_theme_toggle_is_tri_state_and_defaults_to_auto():
     assert "return frameworkDark() ? 'dark' : 'light';" in html
     # 默认自动:没存过 / 存的是旧值都落到 auto
     assert "applyTheme(saved || 'auto')" in html
-    # 首屏按钮就是自动态图标,不能还是浅色那一个
+    # 首屏按钮就是自动态图标
     assert re.search(r'id="theme-toggle".*?<use href="#i-theme-auto"', html)
-    # 点击按 THEME_MODES 轮转,原来的「明暗对翻」写法必须消失
+    # 点击按 THEME_MODES 轮转,不能是明暗二态对翻
     assert 'THEME_MODES.indexOf(themeMode) + 1' in html
     assert "cur === 'dark' ? 'light' : 'dark'" not in html
 
@@ -691,14 +683,12 @@ def test_theme_toggle_is_tri_state_and_defaults_to_auto():
 def test_theme_auto_follows_framework_toggle_live():
     """★ 框架切夜间模式时本页要实时跟随:同源跨 document 的 storage 事件。
 
-    只在自动模式下跟 —— 用户手动选过浅色 / 深色是显式覆盖,再跟就是把人家的
-    选择改掉了。
+    只在自动模式下跟 —— 用户手动选过浅色 / 深色是显式覆盖。
     """
     wm = _main()
     html = wm._render_html()
     i = html.index("addEventListener('storage'")
-    # 只截这个 listener 自己的函数体 —— 放宽窗口会串到下面那个
-    # visibilitychange listener(它也写了 themeMode === 'auto'),漏判就无声无息
+    # 只截这个 listener 自己的函数体:下面的 visibilitychange listener 也写了 themeMode === 'auto'
     body = html[i:html.index('});', i)]
     assert 'FRAMEWORK_DARK_KEY' in body
     assert "themeMode === 'auto'" in body
@@ -708,8 +698,7 @@ def test_theme_resolved_in_head_before_first_paint():
     """★ 首屏就要定主题:main.js 等 DOMContentLoaded,那之前整页按
     ``data-theme="light"`` 画一遍 —— 夜间模式下就是一记白闪。
 
-    首屏脚本必然与 main.js 重复一份取值逻辑,那就把「键名一致」钉死:
-    任一处改键名而另一处没跟上,首屏与稳定态就会是两个主题。
+    首屏脚本与 main.js 各有一份取值逻辑,键名必须一致,否则首屏与稳定态是两个主题。
     """
     wm = _main()
     html = wm._render_html()
@@ -725,8 +714,7 @@ def test_theme_resolved_in_head_before_first_paint():
 def test_clean_badge_threshold_and_wiring():
     """★ 「清理」标记:仪表盘图片缓存 / 崩溃转储 core 文件超 256MB 时亮橙色。
 
-    两处都挂在各自的 apply 数据函数里 —— 清理动作结束会重新拉一次 payload 并
-    apply,标记因此在清干净的那一刻自动消失,不需要额外通知谁。
+    两处都挂在各自的 apply 数据函数里 —— 清理结束会重新拉 payload 并 apply,标记随之消失。
     """
     wm = _main()
     html = wm._render_html()
@@ -994,8 +982,7 @@ def test_review_panel_shows_the_last_review_error():
     assert 'id="review-scan-error"' in html
     i = html.index("getElementById('review-scan-error')")
     body = html[i:i + 420]
-    # 断言真的把错误文本写进去了 —— 只查 last_error / permanent 出现过的话,
-    # 把赋值改成空串照样能过(周围的取值代码里也有这两个词)
+    # 断言真的把错误文本写进去了:周围的取值代码里也有 last_error / permanent,只查它们出现过不够
     assert 'errEl.textContent = err.message' in body
     assert "scan.last_error" in body and 'err.permanent' in body
 
@@ -1073,7 +1060,7 @@ def test_tab_alert_badge_is_vertically_centred():
 
 
 def test_busy_buttons_come_back_with_their_own_icon():
-    """★ 忙碌态结束要还原图标 + 文案两样;只记文案、拿 textContent 写回去。"""
+    """★ 忙碌态结束要还原图标 + 文案两样;只记文案、拿 textContent 写回去会把图标冲掉。"""
     wm = _main()
     html = wm._render_html()
     assert 'function setBtnBusy(btn, label)' in html

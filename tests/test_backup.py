@@ -3,7 +3,7 @@
 """backup 模块测试 —— 路径解析 / zip 打包 / 列表排序 / 轮转 / SQLite 锁兜底
 / 自动触发判断。
 
-被测重点(对应 plan):
+被测重点:
   · _FRAMEWORK_ROOT 从 boot.PLUGIN_DIR 反推正确
   · create_backup() 产出 zip,包含期望的 data/ 目录条目
   · 不包含 engine/images/ 渲染缓存
@@ -55,7 +55,6 @@ def _make_plain_file(path: str, content: str = 'hello') -> None:
 @pytest.fixture(autouse=True)
 def _clean_backup_dir():
     """每个测试前清 BACKUP_DIR + 重建 data/ 源目录(冷启动状态)"""
-    # 清备份目录
     if os.path.isdir(backup.BACKUP_DIR):
         for entry in os.scandir(backup.BACKUP_DIR):
             try:
@@ -86,7 +85,6 @@ def test_resolve_framework_root():
     # conftest 把 fake PLUGIN_DIR 嵌成 <tmp>/plugins/LGTBot_ElainaBot,还原真实布局;
     # backup._FRAMEWORK_ROOT 按"上两级"算 → <tmp>,与生产环境逻辑一致
     assert backup._FRAMEWORK_ROOT == os.path.dirname(os.path.dirname(boot.PLUGIN_DIR))
-    # 备份路径形如 <FRAMEWORK_ROOT>/data/backup/lgtbot
     assert backup.BACKUP_DIR.endswith(os.path.join('data', 'backup', 'lgtbot'))
     # 关键安全断言:备份目录**不在**插件目录内
     assert not backup.BACKUP_DIR.startswith(boot.PLUGIN_DIR + os.sep)
@@ -110,7 +108,6 @@ def test_create_backup_produces_zip_with_expected_content():
     assert os.path.isfile(result['zip_path'])
     # 应至少含 4 个文件(1 sqlite + 1 json + 1 yaml + 1 txt)
     assert len(result['included']) >= 4
-    # zip 内含期望的归档条目
     with zipfile.ZipFile(result['zip_path'], 'r') as zf:
         names = set(zf.namelist())
     assert 'data/engine/lgtbot.db' in names
@@ -137,7 +134,6 @@ def test_create_backup_omits_images_and_build_dirs():
     assert result['success']
     with zipfile.ZipFile(result['zip_path'], 'r') as zf:
         names = zf.namelist()
-    # 不应含任何 images/ 或 build/ 路径
     for n in names:
         assert 'images' not in n, f'unexpected images entry: {n}'
         assert 'build' not in n, f'unexpected build entry: {n}'
@@ -165,7 +161,6 @@ def test_list_backups_sorted_by_mtime_desc():
     # 第一个应是 i=0(最新),最后一个应是 i=2(最老)
     assert backups[0]['name'] == files[0]
     assert backups[-1]['name'] == files[2]
-    # mtime 严格降序
     assert backups[0]['mtime_ts'] >= backups[1]['mtime_ts'] >= backups[2]['mtime_ts']
 
 
@@ -198,7 +193,6 @@ def test_prune_old_keeps_retention():
 
 def test_prune_old_retention_zero_noop():
     """retention<=0 不轮转(防误传)"""
-    # 造 3 个
     for i in range(3):
         path = os.path.join(backup.BACKUP_DIR, f'LGTBot_z_{i}.zip')
         with zipfile.ZipFile(path, 'w') as zf:
@@ -311,7 +305,6 @@ def test_restore_backup_sweeps_stale_sqlite_sidecars():
     # 原 path 应不在(已被改名)
     assert not os.path.isfile(journal)
     assert not os.path.isfile(wal)
-    # swept_sidecars 列表里应有这俩
     swept = restore_result['swept_sidecars']
     assert any('lgtbot.db-journal.stale_' in s for s in swept)
     assert any('lgtbot.db-wal.stale_' in s for s in swept)
@@ -341,16 +334,13 @@ def test_restore_preserves_old_inode_for_open_fd():
         restore_result = backup.restore_backup(create_result['zip_name'])
         assert restore_result['success']
 
-        # path 现在应当指向新 inode
         ino_after_path = os.stat(boot.DB_PATH).st_ino
         assert ino_after_path != ino_before, \
             'os.replace 应替换 dirent 到新 inode(不要原地 truncate)'
 
-        # fd 仍指向旧 inode(它的 stat 不变,可读)
         ino_via_fd = os.fstat(fd).st_ino
         assert ino_via_fd == ino_before, '旧 inode 必须由 fd 保持存活'
 
-        # 旧 inode 的内容应当与新 path 内容不同
         os.lseek(fd, 0, 0)
         via_fd_head = os.read(fd, 100)
         with open(boot.DB_PATH, 'rb') as f:

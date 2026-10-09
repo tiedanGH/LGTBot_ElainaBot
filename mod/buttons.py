@@ -1,16 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""按钮模板 + 触发命令正则。
+"""按钮模板 + 组装函数。
 
-设计要点：本插件的命令按钮**不使用 `enter` 字段**。
-  原因：当 bot.yaml 配置 `message.button_enter_to_send: true` 时，框架
-        keyboard.py 会把 `type=2 + enter=True` 强制转成 `type=1`（纯
-        callback 按钮）。type=1 在 QQ 协议层永远不会回填输入框，仅触发
-        INTERACTION_CREATE → bot ACK → 客户端弹"操作成功"，与"点按钮 →
-        文字进输入框"的本意冲突。
-  去掉 enter 后保持 type=2 不被转换：点击 → 文字回填到输入框 → 用户手动
-  点发送。如果想要"自动发送"，用户需在 bot.yaml 把 button_enter_to_send
-  设为 false 并在按钮里加回 enter=True。
+设计要点：本插件的命令按钮**不使用 `enter` 字段** —— bot.yaml 开了
+`message.button_enter_to_send` 时，框架 keyboard.py 会把 `type=2 + enter=True`
+转成 `type=1`，而 type=1 只触发 INTERACTION、永远不回填输入框。不带 enter 的
+type=2 点击后文字回填到输入框，由用户手动发送。
 """
 
 from __future__ import annotations
@@ -44,7 +39,6 @@ def btn(text: str, data: str = '', *, type: int = 2, style: int = 0,
 # ──────── 外部链接常量 ──────────────────────────────────────────────────────
 
 _OFFICIAL_GROUP_LINK = 'https://qm.qq.com/q/R3GXMpMU2m'
-# 问题反馈问卷链接 —— 默认指向腾讯文档表单,方便统一收集反馈
 _QUESTIONNAIRE_LINK = 'https://docs.qq.com/form/page/DY1JJTkZZeVh4TXZJ'
 _NAV_HOME_LINK = 'https://tiedan.site/'
 _REPO_ADAPTER_LINK = 'https://github.com/tiedanGH/LGTBot_ElainaBot'
@@ -55,9 +49,8 @@ _AFDIAN_LINK = 'https://afdian.com/a/tiedan-LGTBot/plan'
 
 
 # ──────── 赞助功能总开关 ────────────────────────────────────────────────────
-# 由 config.py::_apply_runtime_tunables 按 ``sponsor_enabled`` 覆写,**默认关闭**。
-# 关闭时本插件不展示任何赞助入口(下面三个 build_* 都不会带赞助按钮),「赞助支持」指令也直接转发给引擎
-# 插件市场里的第三方部署方看不到任何与本作者相关的收款引导。
+# 由 config.py::_apply_runtime_tunables 按 ``sponsor_enabled`` 覆写,**默认关闭**:插件市场里的第三方部署方不该看到本作者的收款引导。
+# 关闭时不展示任何赞助入口,「赞助支持」指令也直接转发给引擎。
 SPONSOR_ENABLED: bool = False
 
 
@@ -109,8 +102,7 @@ def build_game_action_buttons(game_name: str | None = None,
     `include_join_leave=True`(群聊默认)时,第一行是「加入 / 退出」;私信
     场景调用方传 False 跳过这一行,因为 DM 里玩家通常自己就是房主或经
     match_id 加入,/加入 这种群内简写并不适用。
-    `include_rule=True`(仅新建房间消息)且游戏名已知时,追加一行
-    `/规则 <游戏名>` 按钮。
+    `include_rule=True` 且游戏名已知时,追加一行 `/规则 <游戏名>` 按钮。
     两个开关都关掉且无游戏名时返回空列表,调用方负责跳过 pending_buttons
     的写入。
     """
@@ -200,10 +192,7 @@ def build_game_list_buttons() -> list[list[dict]]:
 def build_full_volume_apply_button() -> list[list[dict]]:
     """单按钮一行:「全量申请」(type=2,回填到输入框,用户自行补群号再发送)。
 
-    挂在非全量群的「消息回复限制」教学提示底部,与文案里给出的命令格式
-    ``全量申请 <本群群号>`` 对齐 —— 用户点完按钮后输入框出现「全量申请」,
-    再手动补群号即可。``type=2`` 不带 ``enter``,符合本插件按钮约定。
-    实际处理「全量申请」命令的是另一个插件,本插件只提供 UI 入口。
+    挂在「消息回复限制」教学提示底部。实际处理「全量申请」命令的是另一个插件,本插件只提供 UI 入口。
     """
     return [[BTN_FULL_VOLUME_APPLY]]
 
@@ -212,8 +201,7 @@ def build_about_buttons() -> list[list[dict]]:
     """/关于 回执底部附:左 适配层仓库,右 LGT-Bot 上游仓库。两个都是链接按钮
     (type=0,QQ 协议下点击直接跳转,无 style)。
 
-    ``SPONSOR_ENABLED`` 时「赞助支持」放**第一行**,两个仓库链接退到第二行 ——
-    关于页是介绍项目本身的地方,赞助引导在这里最不违和;开关关闭时这一行完全不出现。
+    ``SPONSOR_ENABLED`` 时「赞助支持」单独放**第一行**,开关关闭时这一行不出现。
     """
     rows: list[list[dict]] = []
     if SPONSOR_ENABLED:
@@ -246,15 +234,8 @@ def build_sponsor_buttons() -> list[list[dict]]:
 def build_support_buttons() -> list[list[dict]]:
     """官方群聊 + 问题反馈按钮组 —— 求助 / 反馈类消息底部统一引导。
 
-    都是 link 按钮(默认 ``type=0``),点击直接跳转外部 URL,**不依赖 bot 进程
-    存活**;因此在崩溃道歉等"进程即将 execv 重启"的场景下也安全可挂(callback
-    按钮 type=1/2 在 execv 后无法 ack,但 link 按钮跟客户端打开浏览器一样不受
-    影响)。
-
-    当前调用方:
-      · dispatcher.lgtbot_troubleshooting —— 疑难解答 Q&A 末尾
-      · dispatcher 两个 catch-all 的「计划重启」维护提示 —— 即将 execv 重启
-      · callbacks._try_send_crash_apology —— 引擎崩溃道歉末尾
+    都是 link 按钮,点击直接跳转外部 URL,**不依赖 bot 进程存活** —— 崩溃道歉等
+    进程即将 execv 重启的消息也能安全挂(callback 按钮在 execv 后无法 ack)。
     """
     return [[BTN_OFFICIAL_GROUP, BTN_FEEDBACK]]
 
@@ -277,12 +258,8 @@ def build_more_features_buttons() -> list[list[dict]]:
 
 
 # ──────── 欢迎菜单按钮组 ────────────────────────────────────────────────────
-# 「游戏快捷开局」部分按 ``MENU_GAMES`` 渲染,这个列表由 ``data/config.yaml``
-# 的 ``menu_game_buttons`` 字段在 @on_load 时下发 (见 config.py)。其他部分
-# (帮助 / 游戏列表 / 创建房间 / 战绩 / 仓库链接) 是固定的。
-#
-# 之所以拆成函数而非常量,是为了让 config 改后 dispatcher 下次 reply 立刻拿到
-# 新布局,不用重启进程;调用方一律走 ``build_menu_buttons()``。
+# 「游戏快捷开局」部分按 ``MENU_GAMES`` 渲染(由 ``data/config.yaml`` 的 ``menu_game_buttons`` 下发,见 config.py),其余部分固定。
+# 做成函数而非常量:config 改后 dispatcher 下次 reply 立刻拿到新布局。
 
 DEFAULT_MENU_GAMES: list[str] = [
     '数字蜂巢', '天赋云巢', '炼金术士',
@@ -308,9 +285,7 @@ def _build_robot_invite_link(uin: str, appid: str) -> str:
 def _auto_robot_invite_link() -> str:
     """用**绑定 bot** 的 (uin, appid) 拼邀请链接。
 
-    用在没有 event 上下文的发送路径(如 callbacks._send_dm_warning,跑在
-    C++ 工作线程上拿不到具体 event.appid)。绑定解析见
-    ``helpers.get_bound_appid``(配置的 bind_bot_appid,回退第一个 bot)。
+    用在没有 event 上下文的发送路径(如 callbacks._send_dm_warning)。
     """
     from . import helpers as _helpers
     appid = _helpers.get_bound_appid()
@@ -321,10 +296,8 @@ def _auto_robot_invite_link() -> str:
 def build_dm_warning_buttons() -> list[list[dict]]:
     """「私信消息限制」提示底部的单按钮一行 ——「💫 添加好友」link 跳转。
 
-    点击后 QQ 客户端打开 bot 分享页(同欢迎菜单「邀我进群」用同一个
-    ``_build_robot_invite_link``),用户可选「添加为好友」或「邀请到群」。
-    uin / appid 自动从 BotManager 抓任一活跃 bot 凭据 —— callbacks 触发点是
-    C++ 工作线程,拿不到具体的 event.appid。链接随绑定 bot 变化,不能做常量。
+    点击后 QQ 客户端打开 bot 分享页,用户可选「添加为好友」或「邀请到群」。
+    callbacks 侧拿不到 event.appid,链接按绑定 bot 现拼,随换绑变化,不能做常量。
     """
     return [[btn('💫 添加好友', link=_auto_robot_invite_link())]]
 
@@ -335,18 +308,15 @@ def build_menu_buttons(appid: str = '') -> list[list[dict]]:
     游戏快捷部分被切分为每行 ``MENU_GAMES_PER_ROW`` 个;``MENU_GAMES`` 为空
     列表时跳过整个游戏分区,菜单仍包含帮助/创建房间等固定按钮和底部链接。
 
-    ``appid`` 用于拼「邀我进群」按钮的链接(需要 bot 的 robot_qq + appid);
-    调用方建议传 ``event.appid``,空则从框架任一已加载 bot 取。
+    ``appid`` 用于拼「邀我进群」按钮的链接(需要 bot 的 robot_qq + appid),
+    调用方建议传 ``event.appid``。
     """
-    # 从 helpers 拿 bot 的 QQ uin 拼邀请链接(避免 circular import)
+    # 局部导入避免 circular import
     from . import helpers as _helpers
     uin = _helpers.get_bot_uin(appid)
     invite_link = _build_robot_invite_link(uin, appid)
 
-    # 游戏快捷区:固定显示 2 行 × MENU_GAMES_PER_ROW 个 = 6 个。
-    #   · 配置 ≤ 6 个:按原序全部展示(每次完全一致,不洗牌)
-    #   · 配置 > 6 个:每次调用都用 ``random.sample`` 随机抽 6 个,顺序也是随机的
-    #     —— 让用户每次 @bot 都能看到不同游戏组合,提升发现感
+    # 游戏快捷区最多 2 行;配置超出时每次随机抽,让用户每次 @bot 都能看到不同的游戏组合
     display_max = MENU_GAMES_PER_ROW * 2
     if len(MENU_GAMES) > display_max:
         display_games = random.sample(MENU_GAMES, display_max)
@@ -360,7 +330,7 @@ def build_menu_buttons(appid: str = '') -> list[list[dict]]:
     return [
         [BTN_MENU_HELP, BTN_MENU_GAME_LIST],
         [BTN_CREATE_ROOM, BTN_MORE_FEATURES],
-        # 游戏快捷开局按钮 (可配置 —— data/config.yaml 的 menu_game_buttons)
+        # 游戏快捷开局按钮
         *game_rows,
         # 底部链接按钮
         [BTN_OFFICIAL_GROUP, btn('🚀 邀我进群', link=invite_link)],
@@ -398,16 +368,14 @@ def cmd_input(text: str, show: str, reference: bool = False) -> str:
 
 
 # ──────── 欢迎菜单「logo / 标题下方」可扩展区块 ─────────────────────────────
-# dispatcher 在 logo 渲染成功 / 失败两个分支都会把本字符串拼到 markdown 末尾,
-# 所以即便图床没启用、logo 没拿到 URL,这里的内容也会照常显示。
+# dispatcher 在 logo 渲染成功 / 失败两个分支都会拼上本字符串,图床没启用时也照常显示。
 
 MENU_HEADER_EXTRA_MD = (
     cmd_input('更新公告', '✨ 点击查看最近更新') + '\n'
 )
 
-# 非全量群的菜单追加行:引导发起「全量申请」(免刷新授权)。
-# 是否拼接由 dispatcher 按事件判定 —— 仅群聊且 **非全量群** 显示;
-# 实际命令由另一插件实现,本插件只提供入口(与 _REFRESH_TIP_GROUP_TAIL / 全量申请按钮同源引导)。
+# 非全量群的菜单追加行:引导发起「全量申请」(免刷新授权),是否拼接由 dispatcher 判定。
+# 实际命令由另一插件实现,本插件只提供入口。
 MENU_FULL_VOLUME_CMD_MD = (
     cmd_input('全量申请', '⚡ 免刷新授权（大幅改善体验）') + '\n'
 )

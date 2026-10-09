@@ -25,8 +25,7 @@ function escapeHtml(s) {
 }
 
 /* ──── 主题(顶部标题栏右侧的 #theme-toggle,整页通用)────
-   三态循环:自动 → 浅色 → 深色 → 自动,默认自动。「自动」跟随主框架面板的夜间模式。
-   图标显示「当前实际主题」:自动 = 半月,浅色 = 太阳,深色 = 月亮(自动态用半月区分,具体是明是暗看页面本身)。 */
+   自动 → 浅色 → 深色三态循环,默认自动;「自动」跟随主框架面板的夜间模式。 */
 const THEME_MODES = ['auto', 'light', 'dark'];
 const THEME_ICON = {auto: '#i-theme-auto', light: '#i-theme-light', dark: '#i-theme-dark'};
 const THEME_TITLE = {
@@ -48,7 +47,6 @@ function applyTheme(mode) {
   document.documentElement.setAttribute('data-theme', resolveTheme(themeMode));
   const btn = document.getElementById('theme-toggle');
   if (btn) {
-    /* 改 <use> 的 href 换图标 */
     const use = btn.querySelector('use');
     if (use) use.setAttribute('href', THEME_ICON[themeMode]);
     btn.title = THEME_TITLE[themeMode];
@@ -73,9 +71,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ──── 标签「清理」标记 ────
-   某个标签下的文件占用超过阈值时,在该标签上亮一枚橙色「清理」提示去清理;清到阈值以下再刷新数据自动消失。
-   各标签在自己的 apply 数据函数里调用,所以清理完成后的那次刷新就会同步。 */
-const TAB_CLEAN_THRESHOLD = 256 * 1024 * 1024;      // 256 MB
+   文件占用超过阈值时亮起;各标签在自己的 apply 数据函数里调用,清理完成后的那次刷新就会同步。 */
+const TAB_CLEAN_THRESHOLD = 256 * 1024 * 1024;
 
 function setTabCleanBadge(id, bytes) {
   const el = document.getElementById(id);
@@ -91,7 +88,7 @@ if (_fullscreenBtn) {
   });
 }
 
-/* 换按钮的图标与文案 —— 按钮里现在是 <svg> + <span class="btn-label"> */
+/* 换按钮的图标与文案 —— 按钮里是 <svg> + <span class="btn-label"> 两段 */
 function setBtnIcon(btn, iconId, label) {
   if (!btn) return;
   const use = btn.querySelector('use');
@@ -166,7 +163,7 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
                                  {level: 'info'});
     if (!ok) return;
   } else {
-    /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选。默认勾上走自动:不拦新游戏,对局自然清空并静默 30s 后自己重启。 */
+    /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选;默认勾上:不拦新游戏,对局全部结束后自己重启。 */
     const input = await dashPrompt(
       '启用计划重启？\n\n' +
       '自动重启（推荐）：不限制新游戏创建，等全部对局结束自动重启。\n\n' +
@@ -233,9 +230,9 @@ document.getElementById('restart-btn').addEventListener('click', async () => {
  *   const value = await dashPrompt('输入名称', {defaultValue: 'foo'});
  *
  * level:
- *   · 'info'   常规操作(默认),OK 按钮 primary 蓝
- *   · 'warn'   常规风险(橙黄色顶 banner + 橙字),OK 按钮 warn 橙
- *   · 'danger' 严重风险 / 不可逆(红顶 banner + 粗体红字),OK 按钮 danger 红
+ *   · 'info'   常规操作(默认)
+ *   · 'warn'   常规风险
+ *   · 'danger' 严重风险 / 不可逆
  *
  * 键盘:Enter = OK,Esc = Cancel(prompt 里 input 聚焦,Enter 提交输入值)
  * 鼠标:点 backdrop 空白 = 取消(不会穿透到 modal 内部)
@@ -286,11 +283,9 @@ function _dashOpenModal(opts) {
       if (cbEl) cbEl.checked = !!checkboxChecked;
       if (cbLabel) cbLabel.textContent = checkbox || '';
     }
-    /* alert 只要一个「我知道了」,不显示取消 */
     cancelBtn.style.display = (kind === 'alert') ? 'none' : '';
     okBtn.textContent     = okText     || _DASH_OK_TEXT[kind] || '确定';
     cancelBtn.textContent = cancelText || '取消';
-    /* OK 按钮颜色随 level 切换 */
     okBtn.className = 'dash-btn ' + (
       level === 'danger' ? 'dash-btn-danger'
       : level === 'warn' ? 'dash-btn-warn'

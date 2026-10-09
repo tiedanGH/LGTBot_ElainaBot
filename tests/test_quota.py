@@ -2,12 +2,10 @@
 # -*- coding: utf-8 -*-
 """quota 模块测试 —— 配额状态机 / 异步等待 / 多 waiter 唤醒 race。
 
-被测重点(对应 plan 的 11 个 case):
+被测重点:
   · refresh_ref + try_consume_ref 基本路径
   · try_consume_ref 三种 None 原因:无 ref / 过期 / 配额满
-  · has_valid_ref **区分配额满 vs 无 ref**(msg_id 越权前置 — 这是关键
-    历史 bug fix:必须能区分"配额满但 5min 内 ref 仍有效"和"完全没 ref",
-    前者值得等刷新,后者私信场景应直接丢弃)
+  · has_valid_ref **区分配额满 vs 无 ref**:前者 ref 仍有效、值得等刷新,后者私信场景应直接丢弃
   · wait_and_consume 唤醒 + 超时
   · 多 waiter 并发唤醒(per-waiter Event 避免共享 Event 信号丢失)
 """
@@ -50,18 +48,15 @@ def test_try_consume_ref_missing_returns_none():
 def test_try_consume_ref_expired_returns_none_and_reaps():
     """过期 ref 返回 None,且**自动从 _active_ref 字典里清掉**"""
     quota.refresh_ref('g:gx', 'msg_id', 'msg_x')
-    # 手动把 expires_at 设到过去
     quota._active_ref['g:gx'][0]['expires_at'] = time.time() - 1
 
     assert quota.try_consume_ref('g:gx') is None
-    # 过期 ref 应该被 try_consume_ref 顺手清掉
     assert 'g:gx' not in quota._active_ref
 
 
 def test_try_consume_ref_quota_exhausted_returns_none():
     """配额满 (count >= ref_quota) 时返回 None,但 ref 仍在字典里"""
     quota.refresh_ref('g:gy', 'msg_id', 'msg_y')
-    # 消费 ref_quota 次,此时 count == ref_quota('g:gy') == 5
     for _ in range(quota.ref_quota('g:gy')):
         assert quota.try_consume_ref('g:gy') is not None
 
@@ -73,7 +68,7 @@ def test_try_consume_ref_quota_exhausted_returns_none():
 
 def test_has_valid_ref_distinguishes_full_vs_missing():
     """**关键 msg_id 越权前置区分** —— has_valid_ref 必须能区分:
-       · 配额满但 ref 在 5min 内 → True(值得等刷新)
+       · 配额满但 ref 在 TTL 内 → True(值得等刷新)
        · 无 ref / 已过期       → False(无效 msg_id,私信发主动消息必拒,应丢弃)
     """
     # 场景 A:完全没 ref
@@ -125,16 +120,8 @@ def test_build_refresh_button_last_flag():
 
 
 async def test_wait_and_consume_wakes_on_refresh():
-    """wait_and_consume 阻塞期间,refresh_ref 应能唤醒并让它拿到新配额。
-
-    模拟「配额满 → 等刷新 → 刷新到」流程:
-      1. 先把配额耗光
-      2. 拉起 wait_and_consume 协程
-      3. 100ms 后另一个协程 refresh_ref
-      4. wait_and_consume 应返回新 ref 的 (type, value, count=1, appid)
-    """
-    # state.event_loop 是 refresh_ref 用来跨线程唤醒 waiter 的依据,本测试
-    # 在协程里跑,直接拿 running loop 注入
+    """wait_and_consume 阻塞期间,refresh_ref 应能唤醒并让它拿到新配额。"""
+    # refresh_ref 经 state.event_loop 跨线程唤醒 waiter,这里注入当前 running loop
     _state.event_loop = asyncio.get_running_loop()
     quota.refresh_ref('g:gw', 'msg_id', 'old', appid='a1')
     for _ in range(quota.ref_quota('g:gw')):
@@ -144,7 +131,6 @@ async def test_wait_and_consume_wakes_on_refresh():
         await asyncio.sleep(0.05)
         quota.refresh_ref('g:gw', 'msg_id', 'new', appid='a2')
 
-    # 并行:wait_and_consume + 0.05s 后 refresh
     waiter_task = asyncio.create_task(quota.wait_and_consume('g:gw', timeout=2.0))
     refresher_task = asyncio.create_task(_refresher())
 
@@ -171,8 +157,7 @@ async def test_wait_and_consume_timeout_returns_none():
 async def test_multiple_waiters_all_woken():
     """3 个并发 wait_and_consume 同一 key,refresh 后应**全部苏醒**。
 
-    这是 per-waiter Event 设计(quota.py 历史 bug fix:旧实现用共享 Event,
-    一个 waiter ev.clear() 后其他 waiter 死等)。
+    每个 waiter 独立一个 Event:共享 Event 被其中一个 clear() 后,其余 waiter 会死等。
     """
     _state.event_loop = asyncio.get_running_loop()
 
@@ -180,7 +165,6 @@ async def test_multiple_waiters_all_woken():
         await asyncio.sleep(0.05)
         quota.refresh_ref('g:multi', 'msg_id', 'new')
 
-    # 3 个 waiter 并发等同一 key
     tasks = [
         asyncio.create_task(quota.wait_and_consume('g:multi', timeout=1.0))
         for _ in range(3)
@@ -188,9 +172,7 @@ async def test_multiple_waiters_all_woken():
     asyncio.create_task(_refresher())
 
     results = await asyncio.gather(*tasks)
-    # 全部应该苏醒(返回非 None)。注意:同一 ref 配额有群聊 5 条,3 个 waiter
-    # 抢同一份配额,前 5 个 ok,第 6+ 个会因 try_consume_ref 配额满返 None。
-    # 这里只 3 个,都能抢到。
+    # 群聊一条 ref 有 5 次配额,3 个 waiter 都抢得到
     assert all(r is not None for r in results), \
         f'expected all 3 waiters woken, got {results}'
     # 三个抢到的 count 应该是 1,2,3 的某种排列(并发顺序不定)
@@ -251,7 +233,7 @@ def _values(key):
 
 
 def test_pool_keeps_the_rest_of_older_refs():
-    """★ 新消息进来不再作废旧 msg_id 剩下的次数:先用完快过期的 A,再用 B,两条合计 10 次。"""
+    """★ 新消息进来不作废旧 msg_id 剩下的次数:先用完快过期的 A,再用 B,两条合计 10 次。"""
     quota.refresh_ref('g:pool', 'msg_id', 'A')
     quota.try_consume_ref('g:pool')
     quota.try_consume_ref('g:pool')
@@ -338,7 +320,7 @@ def test_pool_still_reads_as_a_single_ref_for_old_callbacks():
     assert {r['ref_value']: r['count'] for r in quota._active_ref['g:mixed']} == {'A': 0, 'B': 1}
     for _ in range(4):
         _old_try_consume_ref('g:mixed')
-    assert _old_try_consume_ref('g:mixed') is None         # B 用完,旧逻辑看不到 A —— 与改版前一致
+    assert _old_try_consume_ref('g:mixed') is None         # B 用完,旧逻辑看不到 A
     assert quota.try_consume_ref('g:mixed')[1] == 'A'      # 新逻辑照样把 A 用上
 
 

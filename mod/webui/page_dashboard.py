@@ -18,10 +18,9 @@
 
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_JS`` 从 ``templates/dashboard/`` 加载
-  · ``get_data()`` 返回面板数据(版本、机器人列表、缓存尺寸、引擎配置内容、
-    config 文件绝对路径 —— 保存走主框架 ``/api/config-file/save`` 端点)
+  · ``get_data()`` 返回面板数据(版本、机器人列表、缓存尺寸等)
   · ``render_check_update`` / ``render_do_update`` / ``render_clear_*``
-    供 ``webui/main.py`` 注册为隐藏 action 端点(参考 RESTART_KEY 套路),
+    供 ``webui/main.py`` 注册为隐藏 action 端点,
     每个端点返回 ``<pre id="result">JSON</pre>`` 单片段供 JS 解析
 """
 
@@ -64,7 +63,7 @@ TAB_JS = _load('dashboard/dashboard.js')
 
 # ─────────────────────────────────────────────────────────────────────────
 # 运行环境自检 —— 运行时依赖(引擎运行必须)+ 编译依赖(本地编译才需,预编译模式可免)。
-# 构建来源 mode 仍取 ``prebuilt.mode_info()``。
+# 构建来源 mode 取 ``prebuilt.mode_info()``。
 # ``get_data()`` 把结果塞进 dashboard-data,前端 dashboard.js 的 dashRenderSelfCheck 渲染成检查项网格。
 # 编译依赖列表覆盖 build.sh 依赖检查 + apt 清单 + CI(cmake.yml)所装。
 # ─────────────────────────────────────────────────────────────────────────
@@ -158,11 +157,10 @@ def self_check() -> dict:
 
     runtime = 引擎「跑起来」的硬依赖(缺失报红、计入严重异常):桥接层 .so / 引擎共享库 /
     Python 版本 + **逐项列出**的系统库(Boost.Python、libcurl、SQLite3、Protobuf)。系统库
-    判定优先用 ldd 实测:对真实产物(桥接 .so、build/lib*.so、runner)跑 ``ldd``,某库若出现
-    在 ``not found`` 集里即判缺(soname 版本精确、自动适应 --glog 等条件构建,不会像 ldconfig
-    静态子串那样误报;实测 Boost.System 是 header-only、glog 默认 OFF、gflags 被 --as-needed
-    丢弃 —— 都**不是**运行时依赖,不列)。ldd 还会额外揪出清单外的缺失外部库。产物 / ldd
-    不可用时回退 ldconfig/lib 目录静态判定。
+    判定优先对真实产物(桥接 .so、build/lib*.so、runner)跑 ``ldd``,某库若出现在 ``not found``
+    集里即判缺(soname 版本精确、自动适应 --glog 等条件构建,不会像 ldconfig 静态子串那样误报);
+    ldd 还会额外揪出清单外的缺失外部库。产物 / ldd 不可用时回退 ldconfig/lib 目录静态判定。
+    Boost.System(header-only)、glog(默认 OFF)、gflags(被 --as-needed 丢弃)都**不是**运行时依赖,不列。
 
     warn 级(``warn: True``,前端黄点、计入警告计数、不算严重异常):Qt 图片渲染 ——
     markdown2image 需要 Qt5 WebKit 或 Qt6 WebEngine **其一**(二选一,detail 注明当前后端),
@@ -226,7 +224,7 @@ def self_check() -> dict:
 
     # ── Qt 图片渲染(warn 级:二选一,缺失黄点计警告,引擎仍可启动) ─────────────
     # markdown2image 出图后端:Qt5 走 WebKit、Qt6 走 WebEngine,**二选一**即可。
-    # 用 _lib_present 区分并命名当前后端(与旧版一致);缺失只影响图片渲染。
+    # 用 _lib_present 区分并命名当前后端;缺失只影响图片渲染。
     qt5 = _lib_present('libQt5WebKit')          # 匹配 libQt5WebKit{,Widgets}*.so
     qt6 = _lib_present('libQt6WebEngineCore')
     qt_ok = qt5 or qt6
@@ -266,14 +264,7 @@ def self_check() -> dict:
 # 避免硬编码两处。
 #
 # 关键:framework 大型插件入口的 sys.modules 名是 ``plugins.LGTBot_ElainaBot``
-# (见 core/plugin/_loader.py::_import_plugin 行 246 的
-# ``mod_name = f'plugins.{name}'``),**不是** ``plugins.LGTBot_ElainaBot.main``。
-# 早期版本误用后者导致查不到 → "无法解析 GitHub 仓库地址"。
-#
-# 三层 fallback 保证稳健:
-#   1. sys.modules['plugins.LGTBot_ElainaBot']           (大型插件 entry)
-#   2. sys.modules['plugins.LGTBot_ElainaBot.main']      (multi-file 加载备选)
-#   3. ast.parse(main.py) → 取顶层 __plugin_meta__ 字面量(永不失败的兜底)
+# (见 core/plugin/_loader.py::_import_plugin),**不是** ``plugins.LGTBot_ElainaBot.main``。
 # ─────────────────────────────────────────────────────────────────────────
 
 def _get_plugin_meta() -> dict:
@@ -329,21 +320,15 @@ def _parse_github_owner_repo(url: str) -> tuple[str, str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 子模块(lgtbot/)状态检测 —— 读 .gitmodules 取 url/branch,然后:
-#   · 路径不存在 → status='missing'
-#   · 路径存在但无 .git → status='empty'(子模块未 init)
-#   · 否则 → status='ok',rev-parse HEAD 取本地 commit
-#
-# 上游最新 commit 通过 GitHub commits API 取。
+# 子模块(lgtbot/)状态检测 —— 读 .gitmodules 取 url/branch,本地 rev-parse HEAD,
+# 上游最新 commit 通过 GitHub commits API 取(status 取值见 _get_submodule_info)。
 # ─────────────────────────────────────────────────────────────────────────
 
 # 给 git 命令注入的 SSH→HTTPS url 改写 ——
-# lgtbot 上游 .gitmodules 把 7 个嵌套子模块都登记成 ``git@github.com:...`` 形式,
+# lgtbot 上游 .gitmodules 把嵌套子模块都登记成 ``git@github.com:...`` 形式,
 # 市场用户没 SSH key 就会卡住。下面这两条 ``-c url.<https>.insteadOf=<ssh>`` 在**本次
 # git 子进程内临时生效**,不污染用户 ``~/.gitconfig`` 也不动 .gitmodules 文件,
-# 递归 init 时同样会作用到嵌套子模块。同时覆盖两种 ssh 写法:
-#   · ``git@github.com:owner/repo.git``        ← scp-like 短写法
-#   · ``ssh://git@github.com/owner/repo.git``  ← 完整 ssh:// 形式
+# 递归 init 时同样会作用到嵌套子模块;两条分别覆盖 scp-like 短写法与 ``ssh://`` 完整形式。
 _GITHUB_SSH_TO_HTTPS_ARGS = [
     '-c', 'url.https://github.com/.insteadOf=git@github.com:',
     '-c', 'url.https://github.com/.insteadOf=ssh://git@github.com/',
@@ -362,8 +347,7 @@ def _parse_gitmodules() -> dict:
     """解析 ``<plugin_dir>/.gitmodules``,返回 ``{path, url, branch}`` dict。
 
     文件不存在或解析失败时返回 ``_SUBMODULE_FALLBACK`` 兜底值，让 UI 仍能展示
-    上游链接和默认分支。该插件只配置了一个子模块(lgtbot),不实现多 submodule
-    支持以保持代码简洁;后续若加更多子模块再扩展为 list。
+    上游链接和默认分支。只支持单个子模块(lgtbot)。
     """
     info = dict(_SUBMODULE_FALLBACK)
     gm = os.path.join(boot.PLUGIN_DIR, '.gitmodules')
@@ -490,8 +474,7 @@ def _get_submodule_info(query_remote: bool = False) -> dict:
             info['local_commit_full'] = full
 
     if query_remote:
-        # 远端 commit 可在任何 status 下查询(即便子模块未 init,UI 也能展示「上游
-        # 最新是 abc1234,你需要初始化子模块」)
+        # 远端 commit 在任何 status 下都查:子模块未 init 时 UI 也要展示上游最新 commit
         short, full, err = _query_upstream_commit(owner, repo, branch)
         info['remote_commit'] = short
         info['remote_commit_full'] = full
@@ -574,8 +557,7 @@ def _dir_size_and_count(path: str) -> dict:
 
 # cache key → 实际目录名映射。赛况缓存目录引擎用复数 ``matches``,且内部是
 # ``<match_id>_<game>/`` 子目录嵌套 PNG;头像 / 图片是扁平结构。「保留 7 天」
-# 的 mtime 比较仍按直接子项(matches/ 下就是子目录,avatar / gen 下就是文件)
-# —— _clear_dir_keep_recent 对两种结构都成立。
+# 按直接子项的 mtime 比较,_clear_dir_keep_recent 对两种结构都成立。
 _CACHE_DIRNAMES = {
     'avatar': 'avatar',
     'gen':    'gen',
@@ -592,8 +574,6 @@ def _cache_sizes() -> dict:
 
 # ─────────────────────────────────────────────────────────────────────────
 # 数据入口 —— 每次页面渲染调用一次
-# (注:插件配置 / 引擎配置 / 更新公告 / 疑难解答 的编辑器全部搬迁到「⚙️ 配置
-# 管理」tab,见 mod/webui/page_config.py,本文件不再 read lgtbot.json / yaml)
 # ─────────────────────────────────────────────────────────────────────────
 
 def _group_remarks() -> dict:
@@ -717,11 +697,10 @@ def _fragment(payload: dict) -> str:
 
 
 def render_matches() -> str:
-    """只读轻量端点:只返回进行中对局列表,供前端每几秒实时轮询。
+    """只读轻量端点:返回进行中对局与等待中房间,供前端每几秒实时轮询。
 
     刻意**不**复用 get_data() —— 那会顺带跑缓存目录 os.walk / 机器人列表等较重逻辑,
-    不适合高频轮询;这里只读内存里的两份 dict(+ 群备注 / 昵称查表),开销极小。
-    等待中的房间一并返回:前端那个开关是纯展示态,不该为它多开一个端点。"""
+    不适合高频轮询。"""
     return _fragment({'matches': _active_matches_view(),
                       'waiting': _waiting_rooms_view()})
 
@@ -809,9 +788,8 @@ _STARTUP_CHECK_MIN_INTERVAL = 600.0
 def _get_update_hint() -> dict:
     """从持久缓存取启动自检的 remote_version,是否有新版用**当前运行版本现算**。
 
-    不能直接信缓存里的 ``has_update``:「更新桥接层」git pull 成功后插件热重载,运行中的 ``__plugin_meta__.version`` 已经是新版,
-    但缓存是 pull 前判定的、600s 防抖又让自检不再重跑 —— 直接读缓存会让「新版本」标识在更新完成后错误残留。
-    现算(缓存 remote vs 实时 local)让标识随运行版本自动消失,且不多打一次 GitHub API。
+    不能直接信缓存里的 ``has_update``:git pull 更新后热重载,运行中的 ``__plugin_meta__.version`` 已经是新版,
+    而缓存是 pull 前判定的、又被 600s 防抖挡住不重跑,「新版本」标识会在更新完成后残留。
     """
     cached = boot._get_persistent().get(_STARTUP_CHECK_KEY) or {}
     bridge = cached.get('bridge') or {}
@@ -860,9 +838,8 @@ def _fetch_releases() -> dict:
     """GET ``/releases`` → ``{releases: [...], error: ''}``。
 
     ``releases`` 是**比本地版本新**的已发布版本(新→旧,各含 markdown 正文),
-    让用户跨多个版本升级时能分别查看每个版本的说明(如 2.2.x → 2.4.0 会同时列出 2.3.0 与 2.4.0)。
-    本项目约定只在大版本(2.3 / 2.4 …)发 release,补丁版(2.4.1)不发 —— 故按「版本号 > 本地」过滤 GitHub 上真实发布的 release,
-    补丁版天然不产生新卡片。若没有比本地更新的(已最新 / 仅落后无 release 的补丁),退化为只含最新一个 release(与旧行为一致)。
+    让用户跨多个版本升级时能分别查看每个版本的说明。若没有比本地更新的
+    (已最新 / 仅落后无 release 的补丁版),退化为只含最新一个 release。
 
     仓库无 release / 网络失败时 ``releases`` 为空,前端静默不渲染折叠卡。
     """
@@ -900,7 +877,6 @@ def _fetch_releases() -> dict:
     # 不完全信任 API 顺序,按语义化版本降序(新→旧)自排
     rels.sort(key=lambda r: _semver_tuple(r.get('tag_name', '')), reverse=True)
     newer = [r for r in rels if _semver_gt(r.get('tag_name', ''), local_ver)]
-    # 有比本地新的 → 全列(可能多个);否则(已最新)→ 只给最新一个
     return {'releases': newer if newer else rels[:1], 'error': ''}
 
 
@@ -914,8 +890,7 @@ def render_check_update() -> str:
       · ``release``   —— ``{releases: [...]}``:比本地新的 release 列表
                         (跨多个大版本升级时逐个可展开);已最新则退化为最新一个。
                         markdown 正文由前端渲染成折叠卡
-    任一侧失败不影响另一侧，success 反映「两侧都没致命错误」(子模块网络失败
-    会被 UI 单独展示);整体 success 仅当桥接层成功时为 True。
+    任一侧失败不影响另一侧(子模块网络失败会被 UI 单独展示);整体 success 仅当桥接层成功时为 True。
     """
     bridge = _bridge_check_payload()
     submodule = _get_submodule_info(query_remote=True)
@@ -940,8 +915,7 @@ def _git_output_summary(proc, success: bool) -> str:
 def render_do_update() -> str:
     """更新桥接层 —— 在 ``boot.PLUGIN_DIR`` 执行 ``git pull --ff-only``。
 
-    同步阻塞 web worker 数秒(直到 git 完成);考虑到该操作极少触发，且
-    ``--ff-only`` 模式下 git 不会进入交互，可接受。失败不会破坏工作区。
+    同步阻塞 web worker 数秒(直到 git 完成;``--ff-only`` 模式下 git 不会进入交互)。失败不会破坏工作区。
     """
     plugin_dir = boot.PLUGIN_DIR
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
@@ -1080,14 +1054,13 @@ def render_update_submodule() -> str:
         })
 
     # ``_GITHUB_SSH_TO_HTTPS_ARGS`` 必须在子命令(``submodule``)之前传给 git ——
-    # ``git -c <k>=<v> <subcmd>`` 是 git 的标准用法,会递归到嵌套子模块。lgtbot
-    # 上游 .gitmodules 全是 SSH,没这个改写市场用户绝对拉不到。
+    # ``git -c <k>=<v> <subcmd>`` 是 git 的标准用法,会递归到嵌套子模块。
     cmd = ['git', '-C', plugin_dir, *_GITHUB_SSH_TO_HTTPS_ARGS,
            'submodule', 'update',
            '--init', '--recursive', '--force', sub_path]
     try:
-        # git submodule update 第一次 init 时要克隆整个 lgtbot 仓库,大概 30~60s
-        # (含 50+ 游戏插件子目录),网络慢可能更久 —— timeout 给 300s
+        # git submodule update 第一次 init 时要克隆整个 lgtbot 仓库(含全部游戏插件子目录),
+        # 网络慢时很久 —— timeout 给 300s
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300.0,
         )
@@ -1134,17 +1107,13 @@ def render_update_submodule() -> str:
 # 主框架插件市场(``web/tools/_market/install.py``)在解压 zip 时显式过滤掉
 # ``/.git/`` 子目录,所以市场用户拿到的目录没有任何 git 元信息,既不能
 # ``git pull`` 更新桥接层,也跑不了 ``git submodule update --init`` 把 lgtbot
-# 拉下来。本函数原地建仓:``git init`` + ``remote add`` + 浅 fetch + ``reset
-# --mixed v<version>``,**保留工作区所有文件不动**(用户的 data/、build/、
-# lgtbot/ 都不会被擦)。完成后 git status 会显示大量 M(zip 解压版与 tag
-# 内容可能字节级有差异),这是预期 —— 后续 ``git pull --ff-only`` 仍能 ff
-# 那些 unmodified 的文件,modified 文件保留。
+# 拉下来。本函数原地建仓,**保留工作区所有文件不动**(用户的 data/、build/、
+# lgtbot/ 都不会被擦)。完成后 git status 会显示大量 M 是预期(zip 解压版与 tag
+# 内容可能字节级有差异)。
 # ─────────────────────────────────────────────────────────────────────────
 
 def _git_run(cmd: list, timeout: float = 60.0):
-    """跑一条 git 命令，返回 ``CompletedProcess``。捕获常见异常包成同形态对象，
-    让 ``render_init_repo`` 单一返回路径处理 ok / 各类错误。
-    """
+    """跑一条 git 命令，返回 ``CompletedProcess``;异常由调用方处理。"""
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
@@ -1343,8 +1312,8 @@ def render_download_update() -> str:
     """免 git 覆盖更新:下载最新 release 的源码 zip 直接覆盖插件目录。
 
     服务给 no_git(插件市场安装、无 git 环境)场景 —— 与「⬇ 更新桥接层」 (git pull)互为替代。
-    服务端**重新查一次**最新版本(不信前端传参),已是最新则拒绝。zip 走 prebuilt 的镜像顺序逐个尝试
-    (源码包仅几 MB,步下载可接受,前端按钮转「下载中…」)。"""
+    服务端**重新查一次**最新版本(不信前端传参),已是最新则拒绝。zip 走 prebuilt 的镜像顺序逐个尝试,
+    同步下载(源码包仅几 MB)。"""
     check = _bridge_check_payload()
     if not check.get('success'):
         return _fragment({'success': False,

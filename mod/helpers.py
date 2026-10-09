@@ -18,24 +18,17 @@ log = get_logger(PLUGIN, 'LGTBot')
 _MENTION_RE = re.compile(r'<@([^>\s]+)>')
 
 # ──── markdown 危险字符转义(用户昵称等不可信内容 → 原生 md 消息) ──────────
-# 本插件所有 QQ 消息默认按原生 markdown 发送,昵称里带 # / * / [ 等字符会被
-# 当作语法解析(标题 / 加粗 / 链接),导致排版爆炸。统一加反斜杠转义 ——
-# QQ 官方 markdown 已实测支持 \ 转义,渲染时只显示字符本身,昵称字形不变。
-# ( ) ! . - + 等只在特定组合 / 行首才构成语法,且在昵称中太常见,不转义 ——
-# [ ] 转义后 ``](`` 链接组合已不可能成立。< > 一并转义,防止昵称伪造
-# <@openid> 提及或截断 C++ 侧 <昵称(uid)> 包装。
-# str.translate 单趟替换:输入里的 \ 自身也被转义成 \\,新加的反斜杠不会被二次处理。
+# 本插件消息默认按原生 markdown 发送,昵称里的 # / * / [ 等会被当作语法解析,统一加反斜杠转义(QQ markdown 支持 \ 转义)。
+# ( ) ! . - + 只在特定组合 / 行首才构成语法且昵称里太常见,不转义;[ ] 转义后 ``](`` 链接组合已不可能成立。
+# < > 一并转义,防止昵称伪造 <@openid> 提及或截断 C++ 侧 <昵称(uid)> 包装。
+# str.translate 单趟替换,新加的反斜杠不会被二次处理。
 _MD_ESCAPE_TABLE = str.maketrans({c: '\\' + c for c in '#*_`~[]<>|\\'})
 
 
 def sanitize_md_name(text: str) -> str:
     """给用户昵称等不可信文本中的 markdown 语法字符加反斜杠转义。
 
-    **只在 markdown 语境使用**;注入点:
-      · callbacks.cb_get_user_name   引擎播报里的昵称(引擎文本按 md 发送)
-      · dispatcher.lgtbot_query_user 查询回执里的 **昵称**
-    纯文本语境(媒体兜底 msg_type=7 / WebUI 消息日志)不转义;引擎文本因
-    源头已转义,那些路径改用 ``strip_md_escapes`` 还原。
+    **只在 markdown 语境使用**;纯文本语境拿到已转义的引擎文本时用 ``strip_md_escapes`` 还原。
     """
     if not text:
         return text
@@ -77,8 +70,8 @@ def as_quote(text: str) -> str:
 def read_optional_txt(path: str, label: str) -> str:
     """读「按需存在」的可选 txt 并 strip。文件缺失 / 内容全空白 → 返回 ``''``。
 
-    与「有默认内容」的那批 txt(更新公告 / 疑难解答)不同:**不自动创建**也不返回默认值
-    这类文本都是"按需添加的临时提示",不该有自动写入的占位文件污染 ``data/``。空返回让调用方把整个区块跳过,不留空标题 / 空行。
+    **不自动创建**也不返回默认值:这类文本是按需添加的临时提示,不该在 ``data/`` 留占位文件。
+    空返回让调用方把整个区块跳过,不留空标题 / 空行。
 
     每次调用都重新开文件 —— 管理员在面板改完存盘,下一条消息就拿到新内容。
     """
@@ -96,7 +89,7 @@ def humanize_mentions(text: str) -> str:
     """把 <@openid> 转成 @昵称（用于图文消息 content）
 
     QQ msg_type=7 的 content 不解析 <@openid> 提及语法，会原样显示为字面字符串。
-    本函数从 ``userinfo``(主框架 data.db users 表)取对应昵称替换,保持图文单条消息的同时让文字可读。未命中时退化为截短 uid 占位。
+    昵称取自 ``userinfo``(主框架 data.db users 表),未命中时退化为截短 uid 占位。
     """
     if not text or '<@' not in text:
         return text
@@ -107,7 +100,6 @@ def humanize_mentions(text: str) -> str:
         if name:
             # 输出只用于纯文本语境(媒体 caption / 日志),不做 md 转义
             return f'@{name}'
-        # DB 未命中：截短 openid 占位
         return f'@{uid[:6]}…' if len(uid) > 6 else f'@{uid}'
 
     return _MENTION_RE.sub(_repl, text)
@@ -137,7 +129,7 @@ def mentioned_ids(text: str) -> list:
 # 两个权限位是**QQ 后台分别开通**的不同东西,一个群可能只有其中之一:
 #   · is_full_access      全量消息权限 —— bot 收得到群里非 @ 的普通消息
 #   · allow_proactive_msg 主动推送权限 —— bot 可不依赖被动 msg_id 主动发消息
-# 已退群的记录不计:框架 _handle_group_del 只置 in_group=0,权限位原样残留,不排除会把早就退掉的群算进数量里。
+# 已退群的记录不计:框架 _handle_group_del 只置 in_group=0,权限位原样残留。
 _SQL_GROUP_PERMS = (
     'SELECT SUM(is_full_access = 1) AS full_n, '
     '       SUM(allow_proactive_msg = 1) AS push_n '
@@ -261,9 +253,8 @@ def get_bot_uin(appid: str = '') -> str:
         appid: bot 的 appid;空 / 未加载时回退**绑定 bot**。
 
     Returns:
-        uin 字符串。bot 未加载 / 字段未配置时返回 ``''``,调用方应能优雅降级
-        (比如「邀我进群」按钮的链接里 ``robot_uin=`` 留空仍可生成 URL,
-        QQ 点击后会提示无效 robot,用户回头查 bot.yaml 即可修复)。
+        uin 字符串。bot 未加载 / 字段未配置时返回 ``''``,调用方应能降级
+        (「邀我进群」链接里 ``robot_uin=`` 留空仍可生成 URL)。
     """
     try:
         from core.bot.manager import _bot_manager_ref
@@ -317,31 +308,11 @@ def is_full_volume_group(gid: str) -> bool:
     """判断 ``gid`` 是否有「全量消息」权限 —— 只信任**运行时观测**到的事实。
 
     ⚠️ 这只回答「bot 收得到该群的全部消息吗」。**能不能主动发消息是另一回事**,
-    由 ``can_push_group`` 按 ``allow_proactive_msg`` 判定 —— 刷新按钮、《消息
-    回复限制》教学、配额耗尽后转主动消息全都走那一个,不要拿本函数当推送资格用。
+    由 ``can_push_group`` 按 ``allow_proactive_msg`` 判定,不要拿本函数当推送资格用。
 
-    判定唯一依据:``state.full_volume_groups`` 集合,由 dispatcher 在见到
-    ``GROUP_MESSAGE_CREATE`` 事件时填入。
-
-    为什么不再退回框架 ``non_at_message.{enabled,group_whitelist}`` 配置:
-
-      · QQ 的全量推送权限是在 **QQ 官方 bot 管理后台**给单个 (bot, 群) 维度开
-        的;开了之后 QQ 才会向 bot 投递 ``GROUP_MESSAGE_CREATE`` 事件。
-      · 框架 ``non_at_message.*`` 配置只是「框架收到 non-AT 后,要不要派给
-        非 ``ignore_at_check`` 插件」的二级开关 —— 它和 QQ 后台权限**不同步**,
-        可以一边开一边关。
-      · 当用户在 ``bot.yaml`` 里写了 ``group_whitelist``、但 QQ 后台并没真给
-        权限时,该群永远不会有 ``GROUP_MESSAGE_CREATE`` 投来。这时 helper 若
-        信任配置就会把非全量群误判为全量,引发**非全量群里漏挂刷新按钮、
-        被动配额耗尽后乱走主动消息**(用户反馈的现象)。
-      · 框架自身在 ``core/bot/event.py::_record_full_access_group`` 也是按
-        实际收到 ``GROUP_MESSAGE_CREATE`` 来记录全量群的(内存 cache + SQLite
-        ``groups_users.is_full_access``),并不查 ``non_at_message.*`` ——
-        这进一步说明运行时观测才是 ground truth。
-
-    取舍:进程首次启动后,第一次在某全量群收到 non-AT 消息前,helper 会暂时
-    返回 False(空集合);该窗口里第一条引擎回复会按非全量逻辑挂刷新按钮 —— 视觉上多一个按钮,无功能损失。一旦任何 non-AT 消息到达,集合即标记,
-    后续行为正确。
+    唯一依据是 ``state.full_volume_groups``(dispatcher 见到 ``GROUP_MESSAGE_CREATE`` 时填入):
+    QQ 后台开了全量权限才会投递该事件;框架 ``non_at_message.*`` 配置与 QQ 后台权限不同步,不能当真值。
+    进程启动后、该群第一条 non-AT 消息到达前暂时返回 False。
     """
     if not gid:
         return False
@@ -352,8 +323,7 @@ def is_full_volume_group(gid: str) -> bool:
 
 
 # ──── 主动推送资格:按群号点查 + TTL 缓存 ────────────────────────────────
-# 点查则只为**真正在用**的群付费:命中缓存 0.2µs,未命中一次 PK 索引查询(亚毫秒,且发消息本来就要走网络),缓存条目数取决于活跃群数(几十)而非总群数。
-# 顺带解决两件事:① 不再依赖启动时机(冷启动 bot 未就绪只是一次 miss,30s 后自愈),② 群主新授予权限最迟 TTL 后生效,不必等下一轮全量刷新。
+# 只为**真正在用**的群付费:缓存条目数取决于活跃群数而非总群数。冷启动 bot 未就绪只是一次短 TTL 的 miss,群主新授予的权限最迟一个 TTL 后生效。
 _SQL_GROUP_PUSH = ('SELECT allow_proactive_msg FROM groups_users '
                    'WHERE group_id = ? AND COALESCE(in_group, 1) = 1')
 _PUSH_CACHE_KEY = 'group_push_cache'
@@ -381,18 +351,14 @@ def invalidate_push_cache() -> None:
 
 # ──── 权限时效:主动向 QQ 拉一次 bot_state ────────────────────────────────
 # 光靠读 DB 不够新:框架只在 **bot 入群** 与 **面板手动刷新群资料** 时才调 ``get_group_bot_state``
-# 写 ``allow_proactive_msg``,群主在 QQ 后台授权后**没有任何事件**通知框架 —— DB 里那个 0 会一直躺着,
-# 表现就是"授权很久了还在提醒消息回复受限"。所以这里自己去拉:框架那个方法本身就会把结果写回 DB,
-# 我们只需在拉完后把该群的缓存打掉,下一次判定即读到新值。
+# 写 ``allow_proactive_msg``,群主在 QQ 后台授权后**没有任何事件**通知框架,DB 里那个 0 会一直留着 —— 所以这里自己去拉。
 #
-# 触发点(都很便宜,且都带节流):
+# 触发点(都带节流):
 #   · can_push_group 得到否定结论时 —— 正是"可能已经授权但 DB 还没更新"的时刻
-#   · dispatcher 收到 GROUP_MESSAGE_CREATE 时 —— 该事件本身就是全量消息权限的
-#     直接证据,权限刚变动的可能性最高,借它做快速识别
+#   · dispatcher 收到 GROUP_MESSAGE_CREATE 时 —— 全量消息权限的直接证据,权限刚变动的可能性最高
 _PUSH_PROBE_KEY = 'group_push_probe_at'   # gid → 上次发起探测的时刻
 _PUSH_PROBE_INTERVAL = 60.0               # 每群最多每 60s 拉一次(群资料接口有频控)
-# 已确认有权限的群只做低频复核。
-# 权限被收回是罕见事件,结论也早已写进库,can_push_group 每次过期重读 DB 就够用了。
+# 已确认有权限的群只做低频复核:权限被收回很罕见,can_push_group 每次过期重读 DB 就够用了。
 _PUSH_PROBE_OK_INTERVAL = 1800.0
 
 
@@ -438,8 +404,7 @@ def refresh_group_push_permission(gid: str) -> None:
 async def _do_probe(sender, gid: str) -> None:
     """拉一次 bot_state,**拿返回值直接刷缓存**。
 
-    框架那个方法自己会把权限位写回 DB,但在 log_service 缺席时整段跳过写库,每 60s 白探一次。
-    手上已经有 QQ 的原话,直接落缓存 —— 顺带省掉一次 DB 往返。
+    框架那个方法虽会把权限位写回 DB,但 log_service 缺席时会整段跳过写库;直接落缓存不依赖它,也省掉一次 DB 往返。
     """
     try:
         data, _err = await sender.get_group_bot_state(gid, return_error=True)
@@ -501,9 +466,8 @@ def can_push_group(gid: str) -> bool:
         if bot is None:
             cache[gid] = (False, now + _PUSH_MISS_TTL)
             return False
-        # query_data 失败时**返回 [] 而不抛**(框架 _base.query 吞掉异常),
-        # 所以空结果既可能是"没有该群",也可能是"表不存在/查询出错" —— 两种
-        # 都按无权限 + 短 TTL 处理,下次再试。
+        # query_data 失败时**返回 [] 而不抛**(框架 _base.query 吞掉异常),空结果也可能是查询出错,
+        # 与"没有该群"一样按无权限 + 短 TTL 处理。
         rows = bot.log_service.query_data(_SQL_GROUP_PUSH, (gid,))
         if not rows:
             cache[gid] = (False, now + _PUSH_MISS_TTL)

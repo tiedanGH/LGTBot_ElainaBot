@@ -13,9 +13,8 @@ API 触发的编译同样落 state.json + build.log,面板打开就能看到实�
     ``available=false`` 时给出原因与 compile 此刻会返回的状态码。
 
 认证:``Authorization: Bearer <token>`` 或 ``X-API-Token: <token>``。
-token 落 ``data/build/api_token``(独立文件,不存在则随机生成;放 data/build/ 而非编译产物 build/
-后者会被 --clean / 面板「删除 build 目录」整体清掉,token 若随之轮换,调用方会毫无征兆地集体 401)。
-面板「引擎编译」标签有一键复制按钮。
+token 落 ``data/build/api_token``(不存在则随机生成;不放编译产物 build/:它会被 --clean /
+「删除 build 目录」整体清掉,token 随之轮换会让调用方集体 401)。面板「引擎编译」标签有一键复制按钮。
 
 状态码约定(响应体一律 JSON):
   200 编译成功(elapsed_sec 用时 / active_matches 进行中对局数)或中断成功;
@@ -49,8 +48,8 @@ log = get_logger(PLUGIN, 'LGTBot')
 
 TOKEN_PATH = os.path.join(page_build.BUILD_DATA_DIR, 'api_token')
 
-# 同步等待编译结束的上限。单目标增量编译通常秒级~几分钟(桥接层含 Boost.Python 模板膨胀,慢机器可能到 10 分钟);
-# 超过视为异常,响应 504 但 **不杀进程** —— 编译照常跑完,调用方可去面板看结果或调 terminate。
+# 同步等待编译结束的上限(桥接层 Boost.Python 模板膨胀,慢机器可到 10 分钟);
+# 超时响应 504 但 **不杀进程** —— 编译照常跑完,调用方可去面板看结果或调 terminate。
 _WAIT_TIMEOUT = 600.0
 _POLL_INTERVAL = 1.0
 
@@ -283,8 +282,7 @@ async def terminate_handler(request: 'web.Request') -> 'web.Response':
 def render_api_token() -> str:
     """fragment: token + 端点说明,供「🔑 复制 API Token」按钮取值。
 
-    端点列表涵盖同一枚 token 认证的全部 API(编译 + 重启 / 计划重启,
-    后两者见 restart_api);token 存储位置不再下发 —— 弹窗只关心怎么调用。
+    端点列表涵盖同一枚 token 认证的全部 API(编译 + 重启 / 计划重启,后两者见 restart_api)。
     """
     import html as _html
     payload = {

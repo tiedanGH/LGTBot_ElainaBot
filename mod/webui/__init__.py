@@ -13,7 +13,7 @@ Python 模块(仅做逻辑 + 模板加载):
                    + 紧急公告的「启用 / 关闭」与「重置已通知群」两个 action
     page_build     「引擎编译」标签:子进程跑 bash build.sh,跨 WebUI 进程
                    重启仍能续看(state.json + build.log),支持中途终止;
-                   ANSI 颜色转 HTML 渲染
+                   ANSI 颜色解析为结构化段交前端渲染
     page_logs      「消息日志」标签 + 日志缓冲数据层。除了渲染消息日志页面,还
                    暴露 log_incoming / log_outgoing / get_logs / clear_logs,被
                    callbacks 与 dispatcher 在收发消息路径直接调用 —— deque 与
@@ -29,7 +29,6 @@ Python 模块(仅做逻辑 + 模板加载):
     templates/users/       「用户数据」标签 HTML / CSS / JS
 
 action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不出现在侧边栏列表,仅供 JS fetch 触发):
-    __lgtbot_restart                    整页通用「🔁 重启 LGTBot」按钮
     __lgtbot_dash_check_update          Dashboard「检查更新」(同时查桥接层 / 子模块上游)
     __lgtbot_dash_do_update             Dashboard「更新桥接层」(git pull --ff-only)
     __lgtbot_dash_update_submodule      Dashboard「更新 / 初始化 lgtbot 子模块」
@@ -47,14 +46,11 @@ action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不
 _render_restart`` 里 inline 字符串;Dashboard 端点返回的 ``<pre id="result">
 JSON</pre>`` 也在 ``page_dashboard._fragment`` inline,无模板文件。
 
-「保存引擎配置」复用主框架 ``/api/config-file/save`` 端点(接受 plugins/
-下绝对路径),不在插件 webui 自建端点。
-
 模板由 Python 在 import 时一次性读入并缓存(模块常量);插件热重载会重
 新执行 import → 重新读盘,所以改完模板存盘后下次热重载就能看到新版本,无须重启进程。
 
 如新增标签(房间监控、排行榜等):
-  1. 新建 ``page_xxx.py`` + ``templates/xxx/{html,js}``
+  1. 新建 ``page_xxx.py`` + ``templates/xxx/{html,css,js}``
   2. 在 ``templates/main/main.html`` 加 tab nav 与 tab-pane 容器,并在
-     ``_render_html`` 里把新模块的 HTML/JS/data 拼进去
+     ``_render_html`` 里把新模块的 HTML/CSS/JS/data 拼进去
 """

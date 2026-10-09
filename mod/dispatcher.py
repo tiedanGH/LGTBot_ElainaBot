@@ -29,7 +29,6 @@ from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
 
-# 菜单 logo 文件路径（仓库内置）
 _MENU_LOGO_PATH = os.path.join(boot.PLUGIN_DIR, '_images', 'logo_transparent_colorful.png')
 
 
@@ -91,8 +90,7 @@ _LGT_MSG_EVENTS = frozenset({
 # ──────── 专属指令排除表 ──────────────────────────────────────────────────
 # 这些指令都有专属 handler(priority > 0 且 block=True),不该再落进 LGTBot 引擎的 catch-all。
 # 防线有两层:
-#   ① 框架层:block=True —— 新版框架把**所有**命中的 handler 按优先级顺序全部
-#     执行,只有 block=True 的 handler 命中后才拦截后续。
+#   ① 框架层:框架把**所有**命中的 handler 按优先级顺序全部执行,只有 block=True 的 handler 命中后才拦截后续。
 #   ② 插件层:catch-all(lgtbot_dispatch / lgtbot_interaction_dispatch)派发前
 #     调 _is_exclusive_command 主动跳过 —— 即便框架链语义改变,引擎也不会重复收到这些指令。
 _P_QUERY_ID = r'^(?i:查询id)\s+(\S+)$'
@@ -147,8 +145,8 @@ def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
 # 玩家投票中断:`/中断`(可带其他参数,但 `取消` 是反向操作,不算)。
 # `%中断` 是群管的强制中断,有专属 handler,不走这里。
 _USER_INTERRUPT_RE = re.compile(r'^[/#]?中断(?:\s+(?!取消)\S+)?$')
-# 群管发过 /中断 的标记有效期 —— 引擎的两条回执紧随命令(毫秒级)而来,60s 足够宽松;
-# 留 TTL 只是为了让"没等到那条广播"的情形(全员已确定 → 直接中断,或命令被引擎报错拒绝)自然过期。
+# 群管发过 /中断 的标记有效期 —— 引擎回执紧随命令而来,TTL 只为让"没等到那条广播"的情形
+# (全员已确定 → 直接中断,或命令被引擎报错拒绝)自然过期。
 _FORCE_INTERRUPT_HINT_TTL = 60.0
 
 
@@ -157,7 +155,7 @@ def _mark_force_interrupt_hint(event, content: str, gid: str) -> None:
 
     随后引擎那条「有玩家确定中断比赛，目前 N 人尚未确定中断…」广播会被
     ``callbacks._force_interrupt_buttons_for`` 认领,挂上「强制中断游戏」按钮。
-    普通玩家发 ``/中断`` 不打标记 —— 那条广播就不带任何按钮(需求即口径)。
+    普通玩家发 ``/中断`` 不打标记 —— 那条广播就不带任何按钮。
 
     判定沿用 ``lgtbot_admin_interrupt`` 的同一套 ``member_role``:群管本来就
     只被授权了 ``%中断`` 这一条管理指令,按钮是它的快捷入口。
@@ -192,9 +190,8 @@ def _prewarm_nickname(content: str, uid: str) -> None:
 def _prewarm_push_permission(gid: str, content: str) -> None:
     """要开局了,提前探一次本群的主动消息权限。
 
-    非全量群收不到 GROUP_MESSAGE_CREATE,``note_group_message`` 那条快速通道对它们不生效。
-    群主刚授权完的第一局仍按旧结论走,要等这局的下一条消息才纠正过来。
-    探测带 60s 节流,且已确知可推送的群直接跳过,开局频次可忽略。
+    非全量群收不到 GROUP_MESSAGE_CREATE,``note_group_message`` 那条快速通道对它们不生效,
+    不提前探的话,群主刚授权完的第一局仍按旧结论走。探测带 60s 节流,且已确知可推送的群直接跳过。
     """
     if not gid or not _JOIN_GAME_RE.match(content or ''):
         return
@@ -208,8 +205,8 @@ async def _maybe_notify_urgent(event, content: str, gid: str) -> None:
     """新群第一次建房 → 额外推一条「紧急公告」,发完记下该群,此后不再打扰。
 
     建房命令的识别复用「计划重启」维护闸的同一枚 ``_NEW_GAME_RE`` —— ``/新游戏`` 与 ``/随机游戏`` 都算,
-    **不区分单机局**(单机没有引擎的建房广播,但命令层面一视同仁,少一处特例)。调用点与 ``_capture_pending_game_name``
-    对称:消息事件与按钮 INTERACTION 两条路径都要覆盖(菜单快捷开局按钮的 data  就是 ``/新游戏 X``)。
+    **不区分单机局**。调用点与 ``_capture_pending_game_name`` 对称:消息事件与按钮 INTERACTION
+    两条路径都要覆盖(菜单快捷开局按钮的 data 就是 ``/新游戏 X``)。
 
     先发后记:发送失败(网络 / 配额)就不落记录,下次建房还能补上。
     """
@@ -288,9 +285,7 @@ def _should_block_new_game(content: str) -> bool:
 def _planned_restart_notice() -> str:
     """构造「计划重启」维护提示 —— 每次现拼,带上当前进行中对局数与维护原因。
 
-    · 进行中对局数取自 ``state.active_matches``,为 0 时提示「可随时重启」,让玩家知道等待即将结束。
-    · 维护原因由管理员在开启维护模式时填写(指令 ``/计划重启 <原因>`` 或面板输入框),
-      未填写则不显示该段。原因是管理员可控文本,仍按 markdown 语境转义,防止奇怪字符把整条消息排版搞乱。
+    维护原因是管理员可控文本,仍按 markdown 语境转义,防止奇怪字符把整条消息排版搞乱。
     """
     parts = [
         '## 🚧 维护提醒',
@@ -317,9 +312,7 @@ def _is_exclusive_command(text: str) -> bool:
 
 # ──────── 群管理员执行「非 %中断」管理指令时的明确拒绝 ─────────────────────
 # 群管拥有 %中断 的代理权(见 lgtbot_admin_interrupt),但**没有**引擎的超级管理员权限。
-#
-# 只拦**群管理员**:普通成员没有任何管理能力,引擎原文案本就准确,不加插件干预
-# (行为与本特性上线前完全一致);已配置的超级管理员当然要放行给引擎真执行。
+# 只拦**群管理员**:普通成员没有任何管理能力,引擎原文案本就准确;已配置的超级管理员放行给引擎真执行。
 _ADMIN_CMD_SIGN = '%'
 # 说明群管到底能用什么,措辞点明是「超级」管理员权限缺失。
 _SUPER_ADMIN_DENIED = ('[错误] 您未持有超级管理员权限\n'
@@ -331,8 +324,7 @@ def _super_admin_denied_text(uid: str) -> str:
     return f'<@{uid}>\n{_SUPER_ADMIN_DENIED}' if uid else _SUPER_ADMIN_DENIED
 # 已授权给群管的唯一管理指令,拒绝闸需放行(与 lgtbot_admin_interrupt 同一 pattern)
 _P_ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
-# 视为「拥有群管理权限」的 QQ member_role 取值(框架 parsers/base.py 从 author 解析;
-# 群主 owner 与管理员 admin 都算,普通成员 member / 空串不算)。
+# 视为「拥有群管理权限」的 QQ member_role 取值(框架 parsers/base.py 从 author 解析)。
 _GROUP_ADMIN_ROLES = frozenset({'owner', 'admin'})
 
 
@@ -354,9 +346,8 @@ def _deny_super_admin_cmd(event, content: str, uid: str) -> bool:
 
 
 # ──────── 屏蔽指令表(内置 + config.yaml: blocked_commands) ────────────────
-# 与上面的专属指令排除表互补:排除表是**本插件自己**的指令,这里是**其他插件**的指令
-# 框架把所有命中的 handler 全部执行,其他插件处理完后,消息仍会落进本插件的 catch-all 被转发给引擎。
-# 命中屏蔽表的消息 catch-all 直接跳过,引擎不再二次回复。
+# 与上面的专属指令排除表互补:排除表是**本插件自己**的指令,这里是**其他插件**的指令 ——
+# 框架把所有命中的 handler 全部执行,其他插件处理完的消息仍会落进本插件的 catch-all,命中屏蔽表的直接跳过。
 
 # 主框架 system 插件的全部指令 —— 每个部署都有。
 _SYSTEM_PLUGIN_COMMANDS = (
@@ -377,10 +368,8 @@ BUILTIN_BLOCKED_COMMANDS: tuple[str, ...] = (
 # 与内置表共同组成屏蔽表;匹配语义比内置表严格(斜杠按配置原样)。
 BLOCKED_COMMANDS: tuple[str, ...] = ()
 
-# 复制粘贴出来的 @ 只是一段「@机器人名称」纯文本,不会在 payload 里给 mentions,
-# 事件的 is_at_self 因此为假 —— 但用户主观上就是在 @ 机器人。
-# 开启后把这类消息也当作 @,剥掉前缀再往下走;关闭则只认真实 @。
-# 由 config.text_at_as_mention 下发。
+# 复制粘贴出来的 @ 只是一段「@机器人名称」纯文本,payload 里没有 mentions,is_at_self 为假 —— 但用户就是在 @ 机器人。
+# 开启后把这类消息也当作 @,剥掉前缀再往下走;关闭则只认真实 @。由 config.text_at_as_mention 下发。
 TEXT_AT_AS_MENTION: bool = True
 
 
@@ -401,11 +390,9 @@ def _strip_text_at_prefix(content: str, appid: str) -> str | None:
 def _is_blocked_command(text: str) -> bool:
     """content 是否命中屏蔽表(BUILTIN_BLOCKED_COMMANDS + BLOCKED_COMMANDS)。
 
-    内置项:斜杠不敏感;完整匹配,或后跟空白 / 数字的前缀匹配 ——
-    ``/dau``、``dau 0503``、``dau0503``、``全量申请123456789`` 全部命中。
+    内置项:斜杠不敏感;完整匹配,或后跟空白 / 数字的前缀匹配。
     配置项:斜杠**严格匹配** —— 配置带 ``/`` 只挡带 ``/`` 的消息,两种写法互不通配;
-    完整匹配,或「指令 + 空白 + 参数」前缀匹配 —— ``帮助`` 也挡 ``帮助 xxx``
-    (配置项在 config.py 载入时仅做 strip / 去空 / 去重,``/`` 原样保留。)
+    完整匹配,或「指令 + 空白 + 参数」前缀匹配。
     """
     if not text:
         return False
@@ -438,8 +425,7 @@ async def lgtbot_query_user(event, match):
     - 四源(users / wakeup / 群活跃 / 统计)均查无 → 「查询失败:该 ID 不存在」
     - 活跃时间精度:日志留存期(默认 5 天)内精确到秒,更早降为日粒度(按日),全无记录显示「从未活跃」
     """
-    # 非绑定 bot 的事件静默忽略
-    # (多 bot 部署下本插件只服务绑定 bot,不回复不打日志;下同,所有 handler 的第一道闸)
+    # 多 bot 部署下只服务绑定 bot,其他 bot 的事件静默忽略(所有 handler 的第一道闸,下同)
     if helpers.is_foreign_event(event):
         return
     target = match.group(1).strip()
@@ -466,8 +452,7 @@ async def lgtbot_query_user(event, match):
         time_str = f'{day}（长期未活跃）'
     else:
         time_str = '从未活跃'
-    # 内嵌头像 —— QQ markdown 用 `#WIDTHpx #HEIGHTpx` alt-text 控制尺寸,
-    # 40px 是「小头像」典型尺寸,行内 + 昵称 一目了然
+    # 内嵌头像 —— QQ markdown 用 `#WIDTHpx #HEIGHTpx` alt-text 控制尺寸
     avatar_md = (f'![头像 #40px #40px]({avatar})' if avatar else '[未知]')
     total = user.get('total_messages')
     stats_line = (f'累计消息 {total} 条（统计截至昨日）\n'
@@ -486,22 +471,16 @@ async def lgtbot_query_user(event, match):
 
 
 # ──────── 「📋 更多功能」子菜单 + 更新公告(所有人可用) ─────────────────────
-# 这两个 handler 都同时监听消息事件和 INTERACTION_CREATE,因为「更多功能」
-# 和「更新公告」按钮在 ``buttons.py`` 里是 type=2:
-#   · 默认行为:点击 → 文字回填到输入框 → 用户手动发送 → 走消息事件路径
-#   · 若 bot.yaml 配了 ``button_enter_to_send: true``:type=2 被框架转 type=1
-#     → 点击直接触发 INTERACTION → 走 INTERACTION_CREATE 路径
-# 一个 handler 接两种事件,优先级 50 高于 ``lgtbot_interaction_dispatch``(-100),
-# 抢在被派回 LGTBot 引擎之前响应,免得引擎不认得这俩元指令报「未预料的元指令」。
+# 这些 handler 同时监听消息事件和 INTERACTION_CREATE:按钮在 ``buttons.py`` 里是 type=2(点击回填输入框、
+# 用户手动发送),但 bot.yaml 配了 ``button_enter_to_send: true`` 时框架会转成 type=1,点击直接触发 INTERACTION。
+# 优先级 50 高于 ``lgtbot_interaction_dispatch``(-100),免得引擎不认得这些元指令报「未预料的元指令」。
 
 _UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
 # 首次访问时写入的默认内容
 _DEFAULT_UPDATE_NOTICE = '暂无更新公告'
 
-# 「重要更新」置顶区域 —— 与「更新公告」配合显示在常规代码块的**上方**。
-# 与 update_notice 的关键区别:
-#   · 内容为空 / 文件不存在 → 完全不渲染该区块(避免出现空白小标题)
-#   · 不自动写入默认占位 —— 这是"按需添加的置顶提示",平时应处于"不存在"状态
+# 「重要更新」置顶区域 —— 显示在「更新公告」常规代码块的**上方**。与 update_notice 不同:
+# 内容为空 / 文件不存在时完全不渲染,也不自动写入默认占位 —— 这是"按需添加的置顶提示"。
 _IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
 
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
@@ -552,8 +531,7 @@ def _read_update_notice() -> str:
         _UPDATE_NOTICE_PATH, _DEFAULT_UPDATE_NOTICE, 'update_notice.txt')
 
 
-# 「按需存在」的可选 txt 读取 / markdown 引用块包装
-# 实现在 helpers,紧急公告(urgent.py)与这里共用同一份,避免两处各写一遍再漂移(引用块里空行必须带裸 ``>`` 这种细节最容易只改一边)。
+# 「按需存在」的可选 txt 读取 / markdown 引用块包装:实现在 helpers,与紧急公告(urgent.py)共用同一份,避免两处漂移。
 _read_optional_txt = helpers.read_optional_txt
 _as_quote = helpers.as_quote
 
@@ -653,7 +631,6 @@ async def lgtbot_update_notice(event, match):
     notice = _read_update_notice()
     important = _read_important_update()
     # 代码块包裹 —— 保留换行 / 缩进 / 特殊字符原样显示,管理员可以贴格式化文本。
-    # 「重要更新」代码块标题与「公告详情」对称,留出代码块标签作小标题。
     parts = ['## 📢 更新公告', '', '---', '']
     if important:
         parts.append(f'```重要更新\n{important}\n```')
@@ -670,12 +647,11 @@ async def lgtbot_update_notice(event, match):
 
 # ──────── 「数据统计」的四个窗口视图(按日 / 按月 / 按年 / 累计总计) ─────────
 # 它们与今日视图的差异完全一致:无涨跌标识、无主动消息行、无趋势图,第 4 卡为该期**对局人次**,双榜 TOP10(今日视图 5)。
-# 四者之间只差
+# 四者之间只差下面几项,所以实现只有 _reply_period_stats 一份:
 #   period  卡片 / 榜单文案里的期间词(当日 / 当月 / 当年 / 累计)
 #   who     前两卡的前缀(总计视图是"累计玩家 / 累计群聊",其余是"活跃…")
 #   empty   该期没有已完成对局时的提示措辞
 #   flags   叠给 stats_image 的子模式开关(date_mode 恒真,是这批视图的总闸)
-# 所以实现只有 _reply_period_stats 一份 —— 之前按日 / 按月各一份复制,再加年 / 总就是四份几乎相同的代码。
 
 # 「数据统计YYYY」可查的最早年份
 _MIN_STATS_YEAR = 2026
@@ -700,7 +676,7 @@ def _parse_stats_date(year: int, mm: str, dd: str, arg: str, today, hint: str) -
     """把 (年, MM, DD) 解析成目标日期;非法日期 → 报错项。
 
     输入的就是今天 → 返回 ``'today'``:等价于无参数,仍走带涨跌 / 额度 / 趋势的
-    今日视图(带不带年份都一样,`数据统计0803` 与 `数据统计20260803` 同义)。
+    今日视图(带不带年份都一样)。
     """
     try:
         target = _date(year, int(mm), int(dd))
@@ -723,8 +699,8 @@ def _parse_stats_arg(arg: str, today) -> tuple:
         YYYYMM      某年某月            如 202608
         YYYYMMDD    某年某日            如 20260803
 
-    **4 位参数的年份与 MMDD 不会撞车**:MMDD 的前两位必须是合法月份 01-12,而 2000-2099 的年份前两位恒为 20
-    两个取值域天然不相交。所以 4 位的路由规则就一句:前两位是合法月份 → 按 MMDD,否则按年份。6 / 8 位只可能带年份,不存在歧义。
+    **4 位参数的年份与 MMDD 不会撞车**:MMDD 的前两位必须是合法月份 01-12,而 2000-2099 的年份前两位恒为 20,
+    所以前两位是合法月份 → 按 MMDD,否则按年份。6 / 8 位只可能带年份。
 
     纯函数(时间从 ``today`` 传入),错误文案在这里一处产出 —— handler 只负责回。
     """
@@ -802,7 +778,7 @@ async def _reply_period_stats(event, view: str, stats: dict, prefix: str,
     }
     g.update(cfg['flags'])
     # 总计视图带 bot 规模行:好友 / 群聊总数本身就是累计值,与这一屏口径一致。
-    # **不给增减角标** —— 角标是「今日净变化」,放在累计视图里没有意义(需求亦如此)。
+    # **不给增减角标** —— 角标是「今日净变化」,放在累计视图里没有意义。
     if view == 'total':
         g['bot_groups'] = userinfo.count_groups()
         g['bot_friends'] = userinfo.count_friends()
@@ -899,8 +875,8 @@ async def lgtbot_data_stats(event, match):
     配置了图床时优先走**图片通道**: stats_image 渲染统计卡片(线程池,不阻塞事件循环)→
     uploader 上传 → markdown 内嵌图回复;渲染失败(无 PIL / 无中文字体)或上传失败时回退下方纯文本。
 
-    文本口径:仅游戏数据 —— 两个榜单均为今日口径(00:00 起)且 TOP3 截断控制
-    消息长度(面板另有总榜与本周榜);玩家无缓存昵称时以脱敏 ID(前3****后3)展示。
+    文本口径:两个榜单均为今日口径(00:00 起)且 TOP3 截断控制消息长度;
+    玩家无缓存昵称时以脱敏 ID(前3****后3)展示。
     序号用「1、」,QQ 客户端会把「1.」解析成 markdown 有序列表并自行重排编号,导致显示错乱。
     """
     if helpers.is_foreign_event(event):
@@ -1132,10 +1108,8 @@ async def lgtbot_sponsor(event, match):
 
 
 # ──────── /关于 抢占(优于系统插件的同名指令) ───────────────────────────────
-# 系统插件 ``plugins/system/app/basic.py::about_info`` 注册了 ``^关于$`` 默认
-# priority=0,展示框架级机器人信息。本插件的引擎自带 about 回执,用户在本 bot 上发 ``/关于`` 应优先看到这个
-#
-# priority=50 高于系统插件 + block=True 拦截后续. 函数体里直接转发给 lgtbot_dispatch。
+# 系统插件 ``plugins/system/app/basic.py::about_info`` 也注册了 ``^关于$``(priority=0,展示框架级机器人信息);
+# 在本 bot 上发 ``/关于`` 应优先看到引擎自带的 about 回执,所以 priority=50 + block=True 抢占后转发给 lgtbot_dispatch。
 
 @handler(_P_ABOUT,
          name='LGTBot 关于',
@@ -1168,20 +1142,14 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     if not state.started:
         return
 
-    # GROUP_MESSAGE_CREATE 事件本身就是 QQ 给本 bot 在该群开了「全量消息」权限的直接证据(QQ 后台没开根本不会投递)
-    # 比框架 non_at_message 配置(可能滞后 / 缺失)更准。note_group_message 除了记进 full_volume_groups,
-    # 还借这个最快的变动信号顺带探一次主动推送权限(节流,详见 helpers)。
+    # GROUP_MESSAGE_CREATE 事件本身就是该群开了「全量消息」权限的直接证据(QQ 后台没开根本不会投递),
+    # 比框架 non_at_message 配置更准;note_group_message 还借这个最快的变动信号顺带探一次主动推送权限。
     if event.event_type == GROUP_MESSAGE_CREATE and event.group_id:
         helpers.note_group_message(event.group_id)
 
-    # 全量群里的日常对话必须挡掉(避免 r'.*' + ignore_at_check 把所有群消息都派给引擎)。
-    # 这道闸**只对 GROUP_MESSAGE_CREATE 应用**:
-    #   · GROUP_AT_MESSAGE_CREATE 的事件类型本身就意味着用户 @了 bot,
-    #     但 parse_group_message 只在 payload 含 mentions 数组 + is_you=True 时才把 is_at_self 置 True;
-    #     AT_CREATE payload 不一定 带 mentions(GROUP_AT 的 AT 信号来自事件类型,不在 payload 里重复),
-    #     硬卡这道闸会把所有老的 AT_CREATE 流量误挡。
-    #   · GROUP_MESSAGE_CREATE 是「全量群任意消息」,只有 is_at_self=True 才该交给 LGTBot 引擎,其他是日常聊天。
-    #   · 文本形式的 @(复制粘贴)不带 mentions,is_at_self 同样为假,由 TEXT_AT_AS_MENTION 决定是放行(剥掉前缀)还是照旧挡掉。
+    # 全量群里的日常对话必须挡掉(避免 r'.*' + ignore_at_check 把所有群消息都派给引擎),但这道闸**只对 GROUP_MESSAGE_CREATE 应用**:
+    # GROUP_AT_MESSAGE_CREATE 的 AT 信号来自事件类型,payload 不一定带 mentions(is_at_self 可能为假),硬卡会把正常的 @ 消息误挡。
+    # 文本形式的 @(复制粘贴)同样不带 mentions,由 TEXT_AT_AS_MENTION 决定是放行(剥掉前缀)还是照旧挡掉。
     content = (event.content or '').strip()
     if event.event_type == GROUP_MESSAGE_CREATE and not getattr(event, 'is_at_self', False):
         text_at = (_strip_text_at_prefix(content, event.appid or '')
@@ -1198,8 +1166,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
 
-    # 专属指令排除闸(见 _EXCLUSIVE_RES 注释):菜单 / 关于 / 重启 等已由各自专属 handler 处理,
-    # catch-all 直接跳过,引擎不重复收到 —— 不依赖框架 block 语义。
+    # 专属指令排除闸(见 _EXCLUSIVE_RES 注释):不依赖框架 block 语义,引擎不重复收到专属指令。
     if not _from_exclusive and _is_exclusive_command(content):
         return
 
@@ -1219,7 +1186,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 
     # 「计划重启」维护闸:仅拦新建房间,回维护提示,不派发给引擎。
     # 放在 refresh_ref 之前 —— 该消息不进配额表,提示走消息自己的被动额度。
-    # 底部挂官方群 / 问题反馈 link 按钮 —— 即将 execv 重启的场景下 link 按钮。
+    # 底部挂官方群 / 问题反馈 link 按钮 —— 与 callback 按钮不同,即将 execv 重启时仍可点。
     if _should_block_new_game(content):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
@@ -1232,9 +1199,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         userinfo.note_username(uid, getattr(event, 'username', '') or '')
 
     # 用户消息 → 用 msg_id 刷新被动引用配额（新一轮额度,群 5 条 / 私信 4 条）
-    #
     # ⚠️ 两条分支**必须互斥**:msg_id 带场景,群消息产生的 msg_id 拿去发该用户私信会触发 QQ 端 `请求参数 msg_id 无效或越权`。
-    # 使用 ``elif event.is_direct``,``u:<uid>`` 只会接收真正私信场景的 msg_id。
     appid_str = event.appid or ''
     if event.message_id:
         if event.is_group and gid:
@@ -1245,8 +1210,8 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     # 空消息（仅 @bot）→ 回欢迎菜单，不进 LGTBot 引擎
     if not content:
         page_logs.log_incoming(uid, gid, '(空消息：触发欢迎菜单)')
-        # 欢迎菜单走 event.reply,同样真实消耗上面刚 refresh 的 msg_id 一条引用额度(QQ 按 msg_id 计总数,不区分发送入口)。
-        # 这里先把配额计数烧掉 1 条对齐,分支条件与上方 refresh_ref 完全镜像 —— refresh 没发生就不烧。
+        # 欢迎菜单走 event.reply,同样消耗这条 msg_id 一条引用额度(QQ 按 msg_id 计总数,不区分发送入口),先把计数烧掉 1 条对齐;
+        # 分支条件与上方 refresh_ref 镜像 —— refresh 没发生就不烧。
         if event.message_id:
             if event.is_group and gid:
                 quota.mark_used(helpers.target_key(gid, False), event.message_id)
@@ -1287,21 +1252,12 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 
 
 # ──────── INTERACTION:两类 callback 按钮 ──────────────────────────────────
-# QQ INTERACTION_CREATE 事件由 type=1 callback 按钮点击触发,event.content 是
-# 按钮的 data 字段。本插件处理两类:
-#
-#   1. 「🔄 刷新会话」按钮(data == quota.RELAY_BUTTON_DATA = '__lgt_relay__')
-#      —— 专门用于续被动引用配额,不走 LGTBot 引擎。lgtbot_interaction_relay
-#      只 ack + 刷新 event_id 配额,客户端看一个短暂 toast,新一轮被动额度立即续上。
-#
-#   2. 其他所有 data(欢迎菜单的「数字蜂巢/天赋云巢/...」、规则按钮、上下文按钮等)
-#      等同于用户主动发送 data 这段文字。lgtbot_interaction_dispatch
-#      ack 后把 content 走 on_public_message / on_private_message 派进 C++ 引擎,
-#      与 lgtbot_dispatch 的消息派发路径镜像,差异仅在配额用 event_id 续而非
-#      msg_id(INTERACTION 没有 msg_id,但 event_id 是独立的一轮新额度)。
-#
-# 两个 handler 用互斥 regex 划分职责:relay 严格匹配 RELAY_BUTTON_DATA,
-# dispatch 用负向先行 (?!) 排掉这个 sentinel。
+# QQ INTERACTION_CREATE 事件由 type=1 callback 按钮点击触发,event.content 是按钮的 data 字段。
+# 两个 handler 用互斥 regex 划分职责:
+#   1. 「🔄 刷新会话」按钮(data == quota.RELAY_BUTTON_DATA)—— lgtbot_interaction_relay 只 ack + 用 event_id
+#      续一轮被动引用配额,不走 LGTBot 引擎。
+#   2. 其他所有 data 等同于用户主动发送这段文字 —— lgtbot_interaction_dispatch 镜像 lgtbot_dispatch 派进引擎,
+#      配额用 event_id 续(INTERACTION 没有 msg_id,但 event_id 是独立的一轮新额度)。
 
 @handler(rf'^{re.escape(quota.RELAY_BUTTON_DATA)}$',
          name='LGTBot 刷新按钮回调',
@@ -1356,9 +1312,8 @@ async def lgtbot_interaction_dispatch(event, match):
     if not content:
         return
 
-    # 专属指令排除闸:菜单 / 更新公告 等按钮的 data 与文本指令同文案,
-    # 已由专属 handler(同样监听 INTERACTION_CREATE)处理,这里跳过防止引擎重复收到
-    # 与 lgtbot_dispatch 的闸对称,见 _EXCLUSIVE_RES 注释。
+    # 专属指令排除闸(与 lgtbot_dispatch 对称):菜单 / 更新公告 等按钮的 data 与文本指令同文案,
+    # 已由同样监听 INTERACTION_CREATE 的专属 handler 处理。
     if _is_exclusive_command(content):
         return
 
@@ -1386,9 +1341,7 @@ async def lgtbot_interaction_dispatch(event, match):
         await event.reply(_planned_restart_notice(), buttons=buttons.build_support_buttons())
         return
 
-    # 昵称写回(与 lgtbot_dispatch 对称)。按钮活跃本身由框架记录 ——
-    # INTERACTION 也走 core/bot/event.py 的用户追踪;此处 username 常为空,
-    # note_username 第一层闸直接返回,近零开销。
+    # 昵称写回(与 lgtbot_dispatch 对称);INTERACTION 的 username 常为空,note_username 第一层闸直接返回。
     if uid:
         userinfo.note_username(uid, getattr(event, 'username', '') or '')
 
@@ -1435,17 +1388,15 @@ async def lgtbot_interaction_dispatch(event, match):
 # 调用方在两者之间插入「响应已发出」步骤(event.reply 或 HTTP response),保证
 # 用户看到的提示先送达再换进程。
 #
-# 为什么必须 exec 而不是 plugin_manager.reload:CPython 扩展模块一经 import 就常驻 sys.modules,
-# plugin 热重载只重跑 Python 装饰器、并不 dlclose LGTBot_ElainaBot.so;
-# 同样,libbot_core.so 与各 libgame.so 一经引擎 dlopen 也驻留进程。
-# 要让 build.sh 重编的 C++ 二进制真正生效,只能换一个全新 Python 进程。
+# 必须 exec 而不是 plugin_manager.reload:热重载不会 dlclose LGTBot_ElainaBot.so,libbot_core.so 与各 libgame.so
+# 一经 dlopen 也驻留进程,要让 build.sh 重编的 C++ 二进制生效只能换一个全新 Python 进程。
 
 def check_and_prepare_restart() -> tuple[bool, str]:
     """同步检查并准备重启。返回 (是否可重启, 给用户的提示文案)。
 
     · 引擎未加载   → (True, 正在重启提示);没有 C++ 引擎要释放,直接换进程即可 ——
-                     无编译产物 / 刚下载完预编译包待切换时,用户正是要靠重启让 boot
-                     按最新 marker 重新加载产物,这里若拒绝重启用户就永远起不来。
+                     无编译产物 / 预编译包待切换时正要靠重启让 boot 按最新 marker
+                     重新加载产物,拒绝的话就永远起不来。
     · 活跃 match   → (False, 拒绝原因);引擎保持运行
     · 否则         → (True, 正在重启提示),并已干净释放 C++ 引擎、把
                      state.started / boot.is_engine_running 置 False;
@@ -1527,14 +1478,12 @@ def set_planned_mode(enable: bool, reason: str = '', auto: bool = False) -> tupl
 
 
 # ──────── 计划重启·自动重启 watcher ──────────────────────────────────────
-# 挂在新模块的事件钩子不在旧回调执行路径上;轮询读的 state.active_matches 是跨模块共享的持久 dict。
-#
-# task 引用挂持久 dict:热重载重复调用 _ensure 不会二次起 task(旧 task 读同一份持久 flag,行为一致);模式关闭 / execv 后 task 自然终结。
+# 用轮询:挂在新模块的事件钩子不在旧回调执行路径上;轮询读的 state.active_matches 是跨模块共享的持久 dict。
+# task 引用挂持久 dict:热重载重复调用 _ensure 不会二次起 task;模式关闭 / execv 后 task 自然终结。
 _AUTO_WATCH_KEY = 'planned_auto_watcher'
 _AUTO_WATCH_INTERVAL = 20.0
-# 对局清空后的静默期:结算消息(终局赛况文本 / 图片)由 cb_send_* fire-and-forget 投递,还要排 per-target 发送队列 + 图床上传,
-# 对局从 active_matches 移除的那一刻它们往往尚未送达 QQ —— 立即 execv 会把这些 pending 发送连同终局赛况一起丢掉。
-# 持续空满该秒数才真正重启;期间已建房间开出新局则计时清零重来。
+# 对局清空后的静默期:终局结算消息 fire-and-forget 投递,还要排发送队列 + 图床上传,对局移出 active_matches 时
+# 往往尚未送达 QQ,立即 execv 会把它们丢掉。持续空满该秒数才真正重启;期间开出新局则计时清零。
 _AUTO_RESTART_GRACE = 30.0
 
 
@@ -1565,10 +1514,8 @@ def _ensure_auto_restart_watcher() -> None:
 async def _auto_restart_watcher() -> None:
     """「自动重启」轮询:planned + auto 开启期间每 20s 检查进行中对局。
 
-    对局清空后**不立即**重启,先进入 ``_AUTO_RESTART_GRACE`` 秒静默期 ——
-    终局赛况等结算消息此刻多半还在异步发送链路上(见常量注释),等它们送达后才 execv;静默期内出现新对局(已建房间开局)则计时清零。
-    触发时走与手动重启完全相同的 ``check_and_prepare_restart`` 原子预检
-    (release 内部还会二次确认引擎侧无对局),成功后计审计(SRC_AUTO)+重启指标,再调度 os.execv;预检被拒(race)回到等待重来。
+    对局清空后**不立即**重启,先进入 ``_AUTO_RESTART_GRACE`` 秒静默期(见常量注释),期间出现新对局则计时清零。
+    触发时走与手动重启完全相同的 ``check_and_prepare_restart`` 原子预检,被拒(race)回到等待重来。
     """
     empty_since = None
     while state.is_planned_restart() and state.is_planned_restart_auto():
@@ -1644,8 +1591,8 @@ async def _notify_auto_restart(reason: str) -> None:
     """自动重启触发时向**全部通知群**推送一条说明(手动重启不推)。
 
     与崩溃报告 / 熔断告警共用 ``callbacks.broadcast_notify`` 与同一份 ``notify_groups`` 配置
-    (这些群需全量推送权限,没权限会被 QQ 拒,仅 warning)。单条限时 5s(比崩溃路径的 8s 更紧)
-    通知只是锦上添花,不能卡住已经释放引擎的重启流程;多个群并发推,不会因为群多而线性变慢。
+    (这些群需全量推送权限,没权限会被 QQ 拒,仅 warning)。单条限时 5s:
+    通知只是锦上添花,不能卡住已经释放引擎的重启流程。
     """
     from . import callbacks as _callbacks   # 延迟取,拿 config 覆盖后的最新值
     md = (
@@ -1687,7 +1634,7 @@ async def lgtbot_match_list(event, match):
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
     # 本 handler block=True 抢在 catch-all 之前,catch-all 里的 refresh_ref 不会执行,
-    # 必须自己登记本次事件的引用 —— 否则引擎生成的列表走插件配额通道时没有可用
+    # 必须自己登记本次事件的引用 —— 否则引擎生成的列表没有可用的被动配额
     appid_str = event.appid or ''
     ref_type, ref_value = ('event_id', event.event_id) if event.is_interaction \
         else ('msg_id', event.message_id)
@@ -1725,9 +1672,9 @@ async def lgtbot_match_list(event, match):
 async def lgtbot_admin_interrupt(event, match):
     """抢占引擎管理指令「%中断」,给**群管理员**开放且仅开放这一条管理能力。
 
-    背景:引擎权限是单极的 —— ``bot_core.cc::HandleRequest`` 见 '%' 开头就查 `HasAdmin(uid)``,
+    引擎权限是单极的 —— ``bot_core.cc::HandleRequest`` 见 '%' 开头就查 ``HasAdmin(uid)``,
     过了便放行整个 ``admin_cmds``(含 %清除战绩 / %荣誉 等破坏性指令)。
-    把群管写进引擎 admins 会连带交出这些权限,故改在插件层做**受限代理**:
+    把群管写进引擎 admins 会连带交出这些权限,所以只在插件层做**受限代理**:
 
       · 群聊 + 请求者是群主 / 群管理(``event.member_role``)→ 把发给引擎的
         uid 换成**已配置的引擎管理员**(``config.ADMIN_UIDS[0]``),引擎因此
@@ -1735,9 +1682,6 @@ async def lgtbot_admin_interrupt(event, match):
       · 其他情况(普通群员 / 私信)→ **原样用请求者自己的 uid** 派发,由引擎
         自行裁决:本身在 admins 里(主人)照常执行,否则引擎回「未持有管理员权限」。
         插件不自造拒绝文案,语义与引擎保持一致。
-
-    其他管理指令(%清除战绩 等)没有专属 handler,会走 catch-all 用请求者本人
-    uid 进引擎 → 群管无权、被引擎拒绝,这正是期望行为。
     """
     if helpers.is_foreign_event(event):
         return
@@ -1784,10 +1728,7 @@ async def lgtbot_admin_interrupt(event, match):
     cmd = (event.content or '').strip() or '%中断'
     page_logs.log_incoming(uid, gid if event.is_group else '', cmd)
     if proxied:
-        # 审计里的游戏名分三种情形,事后追溯时要能分辨这次代理中断到底作用在哪局上:
-        #   · 有名字(等待房间 / 已开局)      → 游戏名
-        #   · 有对局但名字未知(单机局兜底失效)→ 未知游戏
-        #   · 群里根本没有对局(引擎会回「该房间未进行游戏」)→ 无游戏
+        # 事后追溯要能分辨这次代理中断作用在哪局:有对局但名字未知(单机局兜底失效)与群里根本没有对局分开记
         key = helpers.target_key(gid, False)
         rec = state.active_matches.get(key) or {}
         game = state.current_game.get(key, '') or rec.get('game', '')
@@ -1825,13 +1766,10 @@ async def lgtbot_admin_interrupt(event, match):
          priority=100,
          block=True)
 async def lgtbot_planned_restart(event, match):
-    """主人切换「计划重启」维护模式 —— 重启前逐渐清空对局用。
-
-    与真「重启」互补:先启用本模式挡住新房间,等进行中的对局自然结束,
-    再发「重启」平滑换进程(重启后本模式自动恢复关闭)。
+    """主人切换「计划重启」维护模式 —— 重启前逐渐清空对局用(重启后本模式自动恢复关闭)。
 
     默认**自动重启**:不限制新游戏创建,全部对局结束并静默 30s 后自动执行重启。
-    首词恰为「手动」才退回手动模式 —— 拦下新建房间,由管理员自己点重启。
+    首词恰为「手动」才进入手动模式 —— 拦下新建房间,等对局自然结束后由管理员自己发「重启」。
     """
     if helpers.is_foreign_event(event):
         return

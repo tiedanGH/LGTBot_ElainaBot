@@ -3,9 +3,8 @@
 """滚动 prebuilt release 的批次清理 —— CI publish job 调用(prebuilt.yml)。
 
 滚动 release 只保留**两个版本**的预编译包:本次上传的最新批 + 上一批,更早的批次删除。
-「批」按 asset 名末段的 commit sha 分组(同一次构建的三个发行版包sha 相同,天然成批)。
-重跑同一 commit 时新包与现存最新批**同名**(softprops clobber 覆盖、不新增批),
-此时保留现存两批;否则只保留现存最新一批,上传后合计回到两批。不匹配预编译命名的 asset 一律不动;``sha=unknown`` 也算独立批。
+「批」按 asset 名末段的 commit sha 分组(同一次构建的各发行版包 sha 相同,天然成批)。
+不匹配预编译命名的 asset 一律不动;``sha=unknown`` 也算独立批。
 
 用法(publish job,gh 已认证):
     gh release view prebuilt --repo "$REPO" --json assets > assets.json
@@ -13,7 +12,7 @@
 
 参数:assets.json = ``gh release view --json assets`` 的输出;
      dist = 本次构建产物目录(从第一个 zip 名解析本批 sha)。
-环境:``REPO``(owner/repo)。纯决策逻辑在 ``plan_trim``,pytest 有覆盖。
+环境:``REPO``(owner/repo)。纯决策逻辑在 ``plan_trim``。
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """metrics 模块测试 —— 持久计数器(落盘/损坏容错/静默失败/并发)+
-lgtbot.db 只读统计(今日过滤/排行/参与榜脱敏/7日趋势补零)。
+lgtbot.db 只读统计(今日过滤/排行/参与榜脱敏/10日趋势补零)。
 
 游戏查询组在 conftest 假 boot 的 tmp ``DB_PATH`` 上建 db_manager.cc 同款
-schema;``finish_time`` 用**本地时间字符串**构造今/昨/8 天前数据(与引擎
+schema;``finish_time`` 用**本地时间字符串**构造(与引擎
 ``datetime(CURRENT_TIMESTAMP,'localtime')`` 写入格式一致)。
 """
 
@@ -105,8 +105,7 @@ def test_active_push_used_per_target():
 
 
 def test_active_push_used_resets_across_day():
-    """跨天:桶 date 不是今天 → 用量归 0(限额因此次日 0 点自动恢复,
-    进行中的对局跨天也无需特殊处理 —— 每条消息独立判定,不缓存资格)。"""
+    """跨天:桶 date 不是今天 → 用量归 0,限额次日 0 点自动恢复(每条消息独立判定,不缓存资格)。"""
     import json as _json
     metrics.record_active_push('GDAY', is_uid=False)
     assert metrics.active_push_used('GDAY', False) == 1
@@ -122,7 +121,7 @@ def test_active_push_resets_across_day(monkeypatch):
     """桶 date 不是今天时整桶重建(跨天自动清零)。"""
     import json as _json
     metrics.record_active_push('G1', is_uid=False)
-    # 手动把桶日期改成昨天,模拟跨天
+    # 模拟跨天
     with open(metrics.METRICS_PATH, encoding='utf-8') as f:
         d = _json.load(f)
     d['active_push']['date'] = '2000-01-01'
@@ -496,8 +495,7 @@ def test_query_game_stats_total_covers_everything():
         ('五子棋', '2021-03-01 12:00:00', 'G1', ['U1']),
         ('五子棋', '2025-06-01 12:00:00', 'G2', ['U1', 'U2']),
         ('大富翁', 0, None, ['U3']),                   # 今天 + 私聊局(NULL)
-        # 空串 group_id:``COUNT(DISTINCT)`` 会**照常把 '' 计成一个值**
-        # (只有 NULL 被它天然忽略),所以 group_id != '' 这条过滤缺一不可
+        # 空串 group_id:``COUNT(DISTINCT)`` 只天然忽略 NULL,所以 group_id != '' 这条过滤缺一不可
         ('狼人杀', 0, '', ['U4']),
     ])
     tot = metrics.query_game_stats_total()
@@ -511,11 +509,7 @@ def test_query_game_stats_total_covers_everything():
 
 
 def test_total_equals_sum_of_year_windows():
-    """★ 四个视图共用一份 SQL 的意义:累计 == 各年之和,口径不会各自漂移。
-
-    以前按日 / 按月各自复制过一份 SQL,这条不变式就是那种复制的防线 ——
-    任何一处窗口条件被改歪(比如群聊那条漏掉私聊局排除)都会让等式失衡。
-    """
+    """★ 四个视图共用一份 SQL:累计 == 各年之和,任何一处窗口条件被改歪都会让等式失衡。"""
     _make_db([
         ('五子棋', '2024-05-01 10:00:00', 'G1', ['U1', 'U2']),
         ('大富翁', '2025-05-01 10:00:00', 'G1', ['U1']),

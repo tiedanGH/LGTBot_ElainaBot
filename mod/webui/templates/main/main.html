@@ -115,8 +115,7 @@ __USERS_HTML__
     </div>
   </div>
 
-  <!-- 全局自定义弹窗(替代浏览器 confirm/alert/prompt)—— 各 tab 共用 ——
-       通过 main.js 的 dashConfirm/dashAlert/dashPrompt 异步函数控制显示 -->
+  <!-- 各 tab 共用的自定义弹窗(替代浏览器 confirm/alert/prompt),由 main.js 的 dashConfirm/dashAlert/dashPrompt 控制 -->
   <div id="dash-modal-backdrop" class="dash-modal-backdrop hidden" aria-hidden="true">
     <div id="dash-modal" class="dash-modal level-info" role="dialog" aria-modal="true">
       <div class="dash-modal-body">

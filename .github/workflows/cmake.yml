@@ -10,7 +10,6 @@ permissions:
   contents: read
 
 env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
 
 jobs:
@@ -36,8 +35,7 @@ jobs:
         with:
           submodules: recursive
 
-      # 通过仓库内 build.sh 完成 cmake configure + build
-      # --test 默认开启 LGTBot 单元测试目标
+      # --test 一并编译 LGTBot 单元测试目标
       - name: Build via build.sh
         env:
           CC: gcc-12
@@ -56,7 +54,6 @@ jobs:
           echo "✅ libgame.so 数量: $GAMES"
           test "$GAMES" -gt 0
 
-      # 真桥接冒烟:import 编译出的 .so,临时 db 起真引擎,发指令断言响应,再走 restart-release 生命周期
-      # 覆盖 mock 单测照不到的 Boost.Python ABI 与 g_bot_core 换代回归。脚本完全独立于主框架。
+      # 真桥接冒烟:import 编译出的 .so 起真引擎,覆盖 mock 单测照不到的 Boost.Python ABI 与 g_bot_core 换代回归。
       - name: Bridge test
         run: python3 tests/smoke_bridge.py

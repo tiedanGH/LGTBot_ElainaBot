@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """uploader 模块测试 —— filename 唯一化 / 图片尺寸解析 / 并发去重 / TTL cache。
 
-被测重点(对应 plan 的 10 个 case):
+被测重点:
   · _unique_filename 兜底逻辑(空 / 无扩展名 / 正常)
   · get_image_size 解析 PNG / JPEG / GIF / WebP + 异常 fallback
   · upload_image **并发去重核心**:
-      - 同 data ×N 并发 → backend 调 1 次(in-flight Future 互斥,历史 size 错配 fix)
+      - 同 data ×N 并发 → backend 调 1 次(in-flight Future 互斥)
       - 不同 data ×N 并发 → backend 调 N 次,每次 unique filename 不同
       - 30s TTL cache 命中,不重复打图床
       - URL_CACHE_TTL=0 关闭去重,但 filename 唯一化仍生效
@@ -71,7 +71,6 @@ def test_unique_filename_empty_fallback():
 def test_unique_filename_no_ext_fallback():
     """无扩展名 → 仅 base 加哈希,默认补 .png 扩展"""
     result = uploader._unique_filename('foo', '1234567890abcdef')
-    # 实现是 os.path.splitext 拿不到扩展时 ext 为空,代码兜底 ext='.png'
     assert result == 'foo_12345678.png'
 
 
@@ -88,7 +87,7 @@ def test_get_image_size_png():
 
 
 def test_get_image_size_jpeg():
-    """JPEG SOF0 marker (FFC0) 含 (precision, height, width, components),按 plan
+    """JPEG SOF0 marker (FFC0) 含 (precision, height, width, components),
     解析逻辑从 marker 偏移 +3 处读 height/width (big-endian, 2 bytes each)"""
     # 构造最小 JPEG:SOI(FFD8) + APP0(可选,这里用最简 SOF0 直接跟着)
     # SOF0 段:FF C0 [length:2] [precision:1] [height:2] [width:2] [components:1]
@@ -111,7 +110,6 @@ def test_get_image_size_gif():
 def test_get_image_size_webp_vp8():
     """WebP VP8 lossy 格式:RIFF + 'WEBP' + 'VP8 ' chunk,offset 26-30 width/height"""
     # RIFF[4] + size[4] + 'WEBP'[4] + 'VP8 '[4] + chunk_size[4] + ...
-    # 实际 width/height 在 offset 26-30
     webp = (b'RIFF' + b'\x00' * 4 + b'WEBP'
             + b'VP8 ' + b'\x00' * 4
             + b'\x00' * 6                          # padding to reach offset 26
@@ -135,16 +133,7 @@ def test_get_image_size_bad_data_returns_default():
 async def test_upload_image_inflight_dedup(mock_backend):
     """同一份 data ×10 并发 → backend 只被调用 1 次,所有协程拿到同一 URL"""
     _, calls = mock_backend
-    uploader.SELECTED_BACKEND = 'cos'    # 必须设,否则 upload_image 短路返 None
-
-    # 用 module 顶层 mock:_do_upload 已被 mock_backend 替换,这里仍需 mock
-    # _get_hosting 等让 upload_image 不短路。实际上 _do_upload 是真正调用 backend
-    # 的入口,我们 mock 它,upload_image 的去重逻辑测试与 backend 无关。
-    # 但 upload_image 仍会检查 SELECTED_BACKEND —— 让它走完
-    # 实际上 mock_backend 直接替换的是 _do_upload,upload_image 包装层会跳过
-    # SELECTED_BACKEND 检查直接调它(因为我们没 mock 包装层)。
-    # 看 upload_image 实现:它**调** _do_upload 之前没检查 SELECTED_BACKEND,
-    # 只有 _do_upload 自身查。所以 mock _do_upload 已足够。
+    uploader.SELECTED_BACKEND = 'cos'
 
     data = b'PNG_SAMEDATA' + b'\x00' * 100
     results = await asyncio.gather(*[
@@ -152,17 +141,13 @@ async def test_upload_image_inflight_dedup(mock_backend):
         for _ in range(10)
     ])
 
-    # 10 个调用应拿到完全相同的 URL
     assert len(set(results)) == 1
     # backend 真正被调用次数应为 1(in-flight Future 共享)
     assert len(calls) == 1
 
 
 async def test_upload_image_different_data_concurrent(mock_backend):
-    """10 份不同 data 并发 + 同原 filename → backend 调 10 次,但**每次 filename 都
-    不同**(各带不同 sha1[:8])—— 这是 cos_key 冲突 fix 的核心:不同 data 永远不
-    会撞同一图床路径,即便用户传同 filename + 同尺寸 + 同时间戳。
-    """
+    """10 份不同 data 并发 + 同原 filename → backend 调 10 次,但**每次 filename 都不同**(各带不同 sha1[:8]),同名同尺寸同时间戳也不会撞同一图床路径。"""
     _, calls = mock_backend
     datas = [f'IMG_{i:02d}'.encode() + b'\x00' * 100 for i in range(10)]
 
@@ -170,11 +155,8 @@ async def test_upload_image_different_data_concurrent(mock_backend):
         uploader.upload_image(d, 'match.png') for d in datas
     ])
 
-    # 10 个 URL 全不同
     assert len(set(results)) == 10
-    # backend 被调 10 次
     assert len(calls) == 10
-    # 每次的 unique filename 应该符合 'match_<8 hex>.png' 模式 + 10 个都不同
     filenames = {c[1] for c in calls}
     assert len(filenames) == 10
     for f in filenames:
@@ -229,7 +211,6 @@ async def test_upload_image_cached_benefits_from_inflight(mock_backend):
         for _ in range(5)
     ])
 
-    # 5 个调用,全部非 None,URL 一致
     assert all(r is not None for r in results)
     assert len({r['url'] for r in results}) == 1
     # backend 只被调 1 次(in-flight 在 upload_image 层去重)

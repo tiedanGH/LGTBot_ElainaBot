@@ -2,17 +2,13 @@
  * 主要职责:
  *   · 状态条:轮询 build action 拉最新 state + log,渲染 badge / 当前命令 /
  *     已运行时间;running 时显示「终止编译」按钮
- *   · 10 个 action 按钮(8 个启动 + 1 个终止 + 1 个删 build/)。所有按钮都
- *     先 confirm 显示完整命令再发起请求
+ *   · 启动 / 终止 / 删 build/ 都先弹 confirm(启动类显示完整命令)再发起请求
  *   · 自定义目标:前端 prompt + 严格白名单(同后端 _validate_target_name),
  *     合法后通过 framework /api/config-file/save 写参数文件,再调编译端点
  *
  * 安全:
- *   · 自定义目标名前端用 BUILD_TARGET_RE 校验后才允许通过 confirm;后端
- *     有独立校验,前端绕过(改 JS)也无法注入 shell —— 服务端用 argv
- *     list-form Popen,且 _validate_target_name 拒绝任何非白名单字符。
- *   · 没用 fetch JSON 任意命令的设计 —— 每条命令在后端写死 argv,前端只能
- *     选「哪个端点」+ 提供一个白名单 target 字符串。
+ *   · 前端白名单只是第一道闸:后端独立校验,且用 argv list-form Popen,改 JS 绕过也注入不了 shell。
+ *   · 每条命令在后端写死 argv,前端只能选「哪个端点」+ 提供一个白名单 target 字符串。
  */
 
 const BUILD_KEYS = {
@@ -70,10 +66,9 @@ function buildFmtDuration(sec) {
   return h + ' 时 ' + m + ' 分';
 }
 
-/* 服务端 _ansi_to_segments 把 ANSI 日志解析成 [{t,b,c}] 结构化段(文本 /
-   粗体 / 前景色)。这里从数据直接建 DOM:文本一律 createTextNode / textContent,
-   颜色经十六进制白名单校验后由 CSSOM 属性赋值 —— 日志内容全程不以 HTML
-   字符串出现,也就不存在任何 HTML 解析 / innerHTML 环节 */
+/* 服务端 _ansi_to_segments 把 ANSI 日志解析成 [{t,b,c}] 结构化段(文本 / 粗体 / 前景色)。
+   这里直接建 DOM:文本一律 createTextNode / textContent,颜色过十六进制白名单后由 CSSOM 属性赋值 ——
+   日志内容全程不以 HTML 字符串出现。 */
 const BUILD_SAFE_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
 
 function buildLogFragment(segments) {
@@ -112,12 +107,7 @@ function buildApplyState(state, logSegments, logSize) {
     sinceEl.textContent = buildFmtElapsed(state.started_iso);
     killBtn.style.display = '';
   } else if (state && state.finished && state.cmd_display) {
-    /* 已完成:根据 kind + returncode 决定 badge 文案/颜色
-       · kind='build' + rc=0  → 「✅ 编译成功」绿
-       · kind='build' + rc≠0  → 「❌ 编译失败(退出码 N)」红
-       · kind='build' + rc=null → 「⛔ 已终止」灰(被 SIGKILL 等)
-       · kind='meta'           → 「已完成」灰(列出目标 / 删 build 等)
-    */
+    /* 已完成:根据 kind + returncode 决定 badge;kind='meta' 是列出目标 / 删 build 这类非编译任务 */
     const kind = state.kind || 'build';
     const rc = state.returncode;
     if (kind === 'meta') {
@@ -130,8 +120,7 @@ function buildApplyState(state, logSegments, logSize) {
       badge.textContent = '❌ 编译失败 (退出码 ' + rc + ')';
       badge.className = 'dash-badge dash-badge-err';
     } else {
-      /* returncode 缺失:进程被 SIGKILL / wrapper 没机会写 status,
-         同样视为失败/中断,用红 badge 与「编译失败」一致 */
+      /* returncode 缺失 = 进程被 SIGKILL / wrapper 没机会写 status,同样按失败显示红 badge */
       badge.textContent = '⛔ 已终止';
       badge.className = 'dash-badge dash-badge-err';
     }
@@ -169,7 +158,6 @@ function buildLoadInline() {
     buildParamsPath = data.params_path || '';
     buildLastCustomTarget = data.last_custom_target || '';
     buildApplyState(data.state || {}, data.log_segments || [], data.log_size || 0);
-    /* 进入页面时若有正在跑的编译,启动轮询 */
     if (data.state && data.state.running) buildStartPolling();
   } catch (e) {
     console.warn('[build] load failed:', e);
@@ -187,10 +175,7 @@ async function buildCallAction(key) {
   return JSON.parse(el.textContent);
 }
 
-/* 拉一次最新日志 + 状态,并让轮询与运行态保持同步:
- *   running     → 确保在轮询(幂等 start)
- *   非 running  → 确保停轮询(幂等 stop)
- * 关键:buildStartPolling / buildStopPolling **都不回调 buildPullOnce**。 */
+/* 拉一次最新日志 + 状态,并让轮询与运行态保持同步(running → 幂等 start,否则幂等 stop)。 */
 async function buildPullOnce() {
   try {
     const data = await buildCallAction(BUILD_KEYS.log);
@@ -283,7 +268,7 @@ function buildList() {
 }
 
 /* ──── 目标名输入 → 校验 → 写参数文件 → 调端点 ────
-   「🎯 编译指定目标」与「✨ 编译新游戏目标」共用:两者只差端点 key、命令
+   「编译指定目标」与「编译新游戏目标」共用:两者只差端点 key、命令
    展示与 confirm 文案(makeConfirm(target, cmd) 由调用方给)。 */
 async function buildTargetFlow(key, cmdOf, makeConfirm) {
   /* 1. prompt 拿 target —— defaultValue 用上次编译的 target 名 */
@@ -494,10 +479,8 @@ window.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.tabs .tab').forEach(tabBtn => {
     tabBtn.addEventListener('click', () => {
       if (tabBtn.dataset.tab === 'build') {
-        /* 进 build tab —— 强制拉一次,如果在跑就开始轮询 */
         buildPullOnce();
       } else if (buildPollTimer) {
-        /* 离开 build tab —— 停轮询(节省请求) */
         buildStopPolling();
       }
     });

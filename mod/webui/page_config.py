@@ -13,10 +13,9 @@
 
 保存全部走本文件的 ``/api/ext/lgtbot/config/save``:七个编辑器写的都是插件自己
 data/ 下的文件,落盘、校验、审计理应由插件自己负责,不依赖框架通用端点
-(它的可编辑类型白名单会变 —— 纯文案的 .txt 已被排除在外)。
+(它的可编辑类型白名单会变,纯文案的 .txt 就不在其中)。
 
-「热重载配置」按钮调 ``__lgtbot_dash_reload_config`` action,逻辑从原本的
-``page_dashboard`` 搬迁到本文件(保留 action key 不变，JS 调用兼容)。
+「热重载配置」按钮调 ``__lgtbot_dash_reload_config`` action。
 """
 
 from __future__ import annotations
@@ -104,21 +103,15 @@ _URGENT_NOTICE_PATH = urgent.NOTICE_PATH   # 紧急公告文案的**唯一**路�
 _TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
 _SPONSORS_PATH = os.path.join(boot.DATA_DIR, 'sponsors.txt')
 
-# 跨重载共享:存上次热重载后 yaml 里的 admin_uids 逗号串。每次 reload 比较
-# 当前 yaml 内的 admin_uids 与该值,**仅在真的变化时**给前端返回那条
-# 「需重启引擎」note —— 否则保持 reload 面板安静,不再每次都吓用户一跳。
-# 首次 reload 时 key 不存在,保守视作"未变"(用户可凭页面上 admin_count
-# 数字自行判断),后续每次都准确。
+# 跨重载共享:上次热重载时 yaml 里的 admin_uids 逗号串。reload 时与当前值比较,
+# **仅在真的变化时**才给前端返回「需重启引擎」note。
 _PERSISTENT_LAST_ADMINS_KEY = 'cfg_last_loaded_admins'
 
 
 def _read_file(path: str) -> tuple[str, str]:
     """读任意文本文件，返回 ``(content, error_msg)``。文件不存在 → 空内容、无错误。
 
-    用于 update_notice.txt / troubleshooting.txt / config.yaml 这种"用户可编辑"
-    文件:首次访问 web 面板时若文件还没生成(dispatcher 的 _read_* 没被触发过),
-    显示空 textarea 让用户主动写入，不在这里做隐式 default 注入(那是 dispatcher
-    handler 的责任，不应在 UI 渲染路径里副作用 IO)。
+    不在这里补写默认内容:那是 dispatcher 的责任，UI 渲染路径不该有写盘副作用。
     """
     if not os.path.isfile(path):
         return '', ''
@@ -130,7 +123,7 @@ def _read_file(path: str) -> tuple[str, str]:
 
 
 def _read_engine_config() -> tuple[str, str]:
-    """读 lgtbot.json,跟原 page_dashboard 同源行为。
+    """读 lgtbot.json。
 
     ``boot._ensure_lgtbot_conf`` 保证启动时文件已存在。万一缺失，返回 ``{}\\n``
     让 textarea 至少展示有效 JSON 而非空白(避免用户保存空文件导致引擎启动出错)。
@@ -210,7 +203,7 @@ def get_data() -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Action 端点 —— 热重载 config.yaml(从 page_dashboard 搬迁过来,逻辑不变)
+# Action 端点 —— 热重载 config.yaml
 # ─────────────────────────────────────────────────────────────────────────
 
 def _fragment(payload: dict) -> str:
@@ -366,12 +359,12 @@ def render_urgent_reset() -> str:
 # 带校验的配置保存 —— POST /api/ext/lgtbot/config/save
 # ─────────────────────────────────────────────────────────────────────────
 # 七个编辑器统一走这里。config.yaml / lgtbot.json 先语法解析 + 字段 schema 校验,
-# 全部通过才原子落盘,一个格式错误不再让插件加载回退默认配置或引擎启动失败;
+# 全部通过才原子落盘,免得一个格式错误让插件加载回退默认配置或引擎启动失败;
 # 纯文案文件无可校验,走同一条路是为了落盘 / 审计口径统一。
 # 路径由服务端按 target 解析,不信任客户端传路径。
 
-# 图床合法值**动态**取自主框架 image_hosting 模块 status()(≥2.0.0 beds/ 自动发现,与运行时校验同源,避免两处漂移)。
-# 模块未加载 / 查询失败时返回空集 = 无法校验,放行 —— 运行时 _do_upload 会按 status 早退,可用性徽章如实显示。
+# 图床合法值**动态**取自主框架 image_hosting 模块 status(),与运行时校验同源,避免两处漂移。
+# 模块未加载 / 查询失败时返回空集 = 无法校验,放行 —— 运行时 _do_upload 会按 status 早退。
 def _valid_backends() -> set:
     from .. import uploader as _uploader
     hosting = _uploader._get_hosting()
@@ -385,8 +378,7 @@ def _valid_backends() -> set:
 
 # 纯数字 ID 类字段:不带引号时 yaml 解析成 int,运行时
 # (config._apply_runtime_tunables)按字符串接受 —— 校验器同语义放行(警告级)。
-# 其余 str 字段(如 image_hosting)填数字仍是错误。
-# (notify_groups 这类**列表**字段不用登记:列表项的 int 由下面的元素检查放行)
+# notify_groups 这类**列表**字段不用登记:列表项的 int 由下面的元素检查放行。
 _INT_OK_STR_FIELDS = {'bind_bot_appid'}
 
 # 改过名的字段:仍被 config.py 读作兼容值,提示改名即可。

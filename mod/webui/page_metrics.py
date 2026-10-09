@@ -50,8 +50,7 @@ def _payload() -> dict:
     users_total = userinfo.count_users()
     lgtbot_users = game.get('lgtbot_users')
     # 玩家转化率:lgtbot 注册用户 ÷ 框架 users 总数(任一缺失 → None,前端显 —)。
-    # 注:lgtbot 的「注册」并不必然等于「参与过对局」—— 引擎 AddHonor(授予头衔) 也会把从未打过对局的用户插进 user 表(db_manager.cc:GetBirthCountOfUser),
-    # 但差异极罕见且面板不展示该差异,分子直接用 user 表 COUNT。
+    # 引擎 AddHonor(授予头衔)也会把没打过对局的用户插进 user 表,差异极少,分子不扣除。
     conversion = (round(lgtbot_users / users_total * 100, 2)
                   if users_total and lgtbot_users is not None else None)
     return {
@@ -64,9 +63,7 @@ def _payload() -> dict:
             'lgtbot_achievements': game.get('lgtbot_achievements'),
             'player_conversion': conversion,
         },
-        # ② 运行指标:计数器 + 服务端算好的成功率
-        # (4 位小数,百万级样本下才能区分极高成功率:1e6 次里失败 1 次 = 99.9999%;
-        #  总数 0 时 None → 前端显 —。round 后经 JSON 传输,末尾 0 天然省略:99.99900 → 99.999)
+        # ② 运行指标:计数器 + 服务端算好的成功率(4 位小数才能区分极高成功率;总数 0 时 None → 前端显 —)
         'runtime': {
             **snap,
             'upload_rate': None if total == 0 else round((total - fail) / total * 100, 4),

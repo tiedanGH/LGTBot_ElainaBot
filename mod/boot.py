@@ -11,10 +11,8 @@ import 副作用顺序敏感，需要在所有依赖 LGTBot_ElainaBot C++ 扩展
      对后续 dlopen 的 libgame.so 可见（否则报 undefined symbol: ...LogMessage...）
   4. import 完成后立即恢复 CWD 和 dlopen flags，避免影响主框架其他相对路径
 
-注意第 2 步的 chdir **只保证主进程**那份 `k_markdown2image_path` 正确。游戏跑在
-运行时才 fork 的 `match_game_runner` 子进程里，那时 CWD 已恢复，子进程自己那份
-常量会指向框架根 —— 故另用 `_make_runner_wrapper()` 生成的 wrapper 启动 runner
-（`cd build && exec runner`），详见该函数 docstring。
+第 2 步的 chdir **只保证主进程**那份 `k_markdown2image_path` 正确；运行时才 fork 的
+`match_game_runner` 子进程由 `_make_runner_wrapper()` 生成的 wrapper 另行修正。
 """
 
 from __future__ import annotations
@@ -28,20 +26,12 @@ from core.base.logger import get_logger, PLUGIN
 log = get_logger(PLUGIN, 'LGTBot')
 
 # ──────── 路径常量 ────────────────────────────────────────────────────────
-# __file__ → plugins/LGTBot_ElainaBot/mod/boot.py  → 插件根目录是其上一级的上一级
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR   = os.path.join(PLUGIN_DIR, 'data')
 
-# 本地编译产物(build/)与下载的预编译包(build_prebuilt/)两个候选,
-# 用哪个由 data/prebuilt/active marker 决定 —— 见 _resolve_active_build()。
-#
-# 布局差异(关键):本地编译时 .so 在插件根、编译产物在 build/;而预编译包解压后
-# **保留了 zip 内的 build/ 前缀**(见 tools/pack_prebuilt.sh:打包时 .so 放包根、
-# 其余进 build/),即:
-#     build_prebuilt/LGTBot_ElainaBot.so          ← 桥接 .so
-#     build_prebuilt/build/{libbot_core.so, runner, markdown2image, plugins/…}
-# 所以预编译模式下,「桥接 .so 所在目录」(ENGINE_ROOT)与「编译产物目录」(BUILD_DIR)
-# 相差一层,不能混为一谈。
+# 本地编译产物(build/)与下载的预编译包(build_prebuilt/)二选一,由 data/prebuilt/active marker 决定(见 _resolve_active_build)。
+# 预编译包解压后**保留了 zip 内的 build/ 前缀**(桥接 .so 在 build_prebuilt/,其余在 build_prebuilt/build/,见 tools/pack_prebuilt.sh),
+# 所以预编译模式下 ENGINE_ROOT(桥接 .so 目录)与 BUILD_DIR(编译产物目录)相差一层,不能混为一谈。
 LOCAL_BUILD_DIR      = os.path.join(PLUGIN_DIR, 'build')
 PREBUILT_DIR         = os.path.join(PLUGIN_DIR, 'build_prebuilt')
 _PREBUILT_BUILD_DIR  = os.path.join(PREBUILT_DIR, 'build')   # 预编译包内真正的编译产物目录
@@ -71,8 +61,7 @@ def _resolve_active_build() -> tuple[str, str]:
     return PLUGIN_DIR, LOCAL_BUILD_DIR
 
 
-# 上次预编译安装若因 build_prebuilt/ 被运行中引擎占用而暂存 (WSL /mnt、Windows语义盘上加载中的 .so 会锁住整目录 rename → EACCES),
-# 此刻进程刚启动、尚未加载任何 .so,是完成换入的唯一安全窗口。必须在 _resolve_active_build() 选定 ENGINE_ROOT / RTLD_GLOBAL 预加载之前。
+# 完成上次暂存的预编译安装:此刻尚未加载任何 .so,是换入的唯一安全窗口,必须在 _resolve_active_build() 选定 ENGINE_ROOT / RTLD_GLOBAL 预加载之前。
 # _prebuilt_swap 零依赖,不会引入循环 import。
 from . import _prebuilt_swap
 _pending_ok, _pending_msg = _prebuilt_swap.finalize_pending(PREBUILT_DIR)
@@ -88,8 +77,6 @@ IMG_PATH   = os.path.join(ENGINE_DIR, 'images')
 # 引擎自身的配置文件 —— 放在 data/engine/ 子目录避免污染 Web UI 的「插件 → 配置」
 # 入口（该入口非递归扫描 data/，子文件夹自动不可见，与 config.yaml 区分清楚）
 CONF_PATH  = os.path.join(ENGINE_DIR, 'lgtbot.json')
-# 注:data/user_cache.db 是旧版私有昵称缓存的遗留文件
-# 用户数据现全部读主框架数据库(mod/userinfo.py),本插件不再连接 / 读写 / 备份它;可删除。
 
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -98,8 +85,7 @@ os.makedirs(IMG_PATH, exist_ok=True)
 
 
 # ──────── LGTBot 引擎配置文件预生成 ───────────────────────────────────────
-# 启动时若 data/engine/lgtbot.json 不存在则写入空 JSON。引擎自身在 LoadConfig
-# 阶段也会兜底创建，这里前置一次确保 Python 一侧可以直接传 CONF_PATH 给 Start。
+# 引擎在 LoadConfig 阶段也会兜底创建，这里前置一次确保 Python 一侧可以直接传 CONF_PATH 给 Start。
 def _ensure_lgtbot_conf():
     if os.path.isfile(CONF_PATH):
         return
@@ -112,9 +98,7 @@ def _ensure_lgtbot_conf():
 
 _ensure_lgtbot_conf()
 
-# 让 `import LGTBot_ElainaBot` 能找到桥接 .so / .pyd。
-# 预编译模式下 .so 在 build_prebuilt/,ENGINE_ROOT 必须排在插件根之前,盖过插件根里
-# 可能残留的本地旧 .so(ABI 可能与预编译包不同);本地模式 ENGINE_ROOT == 插件根,等价原逻辑。
+# ENGINE_ROOT 必须排在插件根之前:预编译模式下要盖过插件根里可能残留的本地 .so(ABI 可能与预编译包不同)。
 if ENGINE_ROOT in sys.path:
     sys.path.remove(ENGINE_ROOT)
 sys.path.insert(0, ENGINE_ROOT)
@@ -132,24 +116,19 @@ if _chdir_ok:
 
 
 # ──────── 预编译包可重定位 env ────────────────────────────────────────────
-# CI 编译机的绝对路径会被烤进 match_game_runner / config_runner。预编译包解压到
-# 用户任意路径后这些路径失效,需运行时覆盖:
+# CI 编译机的绝对路径会被烤进 match_game_runner / config_runner,预编译包解压到任意路径后失效,需运行时覆盖:
 #   · match_game_runner —— 认 LGTBOT_MATCH_RUNNER 环境变量(见 match.cc:ResolveRunnerExe)
-#   · 子进程 runner 找 build/ 里的 libbot_core.so 等 —— 靠 LD_LIBRARY_PATH(preload
-#     只对本 Python 进程生效,不传播给 spawn 出的 runner 子进程)
-# (config_runner 无环境变量入口,由桥接层 Start() 传 config_runner_path_ 覆盖。)
-# 本地编译路径正确时设这些是幂等的(值本就指向 build/),无副作用。
+#   · 子进程 runner 找 build/ 里的 libbot_core.so 等 —— 靠 LD_LIBRARY_PATH(preload 不传播给子进程)
+#   · config_runner 无环境变量入口,由桥接层 Start() 传 config_runner_path_ 覆盖
+# 本地编译时这些值本就指向 build/,无副作用。
 def _make_runner_wrapper(runner_exe: str) -> str:
     """生成「先 chdir 到 BUILD_DIR 再 exec runner」的 wrapper 脚本,返回其路径。
 
-    引擎渲染 markdown 用的 ``k_markdown2image_path`` 是 ``bot_core/image.h`` 里的 **inline 全局常量**,
-    在「谁加载它、谁当时的 cwd」那一刻就固化为 ``current_path()/markdown2image``。本模块只在 import 期间
-    chdir 到 BUILD_DIR(所以**主进程**那份常量是对的),import 结束即恢复主框架 cwd;而游戏跑在**运行时**才
-    fork+execvp 的 ``match_game_runner`` 子进程里(``bot_core/subprocess.cc`` 不设 cwd、``game_runner_main.cc``
-    也不 chdir),它继承的是恢复后的框架根 → 子进程那份常量指向 ``<框架根>/markdown2image``(不存在)。
+    ``k_markdown2image_path``(``bot_core/image.h`` 的 inline 全局常量)按加载那一刻的 cwd 固化。
+    本模块只在 import 期间 chdir,而运行时才 fork 的 ``match_game_runner`` 子进程(引擎 fork 时不设 cwd,
+    runner 自己也不 chdir)继承的是框架根 → 子进程那份常量指向不存在的 ``<框架根>/markdown2image``。
 
-    wrapper 用 ``exec`` 顶替自身进程,**pid 不变** —— bot_core 要 waitpid / SignalStop 这个 pid,
-    语义与直接 exec runner 完全一致。引擎侧入口是 ``bot_core/match.cc::ResolveRunnerExe``。
+    wrapper 必须用 ``exec`` 顶替自身进程、**pid 不变** —— bot_core 要 waitpid / SignalStop 这个 pid。
     """
     # 放 data/ 而非 build/:预编译包切换会整体覆盖 build/,wrapper 会被冲掉
     path = os.path.join(DATA_DIR, 'match_runner_cwd.sh')
@@ -191,10 +170,8 @@ if _chdir_ok:
 
 
 # ──────── 预加载本地共享库 ────────────────────────────────────────────────
-# LGTBot_ElainaBot.so 链接 libbot_core.so（位于 build/），但 ld.so 默认不搜
-# build/，rpath 缺失时会报 "cannot open shared object file"。
-# 用 ctypes.CDLL 显式按绝对路径预加载所有 build/lib*.so，配合 RTLD_GLOBAL
-# 让符号进全局符号表，后续 LGTBot_ElainaBot.so 通过 dlopen 加载时直接命中。
+# LGTBot_ElainaBot.so 链接 build/ 里的 libbot_core.so，但 ld.so 默认不搜 build/（rpath 缺失报 "cannot open shared object file"）；
+# 按绝对路径 RTLD_GLOBAL 预加载所有 build/lib*.so，后续 dlopen 直接命中。
 if _chdir_ok:
     _libs = sorted(glob.glob(os.path.join(BUILD_DIR, 'lib*.so')))
     # 两趟：A 依赖 B 时第一趟 A 失败、第二趟 B 已就位则 A 成功
@@ -207,28 +184,12 @@ if _chdir_ok:
 
 
 # ──────── 跨插件热重载持久化容器 ──────────────────────────────────────────
-# 插件热重载时，PluginManager 会把本插件的 Python 模块从 sys.modules 移除并
-# 重新 import；但 C++ 扩展 `LGTBot_ElainaBot` 一旦被 dlopen 就常驻进程内，sys.modules
-# 也保留缓存。利用这一点，把所有需要跨重载共享的可变容器挂到扩展模块对象上：
-#
-#   pending_buttons  - 命令触发的待附按钮（一次性消费, 见 callbacks.cb_match_event）
-#   active_ref       - 被动消息配额状态（msg_id/event_id + count, 见 quota.py）
-#   ref_waiters      - 配额满时等待的 asyncio.Event 列表（同上）
-#   current_game     - 群/用户 → 当前游戏名（/规则 按钮回查用，见 state.py）
-#   full_volume_groups - 已观测到 GROUP_MESSAGE_CREATE 的群 openid 集合
-#                       （helpers.is_full_volume_group 唯一信号源）
-#   group_push_cache - 群 → (可否主动推送, 过期时间) 的 TTL 缓存
-#                       （helpers.can_push_group 按群点查 DB 的结果缓存）
-#   log_attribution_ctxvar - log_attribution 模块的 ContextVar 实例
-#                       （跨热重载身份保持,patched _log_push 闭包要捕获同一个对象）
-#
-# 这样旧 callback（持有旧模块引用）和新 dispatcher（新模块引用）操作的都是
-# 同一份字典，热重载后玩家命令仍能正确路由到旧引擎里仍在进行的游戏。
+# 热重载会重建本插件的 Python 模块，但 C++ 扩展 `LGTBot_ElainaBot` 常驻进程、sys.modules 也保留它；
+# 跨重载共享的可变容器都挂到扩展模块对象上，旧 callback 与新 dispatcher 操作的才是同一份字典。
 _PERSIST_ATTR = '_elaina_persistent'
 _ENGINE_RUNNING_ATTR = '_elaina_engine_running'
 
-# 持久化字典的所有默认 key 集中在这里 —— state.py / log_attribution.py 不再
-# 各自 setdefault,直接从 _get_persistent() 取就保证 key 一定存在。
+# 持久化字典的所有默认 key 集中在这里,从 _get_persistent() 取就保证 key 一定存在。
 # (log_attribution_ctxvar 是 ContextVar 实例,延迟构造 —— 这里只占位 None,
 #  log_attribution._get_ctxvar() 检测到 None 时再 ContextVar(...) 一次性填上。)
 _PERSIST_DEFAULTS: dict = {
@@ -252,10 +213,8 @@ _PERSIST_DEFAULTS: dict = {
 def _get_persistent() -> dict:
     """返回挂在 C++ 扩展上的持久化容器，缺失则创建并补齐所有默认 key。
 
-    第一次插件加载：扩展模块上没有 _elaina_persistent → 创建新 dict
-    后续热重载：直接复用已有的 dict；如果新增了某 key 但旧 dict 没有,在此补齐
-    (容器类型 default 用 dict/set/list 实例,**不要共享**,每次 setdefault 单独
-    构造一个新的;None 默认值天然安全)。
+    热重载时复用已有的 dict，只补齐旧 dict 没有的 key；容器类默认值每次构造新实例，
+    **不要共享** ``_PERSIST_DEFAULTS`` 里的那一份。
     """
     if LGTBot_ElainaBot is None:
         # 扩展未编译：返回一次性的 fallback dict（不会跨重载共享，但避免 None）
@@ -268,7 +227,6 @@ def _get_persistent() -> dict:
             setattr(LGTBot_ElainaBot, _PERSIST_ATTR, p)
         except Exception:
             pass
-    # 补齐缺失的 key (老版本 dict 没有的字段在新版本里仍可用)
     for k, v in _PERSIST_DEFAULTS.items():
         if k not in p:
             p[k] = type(v)() if isinstance(v, (dict, set, list)) else v
@@ -295,13 +253,9 @@ def mark_engine_running(running: bool):
 def _import_extension() -> tuple[object, str]:
     """import 真正的 C++ 扩展并校验身份。返回 ``(module, '')`` 或 ``(None, err)``。
 
-    关键陷阱:仓库根 / plugins 下存在同名**目录** ``LGTBot_ElainaBot/``(开发副本、
-    插件目录本身),当 .so 不存在时 ``import LGTBot_ElainaBot`` 不会抛 ImportError,
-    而是把该目录当**命名空间包**导入 —— 得到一个没有任何扩展函数的空模块对象。
-    若不校验,``LGTBOT_AVAILABLE`` 会假阳性为 True:自检误报「已加载」、重启走到
-    ``release_bot_if_not_processing_games()`` 直接 AttributeError 500。
-    这里用扩展一定导出的 ``start`` 作探针;不是真扩展就当作未加载,并把命名空间包
-    从 sys.modules 剔除,免得缓存污染后续导入。
+    .so 不存在时,同名**目录** ``LGTBot_ElainaBot/``(开发副本、插件目录本身)会被当成**命名空间包**导入,
+    不抛 ImportError,得到一个没有任何扩展函数的空模块,``LGTBOT_AVAILABLE`` 随之假阳性。
+    用扩展一定导出的 ``start`` 作探针;不是真扩展就当作未加载,并从 sys.modules 剔除,免得污染后续导入。
     """
     try:
         import LGTBot_ElainaBot as _lib  # noqa: F401

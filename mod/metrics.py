@@ -11,10 +11,9 @@
   · 主动重启:面板按钮 / /重启 指令触发的 os.execv 重启次数 + 上次重启时间
     (挂两个重启入口的放行分支;崩溃自动重启计在崩溃项,不混入)
   · 配额压力:耗尽次数(TTL 内引用的被动条数真用完,**且无主动直推资格** —— 全量群 /
-    沙箱私信配额满后可无缝转主动消息,无实际影响,不计)/ 刷新等待超时次数(15s
-    未等到新引用强发降级)。挂 callbacks 发送路径 —— quota 模块内部无法区分
-    「无事件上下文」与「真耗尽」,也拿不到全量群 / 沙箱判定,且 wait_and_consume
-    内部重复调 try_consume 会重计,故不挂 quota.py。
+    沙箱私信可转主动消息,不计)/ 刷新等待超时次数(15s 未等到新引用强发降级)。
+    挂 callbacks 发送路径而非 quota.py:quota 内分不清「无事件上下文」与「真耗尽」,
+    拿不到全量群 / 沙箱判定,wait_and_consume 还会重复计数。
   · 今日主动消息:群聊 / 私信分开按日分桶(跨天自动清零),并按目标计数,
     供「平均每群 / 每用户」展示。挂 callbacks._deliver 的主动分支,只计送达的
     (无 msg_id/event_id 的推送:全量直推 / 沙箱直推 / 超时强发)。
@@ -155,8 +154,8 @@ def record_restart() -> None:
 
 
 def record_quota_exhausted() -> None:
-    """被动配额真耗尽且有实际影响:TTL 内引用的 5 条回复真用完(无上下文的推送不算),
-    且目标无主动直推资格(全量群 / 沙箱私信可转主动消息、无影响,由调用方过滤不计)。"""
+    """被动配额真耗尽且有实际影响:TTL 内引用的被动回复真用完(无上下文的推送不算),
+    且目标无主动直推资格(全量群 / 沙箱私信可转主动消息,由调用方过滤不计)。"""
     def _m(d: dict) -> None:
         d['quota_exhausted'] = int(d.get('quota_exhausted') or 0) + 1
     _bump(_m)
@@ -248,9 +247,8 @@ def record_quota_wait_timeout() -> None:
 
 
 # 不计入主数值的返回码(仍计入 ``send_fail_all`` 与 by_code 分布留证):
-#   · 40034105 = 被动配额超时强发时的「无主动消息权限」拒绝 —— 刷新等待超时兜底的**预期**失败,
-#     反映的是配额压力(已有独立计数),不算发送链路异常
-#   · 40034100 = 主动消息频控 —— 发送出口会退避重发,单次被拒不算丢;真丢掉的由 record_rate_limit 计入主数值
+#   · 40034105 = 配额超时强发撞上「无主动消息权限」—— **预期**失败,已计入配额压力
+#   · 40034100 = 主动消息频控 —— 出口会退避重发,真丢掉的由 record_rate_limit 计入主数值
 SEND_FAIL_IGNORED_CODES = frozenset({40034105, 40034100})
 
 
@@ -464,33 +462,29 @@ def unranked_window(start: datetime, end: datetime | None = None) -> dict:
 
 _TODAY = "datetime('now','localtime','start of day')"
 
-# 「昨日同时段」窗口:昨日 00:00 → 恰好 24 小时前(昨日的同一时刻)。
-# 与「今日 00:00 → 现在」严格等长,供今日对局 / 活跃玩家的**增减标识**对比
-# 若跟昨日全天比,今天没过完的时段永远显示假跌,毫无参考意义。
+# 「昨日同时段」窗口:昨日 00:00 → 恰好 24 小时前,与「今日 00:00 → 现在」严格等长,供**增减标识**对比;
+# 跟昨日全天比的话,没过完的今天永远显示假跌。
 _YDAY_START = "datetime('now','localtime','start of day','-1 day')"
 _YDAY_SAME = "datetime('now','localtime','-1 day')"
 
-# 标量查询:key → SQL(前 4 个是原仪表盘「数据统计」区的基础 COUNT,随
-# 指标面板特性一并搬到这里,同一只读连接一次查完)
+# 标量查询:key → SQL(同一只读连接一次查完)
 _SCALAR_SQL = {
     'lgtbot_users':             'SELECT COUNT(*) FROM user',
     'lgtbot_matches':           'SELECT COUNT(*) FROM match',
     'lgtbot_match_attendances': 'SELECT COUNT(*) FROM user_with_match',
     'lgtbot_achievements':      'SELECT COUNT(*) FROM user_with_achievement',
     'today_matches':            f'SELECT COUNT(*) FROM match WHERE finish_time >= {_TODAY}',
-    # 昨日同时段对局(窗口定义见 _YDAY_* 注释)
     'yesterday_matches_same_span':  ('SELECT COUNT(*) FROM match '
                                      f'WHERE finish_time >= {_YDAY_START} '
                                      f'AND finish_time < {_YDAY_SAME}'),
-    # 上一个 10 日的对局总数([今天-19 天, 今天-9 天) 整天窗口)——「近10日对局」的涨跌对比基准。
-    # 跨度按整天算,不做时段对齐:近 10 日含今天(未过完),对比结果在一天内单调爬升,语义是"这一轮 10 天目前跑到哪了"。
+    # 上一个 10 日([今天-19 天, 今天-9 天) 整天窗口)——「近10日对局」的涨跌对比基准。
+    # 不做时段对齐:语义是"这一轮 10 天目前跑到哪了",一天内对比结果单调爬升。
     'prev10_matches':               ('SELECT COUNT(*) FROM match '
                                      "WHERE finish_time >= datetime('now','localtime','start of day','-19 days') "
                                      "AND finish_time < datetime('now','localtime','start of day','-9 days')"),
 }
 
-# 取去重集合而不是 COUNT:这四项要和不计分账本取并集才是真正的今日 / 昨日口径,只拿回一个数字就没法去重了。
-# 窗口是一天,行数与日活同量级。私聊局 group_id 为 NULL,群聊两项天然排除。
+# 取去重集合而不是 COUNT:要和不计分账本取并集才能去重;窗口是一天,行数与日活同量级。
 _SET_SQL = {
     'today_players':                ('SELECT DISTINCT uwm.user_id FROM user_with_match uwm '
                                      'JOIN match m ON m.match_id = uwm.match_id '
@@ -532,8 +526,7 @@ _TOP_PLAYERS_TODAY_SQL = ('SELECT uwm.user_id, COUNT(*) c FROM user_with_match u
                           f'WHERE m.finish_time >= {_TODAY} '
                           'GROUP BY uwm.user_id')
 
-# 对局趋势窗口:10 天(含今天,对齐排行榜 TOP10)。除每日对局数外,同窗口再查
-# 每日活跃玩家(去重),前端并排成一张表。
+# 对局趋势窗口:10 天(含今天,对齐排行榜 TOP10);每日对局数与每日活跃玩家同窗口,前端并排成一张表。
 _TREND_WINDOW_DAYS = 10
 _TREND_SINCE = f"datetime('now','localtime','start of day','-{_TREND_WINDOW_DAYS - 1} days')"
 _TREND_MATCHES_SQL = ('SELECT date(finish_time) d, COUNT(*) c FROM match '
@@ -545,9 +538,8 @@ _TREND_PLAYERS_SQL = ('SELECT date(m.finish_time) d, COUNT(DISTINCT uwm.user_id)
                       f'WHERE m.finish_time >= {_TREND_SINCE} '
                       'GROUP BY d ORDER BY d')
 
-# 面板「游戏数据」四张今日卡的近 10 日小字行 + 对局人次卡,只有 ``ten_day=True`` 才查,/数据统计 指令在事件循环里同步查库,用不上的不跑。
-# 近 10 日与趋势图同窗(含今天),上一个 10 日同 prev10_matches,四项口径同 _span_stats。user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表,
-# 所以两个窗口连同今日 / 昨日同时段的人次合成一条一次扫完(仿真 200 万人次时逐项单查慢约 1.8 秒)。
+# 面板「游戏数据」的近 10 日小字行 + 对局人次卡,只有 ``ten_day=True`` 才查:/数据统计 指令在事件循环里同步查库,用不上的不跑。
+# 窗口同趋势图 / prev10_matches,口径同 _span_stats。user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表,所以合成一条一次扫完。
 _PREV10_SINCE = "datetime('now','localtime','start of day','-19 days')"
 _TEN_DAY_SQL = {
     ('recent10_matches', 'recent10_groups', 'prev10_groups'): (
@@ -570,7 +562,7 @@ _TEN_DAY_SQL = {
 def query_game_stats(ten_day: bool = False) -> dict:
     """lgtbot.db 游戏统计快照(只读)。任何失败不抛 —— 单项置 None/空 + errors。
 
-    参与榜在此完成昵称解析(userinfo.get_name,主框架 users 表)与脱敏兜底(mask_id),
+    参与榜在此完成昵称解析(userinfo.display_name,主框架 users 表)与脱敏兜底(mask_id),
     原始 openid 不出本模块。榜单双口径:本周(近 7 天,面板展示)与今日
     (/数据统计 指令用)。trend_10d 恒 10 项(缺失日补 0,含今天,新→旧),
     每项含当日对局数与当日活跃玩家数。
@@ -678,8 +670,7 @@ def query_game_stats(ten_day: bool = False) -> dict:
             {'display': userinfo.display_name(uid) or mask_id(uid), 'count': c}
             for uid, c in sorted(players.items(), key=lambda kv: (-kv[1], kv[0]))[:10]]
 
-        # 10 日趋势:查询按存在的日期聚合,Python 端补零成恒 10 项。
-        # 新→旧排列(今天在最前,越靠近的日期越靠前)。
+        # 10 日趋势:SQL 只返回有对局的日期,Python 端补零成恒 10 项,新→旧。
         matches_by_date = {str(d): int(c)
                            for d, c in _rows(_TREND_MATCHES_SQL, 'trend_10d')}
         players_by_date = {str(d): int(c)
@@ -709,10 +700,9 @@ def query_game_stats(ten_day: bool = False) -> dict:
 #   · matches      窗口内已完成对局数
 #   · players      窗口内去重玩家
 #   · groups       窗口内活跃群聊(私聊局 group_id 为 NULL / 空,不计)
-#   · attendances  窗口内**对局人次**(user_with_match 行数,不去重 —— 同一玩家打 3 局计 3;这四个视图的第 4 张卡用它替代「近10日对局」)
+#   · attendances  窗口内**对局人次**(user_with_match 行数,不去重;这四个视图的第 4 张卡用它替代「近10日对局」)
 #   · top_games / top_players  窗口内双榜,LIMIT 10
-# 所以 SQL 只写一遍 —— 复制四份必然漂移(「活跃群聊要排掉私聊局」「人次不去重」
-# 这类细节最容易只改一处)。各视图的公开函数只做键名改写(见 _prefixed)。
+# SQL 只写一遍,复制四份必然漂移;各视图的公开函数只做键名改写(见 _prefixed)。
 
 _SPAN_KEYS = ('matches', 'players', 'groups', 'attendances')
 
@@ -733,7 +723,6 @@ def _span_stats(start: str | None, end: str | None) -> dict:
     if not os.path.isfile(boot.DB_PATH):
         return _blank_span(f'lgtbot.db 不存在:{boot.DB_PATH}')
     out = _blank_span()
-    # 无窗口(总计)时不挂时间条件;有窗口时 match 表用 finish_time、带 join 的查询用 m.finish_time
     if start is None or end is None:
         w_m = w_j = ''
         args: tuple = ()
@@ -742,7 +731,6 @@ def _span_stats(start: str | None, end: str | None) -> dict:
         w_j = ' WHERE m.finish_time >= ? AND m.finish_time < ?'
         args = (start, end)
     join = 'FROM user_with_match uwm JOIN match m ON m.match_id = uwm.match_id'
-    # 群聊那条的附加条件:有窗口时接在后面当 AND,没窗口时它自己就是 WHERE
     _gc = "group_id IS NOT NULL AND group_id != ''"
     w_g = f'{w_m} AND {_gc}' if w_m else f' WHERE {_gc}'
 
@@ -835,7 +823,7 @@ def query_game_stats_for_date(date_str: str) -> dict:
     """某个**历史日期**的游戏统计(只读,供「数据统计MMDD」指令)。
 
     ``date_str`` 形如 ``'2026-08-02'``;窗口 [该日 00:00, 次日 00:00) 全整天,
-    键前缀 ``day_``。双榜 LIMIT 10(历史回看给全量,今日视图是 5)。
+    键前缀 ``day_``。双榜 LIMIT 10(今日视图是 5)。
     日期格式非法 → available=False + errors,不查库。
     """
     try:

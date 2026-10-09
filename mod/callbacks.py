@@ -16,8 +16,8 @@
   · _send_image_quota_managed        上传 + markdown / media 二选一,交给 _deliver 发送
   · _deliver                         选通道(_pick_route:被动引用 / 主动 / 丢弃)+ 发送失败的换引用 / 频控退避重发
 
-设计要点：cb_send_text/image_message 不阻塞 C++ 调用线程
-lgtbot 的 read thread 在 OnPost 里只持 Match.mutex_ 几十 µs。
+设计要点：cb_send_text/image_message 不阻塞 C++ 调用线程 —— 回调期间引擎持有
+Match.mutex_(见 cb_send_text_message)。
 """
 
 from __future__ import annotations
@@ -43,8 +43,7 @@ log = get_logger(PLUGIN, 'LGTBot')
 # 发日志 + 给玩家道歉 + 调度 30s 后整进程 execv。
 
 _LGTBOT_CRASH_DELAY_S = 30.0       # 倒计时 execv;给 framework 其他清理留 buffer
-# 工作线程被阻塞等道歉 / 通知 HTTP 完成的最长秒数
-# 必须趁线程还没退出去触发 SIGABRT 之前把"重要的事"发完。HTTP 往返通常 100–500ms。
+# 工作线程阻塞等道歉 / 通知 HTTP 发完的最长秒数:必须趁线程退出触发 SIGABRT 之前发完
 _CRASH_SEND_TIMEOUT_S = 8.0
 _CRASH_APOLOGY_MD = (
     '## 💥 游戏模块发生致命错误\n'
@@ -74,8 +73,7 @@ _CRASH_COLLATERAL_MD = (
 )
 
 # 通知群 openid 列表 —— 由 config.py::_apply_runtime_tunables 按 yaml 的
-# ``notify_groups`` 覆盖(旧字段名 ``crash_notify_group``,单个群)。
-# 空 = 不推送。三类通知都会**向列表里的全部群**推送:
+# ``notify_groups`` 覆盖。空 = 不推送。三类通知都会**向列表里的全部群**推送:
 #   · 引擎崩溃报告(_try_send_crash_notification)
 #   · 崩溃死循环熔断告警(_alert_crash_loop_tripped)
 #   · 自动重启说明(dispatcher._notify_auto_restart)
@@ -84,21 +82,17 @@ NOTIFY_GROUPS: tuple = ()
 
 # 私信主动直推资格 —— 两个变量均由 config.py::_apply_runtime_tunables 按 yaml 的
 # sandbox_dm_users 覆盖:
-#   · 列表恰好为 ['all'] → DM_PUSH_ALL=True,对**全部用户**私信直推。
-#     官方现已默认允许 bot 向好友推送主动私信(默认开启,用户可在权限设置中自行关闭)。
-#   · 其他 → 白名单老语义:仅列表内用户(沙箱测试号)直推,其余私信在无有效
-#     msg_id 时丢弃。老逻辑保留 —— 官方将来收回全员推送权限时改回配置即可。
-# 两种模式下「直推资格」都不跳过被动配额:前 5 条照常 msg_id 被动回复,
-# 配额耗尽后才走主动消息(见 _send_text/image_quota_managed)。
+#   · 列表恰好为 ['all'] → DM_PUSH_ALL=True,对**全部用户**私信直推
+#     (QQ 默认允许 bot 向好友推送主动私信,用户可在权限设置中自行关闭)。
+#   · 其他 → 白名单:仅列表内用户(沙箱测试号)直推,其余私信在无有效 msg_id 时丢弃。
+# 两种模式下「直推资格」都不跳过被动配额:被动次数用完才走主动消息(见 _pick_route)。
 SANDBOX_DM_USERS: frozenset = frozenset()
 DM_PUSH_ALL: bool = False
 
 
 # 单群 / 单用户每日主动消息上限(QQ 官方接口限制)。由 config.py 的 ``active_push_daily_limit`` 覆盖;0 = 不限制。
-#
-# 用满后**当日**该目标失去「主动直推资格」→ 发送路径退回被动的刷新按钮机制 (倒数第 2 条起挂「🔄 刷新会话」、配额满时阻塞等待续命 ≤refresh_wait_timeout),
-# 与非全量群的行为完全一致。计数走 metrics 的日分桶,**次日 0 点自然重置**, 无需定时任务:跨天后第一条消息读到的桶 date 已不是今天 → 用量归 0 → 资格自动恢复。
-# 进行中的对局跨天也因此无需任何特殊处理 —— 每条消息都是独立判定,不缓存资格,不存在"开局时算过一次就一直沿用"的问题。
+# 用满后**当日**该目标失去「主动直推资格」,退回刷新按钮机制;计数走 metrics 的日分桶,**次日 0 点自然重置**。
+# 每条消息独立判定、不缓存资格,进行中的对局跨天也无需特殊处理。
 ACTIVE_PUSH_DAILY_LIMIT: int = 1000
 
 
@@ -113,10 +107,8 @@ def _active_push_allowed(target_id: str, is_uid: bool) -> bool:
 def _is_sandbox_dm(target_id: str, is_uid: bool) -> bool:
     """私信目标是否具备「配额耗尽后主动直推」资格(all 模式 = 所有人)。"""
     return is_uid and (DM_PUSH_ALL or target_id in SANDBOX_DM_USERS)
-# 信号编号 → 名称,日志里更可读。
-# 数字 key 对应 SigSegvHandler 路径(C++ bridge 直接传 int);
-# 字符串 key 对应 OnCxxTerminate 写入 marker 文件里的 sig=<kind> 字段
-# (目前只有 cxx_terminate 一种,std::terminate / uncaught C++ exception 路径)。
+# 信号编号 → 名称,日志里更可读。数字 key 对应 SigSegvHandler 路径(C++ bridge 直接传 int);
+# 字符串 key 对应崩溃 marker 文件里的 sig=<kind> 字段。
 _SIG_NAMES = {
     6: 'SIGABRT', 7: 'SIGBUS', 11: 'SIGSEGV',
     'cxx_terminate': 'C++ 异常未捕获',
@@ -129,18 +121,16 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
     """C++ bridge → Python:lgtbot 触发 SIGSEGV/SIGBUS 被 wrapper 捕获恢复后调本函数。
 
     被调时 GIL 已由 wrapper 抢回(``PyGILState_Ensure``),Python C API 可用。
-    实际工作放到 asyncio loop 上跑 —— 这里只做最少同步操作,然后调度异步善后。
+    实际发送放到 asyncio loop 上跑。
     """
     global _crash_handled
     if _crash_handled:
-        # 多线程并发崩溃只处理第一条 —— 后面那些都是同一波连锁反应,30s 内
-        # 进程就会被 execv 替换,先把噪音压下去
+        # 多线程并发崩溃只处理第一条 —— 后面那些都是同一波连锁反应,进程很快会被 execv 替换
         return
     _crash_handled = True
 
     sig_name = _SIG_NAMES.get(sig, f'sig{sig}')
-    # 单行 target,仅供本地日志可读;通知群侧由 _try_send_crash_notification 用
-    # uid/gid/is_uid 自行排版成多行,见下面的安全说明。
+    # 单行 target 只进本地日志 / 审计;通知群消息由 _try_send_crash_notification 另行排版
     target = (f'用户 {uid}' if is_uid else f'群聊 {gid} 用户 {uid}')
     preview = (msg or '')[:80].replace('\n', ' ')
 
@@ -163,15 +153,14 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
     except Exception:
         pass
 
-    # 指标 + 审计:两者都同步写盘且永不抛。在腐败 heap 上属 best-effort,但发生在 execv 之前,通常能成功落盘
-    # 且必须趁现在写:工作线程 return 时若在 tcache_thread_shutdown 撞出 SIGABRT,C++ 侧会立刻 execv,后面的代码都跑不到。
+    # 指标 + 审计同步写盘且永不抛,必须趁现在写:工作线程 return 时若撞出 SIGABRT,C++ 侧会立刻 execv,后面的代码都跑不到。
     metrics.record_crash(sig_name)
     audit.record('restart', '引擎崩溃自动重启',
                  f'{sig_name}；触发源 {target}；'
                  f'{_LGTBOT_CRASH_DELAY_S:.0f}s 后 os.execv 自启',
                  src=audit.SRC_AUTO)
 
-    # 异步善后:发道歉 + 倒计时 + execv。C++ wrapper 即将 return,不能在这里阻塞。
+    # 异步善后:发道歉 + 倒计时 + execv。
     loop = state.event_loop
     if loop is None or loop.is_closed():
         # 没 loop 就只能立即退出让 supervisor 重启 —— 道歉就送不出了,但不至于卡死。
@@ -181,15 +170,12 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
         except Exception as e:
             log.error(f'os.execv 失败，需 supervisor 兜底: {e}')
         return
-    # preview(用户原文)只用于本地 log.error
-    # admin 凭 target + 时间戳去服务端日志反查 preview 原文即可。
+    # preview(用户原文)只用于本地 log.error,通知里只给长度(见 _try_send_crash_notification 的安全约束)
     msg_len = len(preview)
 
     # ── Phase 1: **阻塞当前工作线程**等道歉 + 通知 HTTP 发完 ───────────────────
-    # 关键设计:cb_lgtbot_crashed 跑在出错的工作线程上,该线程一旦 return 就进入退出流程,
-    # 极可能在 glibc tcache_thread_shutdown 撞坏 heap 触发 SIGABRT。
-    # 必须趁工作线程还活着,把"重要的事" —— 尤其 **崩溃报告推送给管理员通知群** —— 同步发完。
-    # 用 run_coroutine_threadsafe + Future.result(timeout=) 实现跨线程阻塞等待;超时直接放弃当前未完成的发送。
+    # 本函数跑在出错的工作线程上,它一 return 就进入退出流程,极可能在 glibc tcache_thread_shutdown 撞坏 heap 触发 SIGABRT;
+    # 必须趁它还活着把崩溃报告与道歉同步发完,超时就放弃未完成的发送。
     try:
         send_fut = asyncio.run_coroutine_threadsafe(
             _send_crash_messages(uid, gid, is_uid, sig_name, msg_len), loop)
@@ -200,9 +186,8 @@ def cb_lgtbot_crashed(uid: str, gid: str, is_uid: bool, msg: str, sig: int) -> N
         log.warning(f'崩溃消息发送异常,仍继续重启流程: {e}')
 
     # ── Phase 2: 调度 30s 后整进程 execv (不阻塞,asyncio loop 跑) ────────────
-    # 此时道歉 + 通知 HTTP 已经发出或失败,工作线程可以返回了。
-    # 30s buffer 留给主框架其他清理工作(WebUI 日志 flush、框架写队列落盘等)。
-    # 中途若工作线程退出触发 SIGABRT,C++ 桥接层的 SigAbrtHandler 会用预存的 execv 参数立即重启。
+    # 30s 留给主框架其他清理(WebUI 日志 flush、框架写队列落盘等);
+    # 其间工作线程退出若触发 SIGABRT,C++ 桥接层的 SigAbrtHandler 会用预存的 execv 参数立即重启。
     try:
         asyncio.run_coroutine_threadsafe(
             _post_send_countdown(sig_name), loop)
@@ -215,8 +200,8 @@ async def _send_crash_messages(uid: str, gid: str, is_uid: bool,
                                sig_name: str, msg_len: int) -> None:
     """同步阻塞路径:并发发道歉 + 通知,worker 线程通过 ``Future.result`` 等完。
 
-    用 ``asyncio.gather(*, return_exceptions=True)`` 保证一边失败不影响另一边(尤其通知群推送,不能被道歉发送失败牵连)。
-    再加一层 ``asyncio.wait_for`` 做内部超时兜底,免得 HTTP hung 把整个 future 拖到外层 8s 超时才被砍。
+    ``return_exceptions=True`` 保证一边失败不影响另一边(尤其通知群推送);内层 ``wait_for`` 兜底,
+    免得 HTTP hung 把整个 future 拖到外层超时才被砍。
     """
     coros = []
     # 优先级:通知群 > 道歉。先 append 表示在 gather 里优先调度,实际 HTTP 并发。
@@ -260,8 +245,7 @@ async def _try_send_crash_apology(target_id: str, is_uid: bool,
                                   *, is_belated: bool = False) -> None:
     """走标准发送通道把道歉送达 —— 复用现有 quota/sender 设施。
 
-    ``is_belated=True`` 走 ``_CRASH_APOLOGY_MD_BELATED`` —— 这条路径下进程已经重启完成,
-    「30 秒后自动重启」不再适用,改为「已恢复服务」。SIGSEGV 路径保持默认 False,文案不变。
+    ``is_belated=True``(补发路径,进程已经重启完成)用 ``_CRASH_APOLOGY_MD_BELATED``。
     """
     md = _CRASH_APOLOGY_MD_BELATED if is_belated else _CRASH_APOLOGY_MD
     try:
@@ -307,12 +291,9 @@ async def _send_collateral_notice(target_id: str, is_uid: bool) -> None:
 async def broadcast_notify(md: str, label: str, *, timeout: float = 8.0) -> int:
     """把一条**主动消息**广播到 ``NOTIFY_GROUPS`` 的全部群,返回成功条数。
 
-    三类通知共用本函数:崩溃报告、崩溃死循环熔断告警、自动重启说明。
-    用 ``sender.send_to_group(group_id, content)`` 不带 ``msg_id``/``event_id``
-    走 push API —— 仅在该群 QQ 后台给本 bot 开了「全量推送」权限时能落地,没权限会被 QQ 拒。
+    不带 ``msg_id``/``event_id`` 走 push API —— 仅在该群 QQ 后台给本 bot 开了「全量推送」权限时能落地。
 
-    几个刻意的选择:
-      · **并发发送 + ``return_exceptions=True``**:一个群失败绝不能连累其他群 —— 这几条恰恰是最不能漏的消息。
+      · **并发发送 + ``return_exceptions=True``**:一个群失败绝不能连累其他群。
       · **每条独立 ``wait_for``**:崩溃善后路径整体只有 8s 预算,不能让一个 hung 住的 HTTP 把其他群的推送一起拖死。
       · 失败只 ``warning``,绝不抛 —— 调用方(崩溃善后 / 重启流程)不能被通知推送反过来打断。
       · 未配置通知群 / 拿不到 sender → 返回 0 静默跳过。
@@ -368,8 +349,7 @@ async def notify_restart_rooms(reason: str = '', *, skip_keys=(),
     只发**有主动推送权限**的群:重启这一刻多半没有可用的被动引用,没权限的群直接丢弃。
     私信房间不在范围内:私信 ``/新游戏`` 直接开局,不存在「等待中」的房间。
 
-    ``skip_keys`` 用来去重:自动重启已经给通知群推过一条了,那些群不必再收一条
-    (手动重启不推通知群,所以那条路径下通知群里有房间照样通知)。
+    ``skip_keys`` 用来去重:自动重启已经给通知群推过一条了,那些群不必再收一条。
 
     并发发送 + 每条独立超时:夹在「引擎已释放」与 ``os.execv`` 之间,不能被某个群的慢请求拖住整个重启。
     """
@@ -413,15 +393,12 @@ async def _try_send_crash_notification(sig_name: str, uid: str, gid: str,
     """向全部通知群推送一条**主动消息**汇报崩溃(发送细节见 broadcast_notify)。
 
     ``is_belated=True`` 走补发路径(OnCxxTerminate marker):此时进程已经重启完成,
-    把「进程将在 N 秒后自动重启」这行替换为「机器人已自动重启恢复服务」,SIGSEGV 路径默认 False,文案不变。
+    状态行改为「机器人已自动重启恢复服务」。
 
-    **安全约束:** 本消息走 bot 自己的 appid 发出,QQ 风控同样适用
-    因此**不把触发崩溃的用户原文(preview)拼进 markdown**,避免用户故意发违规/敏感内容借崩溃路径让 bot 转发,
-    触发风控扣分甚至封号。只展示机械生成、bot 完全可控的字段(信号名 / openid / 长度数字),全部塞进单个代码块里,
-    QQ markdown 不会把里面的内容当指令解析。完整 preview 在服务端 ``log.error`` 里,
-    管理员凭 target + 时间戳去 WebUI「消息日志」或 framework 全局日志反查即可,本地查完全无风险。
+    **安全约束:** **不把触发崩溃的用户原文(preview)拼进 markdown** —— 否则用户可故意发违规/敏感内容
+    借崩溃路径让 bot 转发,触发风控扣分甚至封号。只展示 bot 完全可控的字段(信号名 / openid / 长度数字),
+    全部塞进单个代码块里;完整 preview 只在服务端 ``log.error`` 里。
     """
-    # 触发源块:私聊单行,群聊两行(群号 + 用户号各占一行,提升可读性)
     if is_uid:
         target_block = f'用户 {uid}'
     else:
@@ -460,10 +437,7 @@ async def _try_send_crash_notification(sig_name: str, uid: str, gid: str,
 #      `<plugin_dir>/LGTBot_CRASH_DUMPS/pending_apology_<sec>_<pid>_<tid>.txt`
 #   2. execv 重启整进程
 # 新进程 @on_load 调本模块 ``recover_pending_apologies``,异步补发道歉 + 通知,
-# 然后删 marker。
-#
-# 与 SigSegvHandler → cb_lgtbot_crashed 路径互补:那条路径是「崩溃当下同步发」,
-# 这条是「崩溃后重启再补发」—— 因为 OnCxxTerminate 跑在 c++ 异常上下文里,
+# 然后删 marker。不像 cb_lgtbot_crashed 那样当场发:OnCxxTerminate 跑在 C++ 异常上下文里,
 # Python C API / heap 都不可信,只能落地到文件再让干净进程接力。
 _PENDING_APOLOGY_PREFIX = 'pending_apology_'
 _PENDING_APOLOGY_SUFFIX = '.txt'
@@ -473,8 +447,7 @@ _BELATED_APOLOGY_DELAY_S = 5.0
 # ── 崩溃死循环熔断 ─────────────────────────────────────────────────────────
 # C++ 侧 abort-class handler(SigAbrtHandler / OnCxxTerminate)在 execv 前往
 # `LGTBot_CRASH_DUMPS/abort_restart_history` 追加一行重启时间戳。
-# 若 heap 腐败是确定性的,会每次重启又立刻 abort → 紧凑 execv 死循环。check_crash_loop()
-# 在 @on_load 读历史:窗口内重启 ≥ 阈值则判定死循环,暂停启动引擎(主框架仍运行)+ 告警,并清空历史。
+# 若 heap 腐败是确定性的,会每次重启又立刻 abort → 紧凑 execv 死循环,由 check_crash_loop 熔断。
 _ABORT_HISTORY_NAME = 'abort_restart_history'
 _CRASH_LOOP_WINDOW_S = 120.0       # 统计窗口
 _CRASH_LOOP_THRESHOLD = 4          # 窗口内重启达到该次数即熔断
@@ -561,7 +534,6 @@ def _parse_apology_marker(path: str) -> dict:
             result[name] = payload.decode('utf-8', errors='replace')
         else:
             result[key] = value.decode('utf-8', errors='replace')
-    # is_uid 规范化为 bool
     result['is_uid'] = (result.get('is_uid', '0') == '1')
     return result
 
@@ -659,7 +631,6 @@ def check_crash_loop() -> bool:
             recent.append(t)
 
     if len(recent) >= _CRASH_LOOP_THRESHOLD:
-        # 熔断:清空历史(下次热重载重新计数),告警,返回 True
         try:
             os.remove(path)
         except OSError:
@@ -712,33 +683,22 @@ async def _alert_crash_loop_tripped(count: int) -> None:
 # ──────── 「消息回复限制」教学提示(新建房间触发,紧跟建房公告发出) ──────────
 # 触发流:LGTBot_ElainaBot.cc::ClassifyMatchEvent 识别引擎「现在玩家可以…」建房
 # 广播(/新游戏、/随机游戏 共用同一条 NewMatch 广播)→ 调 cb_match_event(kind='new_game') →
-# 此处把 key 记入 _pending_tip_keys。**真正的发送时机被推迟到本帧的
-# cb_send_text_message / cb_send_image_message 把那条建房公告排进 asyncio
-# 发送队列之后**:
+# 此处把 key 记入 _pending_tip_keys。**真正的发送时机被推迟到建房公告发完之后**:
 #   1. C++ 调 cb_match_event(只标记,不立刻发) → 立即返回
 #   2. C++ 调 cb_send_text_message → 投递「房间已创建」send task 到 asyncio + per-key
 #      Lock 排队(见下面 _send_locks);Lock 保证 QQ 端按 cb 调用顺序送达
 #   3. 建房公告 send task 跑完后,我们才在同一个 task 末尾调 _consume_pending_tip
 #      → 调度教学提示 task,后者再次抢同一把 Lock 排到建房公告后面 → 顺序得证。
 
-# 建房广播是对 /新游戏 命令 msg_id 的**第 1 条**回复,教学提示紧随其后为第 2 条,必然在被动配额内送达;
-# 而游戏开始的消息发得晚(开局刷屏高峰),常常已超配额把提示吞掉。单机局无 new_game 广播 → 不再发教学。
+# 挂在建房而非开局:建房广播是对 /新游戏 命令 msg_id 的**第 1 条**回复,教学提示紧随其后必在被动配额内;
+# 开局消息发得晚(开局刷屏高峰),常常已超配额把提示吞掉。单机局无 new_game 广播 → 不发教学。
 _pending_tip_keys: set[str] = set()
 
 # ─────────────────────────────────────────────────────────────────────────
-# 「带开局私信」游戏白名单 —— 此集合内的游戏在**全量群**里 cb_match_event(kind='new_game')
-# 时会被记入 _pending_dm_warn_keys,在建房公告发完后追加一条「主动私信」提示给群内玩家。
-# 与「消息回复限制」教学**互斥**:非全量群建房时发的是回复限制教学(覆盖面更广,含刷新按钮机制),
-# 私信提示被抑制;全量群不需要教学,才轮到私信提示。**私信里新建游戏不提示**(玩家已在私信会话内)。
-#
-# 触发逻辑:
-#   1. C++ 引擎调 cb_match_event(kind='new_game', game_name='XXX')
-#   2. 若 'XXX' 在 _DM_LIMITED_GAMES 内**且该群能主动推送**(群聊 + can_push_group),
-#      key 进 _pending_dm_warn_keys;不能推送的群该位置标记的是 _pending_tip_keys
-#   3. 引擎随后调 cb_send_text_message 发出「房间已创建」公告
-#   4. _serialized_text_send 在 Lock 内调 _consume_pending_dm_warn,
-#      pop 出 key 并调度 _schedule_dm_warning —— 该 task 抢同把 Lock 排在
-#      本条之后,QQ 端先看到「房间已创建」,再看到「私信限制」提示。
+# 「带开局私信」游戏白名单 —— 此集合内的游戏在**能主动推送的群**里建房(new_game)时
+# 记入 _pending_dm_warn_keys,建房公告发完后追加一条「主动私信」提示,排队方式同上面的教学提示。
+# 与「消息回复限制」教学**互斥**:不能推送的群发回复限制教学(覆盖面更广),私信提示被抑制。
+# **私信里新建游戏不提示**(玩家已在私信会话内)。
 # ─────────────────────────────────────────────────────────────────────────
 _DM_LIMITED_GAMES: frozenset = frozenset({
     '谁是牛头王', 'wordle', '蓄攻防', '情书',
@@ -748,15 +708,12 @@ _DM_LIMITED_GAMES: frozenset = frozenset({
     '十七步', '同步麻将', '德州波卡', '幸运波卡',
 })
 
-# 类似 _pending_tip_keys:cb_match_event 阶段只标记 key,等开局公告
-# 通过 cb_send_text/image 发完后,在同一把 per-target Lock 内调度提示发送。
 _pending_dm_warn_keys: set[str] = set()
 
 # 不计分对局的补记 —— 引擎不把它们写进 lgtbot.db,今日统计因此看不到。
 # 「不记录」的另两种原因(单机局 / 未连库)不属于不计分,marker 取得足够窄把它们排除在外。
 _UNRANKED_MARKER = '游戏结果不记录：因为该游戏为非正式游戏'
-# 原因与参与者只在结算正文里,而 cb_match_event 拿不到正文;游戏名反过来只在 cb_match_event 拿得到。
-# 所以在这里寄存,由紧随其后的那条结算文本取走。
+# 原因与参与者只在结算正文里,游戏名反过来只在 cb_match_event 拿得到 —— 在这里寄存,由紧随其后的那条结算文本取走。
 _pending_unranked: dict[str, str] = {}
 
 # 白名单模式(正式环境主动私信被拒,发出去会失败)下的受限警告
@@ -773,8 +730,8 @@ _DM_WARNING_TEXT_ALL = (
 )
 
 # ──────── per-target 串行化:发到同一 target 的消息按 cb 调用顺序送达 QQ ────────
-# cb_send_text/image_message 改 fire-and-forget:投递到 asyncio loop 立即返回,read thread 在 OnPost 里持锁只剩几十 µs。
-# per-target asyncio.Lock 保证发到同一 target 的消息按 cb 调用顺序送达 QQ(asyncio FIFO + Lock 串行)。
+# cb_send_text/image_message 投递到 asyncio loop 立即返回;per-target asyncio.Lock 保证发到同一 target
+# 的消息按 cb 调用顺序送达 QQ(asyncio FIFO + Lock 串行)。
 _send_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -809,17 +766,14 @@ _REFRESH_TIP_GROUP_TAIL = (
 async def _send_refresh_tip(target_id: str, is_uid: bool) -> None:
     """走标准 `_send_text_quota_managed` 通道发出教学提示。
 
-    第 4 / 5 条配额上的真正刷新按钮由 ``_send_text_quota_managed`` 按 count 自动挂载;
-    教学消息本身视场景另带「全量申请」按钮。
+    真正的刷新按钮由 ``_send_text_quota_managed`` 按用量自动挂载;教学消息本身视场景另带「全量申请」按钮。
 
     走 per-target Lock 排队 —— 跟 ``_serialized_text_send`` 共用同一把锁,
-    保证教学提示永远在「开局公告」之后到达 QQ。
+    保证教学提示永远在建房公告之后到达 QQ。
 
     分支:
       · 私信(``is_uid=True``):DM 版 BASE(4 条/60 分钟),无附加按钮。
-      · 群聊(``is_uid=False``):群版 BASE(5 条/5 分钟)+ GROUP_TAIL 段,
-        底部挂一行「全量申请」type=2 按钮(回填到输入框,用户自行补群号再发);
-        实际命令由另一个插件实现,本插件只提供 UI 入口。
+      · 群聊(``is_uid=False``):群版 BASE(5 条/5 分钟)+ GROUP_TAIL 段,底部挂一行「全量申请」按钮。
     """
     if is_uid:
         msg = _REFRESH_TIP_BASE_DM
@@ -837,11 +791,7 @@ async def _send_refresh_tip(target_id: str, is_uid: bool) -> None:
 
 
 def _schedule_refresh_tip(target_id: str, is_uid: bool) -> None:
-    """C++ 工作线程安全地把 `_send_refresh_tip` 投到 asyncio loop,fire-and-forget。
-
-    `asyncio.run_coroutine_threadsafe` 返回的 Future 故意不 await
-    C++ 线程立即返回继续处理引擎下一帧。
-    """
+    """把 `_send_refresh_tip` 投到 asyncio loop,fire-and-forget(返回的 Future 故意不 await)。"""
     loop = state.event_loop
     if loop is None or loop.is_closed():
         log.debug('事件循环不可用,跳过刷新按钮使用说明')
@@ -857,16 +807,11 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
     """若本 key 之前在 cb_match_event(kind='new_game')里被打了标记,这里弹掉并发出。
 
     由 ``_serialized_text_send`` / ``_serialized_mixed_send`` 在 per-target Lock
-    持有期间、``_send_text/image_quota_managed`` 已 await 完毕之后调用。
-    教学提示走 ``_schedule_refresh_tip`` 投到 asyncio loop,内部再次抢同一把
-    Lock —— 当前 send task 释放锁后,教学提示 task 自然排到下一位,QQ 端先
-    看到「游戏开始」再看到「消息回复限制」教学。
+    持有期间、本条已发完之后调用。教学提示走 ``_schedule_refresh_tip`` 投到 asyncio loop,
+    内部再次抢同一把 Lock —— 当前 send task 释放锁后,教学提示 task 自然排到下一位。
 
-    有主动推送资格的群里 bot 不被被动回复条数限制,refresh 按钮永远不会出现
-    —— 这条教学的整段文案(在讲怎么点刷新按钮)会变成误导。所以只清掉标记,不发送。
-    判据是 ``can_push_group`` 而非全量群:**没开全量但开了主动推送**
-    的群同样全程不需要刷新按钮,不该收到这条提示。
-    沙箱私信用户同理:配额满后直接主动直推,不依赖刷新按钮,教学同样会误导。
+    能主动推送的群(判据是 ``can_push_group``,不看是否全量)与直推私信用户不依赖刷新按钮,
+    讲刷新按钮的教学只会误导 —— 只清掉标记,不发送。
     """
     if key not in _pending_tip_keys:
         return
@@ -881,10 +826,7 @@ def _consume_pending_tip(key: str, target_id: str, is_uid: bool) -> None:
 
 
 # ─────────── 「带开局私信」游戏限制提示 ──────────────────────────────────
-# 结构跟上面 _consume_pending_tip / _schedule_refresh_tip 完全对称
-# 在 cb_match_event(kind='new_game') 阶段判定游戏名是否在 _DM_LIMITED_GAMES
-# 内并打 _pending_dm_warn_keys 标记;真正的发送时机由 _serialized_text/
-# image_send 在开局公告同步落地后调 _consume_pending_dm_warn 触发。
+# 结构跟上面 _consume_pending_tip / _schedule_refresh_tip 完全对称。
 
 async def _send_dm_warning(target_id: str, is_uid: bool) -> None:
     """走标准 ``_send_text_quota_managed`` 通道发出「主动私信」提示。
@@ -906,7 +848,7 @@ async def _send_dm_warning(target_id: str, is_uid: bool) -> None:
 
 
 def _schedule_dm_warning(target_id: str, is_uid: bool) -> None:
-    """C++ 工作线程安全地把 `_send_dm_warning` 投到 asyncio loop,fire-and-forget。"""
+    """把 `_send_dm_warning` 投到 asyncio loop,fire-and-forget。"""
     loop = state.event_loop
     if loop is None or loop.is_closed():
         log.debug('事件循环不可用,跳过私信限制提示')
@@ -921,8 +863,7 @@ def _schedule_dm_warning(target_id: str, is_uid: bool) -> None:
 def _consume_pending_dm_warn(key: str, target_id: str, is_uid: bool) -> None:
     """若 cb_match_event 标了私信限制 key,这里弹掉并发出提示。
 
-    由 ``_serialized_text_send`` / ``_serialized_mixed_send`` 在开局公告
-    发送完毕后调用 —— 与 ``_consume_pending_tip`` 并列。
+    调用时机同 ``_consume_pending_tip``。
     """
     if key not in _pending_dm_warn_keys:
         return
@@ -950,9 +891,9 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
                          主动结束等场景,紧接着会有真正的新建消息覆盖,或就该
                          安静收尾)。
       ``mid_quit``       玩家中途强退广播。**仅私信**按 terminate 语义清理 ——
-                         私信对局全员 LEFT 后的解散广播私发不到任何人(桥接层
-                         2.6 注释),这条可送达的中途退出就是对局对该目标结束
-                         的最后信号;群聊对局仍在继续,不动任何状态。
+                         私信对局全员 LEFT 后的解散广播私发不到任何人,这条可送达的
+                         中途退出就是对局对该目标结束的最后信号;群聊对局仍在继续,
+                         不动任何状态。
       ``game_over``      游戏自然结束的结算广播 —— 挂「📊 查看战绩 + 🔄 重开一局」。
                          结算广播无 brief,重开按钮的游戏名从 ``current_game`` 回查,
                          取完即清(对局已随结算释放)。
@@ -961,12 +902,7 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
                          若游戏名也未知则整组不挂。
       ``game_started``   引擎 Match::GameStart 成功后的 BoardcastAtAll —— 挂
                          「🎮 游戏帮助」(广播本身在教玩家发「帮助」),并做
-                         进行中对局跟踪(active_matches)。「消息回复
-                         限制」教学已前移到 ``new_game`` 建房时标记:开局消息发
-                         得晚,配额可能已耗尽把提示吞掉;建房公告是命令的第 1 条
-                         回复,教学紧随其后必达。同时若建房游戏带「开局私信」,
-                         仅在全量群(教学不发送)才改发「主动私信」提示 ——
-                         两条提示互斥,回复限制优先。
+                         进行中对局跟踪(active_matches)。
       ``unknown_meta``       未参与游戏 / 不在本群的游戏 —— 挂「元指令帮助」。
       ``unknown_config``     等待房间里输错配置 —— 挂「配置帮助 + 元指令帮助」。
       ``unknown_game``       游戏进行中输错游戏指令 —— 挂「游戏帮助 + 元指令帮助」。
@@ -988,11 +924,9 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         state.current_game[key] = game_name
 
     # 进行中对局跟踪:game_started = 真正开局才记(等待房间 / 单机秒结算局不发此事件,不算进行中);结束 / 解散移除(pop 幂等,孤儿 game_over 也安全)。
-    # 游戏名从current_game 快照(game_started 广播本身无 brief;多人局在此前的 new_game 已写入)。
     if kind == 'game_started':
-        # 游戏名:多人局 current_game 已由 new_game 的 brief 写入,优先用;单机局引擎跳过
-        # new_game、game_started 又无 brief → current_game 为空,回退到 dispatcher
-        # 从「/新游戏 X」命令抓下的 pending 名。pop 无论命中与否都清掉 pending,不残留。
+        # 游戏名:多人局 current_game 已由 new_game 的 brief 写入,优先用;单机局没有 new_game、
+        # game_started 又无 brief,回退到 dispatcher 从「/新游戏 X」命令抓下的 pending 名。pop 无论命中与否都清掉 pending。
         pending = state.pending_new_game_name.pop(key, '')
         game = state.current_game.get(key) or pending
         if game:
@@ -1021,12 +955,9 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
 
     # 按钮挂载 —— new_game / join_leave 都挂同样一组:
     #   · 群聊:  「加入 / 退出」+ 「📖《X》规则」 两行
-    #   · 私聊:  仅「📖《X》规则」一行(DM 里 /加入 /退出 无意义,见 is_uid 分支)
-    # 私聊场景下 build_game_action_buttons 返回的若是空列表(game_name 未知的极端情形),
-    # `if btns:` 跳过 pending_buttons 写入,避免给框架塞空按钮组。
-    #
-    # announce 也挂同一组:「设置成功」的回执带 brief,是玩家最常看到的报名入口之一。
-    # 但必须限定在**等待中的房间**对局已开始时挂「加入 / 退出」只会点出一个错误回执。
+    #   · 私聊:  仅「📖《X》规则」一行(DM 里 /加入 /退出 无意义)
+    # announce 也挂同一组(「设置成功」的回执带 brief,是常见的报名入口),但只限**等待中的房间**:
+    # 对局已开始时挂「加入 / 退出」只会点出一个错误回执。
     if kind in ('new_game', 'join_leave') or (
             kind == 'announce' and key in state.waiting_rooms):
         btns = buttons.build_game_action_buttons(
@@ -1037,23 +968,17 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
         if btns:
             state.pending_buttons[key] = btns
         if kind == 'new_game':
-            # 「消息回复限制」教学:新建房间即标记(见 _pending_tip_keys 段注释),
-            # 建房公告 send task 末尾 consume → 提示作为第 2 条回复必达;是否真发
-            # 由 _consume_pending_tip 按目标过滤(全量群 / 直推私信跳过)。
+            # 「消息回复限制」教学(见 _pending_tip_keys 段注释);是否真发由 _consume_pending_tip 按目标过滤。
             _pending_tip_keys.add(key)
-            # 带开局私信的游戏:仅当回复限制提示**不会**发送(全量群)时才发
-            # 「主动私信」提示 —— 非全量群里两条提示都跟在建房公告后太吵,
-            # 回复限制优先、私信提示抑制;私信里新建游戏不发私信提示
-            # (玩家已在私信会话内)。
+            # 「主动私信」提示只在回复限制教学**不会**发送的群里标记 —— 两条都跟在建房公告后太吵。
             if (not is_uid and game_name and game_name in _DM_LIMITED_GAMES
                     and helpers.can_push_group(target_id)):
                 _pending_dm_warn_keys.add(key)
     elif kind == 'all_left':
         state.pending_buttons[key] = buttons.build_dissolve_buttons()
     elif kind in ('game_over', 'game_over_unrecorded'):
-        # 结算广播不带 brief(bridge 传来的 game_name 为空),重开按钮的游戏名
-        # 从 current_game 回查;pop 取完即清 —— 对局已随结算释放,残留会让之后
-        # 的按钮回查到已结束的游戏。「游戏结果不记录」的结算不挂「查看战绩」。
+        # 结算广播不带 brief,重开按钮的游戏名从 current_game 回查;pop 取完即清 ——
+        # 残留会让之后的按钮回查到已结束的游戏。
         game = state.current_game.pop(key, None)
         if kind == 'game_over_unrecorded':
             _pending_unranked[key] = game or ''
@@ -1079,13 +1004,13 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
 def cb_get_user_name(uid: str) -> str:
     """C++ → Python：返回用户昵称(主框架 data.db users 表;未命中返回 uid 兜底)
 
-    ``userinfo.get_name`` 同步且线程安全(缓存命中零 I/O;未命中走框架
+    ``userinfo`` 查昵称同步且线程安全(缓存命中零 I/O;未命中走框架
     log_service 的独立只读连接),可从引擎工作线程直调。昵称经
     ``helpers.sanitize_md_name`` 按 markdown 语境转义。
 
     非 markdown 出站路径(媒体兜底 msg_type=7 / WebUI 消息日志)在各自出口
     用 ``helpers.strip_md_escapes`` 还原,不会露出反斜杠。已知残留:引擎自渲
-    的对局图片(HTML)里带特殊字符的昵称会显示 ``\\`` 前缀,暂无干净解法。
+    的对局图片(HTML)里带特殊字符的昵称会显示 ``\\`` 前缀。
     """
     return helpers.sanitize_md_name(userinfo.display_name(uid) or uid)
 
@@ -1103,17 +1028,14 @@ def cb_get_user_avatar_url(uid: str) -> str:
 
 # ──────── 代理身份回执的 @ 改写(%中断 群管代理用)─────────────────────────
 # dispatcher 的 %中断 受限代理会把发给引擎的 uid 换成已配置的引擎管理员,于是引擎回执里的
-# ``At(uid)`` 变成 <@引擎管理员> —— 群里看到的是"@某个陌生人 中断成功",而不是真正点了指令的那位群管。
+# ``At(uid)`` 变成 <@引擎管理员>,而不是真正点了指令的那位群管。
 #
 # 这里给发送路径挂一个**一次性、限时、限 target** 的 mention 改写:dispatcher 代理派发前登记
-# (target_key → 引擎管理员uid → 真实操作者uid),引擎的下一条 回执命中即改写并立即注销。
-# 做成"一次性 + 5s 过期"是为了不误伤后续任何真的要 @ 该管理员的消息(例如该管理员本人正在这个群里玩游戏)。
+# (target_key → 引擎管理员uid → 真实操作者uid),引擎的下一条回执命中即改写并立即注销。
+# "一次性 + 5s 过期"是为了不误伤后续真的要 @ 该管理员的消息(例如该管理员本人正在这个群里玩游戏)。
 _MENTION_REWRITE_TTL_S = 5.0
-# key → (from_uid, to_uid, expires_at)。
-# 挂持久 dict 而非模块级变量 —— 登记发生在**新** dispatcher(热重载后的模块),
-# 消费发生在 cb_send_text_message,而引擎复用时 C++ 持有的是**旧** callbacks 模块:
-# 两边若各持各的模块级 dict,登记永远不会被旧回调看到(线上实测回执仍 @引擎管理员 的根因)。
-# 持久 dict 新旧模块共享,与 pending_buttons 同理。
+# key → (from_uid, to_uid, expires_at)。必须挂持久 dict:登记发生在热重载后的**新** dispatcher,
+# 消费却在引擎复用时 C++ 仍持有的**旧** callbacks 模块里,模块级 dict 会让登记永远不被旧回调看到。
 _mention_rewrites: dict = boot._get_persistent()['mention_rewrites']
 
 
@@ -1145,7 +1067,7 @@ def _apply_mention_rewrite(key: str, msg: str) -> str:
 # 中断投票广播的识别串 —— 上游 match.cc::UserInterrupt 的 Boardcast:
 #   「有玩家确定中断比赛，目前 N 人尚未确定中断，所有玩家可通过「/中断」…」
 # 取「尚未确定中断」这段:N 是变量,前半段「确定 / 取消」也会变(取消中断走同一条广播),中间这几个字在两种情形下都在,且全库仅此一处出现。
-# (与 bridge 的 ClassifyMatchEvent 同一套「依赖契约级稳定文本」的做法,只是这条判定要结合"谁发的命令",放在 Python 侧才拿得到发起人身份。)
+# 这条判定要结合发起人身份,所以放在 Python 侧而不是 bridge 的 ClassifyMatchEvent。
 _INTERRUPT_VOTE_MARKER = '尚未确定中断'
 
 
@@ -1182,16 +1104,9 @@ def _record_unranked(key: str, target_id: str, is_uid: bool, msg: str) -> None:
 def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """C++ → Python：发送文本消息（fire-and-forget,不阻塞 C++ 调用线程）
 
-    旧实现走 ``helpers.run_coro_blocking`` 阻塞 C++ 线程至多 15s 等刷新按钮 ——
-    那段时间内 lgtbot read thread 在 OnPost 里持有 ``Match.mutex_``,后续玩家
-    指令在 Thread B 排队;15s 后释放,Thread B 几乎同时和 OnGameOver 抢锁 →
-    Thread B 拿到锁后看 state 仍是 IS_STARTED → 解锁 → OnGameOver 紧接着拿锁
-    置 IS_OVER + CloseInput → child_in_=NULL → Thread B 的 SendExecute →
-    WriteFrame(NULL) → SIGSEGV。
-
-    新实现:投递发送任务到 asyncio loop 立即返回,read thread 持锁时间从 ≤15s
-    压到几十 µs。per-target Lock 保证发到同一 target 的消息按 cb 调用顺序
-    送达 QQ。
+    投递到 asyncio loop 后立即返回:回调期间引擎持有 ``Match.mutex_``,在这里阻塞会让
+    后续指令与 OnGameOver 抢锁,写已关闭的管道而 SIGSEGV。per-target Lock 保证发到
+    同一 target 的消息按 cb 调用顺序送达 QQ。
 
     本条回复要附的按钮（若有）已由 bridge 先调用 cb_match_event 写进
     state.pending_buttons[key]——同一次 HandleMessages 内顺序调用,
@@ -1201,13 +1116,12 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     _record_unranked(key, target_id, is_uid, msg)
     extra_buttons = state.pending_buttons.pop(key, None)
     if not extra_buttons:
-        # 群管发起的中断投票 → 给「还差 N 人」那条广播挂「强制中断游戏」。
+        # 群管发起的中断投票 → 给「还差 N 人」那条广播挂「强制中断游戏」;
         # 只在没有其他按钮时挂,不抢 cb_match_event 排好的按钮组。
         extra_buttons = _force_interrupt_buttons_for(key, msg)
     # 代理指令(%中断)的回执把 @引擎管理员 改回 @真实操作者;无登记时原样返回
     msg = _apply_mention_rewrite(key, msg)
-    # 日志是纯文本展示语境:引擎文本里源头转义的昵称(\#foo)还原后再记录,
-    # 实际发送仍用带转义的 msg(markdown 语境)
+    # 日志是纯文本展示语境,还原昵称的 md 转义后再记录;实际发送仍用带转义的 msg
     page_logs.log_outgoing(target_id, is_uid, helpers.strip_md_escapes(msg))
 
     loop = state.event_loop
@@ -1228,8 +1142,8 @@ async def _serialized_text_send(key: str, target_id: str, is_uid: bool,
 
     Lock 内顺序:
       ① ``_send_text_quota_managed``  实际把这条文本送出去
-      ② ``_consume_pending_tip``      如本帧标了 game_started,调度教学提示 task
-                                      —— 它也走同一把 Lock,会自动排在本条之后。
+      ② ``_consume_pending_tip`` / ``_consume_pending_dm_warn``  如本帧标了 new_game,
+         调度提示 task —— 它也走同一把 Lock,会自动排在本条之后。
     """
     async with _get_send_lock(key):
         await _send_text_quota_managed(target_id, is_uid, msg, extra_buttons)
@@ -1302,17 +1216,16 @@ async def _pick_route(key: str, target_id: str, is_uid: bool, what: str, *, retr
     """
     # 直推私信(all 模式全员 / 白名单沙箱用户):逻辑与全量群完全一致。
     is_sandbox_dm = _is_sandbox_dm(target_id, is_uid)
-    # 群的主动推送资格:全量群 ∪ QQ 后台开了 allow_proactive_msg 的群(两种权限分别开通,见 helpers.can_push_group)。
-    # 两个集合都只认落实过的事实,不看框架 non_at_message.* 配置 —— 可能真实权限不同步,会让没权限的群也走主动消息(必拒)。
+    # 群的主动推送资格:QQ 后台开了 allow_proactive_msg 的群(与全量消息权限分别开通,见 helpers.can_push_group)。
+    # 只认落实过的事实,不看框架 non_at_message.* 配置 —— 可能真实权限不同步,会让没权限的群也走主动消息(必拒)。
     is_full = (not is_uid) and helpers.can_push_group(target_id)
     is_active_push = (is_full or is_sandbox_dm) and _active_push_allowed(target_id, is_uid)
 
     consumed = quota.try_consume_ref(key)
     if consumed is not None:
         return consumed, is_active_push
-    # 指标:「真耗尽」= TTL 内引用的被动条数真用完(has_valid_ref True);
-    # 无引用 / 已过期的场景(无事件上下文的推送、私信丢弃)不算配额压力。
-    # 且仅统计**无主动直推资格**的目标:全量群 / 沙箱私信配额满后可无缝转主动消息、消息照常送达,没有实际影响,不计入配额压力。
+    # 指标只计「真耗尽」:TTL 内引用的被动条数真用完(无引用 / 已过期不算配额压力),
+    # 且目标**无主动直推资格**(有资格的配额满后无缝转主动消息,没有实际影响)。
     had_valid_ref = quota.has_valid_ref(key)
     if had_valid_ref and not is_active_push and not retry:
         metrics.record_quota_exhausted()
@@ -1321,8 +1234,7 @@ async def _pick_route(key: str, target_id: str, is_uid: bool, what: str, *, retr
         log.info(f'⚡ [{tag}] {key} 配额已满，走主动消息: {what}')
         return None, True
     if not had_valid_ref:
-        # **无有效引用**:要么从未登记,要么已过 TTL(群 5 分钟 / 私信 60 分钟)。
-        # → 直接丢弃,不白等、不白烧一次必失败的调用。典型场景:冷群里超时触发的「游戏解散」广播。
+        # **无有效引用**(从未登记 / 已过 TTL)→ 直接丢弃,不白等、不白烧一次必失败的调用。
         log.info(f'🗑️ [{_drop_scope(is_uid)}丢弃] {_no_ref_reason(key)}，丢弃: {what}')
         return None
     # 群聊配额满 / 普通私信配额满(TTL 内仍有引用) → 阻塞等待刷新,不预先尝试发送(直接发也会被 QQ 拒)。
@@ -1336,8 +1248,8 @@ async def _pick_route(key: str, target_id: str, is_uid: bool, what: str, *, retr
         log.info(f'✅ [配额已刷新] {key} 等 {elapsed:.1f}s 后续命成功，重发: {what}')
         return consumed, False
     metrics.record_quota_wait_timeout()
-    # 等待超时 → 改走主动消息(无 msg_id/event_id)。bot 若在该群/用户上有主动 quota 还能落地,语义更干净。
-    # 但今日主动额度已用满时**不再强发**:QQ 必拒,发了只是白烧一次调用并让日志误报成功 —— 直接丢弃,等用户点刷新或次日重置。
+    # 等待超时 → 改走主动消息(无 msg_id/event_id),bot 若在该群/用户上有主动 quota 还能落地。
+    # 今日主动额度已用满时不强发:QQ 必拒,发了只是白烧一次调用并让日志误报成功。
     if not _active_push_allowed(target_id, is_uid):
         log.warning(f'🚫 [主动额度已满] {key} 经 {elapsed:.1f}s 无刷新，'
                     f'且今日主动消息已达上限 {ACTIVE_PUSH_DAILY_LIMIT}，丢弃: {what}')
@@ -1365,7 +1277,7 @@ async def _deliver(target_id: str, is_uid: bool, what: str, send) -> None:
             ref_type, ref_value, used, ref_appid = consumed
             sender, kwargs = helpers.get_sender(ref_appid), {ref_type: ref_value}
         else:
-            # 主动路径:无 ref / 无 appid;用任一可用 sender,kwargs 空
+            # 主动路径:无 ref / 无 appid,kwargs 空
             sender, kwargs, used = helpers.get_sender(''), {}, 0
         if sender is None:
             log.warning(f'无可用 sender，丢弃 → {target_id}: {what}')
@@ -1435,17 +1347,16 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
 # ──────── 图片发送 ────────────────────────────────────────────────────────
 
 # ──────── 图文混排(还原引擎排版) ─────────────────────────────────────────
-# 桥接层在排版串里用 \x01IMG<i>\x01 占位符标出每张图片在原文里的**位置**(见 LGTBot_ElainaBot.cc::HandleMessages)。
-# 引擎给玩家看的文案不含控制字符,不存在与正文冲突的可能。有了位置信息,「图片在文字之前」「文字—图片—文字」
-# 这类排版才能原样送到 QQ,而不是一律压成「文字在前、图片在后」。
+# 桥接层在排版串里用 \x01IMG<i>\x01 占位符标出每张图片在原文里的**位置**(见 LGTBot_ElainaBot.cc::HandleMessages),
+# 图文排版才能原样送到 QQ。引擎给玩家看的文案不含控制字符,不存在与正文冲突的可能。
 _IMG_PLACEHOLDER_RE = re.compile('\x01IMG(\\d+)\x01')
 
 
 def _split_layout(content: str, n_images: int) -> list[tuple[str, object]]:
     """把带占位符的排版串拆成有序段:``('text', str)`` / ``('image', idx)``。
 
-    占位符一个都没有时(旧桥接层 / 纯 caption 调用)退化为「文字在前,图片依次在后」
-    与 2.7 及以前的行为一致。占位符没覆盖到的图片补在末尾,保证任何情况下都不丢图。
+    占位符一个都没有时退化为「文字在前,图片依次在后」。占位符没覆盖到的图片补在末尾,
+    保证任何情况下都不丢图。
     """
     content = content or ''
     segs: list[tuple[str, object]] = []
@@ -1516,7 +1427,7 @@ def _read_rendered_image(image_path: str) -> bytes | None:
 def cb_send_image_message(target_id: str, is_uid: bool, image_paths, content: str = ''):
     """C++ → Python：发送图文消息（fire-and-forget,理由同 ``cb_send_text_message``）
 
-    ``image_paths`` 是本次 flush 的**全部**图片路径(当前桥接层传 list;未重新编译的旧桥接层逐张传 str,按单图处理)。
+    ``image_paths`` 是本次 flush 的**全部**图片路径(list;传 str 时按单图处理,兼容未重新编译的桥接层)。
     ``content`` 是带 ``\\x01IMG<i>\\x01`` 占位符的排版串,占位符标出每张图在原文里的位置。
 
     图片读完后投到 asyncio loop 串行发送,本函数立即返回让 C++ read thread 释放 Match.mutex_。
@@ -1560,11 +1471,7 @@ def cb_send_image_message(target_id: str, is_uid: bool, image_paths, content: st
 
 async def _serialized_mixed_send(key: str, target_id: str, is_uid: bool,
                                  segs, images: dict, plain: str, extra_buttons) -> None:
-    """串行化的图文发送 —— 与 ``_serialized_text_send`` 共享 per-target Lock。
-
-    ``game_started`` 教学标记只在「胜利!」之类文本里出现,因此只有本条带文字时
-    才尝试 ``_consume_pending_tip``;纯图片消息看不到 key 也是 no-op。
-    """
+    """串行化的图文发送 —— 与 ``_serialized_text_send`` 共享 per-target Lock。"""
     async with _get_send_lock(key):
         await _send_mixed_message(target_id, is_uid, segs, images, plain, extra_buttons)
         if plain:
@@ -1577,11 +1484,11 @@ async def _send_mixed_message(target_id: str, is_uid: bool, segs, images: dict,
     """图文混排发送。
 
     通道 A(全部图片上传成功):拼一条 markdown,文字与图片**按引擎原顺序**内联,
-    整个 flush 只发一条消息 —— 多图也不再拆条,顺带省下配额。走 ``_send_text_quota_managed``:
+    整个 flush 只发一条消息。走 ``_send_text_quota_managed``:
     markdown 与文本在框架侧是同一种 msg_type,配额 / 主动直推 / 刷新按钮逻辑完全复用。
 
     通道 B(任一图片上传失败):退回媒体消息(msg_type=7)。它一条只能带一个媒体、
-    content 也不解析 markdown,排版无法还原 —— 压平成 2.7 的行为(首图带全部文字,其余图单发)。
+    content 也不解析 markdown,排版无法还原 —— 首图带全部文字,其余图单发。
     按钮挂不上媒体消息,还给 pending_buttons 让下一条文本带。
     """
     idxs = [i for kind, i in segs if kind == 'image']
@@ -1619,7 +1526,7 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
     发送通道二选一：
       A. 图床 markdown：通过 image_hosting 上传图片得到 URL，用 markdown
          `![](url)` 内嵌；保留 `<@openid>` 原生 mention，可挂刷新按钮
-      B. 媒体兜底：图床未启用 / 上传失败时走原有 msg_type=7 路径（content
+      B. 媒体兜底：图床未启用 / 上传失败时走 msg_type=7 路径（content
          字段需 humanize mentions，无法挂按钮）
 
     ``pre_url`` 是上游(``_send_mixed_message`` 的媒体兜底分支)已经拿到的上传结果:
@@ -1687,7 +1594,7 @@ async def _send_media_fallback(sender, target_id, is_uid, kwargs, raw_content, d
     ``kwargs`` 为空即主动消息。``up['media']`` 缓存 ``(sender, file_info)``:file_info 归上传它的 bot 所有,
     换了 sender(被动引用的 appid 与主动路径的不同)才重新上传。
     """
-    from core.message.media import upload_media_bytes  # 延迟导入
+    from core.message.media import upload_media_bytes
 
     if not up['media'] or up['media'][0] is not sender:
         prefix = 'users' if is_uid else 'groups'

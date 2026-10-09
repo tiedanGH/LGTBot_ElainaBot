@@ -93,7 +93,6 @@ html[data-theme="dark"] [data-cat="match"]   { --cat: #d6bb44; }
   background: var(--panel-2);
   border-bottom: 1px solid var(--border);
 }
-/* 表头文案在各自单元格内居中 */
 .audit-table th {
   text-align: center; padding: 10px 12px;
   font-size: 12px; font-weight: 600; color: var(--text-muted);
@@ -119,12 +118,10 @@ html[data-theme="dark"] [data-cat="match"]   { --cat: #d6bb44; }
 .audit-col-action { width: 1px; white-space: nowrap; }
 .audit-col-src    { width: 1px; white-space: nowrap; }
 .audit-col-result { width: 1px; white-space: nowrap; }
-/* 详情列:width:100% 吃掉全部剩余;max-width:0 是 auto 布局下让内部 ellipsis 生效的关键
-   没有它 td 会被长内容撑开,把整个表格挤出容器 */
+/* 详情列:width:100% 吃掉全部剩余;max-width:0 是 auto 布局下让内部 ellipsis 生效的关键,没有它 td 会被长内容撑开 */
 .audit-col-detail { width: 100%; max-width: 0; }
 
-/* 详情单元:单行省略 + title 全文;点击切换展开(pre-wrap 显示完整多行)。
-   宽度由 td(剩余空间)决定,面板越宽能直读的详情越长。 */
+/* 详情单元:单行省略 + title 全文;点击切换展开(pre-wrap 显示完整多行)。 */
 .audit-detail-text {
   display: block;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

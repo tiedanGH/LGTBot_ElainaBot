@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """audit 模块测试 —— 落盘 / 排序 / 保留期清理 / 损坏容错 / 静默失败 / 并发。
 
-被测重点(对应 plan):
+被测重点:
   · record() 原子落盘,字段类型正确,detail 截 500 字符
   · 文件内正序存储,get_entries() 新 → 旧
   · 超过保留期的记录在下次写入时清理,条数本身不设上限
@@ -240,7 +240,7 @@ def test_file_status_matches_file():
 
 def test_every_recorded_category_is_declared():
     """★ 漂移闸:源码里 ``audit.record('<cat>', ...)`` 用到的每个短码都必须在 ``CATEGORIES`` 中登记。
-    漏登记不会报错 —— 只是面板上那条记录的类别徽标渲染成空白、筛选按钮里也找不到它,极易长期无人察觉。"""
+    漏登记不报错,只会让面板上那条记录的类别徽标渲染成空白、筛选按钮里也找不到它。"""
     mod_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'mod')
     used = set()
     for root, _dirs, files in os.walk(mod_dir):

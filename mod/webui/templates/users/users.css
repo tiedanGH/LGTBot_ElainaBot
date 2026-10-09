@@ -72,10 +72,7 @@
 }
 
 /* 用户列表网格(默认 1 列,屏幕够宽时变 2 列)
-   关键:.users-section-right 的 base "display: none" 必须放在 @media 之前;
-   两条规则同特异性 (0,1,0),后写者赢 —— 若 base 放在 @media 后,即便
-   屏幕够宽,@media 里的 display:block 也会被 base 覆盖回 none,直接
-   表现为「2 列模式右侧不显示」。 */
+   .users-section-right 的 base "display: none" 必须写在 @media 之前:同特异性后写者赢,放后面右栏永远不显示。 */
 .users-grid {
   display: grid; grid-template-columns: 1fr; gap: 16px;
 }
@@ -164,7 +161,6 @@
     display: block; width: 16ch; margin: 0 auto;
     word-break: break-all; text-align: left;
   }
-  /* 消息数与最后活跃日期不允许断行 */
   .user-row .col-msgs, .user-row .col-seen { white-space: nowrap; }
   .user-row.empty { grid-template-columns: 1fr; width: auto; }
   .users-toolbar .spacer { display: none; }

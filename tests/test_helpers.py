@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""helpers 模块测试 —— markdown 转义 / mention 美化 / bot 绑定解析 / 全量群集合载入 / 跨线程协程桥接。
+"""helpers 模块测试 —— markdown 转义 / mention 美化 / bot 绑定解析 / 推送资格与全量群判定 / 跨线程协程桥接。
 
 框架侧依赖用替身注入,helpers 全部是**函数内延迟 import**,所以替换生效无需重载 helpers:
   · ``core.bot.manager`` 整个模块塞 ``sys.modules`` 桩(同 conftest 处理 boot)
     —— 真模块会连锁 import ``core.message.silk``,后者的 ``X | None`` 注解要
-    Python ≥3.10,dev 机 3.9 直接 TypeError;桩也让 bot 列表完全可控。
+    Python ≥3.10;桩也让 bot 列表完全可控。
   · ``core.base.config.cfg`` 是纯配置对象,直接 monkeypatch 属性。
 """
 
@@ -29,7 +29,7 @@ from plugins.LGTBot_ElainaBot.mod import helpers, state
 class _FakeLogService:
     """按 SQL 里出现的表名分派结果,模拟框架新旧两套 schema。
 
-    ``rows`` 直接给 list = 任何查询都返回它(老用例的简单形态);给 dict 则按
+    ``rows`` 直接给 list = 任何查询都返回它;给 dict 则按
     ``'groups_users'`` / ``'full_access_groups'`` 两个 key 分派,缺哪个 key 就
     在查到那张表时抛 OperationalError —— 正是「表已被迁移删掉」的现场。
     """
@@ -99,7 +99,7 @@ def test_sanitize_md_name_single_pass_no_double_escape():
 
 
 def test_sanitize_md_name_leaves_common_chars_alone():
-    """( ) ! . - + 在昵称里太常见且不构成语法,不转义(注释里的取舍)。"""
+    """( ) ! . - + 在昵称里太常见且不构成语法,不转义。"""
     assert helpers.sanitize_md_name('铁蛋(v2.8)-alpha!') == '铁蛋(v2.8)-alpha!'
 
 
@@ -325,12 +325,7 @@ def test_list_framework_bots_empty_on_config_failure(monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────
 
 def test_can_push_group_queries_by_group_and_caches(monkeypatch):
-    """★ 主动推送资格改为**按群点查 + TTL 缓存**(原本是全表扫描预载成集合)。
-
-    群数一多,全表扫描的代价全落在与实际用量无关的总群数上,而框架 query_data 是
-    同步的 —— 实测 5 万群一次扫描 ~69ms、20 万群 ~288ms,这段时间事件循环整个卡住。
-    点查只为真正在用的群付费,且命中缓存后零查询。
-    """
+    """★ 主动推送资格**按群点查 + TTL 缓存**,不全表扫描预载:框架 query_data 是同步的,扫描耗时随总群数涨,期间事件循环整个卡住。"""
     bot = _FakeBot('A', rows={'groups_users': [{'allow_proactive_msg': 1}]})
     _set_bots(monkeypatch, {'A': bot})
     assert helpers.can_push_group('GP') is True

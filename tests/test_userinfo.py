@@ -3,9 +3,7 @@
 """userinfo 模块测试 —— 框架库读取 / 昵称缓存与写回 / 活跃度三源合并。
 
 用 tmp 目录里的**真 SQLite 文件**(按主框架 core/storage/_schema.py 与
-statistics.py 的建表 SQL)+ FakeLogService(query/query_data/db_queue)模拟
-绑定 bot;monkeypatch helpers.get_bound_bot/get_bound_appid 注入。
-不依赖 aiohttp,本机可全量真跑。
+statistics.py 的建表 SQL)+ FakeLogService 模拟绑定 bot;不依赖 aiohttp,本机可全量真跑。
 """
 
 from __future__ import annotations
@@ -225,8 +223,7 @@ def test_note_username_gates_and_writeback(fake_bot):
 
 
 def test_note_username_first_write_on_freshly_booted_host(fake_bot, monkeypatch):
-    """回归:monotonic 起点为系统启动,刚开机(now < 冷却窗)时首次写回不得被
-    误判为「冷却中」吞掉(CI runner 必现;生产主机重启后前 10 分钟同理)。"""
+    """monotonic 起点为系统启动:刚开机(now < 冷却窗)时首次写回不得被误判为「冷却中」吞掉。"""
     base = fake_bot.log_service._base_dir
     _init_data_db(base, users=[('U1', '旧名')])
     monkeypatch.setattr(userinfo.time, 'monotonic', lambda: 5.0)   # 开机 5 秒
@@ -268,8 +265,7 @@ def test_list_users_merges_three_day_sources(fake_bot, legacy):
         groups=[('G1', [
             {'userid': 'UB', 'last_active': _day(-1)},      # 乙:群内昨天
             {'userid': 'UC', 'last_active': _day(-9)},
-            # 仅入群未互动的成员(进群事件入名单,不在 users 表)—— 不得进列表,
-            # 否则行数会超过「总用户」并挤爆 limit(实测 923 总数 vs 1000 行)
+            # 仅入群未互动的成员(进群事件入名单,不在 users 表)不得进列表,否则行数会超过「总用户」
             {'userid': 'UX_ROSTER_ONLY', 'last_active': _day(0)},
         ], 1)],
         legacy=legacy,
@@ -304,7 +300,7 @@ def test_list_users_limit_and_missing_stats_db(fake_bot):
 
 
 def test_list_users_default_all_and_offset_blocks(fake_bot):
-    """回归:默认无上限(1000+ 全量);limit+offset 分块与全量逐段一致。"""
+    """默认无上限(1000+ 全量);limit+offset 分块与全量逐段一致。"""
     base = fake_bot.log_service._base_dir
     _init_data_db(base, users=[(f'U{i:04d}', f'名{i}') for i in range(1005)])
     out = userinfo.list_users()
@@ -473,11 +469,7 @@ def test_today_lifecycle_delta_zero_and_none(fake_bot, tmp_path):
 
 
 def test_list_users_message_count_is_read_live(fake_bot):
-    """★ 消息数每次都重查 statistics.db —— 插件侧**不缓存**这个值。
-
-    排查「面板消息数一直不变」时要能一眼排除插件:框架每天聚合一次 user_stats.total_messages,只要那行变了,下一次刷新就该跟着变。
-    谁要是给 list_users / _stats_rows 加了进程内缓存,这条会红。
-    """
+    """★ 消息数每次都重查 statistics.db,插件侧**不缓存**:框架每天聚合一次 user_stats.total_messages,那行一变,下一次刷新就该跟着变。"""
     base = fake_bot.log_service._base_dir
     _init_data_db(base, users=[('UA', '甲')])
     _init_stats_db(base, rows=[('UA', 10, 0, {_day(-1): 10})])

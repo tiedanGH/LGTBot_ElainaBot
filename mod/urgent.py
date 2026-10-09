@@ -35,8 +35,7 @@ NOTICE_PATH = os.path.join(boot.DATA_DIR, 'urgent_notice.txt')
 # 开关 + 已通知群 —— 与文案分开存:文案是纯文本给人编辑,状态是机器读写的结构
 STATE_PATH = os.path.join(boot.DATA_DIR, 'urgent_notice.json')
 
-# 新群首次建房时那条通知的固定标题。正文直接用公告文案原文,**不套引用块**
-# 这条消息本身就是公告,再缩进一格只会更难读(菜单里的那份才需要引用块把它与内联指令区分开)。
+# 新群首次建房时那条通知的固定标题。正文**不套引用块**:这条消息本身就是公告,菜单里那份才需要引用块与内联指令区分开。
 NOTIFY_TITLE = '# ⚠️ 紧急公告'
 
 # 进程内缓存:_state 是当前状态,_state_sig 是它对应的文件签名(None = 文件不存在)

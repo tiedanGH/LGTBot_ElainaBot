@@ -9,7 +9,7 @@ const BACKUP_KEYS = {
   list:      '__lgtbot_backup_list',
 };
 
-/* register_route 注册的真实路由前缀(参见 webui/main.py register_backup_routes) */
+/* register_route 注册的真实路由前缀(见 webui/main.py 的 _BACKUP_*_ROUTE) */
 const BACKUP_ROUTE_BASE = '/api/ext/lgtbot/backup';
 
 
@@ -32,12 +32,7 @@ function backupFmtTime(ts) {
          String(d.getSeconds()).padStart(2, '0');
 }
 
-/* 相对时间("3 分钟前" / "昨天 15:30" / "2026-06-22 03:00:15"):
-   ≤ 90s → 「刚刚」
-   ≤ 60min → 「N 分钟前」
-   ≤ 24h 且同一天 → 「今天 HH:MM」
-   昨天 → 「昨天 HH:MM」
-   其它 → 完整 YYYY-MM-DD HH:MM:SS */
+/* 相对时间:刚刚 / N 分钟前 / 今天 HH:MM / 昨天 HH:MM,更早的给完整时间 */
 function backupFmtRelative(ts) {
   if (!ts) return '—';
   const now = Math.floor(Date.now() / 1000);
@@ -132,8 +127,7 @@ async function backupCallAction(key) {
 }
 
 
-/* register_route 路由是真实 HTTP 路由,直接返 json_response,不需要 DOMParser 解析 fragment。
-   但需要带框架 token(全局 TOKEN_QS,与 dash-config-save 同款)。 */
+/* register_route 路由直接返 json_response,不需要 DOMParser 解析 fragment;但要带上框架 token(全局 TOKEN_QS)。 */
 async function backupCallRoute(path, params) {
   const search = new URLSearchParams(params);
   if (TOKEN_QS) {
@@ -178,7 +172,7 @@ async function backupCreate() {
       if (data.skipped && data.skipped.length > 0) {
         console.warn('[backup] 跳过的文件:', data.skipped);
       }
-      await backupRefresh();   /* 自动刷新列表 */
+      await backupRefresh();
     } else {
       backupShowMsg('❌ ' + (data.message || '备份失败'), 'err');
     }
@@ -198,8 +192,7 @@ async function backupRefresh() {
   try {
     const data = await backupCallAction(BACKUP_KEYS.list);
     if (data.success) {
-      /* 复用 get_data 的渲染逻辑,只需要补 backup_dir / retention_count /
-         auto_interval_h 这几个 list 不返的字段 —— 用现有 inline data 补 */
+      /* list 不返 backup_dir / retention_count / auto_interval_h,从首屏 inline data 补齐后复用同一套渲染 */
       const inlineData = JSON.parse(document.getElementById('backup-data').textContent);
       backupApplyData({
         backup_dir: inlineData.backup_dir,
@@ -254,7 +247,6 @@ async function backupRestore(name) {
     const data = await backupCallRoute(BACKUP_ROUTE_BASE + '/restore', {name});
     if (data.success) {
       backupShowMsg('✅ ' + (data.message || '已恢复'), 'ok');
-      /* 仅引擎配置 lgtbot.json 需重启才能重新加载。 */
       dashAlert
         ? await dashAlert('恢复完成！ —— 战绩、成就、公告等数据已立即生效。\n'
               + '若本次恢复涉及引擎配置 lgtbot.json，请点击「🔁 重启 LGTBot」让引擎重新加载。')

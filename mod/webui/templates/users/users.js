@@ -172,7 +172,7 @@ function usersRender() {
 
   if (usersWideMQ.matches) {
     /* 2 列模式:先把左列填满前 50 个,剩下的再去右列(不是奇偶交错)。 */
-    const half = Math.floor(pageSize / 2);  // 100 / 2 = 50
+    const half = Math.floor(pageSize / 2);
     const left = slice.slice(0, half);
     const right = slice.slice(half);
     list1.innerHTML = left.map((u, i) => usersRowHtml(u, start + i + 1)).join('') + tailHint;
@@ -222,14 +222,12 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('users-refresh').addEventListener('click', usersRefresh);
 
-  /* 搜索:input 事件每次按键都触发,全量行的 Array.filter 是亚毫秒级;首次搜索
-     会触发剩余数据补全(usersRender 内)。每次输入回到第 1 页。 */
+  /* 搜索:每次按键直接全量过滤(Array.filter 足够快);首次搜索会触发剩余数据补全(usersRender 内),每次输入回到第 1 页。 */
   document.getElementById('users-search').addEventListener('input', () => {
     usersPage = 1;
     usersRender();
   });
 
-  /* 屏幕跨过 1200px 阈值时重排(2 列 ⇄ 1 列,每页容量也会变)。
-     matchMedia 比 resize 监听更节流,只在阈值翻转时触发。 */
+  /* 屏幕跨过 1200px 阈值时重排(2 列 ⇄ 1 列,每页容量也会变);matchMedia 只在阈值翻转时触发。 */
   usersWideMQ.addEventListener('change', usersRender);
 });

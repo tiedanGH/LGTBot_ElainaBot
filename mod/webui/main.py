@@ -5,7 +5,7 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
 
 骨架与拼装:
   · ``PAGE_KEY = 'lgtbot'``  唯一对用户可见的侧边栏入口
-  · 多个 ``_HIDDEN_KEYS`` —— 内部 action 端点(重启 / 检查更新 / git pull /
+  · 多个 ``_HIDDEN_KEYS`` —— 内部 action 端点(检查更新 / git pull /
     子模块 update / 清理各缓存 / 引擎编译启停),通过 wrap ``web_pages.get_pages``
     从侧边栏列表过滤;前端用 ``fetch(apiUrl(key))`` 触发，响应是单 HTML 片段
     (``<div id="msg">`` / ``<pre id="result">``),JS 用 DOMParser 解析。
@@ -16,24 +16,20 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
     用户数据(``page_users``);各自的 HTML / JS / 数据生成都委托给对应模块,
     本文件只做组装
 
-HTML / CSS / JS 全部抽到 ``templates/`` 子目录的 ``main.html`` /
-``main.css`` / ``main.js`` 中，本文件只保留 Python 逻辑;模板在 import 时
-一次性读入并缓存，插件热重载会随之自动重新读盘。
+HTML / CSS / JS 在 ``templates/main/`` 的 ``main.html`` / ``main.css`` /
+``main.js`` 中;模板在 import 时一次性读入并缓存，插件热重载会随之自动重新读盘。
 
-每次 HTTP 请求 ``_render_html()`` 跑一次，把三个标签的 HTML/JS 片段和数据
+每次 HTTP 请求 ``_render_html()`` 跑一次，把所有标签的 HTML/JS 片段和数据
 JSON 都拼进同一份 HTML —— 这样无论用户当前在哪个标签上，刷新都能就地更新。
 
 设计注意点:
   · ``_LazyHtmlDict.get('html')`` 返回 truthy 占位而非真调 provider,避免框架
     ``core.plugin.web_pages.get_page_html`` 的「先 truthy 后取值」双次访问
-    把有副作用的 provider 跑两遍 → 例如 ``_render_restart`` 释放 C++ 引擎
-    导致 tcache double-free
+    把有副作用的 provider 跑两遍
   · ``_ensure_get_pages_filters_hidden`` 一次性 wrap ``web_pages.get_pages``
     把所有 ``_HIDDEN_KEYS`` 从侧边栏列表里隐去，链式 wrap 不与其它插件冲突
   · ``_render_restart`` 内部延迟 import ``dispatcher``,断开循环依赖(本模块
     被 dispatcher 间接 import)
-  · Dashboard 的「保存引擎配置」复用主框架 ``/api/config-file/save`` 端点
-    (接受 plugins/ 下绝对路径，本插件 webui 不再为此自建端点)
 """
 
 from __future__ import annotations
@@ -231,7 +227,7 @@ _LOGO_DATA_URI = _logo_data_uri()
 
 
 def _render_html() -> str:
-    """每次访问页面调用，生成最新 HTML(含四个标签的内容和数据)。"""
+    """每次访问页面调用，生成最新 HTML(含所有标签的内容和数据)。"""
     return (_MAIN_HTML
             .replace('__ICON_SPRITE__', _ICON_SPRITE)
             .replace('__LOGO_DATA_URI__', _LOGO_DATA_URI)
@@ -293,19 +289,15 @@ def _render_html() -> str:
             .replace('__PLANNED_ON__', '1' if _plugin_state.is_planned_restart() else '0'))
 
 
-# ──────── 重启 action 端点(隐藏,仅按钮 GET) ──────────────────────────────
-# 复用 dispatcher 里命令 /重启 路径的 check_and_prepare_restart +
-# schedule_exec_after,两条入口语义完全一致 —— 包括「有活跃对局则拒绝」原子
-# 预检和「0.5s 后 os.execv 整进程」的换进程动作,确保 C++ 二进制真正被新进程
-# 重新 dlopen。
+# ──────── 重启 / 计划重启端点(面板按钮 GET) ───────────────────────────────
+# 与 /重启 指令共用 check_and_prepare_restart + schedule_exec_after:有活跃对局则原子拒绝,
+# 否则 0.5s 后 os.execv 整进程,确保 C++ 二进制真正被新进程重新 dlopen。
 
 async def _render_restart(reason: str = '') -> str:
     """触发重启 + 返回单个 ``<div id="msg">…</div>``。
 
-    只用做 JS 的回执片段:主页 main.js 的「重启 LGTBot」按钮 fetch 后用
-    DOMParser 抠 #msg.textContent 显示成顶部横幅，完整 HTML 外壳(DOCTYPE /
-    卡片 / hint) 都用不到。这个 key 又被 get_pages 过滤掉，用户也不会以独立
-    页面身份打开它，所以连 <html><body> 都省了。
+    只用做 JS 的回执片段:main.js 的「重启 LGTBot」按钮 fetch 后用 DOMParser 抠
+    #msg.textContent 显示成顶部横幅，所以不带任何 HTML 外壳。
 
     ``reason`` 是面板弹窗里可填的「更新内容」,随重启通知发给还有等待中房间的群。
     """
@@ -325,10 +317,9 @@ async def _render_restart(reason: str = '') -> str:
 
 
 async def restart_panel_handler(request: 'web.Request') -> 'web.Response':
-    """``GET /api/ext/lgtbot/panel-restart?reason=<更新内容>`` —— 面板重启按钮。
+    """``GET /api/ext/lgtbot/panel-restart?reason=<更新内容>`` —— 面板重启按钮,响应 ``#msg`` 片段。
 
-    走 ``register_route`` 而非隐藏 action:后者的 provider 不接参数,拿不到 ``?reason=``(同「计划重启」的选择)。
-    响应仍是 ``#msg`` 片段,main.js 解析方式不变。
+    走 ``register_route`` 而非隐藏 action:后者的 provider 不接参数,拿不到 ``?reason=``。
     """
     reason = (request.query.get('reason') or '').strip()[:_RESTART_REASON_MAX]
     return web.Response(text=await _render_restart(reason), content_type='text/html')
@@ -353,11 +344,9 @@ def _toggle_planned_restart_fragment(reason: str = '', auto: bool = False) -> st
 
 
 async def planned_restart_handler(request: 'web.Request') -> 'web.Response':
-    """``GET /api/ext/lgtbot/planned-restart?reason=<原因>&auto=1`` —— 切换维护模式。
+    """``GET /api/ext/lgtbot/planned-restart?reason=<原因>&auto=1`` —— 切换维护模式,响应 ``#msg`` + ``#state`` 片段。
 
-    走 ``register_route`` 而非隐藏 action:后者的 provider 不接参数,拿不到
-    ``?reason=``(同换绑 bot / 崩溃转储等带参端点的选择)。响应仍是
-    ``#msg`` + ``#state`` 片段,main.js 解析方式不变。
+    走 ``register_route`` 而非隐藏 action:后者的 provider 不接参数,拿不到 ``?reason=``。
     """
     reason = (request.query.get('reason') or '').strip()[:200]   # 截断防超长文案
     auto = (request.query.get('auto') or '') in ('1', 'true')
@@ -370,9 +359,8 @@ async def planned_restart_handler(request: 'web.Request') -> 'web.Response':
 class _LazyHtmlDict(dict):
     """字典子类:访问 'html' key 时调用 provider 动态生成;其他键正常字典行为。
 
-    框架 ``get_page_html`` 内部对 'html' 字段先做 truthy 检查再取值。两次访问
-    若都直传 provider,有副作用的 provider(此处 ``_render_restart`` 释放 C++ 引擎)
-    会跑两遍 → 第二次 deref 已 freed 的 ``g_bot_core`` 触发 tcache double-free。
+    框架 ``get_page_html`` 内部对 'html' 字段先做 truthy 检查再取值,两次都直调 provider
+    会让有副作用的 action 执行两遍(释放 C++ 引擎这类操作会 double-free)。
     本类 ``.get('html')`` 只返回 truthy 占位，真正生成留给 ``__getitem__``。
     """
 
@@ -429,30 +417,10 @@ def _register_hidden_action(key: str, provider):
 
 
 def register():
-    """在 ``web_pages._registry`` 中注册主页与所有 action 端点。
+    """在 ``web_pages._registry`` 中注册主页与所有 action 端点,并挂上带参的真路由。
 
-    可见:
-      · ``lgtbot`` —— 「LGTBot 机器人」侧边栏入口(展示三标签内容)
-
-    隐藏(被 filter wrap 屏蔽，不出现在侧边栏列表):
-      · ``__lgtbot_restart`` —— 整页通用「重启 LGTBot」按钮
-      · ``__lgtbot_dash_check_update``      —— Dashboard「检查更新」(同时查桥接层 + 子模块上游)
-      · ``__lgtbot_dash_do_update``         —— Dashboard「更新桥接层」(git pull --ff-only origin main)
-      · ``__lgtbot_dash_do_update_force``   —— Dashboard「强制更新」(git reset --hard origin/main,丢工作区)
-      · ``__lgtbot_dash_update_submodule``  —— Dashboard「更新 / 初始化 lgtbot 子模块」
-      · ``__lgtbot_dash_init_repo``         —— Dashboard 市场用户「把插件目录初始化为 git 仓库」
-      · ``__lgtbot_dash_clear_avatar`` / ``_7d`` —— Dashboard 头像缓存「清理全部 / 保留 7 天」
-      · ``__lgtbot_dash_clear_gen``    / ``_7d`` —— Dashboard 图片缓存「清理全部 / 保留 7 天」
-      · ``__lgtbot_dash_clear_match_all`` / ``__lgtbot_dash_clear_match_7d``
-        —— Dashboard 赛况缓存「清理全部 / 保留 7 天」
-      · ``__lgtbot_dash_reload_config`` —— Dashboard「插件配置」热重载 yaml 到运行时
-      · ``__lgtbot_urgent_toggle`` / ``__lgtbot_urgent_reset``
-        —— 配置管理「紧急公告」的总开关翻转 / 清空已通知群记录
-      · ``__lgtbot_dash_build_full / incr / bridge / list / custom / newtarget /
-         kill / clean / remove / log`` —— 引擎编译标签的 10 个动作 + 轮询端点
-      · ``__lgtbot_backup_create / list`` —— 数据备份标签的创建 / 列表端点
-      · ``__lgtbot_audit_list`` —— 操作审计标签的列表刷新(只读)
-      · ``__lgtbot_metrics_refresh`` —— 指标面板的统一刷新(只读)
+    可见的只有 ``lgtbot``(「LGTBot 机器人」侧边栏入口);其余 action key 被 filter wrap
+    屏蔽，不出现在侧边栏列表，各自用途见文件顶部的常量注释。
     """
     # 主页(可见)
     log_base = {
@@ -480,7 +448,7 @@ def register():
     _register_hidden_action(_DASH_CLEAR_GEN_7D_KEY,      page_dashboard.render_clear_gen_7d)
     _register_hidden_action(_DASH_CLEAR_MATCH_ALL_KEY,   page_dashboard.render_clear_match_all)
     _register_hidden_action(_DASH_CLEAR_MATCH_7D_KEY,    page_dashboard.render_clear_match_7d)
-    # 注:_DASH_RELOAD_CONFIG_KEY 历史 key 不变(JS / 文档兼容),provider 已搬到 page_config
+    # 插件配置热重载:key 沿用 dash 前缀(与 JS 侧一致),provider 在 page_config
     _register_hidden_action(_DASH_RELOAD_CONFIG_KEY,     page_config.render_reload_config)
     # 配置管理「紧急公告」的两个动作(开关翻转 / 清空已通知群)
     _register_hidden_action(_URGENT_TOGGLE_KEY,          page_config.render_urgent_toggle)
@@ -503,7 +471,7 @@ def register():
 
     # 数据备份 action 端点
     # · create / list:无参,沿用 _register_hidden_action 的 fragment 协议
-    # · restore / delete:要从 ?name= 拿参数,走 web_pages.register_route 真路由
+    # · restore / delete / download:要从 ?name= 拿参数,走 web_pages.register_route 真路由
     _register_hidden_action(_BACKUP_CREATE_KEY, page_backup.render_create)
     _register_hidden_action(_BACKUP_LIST_KEY,   page_backup.render_list)
 

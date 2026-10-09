@@ -2,11 +2,8 @@
  * 只读视图:唯一后端交互是「刷新」(隐藏 action __lgtbot_audit_list,
  * fragment 协议同 backup)。所有渲染字段一律 escapeHtml。
  *
- * 类别筛选(多选切换):auditFilter 是 Set<cat>;
- *   · 空集 = 不过滤,显示全部(「全部」chip 呈激活态)
- *   · 点类别 chip 切换其选中状态,选中一个或多个 = 显示所选类别的并集
- *   · 点「全部」清空选中集回到全显
- * 纯客户端过滤(一个月的量级),切换即时重渲染;状态不持久化,刷新页面回到全显。
+ * 类别筛选(多选切换):auditFilter 是 Set<cat>,空集 = 全部,选中多个 = 并集。
+ * 纯客户端过滤(一个月的量级);状态不持久化,刷新页面回到全显。
  */
 
 const AUDIT_LIST_KEY = '__lgtbot_audit_list';
@@ -62,8 +59,7 @@ function auditCatHtml(info, cat) {
          '<span class="btn-label">' + escapeHtml(info.label || cat) + '</span>';
 }
 
-/* 来源 → 徽标 class(复用 dash-badge 主题色 + audit 自有 API 色):
-   面板 = 中性灰 / 指令 = 橙 / 自动 = 绿 / API = accent 蓝紫 —— 四色区分触发方 */
+/* 来源 → 徽标 class:面板 / 指令 / 自动 / API 四种触发方各用一色 */
 function auditSrcBadgeClass(src) {
   if (src === '指令') return 'dash-badge dash-badge-warn';
   if (src === '自动') return 'dash-badge dash-badge-ok';

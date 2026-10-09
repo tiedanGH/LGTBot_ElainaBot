@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """page_dashboard 更新标识测试 —— _get_update_hint 用运行版本现算。
 
-回归背景:「更新桥接层」git pull 后插件热重载,运行版本已是新版,但启动
-自检缓存(600s 防抖)仍是 pull 前的判定 —— hint 必须现算才会消失。
+「更新桥接层」git pull 后插件热重载,运行版本已是新版,但启动自检缓存
+仍是 pull 前的判定 —— hint 必须现算才会消失。
 page_dashboard 顶部 import aiohttp,dev 机常无 → importorskip 守卫。
 """
 
@@ -162,8 +162,7 @@ def test_bot_rows_show_both_group_permissions():
     pd = _pd()
     js = pd.TAB_JS
     assert 'dashBotPermHtml' in js
-    # 断言**带图标的实际输出串**,不是光看标签文字 —— 后者在注释里也出现,
-    # 删掉渲染代码照样能蒙混过关
+    # 断言**带图标的实际输出串**:标签文字在注释里也出现,删掉渲染代码照样能过
     assert '<use href="#i-globe"/></svg>全量 ' in js
     assert '<use href="#i-megaphone"/></svg>主动 ' in js
     assert 'bot.proactive' in js or '.proactive' in js

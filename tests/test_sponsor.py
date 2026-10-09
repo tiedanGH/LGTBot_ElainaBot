@@ -83,7 +83,7 @@ def test_buttons_hidden_when_disabled(monkeypatch):
     flat = [b['text'] for row in buttons.build_more_features_buttons() for b in row]
     flat += [b['text'] for row in buttons.build_about_buttons() for b in row]
     assert not any('赞助' in t for t in flat)
-    # 关态下 /关于 的回执必须与加赞助功能之前完全一致(仅仓库链接一行)
+    # 关态下 /关于 的回执只有仓库链接一行
     assert buttons.build_about_buttons() == [
         [buttons.BTN_REPO_ADAPTER, buttons.BTN_REPO_LGTBOT],
     ]

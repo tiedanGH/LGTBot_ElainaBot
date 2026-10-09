@@ -7,15 +7,15 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
 内容为 lgtbot 游戏数据:
   · 数据总览,自上而下**先累计总数、再今日数据**:
       1. 好友总数 / 群聊总数(``g['bot_friends']`` / ``['bot_groups']``)——
-         这一行不是今日数据,所以底色换成 accent 系浅蓝紫 ``_TOTAL_BG``、角标用**描边**
-         胶囊,与下面的今日行一眼区分;角标是**今日净变化**本身,不是与昨日对比
+         不是今日数据,所以底色换成浅蓝紫 ``_TOTAL_BG``、角标用**描边**胶囊以示区分;
+         角标是**今日净变化**本身,不是与昨日对比
       2. 今日活跃玩家 / 今日活跃群聊(实底胶囊,对比昨日同时段)
       3. 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期)
       4. 可选的主动消息额度行:有上限时一整条(用量 / 上限 + 进度条,今日总计跟在后面),
          不限量时拆成左右两张(本会话用量 / 今日全部群或全部私信的总计)
   · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条。榜单条目带 ``unranked``
-    时(当天的对局全是不计分的)在名称后跟一个灰色「不计分」胶囊;既有计分又有不计分的游戏只汇总,不打标
+    时(当天的对局全是不计分的)在名称后跟一个灰色「不计分」胶囊
 
 窗口模式(``g['date_mode']`` 真):无涨跌胶囊、无主动消息行、无趋势图;第 4 卡换成「对局人次」
 (``g['attendances']``,user_with_match 计次不去重,票根图标);双榜 TOP10(``g['rank_limit']``);卡片文案去「今日」。
@@ -29,7 +29,7 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
 第一行的好友 / 群聊总数只在调用方注入 ``bot_friends`` / ``bot_groups`` 时出现 ——
 即今日视图(带今日净变化角标)与累计总计视图(**无角标**,``*_delta`` 留空)。
 
-PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)回退纯文本输出 —— 渲染是增强,不是依赖。
+PIL 未安装或找不到中文字体时返回 None,调用方(dispatcher 数据统计指令)回退纯文本输出。
 """
 
 from __future__ import annotations
@@ -52,8 +52,8 @@ _TEXT_MUTED = (107, 114, 128)   # --text-muted #6b7280
 _TEXT_FAINT = (154, 161, 173)   # --text-faint #9aa1ad
 _ACCENT = (91, 110, 232)        # --accent  #5b6ee8
 _ORANGE = (224, 134, 0)         # --img     #e08600
-_GREEN = (22, 163, 74)          # 涨(对局变多是积极信号)
-_RED = (220, 53, 69)            # 跌 / 面板 crash 红 #dc3545
+_GREEN = (22, 163, 74)          # 跌
+_RED = (220, 53, 69)            # 涨 / 面板 crash 红 #dc3545
 _WARN = (230, 162, 60)          # 警告黄(同面板计划重启按钮高亮 #e6a23c)
 _TEAL = (20, 184, 166)          # 今日主动消息总计的纸飞机图标
 _TAG_BG = (238, 240, 247)       # --tag-bg  #eef0f7
@@ -376,7 +376,6 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     _section(d, (pad, y, width - pad, y + overview_h))
     _sec_title(d, pad + 28, y + 24, '数据总览')
     if date_mode:
-        # 历史日 / 月 / 年 / 累计总计:无涨跌;第 4 卡为该期**对局人次**(user_with_match 计次,不去重)。
         # 总计视图前两卡也改「累计」——全量口径下"活跃玩家"会被误读成"当前还在玩的人"。
         period = _period_word(g)
         who = '累计' if g.get('total_mode') else '活跃'
@@ -402,8 +401,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
     tile_w = (inner_w - 28 * 2 - tile_gap) // 2
     ty0 = y + 68
 
-    # ── bot 规模:好友总数 / 群聊总数 —— 排在**第一行**(标题正下方)。
-    # 这两个是累计总数、不是今天的数字,所以放最上面先给全局盘子,再往下看今日。
+    # ── bot 规模:好友总数 / 群聊总数 —— 排在**第一行**:累计总数先给全局盘子,再往下看今日。
     # 数据来自框架绑定 bot 的 data.db(userinfo.count_friends / count_groups)。
     scale_rows = 0
     if show_scale:
@@ -422,7 +420,6 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             d.text((cx + 96, cy + 24), label, font=_font(24), fill=_TEXT_MUTED)
             _bold_text(d, (cx + 96, cy + 60), _fmt(val), _font(48), _ACCENT)
             # 这里的 delta 已经是净变化本身(不是"昨日值"),0 也画出来表示今日无变化。
-            # 用**描边**胶囊而非实底 —— 这一行的角标是「累计总数的今日净增减」,与"今日 vs 昨日同时段"不是一回事。
             if delta is not None:
                 pw = _delta_pill(d, -1000, -1000, int(delta), outline=True)
                 _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, int(delta),
@@ -442,8 +439,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             _delta_pill(d, cx + tile_w - 24 - pw, cy + 24, diff)
 
     # ── 主动消息额度(有上限:通栏一行 用量 / 上限 + 进度条,用满转红;不限量:左右两张)──
-    # 非全量群走**黄色警告**变体:该群没有主动推送权限,额度数字没有意义,
-    # 直接给授权指引(与文本输出同一判定 dispatcher._push_quota_view)。
+    # 非全量群走**黄色警告**变体:没有主动推送权限,额度数字没有意义(与文本输出同一判定 dispatcher._push_quota_view)。
     if show_pq and pq.get('no_permission'):
         cx = pad + 28
         cy = ty0 + (2 + scale_rows) * (tile_h + tile_gap)
@@ -462,7 +458,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
         total = pq.get('total')
         scope, kind = ('本群', '群') if pq.get('is_group') else ('本私信', '私信')
         if not limit:
-            # 不限量没有进度条:拆成和上面指标卡一样的左右两张,左本会话用量、右今日总计(全部群 / 全部私信)
+            # 不限量没有进度条,拆成和上面指标卡一样的左右两张
             halves = [(f'{scope}今日主动消息', used, 'mail', _ACCENT)]
             if total is not None:
                 halves.append((f'今日{kind}主动总计', total, 'push', _TEAL))
@@ -488,7 +484,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
             val_txt = f'{_fmt(used)} / {_fmt(limit)}'
             vf, vy = _font(36), cy + 54
             _bold_text(d, (cx + 96, vy), val_txt, vf, fg)
-            # 今日总计跟在后面:缩小版纸飞机 + 灰标签 + accent 数字,不随本会话的额度状态变色
+            # 今日总计跟在后面,不随本会话的额度状态变色
             if total is not None:
                 tx = cx + 96 + _text_w(d, val_txt, vf) + 36
                 ink_top, ink_bottom = vf.getbbox(val_txt)[1::2]
@@ -568,7 +564,7 @@ def _render(g: dict, sub_title: str) -> bytes | None:
         for j, it in enumerate(items):
             ry = y + 88 + j * 74
             cnt = it.get('count', 0)
-            # 名次:前三金银铜奖牌,4/5 名 tag 底灰字
+            # 名次:前三金银铜奖牌,其余 tag 底灰字
             if j < 3:
                 d.ellipse((cx + 28, ry, cx + 66, ry + 38), fill=_RANK_COLORS[j])
                 rf = _font(22)

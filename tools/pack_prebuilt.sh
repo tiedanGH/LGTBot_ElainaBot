@@ -7,10 +7,10 @@
 # 并在包内写 manifest.json(os / python_tag / boost / bridge_sha / submodule_sha / build_time / files[{path,size,sha256}])。
 #
 # 只收运行时真正需要的文件,排除 .a / 测试工具 / CMake 脚手架。
-# 符号链接 (libmd4c.so → .so.0 → .so.0.5.2)**不以 --symlinks 存**:Python 的 zipfile.extractall 无法还原符号链接
-# (会把链接目标路径当文件内容写出,坏掉 ld.so 的 soname 解析),所以让 zip 默认解引用成多个真实文件(每个几百 KB, 可忽略),下载端 extract 即得真实文件。
+# 符号链接**不以 --symlinks 存**:Python 的 zipfile.extractall 无法还原符号链接(会把链接目标路径
+# 当文件内容写出,坏掉 ld.so 的 soname 解析),所以让 zip 默认解引用成真实文件。
 #
-# Linux only(与本项目一致)。CI 三发行版各自跑一遍。
+# Linux only(与本项目一致)。CI 每个发行版各跑一遍。
 set -euo pipefail
 
 OS_TAG="${1:?usage: pack_prebuilt.sh <os_tag>}"

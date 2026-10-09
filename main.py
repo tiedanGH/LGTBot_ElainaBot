@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """LGTBot × ElainaBot 集成插件 (QQ Official Bot) —— 入口文件
 
-各功能拆分到 app/ 子模块（详见 app/__init__.py），本文件只负责：
+各功能拆分到 mod/ 子模块（详见 mod/__init__.py），本文件只负责：
 
   1. 声明插件元数据
   2. 在 module top-level 捕获 PluginContext（PluginManager 仅在加载窗口期暴露）
@@ -16,7 +16,7 @@ __plugin_meta__ = {
     'name': 'LGTBot 机器人',
     'author': '铁蛋',
     'description': '基于 C++ 的 LGTBot 游戏裁判机器人',
-    'version': '2.12.3',
+    'version': '2.12.4',
     'github': 'https://github.com/tiedanGH/LGTBot_ElainaBot',
 }
 
@@ -29,12 +29,7 @@ from core.plugin import context as _ctx_mod
 from core.base.logger import get_logger, PLUGIN
 
 # ──────── 关键步骤：捕获 PluginContext ────────────────────────────────────
-# PluginManager 加载流程：
-#   1. _ctx_mod.ctx = plugin_ctx   ← set
-#   2. 执行本文件顶层代码（这里读到 ctx）
-#   3. _ctx_mod.ctx = None         ← reset
-#   4. 调用 @on_load 函数（此时 ctx 已是 None）
-# 所以必须在模块顶层捕获，不能延迟到 @on_load 内
+# PluginManager 只在执行本文件顶层代码期间设置 _ctx_mod.ctx，调 @on_load 前已复位为 None，所以必须在模块顶层捕获
 from plugins.LGTBot_ElainaBot.mod import state as _state
 _state.plugin_ctx = _ctx_mod.ctx
 
@@ -43,9 +38,7 @@ _state.plugin_ctx = _ctx_mod.ctx
 # 其他模块依赖 boot.LGTBot_ElainaBot / boot.BUILD_DIR / boot.LGTBOT_AVAILABLE 等
 from plugins.LGTBot_ElainaBot.mod import boot              # noqa: F401  C++ 引擎与路径
 from plugins.LGTBot_ElainaBot.mod.webui import main as webui  # noqa: F401  Web 面板侧边栏页面入口
-# page_logs 既是日志缓冲(callbacks / dispatcher 调 log_incoming/log_outgoing),
-# 也是「消息日志」tab 的页面模块,合并后单一文件入口。webui.main 已 import 它,
-# 这里早 import 是为了确保 callbacks/dispatcher 调用时数据层已就位。
+# page_logs 兼做日志缓冲(callbacks / dispatcher 调 log_incoming / log_outgoing),显式早 import 确保数据层先就位
 from plugins.LGTBot_ElainaBot.mod.webui import page_logs  # noqa: F401
 from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard as _page_dashboard  # 启动更新自检入口
 from plugins.LGTBot_ElainaBot.mod import dispatcher        # noqa: F401  @handler 注册（消息派发 + INTERACTION）
@@ -61,14 +54,11 @@ log = get_logger(PLUGIN, 'LGTBot')
 
 @on_load
 async def _setup():
-    # 主框架 MessageSender 的 push 路径打补丁(让本插件的 push 日志带上正确
-    # plugin_name),幂等;放在最早 —— 任何 send_to_* 之前必须就位
+    # 给 MessageSender 的 push 打日志归属补丁(幂等);放在最早 —— 任何 send_to_* 之前必须就位
     _log_attribution.install_once()
 
     # 预存 execv 自启参数到 C++ 桥接层 —— SIGABRT handler 在 heap 已坏时
     # 没法做任何分配,必须提前用 fixed buffer 固化 sys.executable + sys.argv。
-    # 这样 lgtbot SEGV 后即便工作线程退出引发 double-free → SIGABRT,我们的
-    # SigAbrtHandler 也能立刻 execv 整进程自启,不让进程真死。
     if boot.LGTBOT_AVAILABLE:
         try:
             boot.LGTBot_ElainaBot.set_restart_args(sys.executable, list(sys.argv))
@@ -78,7 +68,7 @@ async def _setup():
     # 注册 Web 面板拓展页（无论 LGTBot 是否可用，让用户先能看到日志页）
     webui.register()
 
-    # 后台自检一次桥接层是否有新版本。放在 LGTBOT_AVAILABLE 早退之前,引擎没编译好也照常提示更新。
+    # 桥接层更新自检放在 LGTBOT_AVAILABLE 早退之前,引擎没编译好也照常提示更新。
     try:
         _page_dashboard.schedule_startup_update_check()
     except Exception as e:
@@ -104,9 +94,7 @@ async def _setup():
     except Exception as e:
         log.warning(f'恢复自动重启 watcher 失败: {e}')
 
-    # 上一轮 C++ 异常 (std::terminate) 路径若留下了 pending_apology_* marker,
-    # 现在干净进程已经就绪,调度异步补发道歉 + 通知群推送（5s 延后,避开 boot 抖动）。
-    # 无 marker 时函数 no-op,失败不阻断后续引擎启动。
+    # 上一轮 std::terminate 路径若留下 pending_apology_* marker,在干净进程里补发道歉 + 通知群推送;失败不阻断引擎启动。
     try:
         callbacks.recover_pending_apologies()
     except Exception as e:
@@ -121,8 +109,7 @@ async def _setup():
         log.warning(f'崩溃死循环检测异常: {e}')
 
     # ── 热重载检测：上一轮的引擎可能还活着 ─────────────────────────────────
-    # 若此时再调 start()，C++ 会覆盖 g_bot_core，旧引擎实例被丢弃，进行中的游戏全部失联（玩家命令进入新引擎找不到 match）。
-    # 解决：检测到引擎已在运行时，先尝试干净释放；释放失败（有游戏在跑）则跳过 start()，复用现有引擎，让玩家可以继续游戏。
+    # 再调 start() 会覆盖 g_bot_core，进行中的游戏全部失联；所以先尝试干净释放，释放失败（有游戏在跑）就跳过 start() 复用现有引擎。
     if boot.is_engine_running():
         if boot.LGTBot_ElainaBot.release_bot_if_not_processing_games():
             boot.mark_engine_running(False)
@@ -138,7 +125,6 @@ async def _setup():
             _backup.schedule_on_load_check()
             return
 
-    # 检查游戏目录是否存在已编译的游戏 .so
     if not os.path.isdir(boot.GAME_PATH):
         log.error('=' * 60)
         log.error(f'游戏插件目录不存在: {boot.GAME_PATH}')
@@ -171,7 +157,7 @@ async def _setup():
     _state.started = True
     log.info('✅ LGTBot 引擎已就绪')
 
-    # 启动后台备份检查 —— 距上次备份 > 24h 时,等 60s 让插件就绪后自动备份一次。每次 reload / restart 触发,无 long-running 定时器。
+    # 距上次备份 > 24h 时自动备份一次;只在每次 reload / restart 时检查,没有常驻定时器。
     _backup.schedule_on_load_check()
 
 

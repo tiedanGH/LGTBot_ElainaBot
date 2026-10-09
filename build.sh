@@ -42,7 +42,7 @@ WITH_GCOV="OFF"
 WITH_ASAN="OFF"
 WITH_GLOG="OFF"
 WITH_SQLITE="ON"
-WITH_TEST="OFF"      # ← 默认关闭，用 --test 开启
+WITH_TEST="OFF"      # 默认关闭，用 --test 开启
 WITH_GAMES="ON"
 TARGETS=()           # 仅构建指定目标;为空则构建全部
 LIST_TARGETS=0
@@ -75,7 +75,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --incremental 与 --clean 互斥:clean 会把 build/ 删了,incremental 又要求它存在
 if [[ $INCREMENTAL -eq 1 && $CLEAN -eq 1 ]]; then
     echo "[!] --incremental 与 --clean 互斥(clean 会删 build/, incremental 要求它存在)"
     exit 1
@@ -94,7 +93,7 @@ if [[ $INCREMENTAL -eq 1 ]]; then
 else
 
 # ── 子模块检查 ───────────────────────────────────────────────────────────
-# lgtbot 上游 .gitmodules 把 7 个嵌套子模块都登记成 ssh (git@github.com:...)
+# lgtbot 上游 .gitmodules 把嵌套子模块都登记成 ssh (git@github.com:...)
 if [[ ! -f "lgtbot/CMakeLists.txt" ]]; then
     echo "[!] lgtbot/ 子模块为空，尝试初始化..."
     if [[ -d "../../.git" ]] || [[ -d ".git" ]]; then
@@ -114,9 +113,8 @@ if [[ ! -f "lgtbot/CMakeLists.txt" ]]; then
 fi
 
 # ── TODO lgtbot Qt5 multiarch 探测补丁(上游 PR c87143b2 未合并前的兜底) ──────────
-# 上游 CMakeLists 的 Qt5 预检漏了 Debian/Ubuntu 的 multiarch 路径(/usr/lib/x86_64-linux-gnu/...),
-# 导致 markdown2image 的 Qt5 WebKit 后端在这些发行版探测不到 → 图片渲染被禁。
-# 配置前把补丁临时打到 lgtbot/ **工作区**(不提交子模块改动)。幂等:已含该路径 / 上游已合并 / 补丁打不上 → 跳过并提示,不中断构建。
+# 上游 Qt5 预检漏了 Debian/Ubuntu 的 multiarch 路径,markdown2image 的 Qt5 WebKit 后端探测不到 → 图片渲染被禁。
+# 补丁只打到 lgtbot/ **工作区**(不提交子模块改动);已含该路径 / 打不上则跳过并提示,不中断构建。
 _QT5_PATCH="$SCRIPT_DIR/tools/patches/lgtbot-qt5-multiarch.patch"
 if [[ -f "$_QT5_PATCH" && -f "lgtbot/CMakeLists.txt" ]]; then
     if grep -q 'x86_64-linux-gnu/cmake/Qt5Core' lgtbot/CMakeLists.txt; then
@@ -145,14 +143,8 @@ else
     [[ -f "$PY_INC/Python.h" ]] || need+=("python3-dev (找不到 Python.h)")
 fi
 
-# Boost.Python：多重检测，任一通过即认可
-# 单纯用 ldconfig -p 不可靠：apt 装完 dev 包后系统缓存可能没立刻刷新；
-# 不同发行版库文件命名也千差万别（libboost_python3.so / .py310 / -mt 等），
-# 单一正则覆盖不全。这里依次尝试 4 种方法：
-#   1. ldconfig 缓存（最快，但可能过期）
-#   2. 直接扫常见 lib 目录（绕过缓存）
-#   3. dpkg 包级查询（Debian/Ubuntu）
-#   4. rpm 包级查询（CentOS/RHEL/Fedora）
+# Boost.Python：多重检测，任一通过即认可 —— ldconfig 缓存可能没刷新，各发行版库文件命名
+# 也不一（libboost_python3.so / .py310 / -mt 等），依次试 ldconfig、扫 lib 目录、dpkg、rpm。
 _have_boost_python() {
     ldconfig -p 2>/dev/null | grep -qE 'libboost_python[0-9a-z.+-]*\.so' && return 0
     local d
@@ -188,13 +180,9 @@ fi
 echo "✅ 依赖齐全"
 
 # ── Python 3 兼容版本探测 ─────────────────────────────────────────────────
-# CMake find_package(Python3) 默认 VERSION 策略会选系统**最高版本**(可能扫到
-# deadsnakes 装的 python3.13),但发行版的 libboost-python-dev 只为系统默认
-# Python 编译(22.04→3.10,24.04→3.12,Debian 12→3.11)。两者错配 → 找不到
-# libboost_python<XYZ>.so → 在 CMakeLists 的 Boost.Python 查找处 FATAL_ERROR。
-#
-# 本段扫 /usr/lib/.../libboost_python<XYZ>.so 提取 ABI 版本(310 / 312 等),
-# 反推应用的 Python 解释器,显式 -DPython3_EXECUTABLE 传给 cmake,避免错配。
+# CMake 默认选系统**最高版本**的 Python(可能是 deadsnakes 装的 python3.13),但发行版的
+# libboost-python-dev 只为系统默认 Python 编译,错配会在 CMakeLists 的 Boost.Python 查找处 FATAL_ERROR。
+# 本段按已装的 libboost_python<XYZ>.so 反推解释器,显式 -DPython3_EXECUTABLE 传给 cmake。
 # 优先级:PYTHON3 环境变量 > 扫到的 boost-python ABI 匹配 > $(command -v python3) 兜底
 PY3_EXE=""
 if [[ -n "${PYTHON3:-}" ]]; then
@@ -215,7 +203,7 @@ else
             [[ -n "$v" ]] && _BP_VERS+=("$v")
         done < <(find "$d" -maxdepth 1 -name 'libboost_python[0-9]*.so*' 2>/dev/null)
     done
-    # 去重 + 数值降序(高版本优先,例如 312 优先于 310)
+    # 去重 + 数值降序(高版本优先)
     if [[ ${#_BP_VERS[@]} -gt 0 ]]; then
         IFS=$'\n' _BP_VERS=($(printf '%s\n' "${_BP_VERS[@]}" | sort -urn))
         unset IFS
@@ -290,8 +278,7 @@ fi  # end of: if INCREMENTAL == 0
 # ── --list-targets:列出 CMake 已知 target,方便用户挑 -t 参数 ───────────
 if [[ $LIST_TARGETS -eq 1 ]]; then
     echo "── 可用编译目标 ───────"
-    # `make help` 是 CMake 生成 Makefile 时自带的目标列表;比 cmake --target help
-    # 输出更整洁(后者可能在新版 CMake 上 require generator-specific 支持)。
+    # 有 Makefile 时优先用 CMake 自带的 `make help`,输出比 cmake --build --target help 整洁。
     if [[ -f build/Makefile ]]; then
         make -C build help 2>/dev/null | sed -n '/^\.\.\./p' | head -200
     else
@@ -303,14 +290,11 @@ if [[ $LIST_TARGETS -eq 1 ]]; then
 fi
 
 # ── 实际编译 ─────────────────────────────────────────────────────────────
-# 多 target 时一次 cmake --build 调用里挂多个 --target,CMake ≥3.15 支持;
-# 留空 TARGETS 时不传 --target,走默认 all。
+# 多 target 时一次 cmake --build 调用里挂多个 --target(CMake ≥3.15);留空 TARGETS 时走默认 all。
 #
-# 游戏目标要额外带上资源复制:lgtbot/games/CMakeLists.txt 里 icon.png 与 resource/ 的复制
-# 是 make_output_dir_<GAME> / resource_dir_<GAME> 两个 **仅挂 ALL** 的 custom target,
-# 与游戏库 <GAME> 之间没有依赖边(rule_binary 才有 add_dependencies)
-# 单目标构建的依赖图里没有它们,只有完整编译会执行。这里在调用侧把伴生 target 显式加进构建列表。
-# 判定游戏与上游同款:games/<t>/mygame.cc 存在(CMakeLists.txt:31)。
+# 游戏目标要额外带上资源复制:icon.png 与 resource/ 的复制是 make_output_dir_<GAME> /
+# resource_dir_<GAME> 两个 **仅挂 ALL** 的 custom target,与游戏库之间没有依赖边,
+# 单目标构建不会执行,所以在调用侧显式加进构建列表。判定游戏与上游同款:games/<t>/mygame.cc 存在。
 target_args=()
 for t in "${TARGETS[@]}"; do
     target_args+=(--target "$t")
@@ -324,10 +308,7 @@ echo "── 编译 (-j $JOBS) ────"
 cmake --build build -j "$JOBS" "${target_args[@]}"
 
 # ── 验证产物 ─────────────────────────────────────────────────────────────
-# 只在「肯定构建过 LGTBot_ElainaBot.so」的两种情形下校验:
-#   · 未指定 -t  (走默认 all,.so 必然在 all 里)
-#   · -t LGTBot_ElainaBot 显式指定
-# 否则 (比如 `-t numcomb`) 不要因 .so 不存在而报错 —— 用户根本没让构建它。
+# 只在构建了 .so 时校验(未指定 -t,或显式 -t LGTBot_ElainaBot);只编别的目标时 .so 缺失不算错。
 WANT_SO=0
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
     WANT_SO=1

@@ -3,17 +3,10 @@
  *
  * 将 LGTBot C++ 引擎通过 Boost.Python 暴露给 Python，
  * Python 侧由 ElainaBot 插件系统提供消息收发能力。
- *
- * 与 lgtbot_kook.cc 的主要差异：
- *   1. Boost.Python 模块名改为 LGTBot_ElainaBot
- *   2. 用户 Mention 格式：Kook (met)uid(met) → QQ Markdown <@uid>
  */
 
-// 抑制 Boost 自身链路里残留的 deprecation `#pragma message`：
-//   · BOOST_BIND_GLOBAL_PLACEHOLDERS —— 显式接受 _1 / _2 仍在全局命名空间
-//   · BOOST_ALLOW_DEPRECATED_HEADERS —— 接受 boost.python 仍然间接引用
-//                                       已被 Boost 标记为 deprecated 的内部头
-// 两个都是 Boost 官方给消费者的 opt-in 开关，只关警告，不改行为。
+// 只为关掉 Boost 自身链路里残留的 deprecation `#pragma message`（全局 _1 / _2 占位符、
+// boost.python 间接引用的 deprecated 内部头）：Boost 官方 opt-in 开关，不改行为。
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #define BOOST_ALLOW_DEPRECATED_HEADERS
 
@@ -66,20 +59,12 @@ private:
 // ──── SIGSEGV / SIGBUS 防护:不让 lgtbot 段错误带垮 Python 主框架 ──────────
 //
 // 设计:
-//   1. `OnPrivate/PublicMessage` 进入时把上下文(uid/gid/msg)写到 thread_local
-//      char 缓冲,然后 ``sigsetjmp`` 设回退点,再调 lgtbot。
-//   2. lgtbot 内部触发 SIGSEGV/SIGBUS → `SigSegvHandler` 只做 async-signal-safe
-//      操作(``write(2)`` 写一行 stderr + ``siglongjmp`` 跳出),其余收尾交给
-//      Python 侧。
-//   3. 回到 wrapper 后,GIL 状态不确定(`ReleaseGIL` 的 dtor 被 longjmp 跳过没跑,
-//      GIL 仍处于释放态),用 `PyGILState_Ensure` 重新拿;然后调 Python 模块
-//      ``plugins.LGTBot_ElainaBot.mod.callbacks.cb_lgtbot_crashed`` 通知崩溃,
-//      Python 侧负责 WebUI 日志 / 发道歉 / 30s 后 os.execv 重启。
-//   4. `thread_local sigjmp_buf` 让多线程并发的引擎调用各自独立恢复 —— 信号
-//      处理器在出错线程上运行,读到的 TLS 就是该线程的,不会互相干扰。
-//   5. SIGSEGV 后 lgtbot 内部状态损坏,Python 侧拿到通知后立刻把 state.started
-//      置 False,避免后续派发去戳已经废了的引擎触发二次崩溃;30s 后 execv
-//      整进程重启,彻底重建。
+//   1. `OnPrivate/PublicMessage` 先把上下文(uid/gid/msg)写进 thread_local 缓冲,
+//      再 ``sigsetjmp`` 设回退点、调 lgtbot。
+//   2. `SigSegvHandler` 只做 async-signal-safe 操作(写 stderr + 落盘 dump + ``siglongjmp``)。
+//   3. 回到 wrapper 后由 `NotifyCrashToPython` 调 ``cb_lgtbot_crashed``:引擎内部状态已损坏,
+//      Python 侧立刻把 state.started 置 False 防二次崩溃,30s 后 os.execv 整进程重建。
+//   4. 信号处理器在出错线程上运行,`thread_local sigjmp_buf` 让并发的引擎调用各自独立恢复。
 
 namespace {
 
@@ -92,9 +77,8 @@ thread_local char t_crash_gid[128];
 thread_local char t_crash_msg[512];
 thread_local volatile sig_atomic_t t_crash_is_uid = 0;
 
-// 崩溃栈 dump 文件夹绝对路径(`<plugin_dir>/LGTBot_CRASH_DUMPS`)。
-// 在 InstallSigSegvHandler 里由 game_path 推导一次,handler 只读。
-// 留 1024 字节足够装绝对路径 + 后缀。空字符串 = 推导失败,dump 跳过。
+// 崩溃栈 dump 文件夹绝对路径(`<plugin_dir>/LGTBot_CRASH_DUMPS`),在 InstallSigSegvHandler
+// 里由 game_path 推导一次,handler 只读。空字符串 = 推导失败,dump 跳过。
 char g_crash_dump_dir[1024] = {0};
 
 // ──────── SIGABRT / terminate execv 自启所需的全局状态 ──────────────────────
@@ -110,8 +94,7 @@ volatile sig_atomic_t g_exec_argv_ready = 0;
 volatile sig_atomic_t g_already_aborting = 0;
 
 // ──────── async-signal-safe 串行写工具 ──────────────────────────────────────
-// 不用 printf/snprintf/fprintf —— 这些理论上可能调 locale 数据、可能死锁。
-// 全部手写,逻辑极简,只用 write(2) 这一个 syscall。
+// 不用 printf 系列(可能碰 locale 数据、可能死锁),只用 write(2)。
 inline void as_write_str(int fd, const char* s) {
     if (!s) return;
     size_t n = std::strlen(s);
@@ -192,8 +175,7 @@ inline size_t as_build_dump_path(char* out, size_t cap,
 inline void DumpCrashToFile(int sig, siginfo_t* info) {
     if (g_crash_dump_dir[0] == '\0') return;
 
-    // mkdir 在 Install 已经做过,但每次 dump 再 mkdir 一次防止有人手贱删了
-    // 文件夹;EEXIST 算成功,handler 不关心返回值。
+    // Install 时已建过;再建一次防目录被手动删掉,EEXIST 忽略。
     (void)mkdir(g_crash_dump_dir, 0755);
 
     struct timespec ts;
@@ -230,17 +212,15 @@ inline void DumpCrashToFile(int sig, siginfo_t* info) {
 
     void* frames[64];
     int frame_count = backtrace(frames, 64);
-    // backtrace_symbols_fd 不分配内存,直接 write(fd) —— 是为 signal handler
-    // 准备的,glibc 文档明示。
+    // backtrace_symbols_fd 不分配内存、直接 write(fd),glibc 明示可用于 signal handler。
     backtrace_symbols_fd(frames, frame_count, fd);
     as_write_str(fd, "\n=== end ===\n");
 
     close(fd);
 }
 
-// 信号处理器 —— 只能用 async-signal-safe 函数(POSIX 列出的那一小撮):
-// `write`、`raise`、`signal`、`open`、`close`、`mkdir`、`clock_gettime`、
-// `backtrace*` 这类。**不能**用 printf / malloc / boost / Python C API。
+// 信号处理器 —— 只能用 async-signal-safe 函数(`write`、`raise`、`signal`、`open`、`close`、
+// `mkdir`、`clock_gettime`、`backtrace*` 这类),**不能**用 printf / malloc / boost / Python C API。
 void SigSegvHandler(int sig, siginfo_t* info, void* /*ucontext*/)
 {
     if (t_sigsegv_armed) {
@@ -250,9 +230,7 @@ void SigSegvHandler(int sig, siginfo_t* info, void* /*ucontext*/)
         ssize_t r = write(STDERR_FILENO, banner, sizeof(banner) - 1);
         (void)r;
 
-        // 在 longjmp 之前把栈和上下文落盘 —— 即便后续 backtrace 自己再次出错
-        // (nested SEGV) 也会被 handler 二次进入时 t_sigsegv_armed==0 分支
-        // 走 SIG_DFL 终结,跟改造前等价,不比 baseline 更差。
+        // longjmp 前先落盘;dump 里再出 SEGV 时已 disarm,二次进入直接走 SIG_DFL 终结。
         DumpCrashToFile(sig, info);
 
         siglongjmp(t_sigsegv_jmpbuf, sig);
@@ -262,14 +240,9 @@ void SigSegvHandler(int sig, siginfo_t* info, void* /*ucontext*/)
     raise(sig);
 }
 
-// 从 game_path 推导 plugin 目录,再拼出 crash dump 目录。
-// game_path 形如 ".../plugins/LGTBot_ElainaBot/build/plugins" —— 去掉
-// "/build/plugins" 后缀就是 plugin 根目录。失败时 g_crash_dump_dir 保持空,
-// handler 里的 dump 会自动跳过。
-//
-// 预编译模式 game_path 形如 ".../LGTBot_ElainaBot/build_prebuilt/build/plugins",
-// 上面截出的 base 末尾会多一层 "/build_prebuilt";剥掉它,让崩溃转储无论本地 /
-// 预编译都**固定落在插件根** /LGTBot_CRASH_DUMPS,面板才统一读得到。
+// 从 game_path 推导 crash dump 目录:去掉 "/build/plugins" 后缀得插件根;预编译模式
+// (".../build_prebuilt/build/plugins")再剥一层 "/build_prebuilt",让本地 / 预编译的转储
+// 都**固定落在插件根** /LGTBot_CRASH_DUMPS,面板才统一读得到。失败时保持空,dump 跳过。
 inline void DeriveCrashDumpDir(const char* game_path) {
     if (!game_path) return;
     const char marker[] = "/build/plugins";
@@ -280,7 +253,7 @@ inline void DeriveCrashDumpDir(const char* game_path) {
     const size_t pre_len = sizeof(pre) - 1;   // 不含 '\0'
     if (base_len >= pre_len &&
         std::memcmp(game_path + base_len - pre_len, pre, pre_len) == 0) {
-        base_len -= pre_len;                  // 预编译:再剥掉 /build_prebuilt → 插件根
+        base_len -= pre_len;
     }
     const char suffix[] = "/LGTBot_CRASH_DUMPS";
     if (base_len + sizeof(suffix) > sizeof(g_crash_dump_dir)) return;
@@ -290,23 +263,15 @@ inline void DeriveCrashDumpDir(const char* game_path) {
 
 // ──────── 二次崩溃兜底:SIGABRT 拦截 + 预存 execv 参数 ───────────────────────
 // 任何 SIGABRT 都意味着进程必死(glibc abort 的「双杀」逻辑:即便 handler 接住
-// 第一次 raise,abort 也会把 handler 重置成 SIG_DFL 再 raise 一次)。所以一律
-// execv 整进程自启 —— 永远比陪葬强。已知三种 abort 来源:
-//   1. SEGV 后 heap 损坏,工作线程退出时 tcache_thread_shutdown double-free;
-//   2. **静默 heap 腐败(无前置 SEGV)** 同样在 tcache_thread_shutdown 暴露;
-//   3. 其它 assert / abort()。
+// 第一次 raise,abort 也会把 handler 重置成 SIG_DFL 再 raise 一次),所以一律
+// execv 整进程自启。典型来源是 SEGV 或静默 heap 腐败后,工作线程退出时
+// tcache_thread_shutdown double-free。
 //
-// 关键前置(Start 时 Python 调 set_restart_args):把 sys.executable + sys.argv
-// 固化进静态 buffer,handler 在 heap 已坏时无需任何分配即可 execv。
-//
-// 死循环熔断:若 heap 腐败是确定性的,会每次重启又立刻 abort → 紧凑 execv 死
-// 循环烧 CPU。handler 经 WriteApologyMarker 往 abort_restart_history 追加一行
-// 时间戳,Python 启动时 callbacks.check_crash_loop() 读历史,窗口内超阈值就暂停
-// 启动引擎(主框架保持运行)并告警,人工修复后热重载即复位。
-//
-// 全局状态 (g_exec_path / g_exec_argv / g_already_aborting) 在文件靠前已声明。
+// 死循环熔断:heap 腐败若是确定性的,每次重启又会立刻 abort。WriteApologyMarker 往
+// abort_restart_history 追加时间戳,Python 启动时 callbacks.check_crash_loop() 窗口内
+// 超阈值就暂停启动引擎并告警。
 
-inline void WriteApologyMarker(const char* sig_kind) noexcept;  // 定义见下方
+inline void WriteApologyMarker(const char* sig_kind) noexcept;
 
 void SigAbrtHandler(int sig, siginfo_t* info, void* /*ucontext*/) {
     // 防 handler 自己再 abort 进死循环(仅 execv 失败 fallback 路径可能触发)
@@ -322,9 +287,8 @@ void SigAbrtHandler(int sig, siginfo_t* info, void* /*ucontext*/) {
     ssize_t r = write(STDERR_FILENO, banner, sizeof(banner) - 1);
     (void)r;
 
-    // 先落 marker + 重启时间戳(便宜、低故障风险),再尝试 backtrace dump
-    // —— 放弃 core 换 uptime;backtrace 万一在腐败 heap 上二次出错,补发 marker
-    // 与熔断计数也已先保住。两者都是 async-signal-safe。
+    // 先落 marker + 重启时间戳,再尝试 backtrace dump:backtrace 万一在腐败 heap 上
+    // 二次出错,补发 marker 与熔断计数也已先保住。
     WriteApologyMarker("sigabrt");
     DumpCrashToFile(sig, info);
 
@@ -344,16 +308,15 @@ void SigAbrtHandler(int sig, siginfo_t* info, void* /*ucontext*/) {
         r = write(STDERR_FILENO, noargs, sizeof(noargs) - 1);
         (void)r;
     }
-    // 走到这就是 execv 也失败了,默认 abort 让 supervisor 兜底
+    // execv 失败或没存下 execv 参数时走到这里,默认 abort 让 supervisor 兜底
     std::signal(sig, SIG_DFL);
     raise(sig);
 }
 
 // ──────── execv 前夜:写「待补发道歉」marker 文件 ─────────────────────────
-// OnCxxTerminate 不敢碰 Python(异常上下文 + heap 边缘);但用户体验上,玩家
-// 仍然该收到一句"游戏崩了"的道歉,管理员群也该收到崩溃通知。折衷:崩溃的
-// 这一刻只用 async-signal-safe syscall 把"该发什么、发给谁"写到一个 marker
-// 文件,execv 重启后由干净进程的 Python 侧扫这个目录,读出来异步补发。
+// 崩溃现场不能碰 Python(异常上下文 / heap 已坏),只用 async-signal-safe syscall 把
+// "该发什么、发给谁"写成 marker 文件;execv 重启后由干净进程的 Python 侧扫这个目录,
+// 异步补发玩家道歉与管理员通知。
 //
 // 文件:`<g_crash_dump_dir>/pending_apology_<sec>_<pid>_<tid>.txt`
 // 格式 (Python 侧 callbacks.py::_parse_apology_marker 配套解析):
@@ -368,11 +331,9 @@ void SigAbrtHandler(int sig, siginfo_t* info, void* /*ucontext*/) {
 //   msg_len=12
 //   msg=<12 字节原文,可含 \n / 任意字节>
 //
-// uid/gid/msg 走 length-prefix 是因为 user message 可能含换行 / 二进制字节,
-// 不想在 async-signal-safe 上下文里写 escape 代码。
-//
-// 所有调用都是 async-signal-safe:mkdir/clock_gettime/getpid/syscall/open/
-// write/close,以及上面已有的 as_write_* 手写工具(只调 write(2))。
+// uid/gid/msg 走 length-prefix:user message 可能含换行 / 二进制字节,免得在
+// async-signal-safe 上下文里写转义。只用 mkdir/clock_gettime/getpid/syscall/open/
+// write/close 与 as_write_*。
 inline void WriteApologyMarker(const char* sig_kind) noexcept {
     if (g_crash_dump_dir[0] == '\0') return;
     (void)mkdir(g_crash_dump_dir, 0755);
@@ -435,8 +396,7 @@ inline void WriteApologyMarker(const char* sig_kind) noexcept {
     as_write_str(fd, "\n");
     close(fd);
 
-    // 追加一行重启时间戳到 abort_restart_history,供 Python 启动时
-    // check_crash_loop() 做崩溃死循环熔断。复用 ts(本次崩溃时刻)。
+    // 追加一行重启时间戳到 abort_restart_history,供 Python 启动时 check_crash_loop() 熔断。
     char hist[1056];
     size_t hl = 0;
     auto hist_append = [&](const char* s) -> bool {
@@ -459,26 +419,17 @@ inline void WriteApologyMarker(const char* sig_kind) noexcept {
 }
 
 // ──────── 第三道防线:std::set_terminate handler ──────────────────────────
-// 处理 SIGSEGV/SigAbrtHandler 兜不住的崩溃路径:C++ 异常 unwind 找不到 catch
-// → c++ runtime 调 std::terminate()。已知触发点:lgtbot 上游
-// match_child_client.cc::WaitForResponse_ 从 pipe 反序列化 protobuf 时,脏数据
-// 被解释成 16 亿元素长度,RepeatedPtrFieldBase::InternalExtend 抛 std::bad_alloc
+// 接管未捕获的 C++ 异常(unwind 找不到 catch → c++ runtime 调 std::terminate())。
+// 已知触发点:lgtbot 上游 match_child_client.cc::WaitForResponse_ 从 pipe 反序列化
+// protobuf 遇到脏数据,RepeatedPtrFieldBase::InternalExtend 抛 std::bad_alloc。
 //
-// 默认 terminate 行为是调 abort(),走 glibc「双杀」逻辑:即便 SigAbrtHandler
-// 接住了第一次 raise(SIGABRT),abort() 也会强制把 handler 重置回 SIG_DFL 再
-// raise 一次,确保进程死亡。所以唯一可靠的接管点就是这个 terminate_handler ——
-// 它在异常 unwind 失败时由 c++ runtime 直接调用,**早于** abort()/SIGABRT 链路
-// 启动,有机会跳过 abort() 直接 execv 自启。
+// 默认 terminate 会调 abort() 走「双杀」;本 handler 由 c++ runtime 直接调用,**早于**
+// abort()/SIGABRT 链路,跳过 abort() 直接 execv 自启。
 //
-// 与 SigAbrtHandler(只在 post-SEGV 状态下接管)互补:本 handler 覆盖所有未捕获
-// 的 C++ 异常路径,无论之前有没有 SEGV。
-//
-// 必须永不返回(返回会让 c++ runtime 兜底调 abort())。只用 async-signal-safe
-// 路径:write/execv/_exit,绝不碰 Python C API(异常上下文 GIL 状态不可知)
-// 或 malloc(heap 可能已坏)。
+// 必须永不返回(返回会让 c++ runtime 兜底调 abort())。只用 async-signal-safe 调用,
+// 绝不碰 Python C API(异常上下文 GIL 状态不可知)或 malloc(heap 可能已坏)。
 [[noreturn]] void OnCxxTerminate() noexcept {
-    // 防递归:execv 失败后哪怕只是个偶然又触发 terminate,第二次直接 _exit
-    // 让 supervisor 兜底,避免无限循环占用 CPU。
+    // 防递归:execv 失败后若再次 terminate,直接 _exit 让 supervisor 兜底,免得死循环。
     static volatile sig_atomic_t s_in_terminate = 0;
     if (s_in_terminate) {
         static const char nested[] = "[LGTBot] nested terminate, _exit\n";
@@ -496,8 +447,7 @@ inline void WriteApologyMarker(const char* sig_kind) noexcept {
     // 把崩溃上下文写到 marker 文件,execv 后干净进程会扫到并补发道歉 + 通知。
     WriteApologyMarker("cxx_terminate");
 
-    // 把 SIGABRT/SIGSEGV/SIGBUS handler 全部重置成 SIG_DFL,以防 execv 失败
-    // 落回 abort 链路时又被我们自己的 handler 卷进双杀流程。
+    // 重置三个 handler 为默认,防 execv 失败落回 abort 链路时又被自己卷入双杀
     std::signal(SIGABRT, SIG_DFL);
     std::signal(SIGSEGV, SIG_DFL);
     std::signal(SIGBUS,  SIG_DFL);
@@ -558,25 +508,22 @@ void SetRestartArgs(const std::string& exec_path, boost::python::list argv) {
               << " (argc=" << argc << ")" << std::endl;
 }
 
-// 安装 SIGSEGV / SIGBUS handler。幂等 —— 由 Start 调用一次即可。
+// 安装 SIGSEGV / SIGBUS / SIGABRT handler。幂等 —— 由 Start 调用一次即可。
 // `game_path` 用于推导 crash dump 目录;nullptr 时跳过 dump 但 handler 仍装。
 void InstallSigSegvHandler(const char* game_path) {
     static bool installed = false;
     if (installed) return;
     installed = true;
 
-    // ① 预热 backtrace —— 强制现在 dlopen libgcc_s.so,handler 里首次调
-    //    backtrace() 才不会触发 dlopen 死锁(POSIX 没明示 backtrace 是
-    //    async-signal-safe,主要风险点就是 lazy load)。
+    // ① 预热 backtrace —— 现在就 dlopen libgcc_s.so,免得 handler 里首次调用
+    //    lazy load 触发 dlopen 死锁。
     void* prewarm[2];
     (void)backtrace(prewarm, 2);
 
-    // ② 推导 + 创建 crash dump 目录。失败不致命 —— g_crash_dump_dir 留空,
-    //    handler 里的 DumpCrashToFile 自检后跳过。
+    // ② 推导 + 创建 crash dump 目录。失败不致命,DumpCrashToFile 自检后跳过。
     DeriveCrashDumpDir(game_path);
     if (g_crash_dump_dir[0]) {
         (void)mkdir(g_crash_dump_dir, 0755);
-        // 给 stderr 留一句开机日志方便排查
         std::cerr << "[LGTBot] crash dumps will land at: " << g_crash_dump_dir << std::endl;
     }
 
@@ -589,9 +536,7 @@ void InstallSigSegvHandler(const char* game_path) {
     sigaction(SIGSEGV, &sa, nullptr);
     sigaction(SIGBUS,  &sa, nullptr);
 
-    // ④ SIGABRT 兜底:lgtbot SEGV 后 heap 损坏,工作线程退出时 glibc
-    //    tcache_thread_shutdown 极易触发 double-free → abort(). 用我们自己的
-    //    handler 接住,如果是 post-SEGV 状态就立刻 execv 自启,不让进程死。
+    // ④ SIGABRT 兜底:接住后直接 execv 自启(见 SigAbrtHandler)。
     struct sigaction sa_abrt;
     std::memset(&sa_abrt, 0, sizeof(sa_abrt));
     sa_abrt.sa_sigaction = SigAbrtHandler;
@@ -609,9 +554,8 @@ inline void StoreCtx(char* dst, size_t cap, const char* src) {
     dst[n] = '\0';
 }
 
-// longjmp 恢复后调:抢 GIL → 调 Python 的 cb_lgtbot_crashed → 留 GIL 给 boost::python
-// 故意不 PyGILState_Release —— wrapper 即将 return,boost::python 期望 GIL 还在;
-// 不平衡的 Ensure 在 30s 后整进程 execv,无后患。
+// longjmp 恢复后调:抢 GIL → 调 Python 的 cb_lgtbot_crashed。故意不 PyGILState_Release ——
+// wrapper 即将 return,boost::python 期望 GIL 还在;不平衡的 Ensure 随 30s 后整进程 execv 消失。
 void NotifyCrashToPython(int sig) {
     PyGILState_Ensure();
     try {
@@ -624,7 +568,6 @@ void NotifyCrashToPython(int sig) {
             std::string(t_crash_msg),
             static_cast<int>(sig));
     } catch (...) {
-        // 兜底:连 Python 都喊不动,只能 stderr 留一句
         static const char emsg[] = "[LGTBot] cb_lgtbot_crashed call failed\n";
         ssize_t r = write(STDERR_FILENO, emsg, sizeof(emsg) - 1);
         (void)r;
@@ -672,37 +615,24 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
     static const std::string kLeft = "退出了游戏";
     static const std::string kGameNameMarker = "游戏名称：";
     static const std::string kZeroUsers = "当前用户数：0";
-    // 未知指令引导(bot_core.cc HandleRequest / HandleMetaRequest / match.cc
-    // Request 四处错误回执):
-    //   "未预料的游戏设置"  房主在等待房间里输错配置
-    //   "未预料的游戏指令"  玩家在游戏中输错游戏指令
-    //   "未预料的元指令"    输了一条 / 开头的未知元指令(HandleMetaRequest)
-    //   "若您想执行元指令"  上面前三种之外、bot_core 层的「未参与游戏 / 未在
-    //                       本群参与游戏」两类错误带的兜底尾句
+    // 未知指令引导:bot_core.cc HandleRequest / HandleMetaRequest、match.cc Request 的错误回执
     static const std::string kUnknownConfig   = "未预料的游戏设置";
     static const std::string kUnknownGame     = "未预料的游戏指令";
     static const std::string kUnknownMetaCmd  = "未预料的元指令";
     static const std::string kUnknownMeta     = "若您想执行元指令";
-    // 引擎里至少 9 处错误回执形如「[错误] 创建/查看/设置失败：未知的游戏名,
-    // 请通过「/游戏列表」查看游戏名称」(message_handlers.cc 的 new_game /
-    // show_rule / show_options / 等)。共用此 marker 同样附「🎲 游戏列表」按钮。
+    // message_handlers.cc 多处「…失败：未知的游戏名,请通过「/游戏列表」查看游戏名称」回执共用此 marker。
     static const std::string kUnknownGameName = "未知的游戏名";
-    // /关于 命令的回执(message_handlers.cc::about) —— 其首句拼 "LGTBot " + LGTBot_Version()。版本号来自 `git describe --tags --always`
-    // tagged 构建形如 v1.0.0-N-gXXXX,合并后含 "LGTBot v" 子串。lgtbot 整个代码库其他用户输出路径都不会出现此前缀,做识别串足够稳定。
-    // (注:CMake 找不到 git tag 时会回退 <unpublished version>,无 v 前缀; 这是开发未提交场景,生产部署不会遇到。)
+    // /关于 回执(message_handlers.cc::about)首句拼 "LGTBot " + LGTBot_Version(),tagged 构建的版本号带 v 前缀,
+    // 其他用户输出路径都不会出现此前缀。(CMake 找不到 git tag 时回退 <unpublished version>,无 v 前缀,仅开发场景。)
     static const std::string kAbout = "LGTBot v";
-    // Match::GameStart 成功后引擎 BoardcastAtAll 这条欢迎语(match.cc 唯一出处)。
-    // 用「游戏开始，您可以使用」这段较长的前缀做识别,既避开游戏内文本里偶然
-    // 出现「游戏开始」二字的可能,也避开 announce / new_game 类 brief 被误判。
+    // Match::GameStart 成功后 BoardcastAtAll 的欢迎语(match.cc 唯一出处)。取较长前缀,免得
+    // 游戏内文本偶然出现「游戏开始」二字,或 announce / new_game 类 brief 被误判。
     static const std::string kGameStarted = "游戏开始，您可以使用";
-    // Match 结算广播(match.cc::ApplyChildGameOverFromScores 唯一出处,形如
-    // "游戏结束，公布分数：\n@xxx 3\n…感谢诸位参与！")。带「，公布分数」后缀
-    // 避免游戏内文本偶然出现「游戏结束」二字造成误挂;结算广播不带 brief,
-    // 重开按钮的游戏名由 Python 侧 state.current_game 回查。
+    // Match 结算广播(match.cc::ApplyChildGameOverFromScores 唯一出处)。带「，公布分数」后缀,
+    // 免得游戏内文本偶然出现「游戏结束」二字造成误挂;此广播不带 brief,游戏名由 Python 侧回查。
     static const std::string kGameOver = "游戏结束，公布分数";
-    // 结算尾句「游戏结果不记录：因为玩家数小于 2 / 该游戏为非正式游戏 /
-    // 未连接数据库」(同函数三处出处共用前缀) —— 本局没进战绩,「查看战绩」
-    // 按钮只会误导,Python 侧据此不挂。
+    // 结算尾句「游戏结果不记录：…」(玩家数不足 / 非正式游戏 / 未连接数据库):本局没进战绩,
+    // Python 侧据此不挂「查看战绩」。
     static const std::string kUnrecorded = "游戏结果不记录";
 
     out_game_name.clear();
@@ -718,21 +648,17 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
         return "terminate";
     }
 
-    // 2.5 游戏中途中断 —— 子进程意外终止(match.cc「[错误] 游戏进程意外终止，游戏
-    // 已中断」)或全员支持中断(match.cc「全员支持中断游戏，游戏已中断，谢谢大家参与」)。
-    // 两者都无 brief、无结算广播,但对局确实结束。之前不识别 → 返回 nullptr →
-    // Python 侧收不到事件 → 进行中缓存(state.active_matches)残留已结束的对局。
-    // 归到 terminate(同样清状态、不挂按钮);marker 取两条广播的公共子串「游戏已中断」。
+    // 2.5 游戏中途中断 —— 子进程意外终止或全员支持中断(match.cc 两条广播的公共子串「游戏已中断」)。
+    // 两者都无 brief、无结算广播,但对局确实结束,不识别的话 state.active_matches 会残留已结束的对局。
+    // 归到 terminate(同样清状态、不挂按钮)。
     static const std::string kInterrupted = "游戏已中断";
     if (content.find(kInterrupted) != std::string::npos) {
         return "terminate";
     }
 
-    // 2.6 玩家中途强退(match.cc::Leave force 分支「玩家 @X 中途退出了游戏，他将不再参与后续的游戏进程」)。此广播发出后引擎才把该玩家标 LEFT;
-    // 若这是最后一个在场玩家,随后的「所有玩家都强制退出…游戏解散」广播在**私信对局**里走逐参与者私发(boardcast_private_sender_),
-    // 而全员已 LEFT → 发不给任何人,桥接层永远看不到那条 all_left → active_matches 残留(群聊对局发群里,必达,不受影响)。
-    // 所以把可送达的「中途退出」本身上报为 mid_quit,由 Python 侧按目标类型处置:私信 = 唯一人类玩家退场,对局对该目标已结束,
-    // 按 terminate 清理;群聊 = 对局仍在继续,不动状态。必须在第 6 步 brief 拦截之前(此广播无 brief),且不会与 all_left 混淆(其文本不含「中途」,且 all_left 判定在前)。
+    // 2.6 玩家中途强退(match.cc::Leave force 分支)。**私信对局**里最后一人强退后,随后的 all_left 广播
+    // 走逐参与者私发,而全员已 LEFT → 发不给任何人,active_matches 会残留(群聊对局发群里,不受影响)。
+    // 所以把可送达的这条本身上报为 mid_quit,由 Python 侧按目标类型处置。须在第 6 步 brief 拦截之前(此广播无 brief)。
     static const std::string kMidQuit = "中途退出了游戏";
     if (content.find(kMidQuit) != std::string::npos) {
         return "mid_quit";
@@ -764,9 +690,7 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
         return "game_started";
     }
 
-    // 5.5 游戏自然结束的结算广播 —— 同样无 brief,须在 brief 检查之前。
-    // 「游戏结果不记录」的结算(单机 / 非正式局 / 未连接数据库)区分返回,
-    // Python 侧据此省掉「查看战绩」按钮。
+    // 5.5 游戏自然结束的结算广播 —— 同样无 brief,须在 brief 检查之前;「游戏结果不记录」区分返回。
     if (content.find(kGameOver) != std::string::npos) {
         return content.find(kUnrecorded) != std::string::npos
             ? "game_over_unrecorded" : "game_over";
@@ -793,8 +717,7 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
         return "join_leave";
     }
     if (content.find(kLeft) != std::string::npos) {
-        // 走到这里的 "退出了游戏" 只剩「等待中退出」(有 brief;「中途强制退出」
-        // 无 brief 且已在 2.6 提前返回 mid_quit)。若是最后一人,下一条消息会带
+        // 走到这里只剩「等待中退出」(中途强退已在 2.6 返回)。若是最后一人,下一条消息会带
         // all_left 按钮,本条不再附,避免重复 / 玩家误点解散后的「加入」。
         const size_t zpos = content.find(kZeroUsers);
         if (zpos != std::string::npos) {
@@ -819,11 +742,7 @@ static const char* ClassifyMatchEvent(const std::string& content, std::string& o
  *      \x01IMG<i>\x01 —— 引擎给玩家看的文案不含控制字符，不会与正文冲突
  *   3. 无图片：发一条文本
  *      有图片：一次性把「图片路径表 + 排版串」交给 Python，由它按占位符还原
- *              引擎原本的排版（图片在文字前 / 文字—图片—文字 都能原样呈现），
- *              并把多图合并成单条 markdown（见 mod/callbacks.py）
- *
- * plain（去掉占位符的纯文本）只喂给 ClassifyMatchEvent —— 事件分类是按关键词
- * find 的，占位符只出现在图片边界不会切断关键词，但保持输入干净更省心。
+ *              引擎原本的排版，并把多图合并成单条 markdown（见 mod/callbacks.py）
  *
  * QQ Markdown mention 格式：<@openid>
  */
@@ -866,7 +785,6 @@ void HandleMessages(void* handler, const char* const id, const int is_uid,
         AcquireGIL a;
 
         // 分类本条消息属于哪种房间事件,推断要附什么按钮 / 是否要清当前游戏名。
-        // ClassifyMatchEvent 返回 nullptr 时不调 Python(无需操作)。
         if (g_match_event != nullptr) {
             std::string game_name;
             const char* kind = ClassifyMatchEvent(plain, game_name);
@@ -899,7 +817,7 @@ void HandleMessages(void* handler, const char* const id, const int is_uid,
  * GetUserName — 获取用户显示名
  * 格式：<昵称(前4…后4)>，省略号中间隐藏 uid 主体（QQ openid 太长不适合 UI 直接展示）。
  * uid 长度 ≤ 8 时不截断，原样输出。
- * Python 侧 cb_get_user_name 缓存未命中时返回 uid 作为名字，此时退化为 <截短uid(截短uid)>。
+ * Python 侧 cb_get_user_name 缓存未命中时返回 uid 作为名字，此时退化为 <uid(截短uid)>。
  * Python 抛异常时 fallback 到 <uid>（仅 uid，不截短不包昵称壳，便于排错）。
  */
 void GetUserName(void* handler, char* const buffer, const size_t size, const char* const uid)
@@ -907,7 +825,6 @@ void GetUserName(void* handler, char* const buffer, const size_t size, const cha
     try {
         AcquireGIL a;
         const std::string name = boost::python::call<std::string>(g_get_user_name, uid);
-        // 截短 uid：长度 > 8 时显示「前4字节 + UTF-8 省略号 + 后4字节」
         std::string short_uid;
         const size_t uid_len = std::strlen(uid);
         if (uid_len > 8) {
@@ -927,8 +844,7 @@ void GetUserName(void* handler, char* const buffer, const size_t size, const cha
 
 /**
  * GetUserNameInGroup — 获取群内用户显示名
- * QQ 群昵称需额外 API，此处直接委托 GetUserName（Python 侧可按需扩展缓存以
- * 区分群昵称 / 全局昵称）
+ * QQ 群昵称需额外 API，此处直接委托 GetUserName
  */
 void GetUserNameInGroup(void* handler, char* const buffer, const size_t size,
                         const char* group_id, const char* const user_id)
@@ -983,8 +899,6 @@ int DownloadUserAvatar(void* handler, const char* const uid, const char* const d
 
 /**
  * Start — 初始化 LGTBot 引擎，注入所有回调
- *
- * 参数与 lgtbot_kook 完全相同，便于 Python 侧无缝替换。
  */
 bool Start(
         const char* const game_path,
@@ -998,18 +912,16 @@ bool Start(
         PyObject* send_image_message,
         PyObject* match_event)
 {
-    // 安装 SIGSEGV/SIGBUS 处理器(幂等)。放在 LGTBot_Create 之前,这样即便
-    // 引擎自身初始化阶段段错误也能被捕获 —— 不过此时 wrapper 没 arm,会走
-    // SIG_DFL 默认动作,跟改造前等价(进程退出)。
-    // 透传 game_path 用于推导 crash dump 目录 (<plugin_dir>/LGTBot_CRASH_DUMPS)。
+    // 安装崩溃信号处理器(幂等),game_path 用于推导 crash dump 目录。LGTBot_Create
+    // 期间 wrapper 还没 arm,引擎初始化阶段的段错误仍走 SIG_DFL(进程退出)。
     InstallSigSegvHandler(game_path);
 
     ReleaseGIL r;
 
-    // 预编译包可解压到用户任意路径,而 config_runner 的绝对路径在编译期被 -DCONFIG_RUNNER_PATH 烤进 libbot_core(bot_ctx.cc 的 #ifndef 使其成为 fallback)。
-    // config_runner 没有环境变量入口,唯一运行时覆盖是 LGTBot_Option.config_runner_path_(bot_core.h)。
-    // 这里从 game_path (= <build>/plugins)反推出 <build>,拼出随包移动的绝对路径。(match_game_runner 走 LGTBOT_MATCH_RUNNER 环境变量,由 boot.py 设置。)
-    // runner_path 只需在 LGTBot_Create 返回前有效 —— 引擎在 LoadGameModules 内立即把它拷进 std::string,故此处栈上 string 安全。Linux only,径分隔符恒为 '/'。
+    // 预编译包可解压到任意路径,而 config_runner 的绝对路径编译期烤进 libbot_core(-DCONFIG_RUNNER_PATH,仅作 fallback);
+    // 它没有环境变量入口,唯一运行时覆盖是 LGTBot_Option.config_runner_path_。从 game_path(= <build>/plugins)
+    // 反推 <build> 拼出随包移动的路径(match_game_runner 走 boot.py 设置的 LGTBOT_MATCH_RUNNER 环境变量)。
+    // 栈上 string 安全:引擎在 LoadGameModules 内立即拷走,只需活到 LGTBot_Create 返回。
     std::string config_runner_path;
     if (game_path && game_path[0] != '\0') {
         std::string gp(game_path);
@@ -1051,9 +963,7 @@ bool Start(
 
 void OnPrivateMessage(const char* msg, const std::string& uid)
 {
-    // 先记崩溃上下文(signal-safe 字符串拷贝),然后才设 sigsetjmp 回退点。
-    // 顺序很关键:sigsetjmp 之后到 lgtbot 调用之间出 SEGV 都会跳回这里,
-    // 那一刻 wrapper 期望 ctx 已经写好。
+    // 先记崩溃上下文再设 sigsetjmp 回退点:回退点之后任何 SEGV 都会跳回这里,那时 ctx 必须已写好。
     StoreCtx(t_crash_uid, sizeof(t_crash_uid), uid.c_str());
     StoreCtx(t_crash_gid, sizeof(t_crash_gid), nullptr);
     StoreCtx(t_crash_msg, sizeof(t_crash_msg), msg);
@@ -1070,9 +980,8 @@ void OnPrivateMessage(const char* msg, const std::string& uid)
         t_sigsegv_armed = 0;
         return;
     }
-    // 从 SIGSEGV 跳回。ReleaseGIL 的 dtor 没跑(longjmp 不跑 C++ 栈展开),
-    // GIL 仍处于释放态。NotifyCrashToPython 内 PyGILState_Ensure 抢回 GIL
-    // 并故意不 Release —— wrapper return 时 boost::python 期望 GIL 持有。
+    // 从 SIGSEGV 跳回:longjmp 不跑 C++ 栈展开,ReleaseGIL 的 dtor 没跑,GIL 仍处于释放态,
+    // 由 NotifyCrashToPython 抢回。
     t_sigsegv_armed = 0;
     NotifyCrashToPython(sig);
 }
@@ -1109,14 +1018,8 @@ BOOST_PYTHON_MODULE(LGTBot_ElainaBot)
 {
     namespace python = boost::python;
 
-    // 第一时间装好 C++ 异常 terminate 兜底 —— 从本 .so import 起就生效,不依赖
-    // 后续 Start() 调用。处理 lgtbot 内部抛了 std::bad_alloc 等却没人 catch 的
-    // 场景(典型触发点是上游 match_child_client.cc 从 pipe 反序列化 protobuf
-    // 时碰到脏数据,详情见 OnCxxTerminate 注释)。
-    //
-    // execv 实际生效仍需 Python 侧调用 set_restart_args() 把 sys.executable /
-    // sys.argv 喂进来;在此之前的早期崩溃(import 阶段) OnCxxTerminate 退化到
-    // _exit(134),让 systemd / supervisor 兜底重启。
+    // 从本 .so import 起就装好 terminate 兜底,不依赖后续 Start()(见 OnCxxTerminate)。
+    // set_restart_args() 之前的早期崩溃没有 execv 参数,退化为 _exit(134) 交给 systemd / supervisor。
     std::set_terminate(OnCxxTerminate);
 
     python::def("start",                          Start);

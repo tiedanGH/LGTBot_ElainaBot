@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""主框架用户数据只读门面(替代旧 userdb 私有缓存)+ 昵称写回。
+"""主框架用户数据只读门面 + 昵称写回。
 
 数据源(全部为主框架 per-bot 库,路径 ``data/log/<appid>/``):
   · ``data.db``       users(昵称) / members(好友) / group_members(群内活跃,一人一行;框架 2.1.0 前存在 groups_users.users JSON 列)
@@ -10,18 +10,14 @@
 头像不落库 —— QQ 官方头像直链按 appid+openid 即时推导。
 
 ★ 消息数口径 ★
-  框架聚合只计 ``at_bot != 0`` 的接收消息(``core/storage/statistics.py`` 的
-  ``COALESCE(at_bot, 1) != 0``;写入见 ``core/bot/event.py``:
-  ``at_bot = is_at_self if event_type == GROUP_MESSAGE_CREATE else True``)。
-  于是私信与「@机器人」的群消息都计入,**全量群里没 @ 机器人的消息不计**。
-  这是框架的既定口径(全量群闲聊与 bot 无关,计入会撑爆统计),本模块只如实透出。
-  最后活跃日期不受影响 —— 用户追踪(``_enqueue_track``)不过 at_bot 闸。
+  框架聚合只计 ``at_bot != 0`` 的接收消息(``core/storage/statistics.py``),私信与
+  「@机器人」的群消息都计入,**全量群里没 @ 机器人的消息不计**。这是框架的既定口径,
+  本模块只如实透出。最后活跃日期不受影响 —— 用户追踪(``_enqueue_track``)不过 at_bot 闸。
 
 ★ 昵称语义 ★
   框架 ``users.name`` 首见即定(core/bot/event.py 的 upsert 带 ``WHERE name=''``
-  守卫,之后不再更新;原作者确认为刻意设计)。本插件用 ``note_username`` 写回
-  最新昵称:内存比对闸门 + 每用户写入冷却窗,实际落库 ≈ 改名事件频率,写走
-  框架 ``db_queue`` 批量通道(不产生独立事务)。
+  守卫,之后不再更新)。本插件用 ``note_username`` 写回最新昵称:内存比对闸门 +
+  每用户写入冷却窗,实际落库 ≈ 改名事件频率,写走框架 ``db_queue`` 批量通道(不产生独立事务)。
 
 ★ 线程安全 ★
   ``get_name`` 会被 C++ 工作线程同步调用:``log_service.query*`` 使用独立只读
@@ -33,9 +29,8 @@
   为 per-call 只读连接),缓存热重载后冷启动重查即可 —— 不进 boot._get_persistent()。
 
 statistics.db 刻意**不走** ``log_service.query('statistics',…)``:那会顺带为它
-建持久写连接并翻 WAL(_base.py:_get_read_conn 先调 _get_conn),侵入
-StatisticsService 自管的文件;这里按 StatisticsService._open_ro 同款姿势自开
-``mode=ro`` URI 连接,用完即关。
+建持久写连接并翻 WAL,侵入 StatisticsService 自管的文件;这里自开 ``mode=ro``
+URI 连接,用完即关。
 """
 
 from __future__ import annotations
@@ -53,18 +48,16 @@ log = get_logger(PLUGIN, 'LGTBot')
 # QQ 官方机器人头像直链(尺寸 40/100/140/640)
 _AVATAR_URL_TPL = 'https://q.qlogo.cn/qqapp/{appid}/{openid}/{size}'
 
-# 昵称缓存:仅存非空名。框架 users.name 一旦非空便不再被框架改写,
-# 而"最新值"由 note_username 写回时同步刷进本缓存 —— 缓存即最新,可长期持有。
-# 空名不缓存(用户首个事件可能漏 username,之后补上时必须能查到)。
+# 昵称缓存:仅存非空名。框架不再改写非空的 users.name,最新值由 note_username 同步刷进来,可长期持有;
+# 空名不缓存:用户首个事件可能漏 username,之后补上时必须能查到。
 _NAME_CACHE: dict[str, str] = {}
-_NAME_CACHE_MAX = 4096          # 超限整体清空(重查便宜,避免复杂 LRU)
+_NAME_CACHE_MAX = 4096          # 超限整体清空(重查便宜)
 
-# 昵称写回的每用户冷却窗:窗内改名只更新缓存不落库(引擎/面板读缓存不受影响,仅框架库可见性延迟),给恶意刷昵称一个与消息频率无关的硬上限。
+# 昵称写回的每用户冷却窗:窗内改名只更新缓存不落库,给恶意刷昵称一个与消息频率无关的硬上限。
 _WRITE_COOLDOWN_S = 600.0
 _LAST_WRITE_TS: dict[str, float] = {}
 
-# 写回 upsert:**无 WHERE 守卫**
-# (框架自身的 guarded upsert 只在 name 为空时更新,两者任意先后顺序结果一致 —— 都以本条的最新 username 收尾)。
+# 写回 upsert **无 WHERE 守卫**:框架的 guarded upsert 只在 name 为空时更新,两者任意先后都以本条的最新 username 收尾。
 _NAME_UPSERT_SQL = ('INSERT INTO users (user_id, name) VALUES (?, ?) '
                     'ON CONFLICT(user_id) DO UPDATE SET name=excluded.name')
 
@@ -142,12 +135,8 @@ def avatar_url(openid: str, size: int = 100) -> str:
 def get_group_names(gids) -> dict:
     """批量查群名:``{gid: group_name}``,只含真的查到非空名字的群。
 
-    数据来自框架 ``groups_users.group_name``(``get_group_info`` 调 QQ 接口后
-    落库)。**只读 DB 不碰接口** —— 群资料接口有频控,面板每次渲染都打会很快撞墙;
-    框架自己会在入群 / 面板刷新时把名字写进来。
-
-    一次 ``IN (...)`` 查完传入的全部群(进行中对局通常个位数),不逐个往返。
-    无 bot / 异常 / 空入参一律返回 ``{}``,调用方自行降级。
+    只读框架 ``groups_users.group_name``,**不碰接口** —— 群资料接口有频控,面板每次渲染都打会很快撞墙;
+    框架自己会在入群 / 面板刷新时把名字写进来。无 bot / 异常 / 空入参一律返回 ``{}``,调用方自行降级。
     """
     gids = [str(g) for g in (gids or []) if g]
     if not gids:
@@ -210,12 +199,9 @@ def count_friends() -> int:
 def today_lifecycle_delta() -> dict:
     """今日群 / 好友的**净变化**,``{'group': int|None, 'friend': int|None}``。
 
-    数据源是框架按日分库的 ``lifecycle.db``(``<log>/<appid>/<date>/lifecycle.db``,
-    入群 / 退群 / 加好友 / 删好友事件实时落库),**不读 dau 表** —— 后者今天的
-    那一行要等聚合任务跑过才有,当天取不到。
-
-    去重直接复用框架的 ``compute_lifecycle_counts``:同一个群 / 好友只看首末事件,
-    「先加后删」互相抵消不计数 —— 与主框架可视统计逐项对得上,不自己另算一套。
+    数据源是框架按日分库、事件实时落库的 ``lifecycle.db``,**不读 dau 表** —— 后者
+    今天那一行要等聚合任务跑过才有。去重复用框架的 ``compute_lifecycle_counts``
+    (「先加后删」互相抵消),与主框架可视统计逐项对得上。
     查不到 / 异常返回 None(前端与图片端显示为「无对比数据」而非 0)。
     """
     none = {'group': None, 'friend': None}
@@ -280,8 +266,7 @@ def note_username(openid: str, username: str) -> None:
         nickname_review.enqueue(username)
     except Exception as e:                  # 审核绝不能影响昵称写回本身
         log.debug(f'userinfo.note_username 送审入队失败 ({openid}): {e}')
-    # 冷却判定:「从未写过」必须与「时刻 0 写过」区分 —— monotonic 起点是系统启动,
-    # 刚开机的主机(如 CI runner)now 本身 < 冷却窗,用 0.0 兜底会把首次写回误判为冷却中。
+    # 「从未写过」必须与「时刻 0 写过」区分:monotonic 从开机起算,刚开机时 now 本身就小于冷却窗。
     now = time.monotonic()
     last = _LAST_WRITE_TS.get(openid)
     if last is not None and now - last < _WRITE_COOLDOWN_S:
@@ -388,15 +373,12 @@ def _legacy_group_activity(bot, openid: str = '') -> dict[str, str]:
 def list_users(limit: int | None = None, offset: int = 0) -> list[dict]:
     """用户列表:以框架 ``users`` 表为**基准集**,按最后活跃日期倒序。
 
-    基准集 = 与机器人交互过的用户(与 ``count_users`` 同口径,总数与行数一致,
-    面板分页因此永远能翻到最后一名)。wakeup / 群名单 / 统计三源仅**补充**活跃
-    日期与消息数,不新增行 —— 群成员名单含仅入群未互动的成员
-    (GROUP_MEMBER_ADD 进群事件直接入名单,不经过 users 表的消息/按钮追踪),
-    若为其建行会让列表大于「总用户」。
+    基准集与 ``count_users`` 同口径,面板分页因此永远能翻到最后一名。wakeup / 群名单 /
+    统计三源仅**补充**活跃日期与消息数,不新增行 —— 群成员名单含仅入群未互动的成员,
+    为其建行会让列表大于「总用户」。
 
-    ``limit``/``offset`` 供面板分块拉取(每次 1000 条):合并与排序键跨三源,
-    无法下推 SQL,**每次调用仍全量合并排序**后切片 —— 分块的收益在 payload
-    体积与前端解析,不在服务端查询量。切片后才补 avatar(只为返回行拼 URL)。
+    ``limit``/``offset`` 供面板分块拉取:合并与排序键跨三源,无法下推 SQL,
+    **每次调用仍全量合并排序**后切片。
 
     ``name`` 是**真名**,不过昵称审核的遮蔽:面板只有管理员能登录,而处理违规
     昵称正需要看见原文。遮蔽只针对会流向玩家的出口(引擎 / 播报 / 排行榜)。
@@ -459,8 +441,8 @@ def list_users(limit: int | None = None, offset: int = 0) -> list[dict]:
 def last_active_exact(openid: str) -> str:
     """留存期内的精确最后活跃时间('YYYY-MM-DD HH:MM:SS');查无返回 ''。
 
-    从今天起倒扫 ``logging.retention_days``(默认 5)个日库,命中即停 ——
-    idx_msg_user_agg(user_id,id,timestamp) 覆盖,单日探测 µs 级。
+    从今天起倒扫 ``logging.retention_days``(默认 5)个日库,命中即停;
+    单日探测走 idx_msg_user_agg(user_id,id,timestamp) 覆盖索引。
     """
     if not openid:
         return ''

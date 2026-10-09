@@ -1,7 +1,7 @@
 /* config 标签专属样式 —— .dash-editor / .dash-pluginconf-* 系列。
    共享 base 在 main.css(.dash-section / .dash-btn / .dash-msg-* / 等)。 */
 
-/* ── 引擎配置编辑器 ── */
+/* ── 编辑器 ── */
 .dash-editor {
   width: 100%; min-height: 240px;
   background: var(--panel-2); color: var(--text);
@@ -55,17 +55,11 @@
 .dash-pluginconf-actions {
   display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;
 }
-/* config tab 专属:让 desc 段 / 按钮组下方留出与「标题→描述」同款 12px 呼吸,
-   避免「bot 收到…」「LGTBot C++ 引擎的…」等描述文字 / 「前往插件模块」按钮组
-   紧贴下方 textarea。双栏 .dash-pluginconf-card 场景靠 card 内部 gap 处理
-   间距,这里用 .config-tab 父选择器 scope 防 spillover。 */
+/* 描述段 / 按钮组下方留出呼吸,别紧贴 textarea;用 .config-tab 限定,不波及其他标签。 */
 .config-tab .dash-pluginconf-desc,
 .config-tab .dash-pluginconf-actions { margin-bottom: 12px; }
 
-/* 「插件配置」编辑器顶部的提示行 —— 描述文字 + 「前往主框架编辑」按钮在桌面端
-   横向并排,通过 .cfg-yaml-tip-row 这一行 flex 容器承载;窄屏(≤600px)切到
-   column,描述在上、按钮在下。row 自身负责 12px 底部呼吸,内部 desc 不再带
-   自己的 margin-bottom(被 row 统一管)。 */
+/* 「插件配置」顶部的提示行:描述与按钮桌面端并排、窄屏上下堆叠;底部呼吸由 row 统一管,内部 desc 不带 margin-bottom。 */
 .cfg-yaml-tip-row {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin-bottom: 12px;

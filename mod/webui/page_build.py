@@ -52,9 +52,8 @@
   · ``data/build/build.log``   编译输出(每次启动覆盖)
   · ``data/build/build_target_input.json``  自定义 target 参数(JS POST 写入)
 
-故意把 build/ 子目录放在 ``data/`` 根下而非 ``data/engine/`` —— 编译产物属
-于「插件级」资源，与引擎自身数据分离，语义清晰。但 framework 配置入口
-非递归扫 data/(已有 webui 文档说明),子目录天然不可见，不会污染配置列表。
+状态文件放 ``data/build/`` 子目录而非 ``data/engine/``,与引擎自身数据分离;
+framework 配置入口非递归扫 data/,子目录天然不可见，不会污染配置列表。
 """
 
 from __future__ import annotations
@@ -95,18 +94,14 @@ BUILD_DATA_DIR = os.path.join(boot.DATA_DIR, 'build')
 STATE_PATH     = os.path.join(BUILD_DATA_DIR, 'state.json')
 LOG_PATH       = os.path.join(BUILD_DATA_DIR, 'build.log')
 PARAMS_PATH    = os.path.join(BUILD_DATA_DIR, 'build_target_input.json')
-# 子进程 wrapper shell 跑完会把退出码 printf 到这里;get_build_state() 在
-# 探测到 PID 已死时读它,把 returncode 落进 state.json(用于 UI 展示
-# 「编译成功 / 编译失败」)
+# wrapper 跑完把退出码写到这里;get_build_state() 探测到 PID 已死时读它,落进 state.json 的 returncode
 STATUS_PATH    = os.path.join(BUILD_DATA_DIR, 'last_exit_status')
 
 os.makedirs(BUILD_DATA_DIR, exist_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 目标名白名单 ——
-# C++/CMake target 名通常是 [A-Za-z_][A-Za-z0-9_]+,可能含 - 或 .,
-# 例如 ``markdown2image`` / ``LGTBot_ElainaBot`` / ``numcomb``。
+# 目标名白名单 —— 如 ``markdown2image`` / ``LGTBot_ElainaBot`` / ``numcomb``;
 # 限制最大 63 字符,严禁任何 shell metachar(空格 ; | & $ \\ ` ( ) < > " ' 等)。
 # ─────────────────────────────────────────────────────────────────────────
 _TARGET_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_\-]{0,62}$')
@@ -149,8 +144,7 @@ def _is_alive(pid) -> bool:
     """进程存活探测,**附带收尸**;0/None/非法 直接 False。
 
     不能只用 ``os.kill(pid, 0)``:``_start_build`` 不保留 Popen 对象(为了跨热重载 / 重启从 state.json 恢复),
-    没人 wait 的已退出子进程是**僵尸**,对 kill(0) 依然"存活"—— running 永远不翻转,直到进程里恰好有别的
-    subprocess 调用触发 Python 的 ``subprocess._cleanup()`` 顺手收尸(表现为"开着仪表盘就正常,无人值守的编译 API 就卡死")。
+    没人 wait 的已退出子进程是**僵尸**,对 kill(0) 依然"存活",running 永远不翻转。
 
     所以先 ``waitpid(pid, WNOHANG)``:是本进程子进程且已退出 → 当场收尸判死;
     ``(0, 0)`` → 真在跑。``ChildProcessError``(execv / 进程重启后 state.json
@@ -259,10 +253,8 @@ def get_build_state() -> dict:
 
 # 固定 wrapper 脚本(模块常量,不含任何用户/动态数据)——
 # 真正要跑的构建命令通过环境变量 LGTBOT_ARGV_NL(换行分隔)传入,``mapfile`` 读回 bash 数组后 ``"${_cmd[@]}"`` 逐元素执行:
-# shell **不对数组元素再做分词 / 通配 / 展开**,任何字符都安全。退出码写 LGTBOT_STATUS_FILE,并向 LGTBOT_LOG_FILE 追加 ``[exit:N]``。
-#
-# 关键安全设计:交给 shell 解释的命令串是**常量**,用户可控的 target 只作为"数据"经 env 传入,永远不进入命令行 tokenize 阶段
-# 从根上杜绝命令注入(target 另有 _validate_target_name 白名单,双保险)。argv 元素均无换行(全是硬编码常量 + 白名单 target),换行分隔安全。
+# shell **不对数组元素再做分词 / 通配 / 展开**,用户可控的 target 永远到不了命令行 tokenize 阶段。
+# argv 元素均无换行(全是硬编码常量 + 白名单 target),换行分隔安全。退出码写 LGTBOT_STATUS_FILE,并向 LGTBOT_LOG_FILE 追加 ``[exit:N]``。
 _BUILD_WRAPPER = (
     'mapfile -t _cmd <<< "$LGTBOT_ARGV_NL"; '
     '"${_cmd[@]}"; status=$?; '
@@ -327,7 +319,7 @@ def _start_build(argv: list, display: str, kind: str = 'build',
         return {'success': False, 'message': f'无法创建日志文件：{e}'}
 
     actual_cmd = _wrap_for_subprocess()
-    log_f = open(LOG_PATH, 'ab', buffering=0)  # binary append, unbuffered
+    log_f = open(LOG_PATH, 'ab', buffering=0)
 
     # 强制彩色输出环境变量(对支持的工具生效)
     env = os.environ.copy()
@@ -446,7 +438,7 @@ _OTHER_ESC_RE = re.compile(r'\x1b[=>()]?[0-9A-Za-z]')
 # 删 NULL / BEL / 表单进给等
 _CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 
-# SGR 颜色码 → CSS color(只覆盖 30-37 / 90-97 前景色;背景色 40-47 / 100-107 留作扩展)
+# SGR 颜色码 → CSS color(只覆盖 30-37 / 90-97 前景色)
 _SGR_FG = {
     30: '#3b3b3b', 31: '#d33', 32: '#3a3', 33: '#c80',
     34: '#36c', 35: '#a3a', 36: '#1aa', 37: '#aaa',
@@ -524,7 +516,7 @@ def _read_log_tail(max_bytes: int = 64 * 1024) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 数据入口 + 9 个 action 端点
+# 数据入口 + action 端点
 # ─────────────────────────────────────────────────────────────────────────
 
 def _read_last_custom_target() -> str:
@@ -532,8 +524,7 @@ def _read_last_custom_target() -> str:
     任一环节失败返回空串(等价于"无历史值"——前端 prompt 不预填)。
 
     这是 prompt 预填功能的数据源 —— 用户连续编译同一个 target 时不用重复
-    输入。文件由 buildCustom 的 framework /api/config-file/save POST 路径
-    写入，无需额外的持久化通道。
+    输入。文件由 buildCustom 经 framework /api/config-file/save POST 写入。
     """
     try:
         with open(PARAMS_PATH, 'r', encoding='utf-8') as f:

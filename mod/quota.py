@@ -33,8 +33,7 @@ from . import state, boot
 log = get_logger(PLUGIN, 'LGTBot')
 
 # ──────── 常量配置 ────────────────────────────────────────────────────────
-# 被动配额按场景区分(见模块 docstring)。TTL 各留余量:群 5min-10s;
-# 单聊 60min-60s(窗口长,预留也放大 —— QQ 从消息发出计时,我们从收到计时)。
+# TTL 各留余量(群 5min-10s / 单聊 60min-60s):QQ 从消息发出计时,我们从收到计时。
 REF_QUOTA_GROUP = 5
 REF_QUOTA_DM = 4
 REF_TTL_GROUP = 290.0
@@ -68,8 +67,7 @@ def refresh_threshold(key: str) -> int:
 # value = [ref, ...] 按登记先后(即 expires_at 升序)排列,
 #         ref = {'ref_type': 'msg_id'|'event_id', 'ref_value', 'count', 'expires_at', 'appid'}
 #
-# 跨重载共享：取自 boot._get_persistent()，挂在 C++ 扩展上常驻进程；
-# 旧 callback 与新 dispatcher 操作同一份字典，热重载不会丢配额状态。
+# 取自 boot._get_persistent():旧 callback 与新 dispatcher 操作同一份字典,热重载不丢配额状态。
 _p = boot._get_persistent()
 _active_ref: dict[str, list[dict]] = _p['active_ref']
 _ref_lock = threading.Lock()
@@ -103,8 +101,7 @@ def _live_pool(key: str, now: float) -> _Pool:
         _active_ref.pop(key, None)
     return live
 
-# 等待器：每个等待中的协程持有独立 asyncio.Event，避免共享 Event 时 ev.clear()
-# 擦掉刚到达的信号导致死等。refresh_ref 时把 list 内所有 Event 都 set。
+# 等待器：每个等待中的协程持有独立 asyncio.Event —— 共享一个时 ev.clear() 会擦掉刚到达的信号,导致死等。
 _ref_waiters: dict[str, list[asyncio.Event]] = _p['ref_waiters']
 
 
@@ -171,11 +168,9 @@ def has_valid_ref(key: str) -> bool:
     """是否存在**未过期**的引用(不管配额是否已用完)。
 
     用来区分 ``try_consume_ref`` 返回 ``None`` 的两种原因:
-      · ``True``  —— 池里有 TTL 内的引用,只是次数全部用完(配额满);
-                    此时值得等用户刷新(私信 / 群聊都按原逻辑等待 + 超时强发)
-      · ``False`` —— 无引用 / 全部过期(次数没用完也一样:QQ 只认 TTL 内的 msg_id / event_id)。
-                    此时等刷新没有可续命的对象,而没有主动推送资格的目标(普通私信 / 无主动推送权限的群)
-                    主动消息必被拒 → 调用方应直接丢弃,别白等 15s 也别白烧一次调用
+      · ``True``  —— 池里有 TTL 内的引用,只是次数全部用完(配额满),值得等用户刷新
+      · ``False`` —— 无引用 / 全部过期(QQ 只认 TTL 内的 msg_id / event_id)。等刷新没有可续命的对象,
+                    没有主动推送资格的目标发主动消息又必被拒 → 调用方应直接丢弃
 
     顺带清掉已过期的 ref(与 ``try_consume_ref`` 的过期处理一致)。
     """
@@ -209,25 +204,20 @@ async def wait_and_consume(key: str, timeout: float = REFRESH_WAIT_TIMEOUT):
       2. 注册后再 try_consume_ref 一次（覆盖"注册前一刻刚刚刷新"的窗口）
       3. 没拿到再真正 await Event；refresh_ref 会同时 set 所有等待者
     """
-    # 注册一个属于自己的等待 Event
     ev = asyncio.Event()
     _ref_waiters.setdefault(key, []).append(ev)
 
     try:
-        # 第二次尝试：注册后立即再试，覆盖竞态窗口
         consumed = try_consume_ref(key)
         if consumed is not None:
             return consumed
 
-        # 真正进入等待
         try:
             await asyncio.wait_for(ev.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             return None
-        # 被唤醒，再尝试取配额
         return try_consume_ref(key)
     finally:
-        # 移除自己的等待器
         lst = _ref_waiters.get(key)
         if lst is not None:
             try:

@@ -7,12 +7,11 @@
     主动触发(restore / delete 还要 confirm);``backup.schedule_on_load_check()``
     是后端 @on_load 钩子里的自动任务，本模块只让用户可见它的产物 + 提供手动
     覆盖入口。
-  · ``restore_handler`` **不停引擎、不调用 ``release_bot_if_not_processing_games``**
-    现在的实现:``backup.restore_backup`` 用 ``os.replace`` 原子覆盖 disk 上的
-    data/ 文件。引擎对 lgtbot.db 没有常驻连接(每条指令现 open by path),所以
-    战绩 / 成就**下条指令立即热生效**,无需重启;唯独引擎配置 lgtbot.json 在
-    引擎启动时解析进内存,需用户按需点「🔁 重启 LGTBot」(走 dispatcher 的活跃
-    游戏预检 + 单次释放)才会重新加载。
+  · ``restore_handler`` **不停引擎、不调用 ``release_bot_if_not_processing_games``**:
+    ``backup.restore_backup`` 用 ``os.replace`` 原子覆盖 disk 上的 data/ 文件。
+    引擎对 lgtbot.db 没有常驻连接(每条指令现 open by path),所以战绩 / 成就
+    **下条指令立即热生效**,无需重启;唯独引擎配置 lgtbot.json 在引擎启动时
+    解析进内存,需用户按需点「🔁 重启 LGTBot」才会重新加载。
 
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_JS`` 从 ``templates/backup/`` 加载
@@ -122,7 +121,7 @@ def render_list() -> str:
 
 # ─────────────────────────────────────────────────────────────────────────
 # 带参 HTTP route handlers —— 用 web_pages.register_route 挂到
-# /api/ext/lgtbot/backup/{restore,delete}, 从 request.query 拿 name
+# /api/ext/lgtbot/backup/{restore,delete,download}, 从 request.query 拿 name
 # ─────────────────────────────────────────────────────────────────────────
 
 async def restore_handler(request: 'web.Request') -> 'web.Response':

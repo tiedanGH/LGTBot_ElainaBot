@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 """config 测试 —— ``_apply_runtime_tunables`` 的 sandbox_dm_users 双模式下发。
 
-历史回归:一次 webui 校验重构曾把函数尾部的 sandbox_dm_users /
-menu_game_buttons 应用块整段误删,``SANDBOX_DM_USERS`` 从此恒为空集合而
-没有任何测试报警。本文件补上这道闸:
+函数尾部的 sandbox_dm_users / menu_game_buttons 应用块整段丢了也不会报错,
+只是 ``SANDBOX_DM_USERS`` 恒为空集合。本文件补上这道闸:
 
   · 白名单模式:列表 → frozenset,DM_PUSH_ALL 关闭
   · ``['all']``(仅此一项)→ 全员直推模式:DM_PUSH_ALL=True + 空白名单
@@ -105,9 +104,7 @@ def test_apply_reaches_function_tail_regression_guard():
 # ─────────────────────────────────────────────────────────────────────────
 # 纯数字 ID 字段的 int → str 容错
 # ─────────────────────────────────────────────────────────────────────────
-# 历史回归:appid 是纯数字,手工 / 框架通用编辑器写成不带引号的
-# ``bind_bot_appid: 102003762`` 时 yaml 解析成 int,旧读取端直接「忽略」——
-# 绑定在重启后静默回退第一个 bot,看起来像绑定丢失。
+# appid 是纯数字,不带引号写进 yaml 会被解析成 int;读取端不收下的话,绑定在重启后静默回退第一个 bot。
 
 
 def test_bind_bot_appid_unquoted_number_coerced_to_str():
@@ -140,8 +137,7 @@ def test_notify_groups_non_list_ignored():
 def test_legacy_crash_notify_group_still_honored():
     """★ 旧字段名兼容:notify_groups 留空而旧的 crash_notify_group 有值时沿用旧值。
 
-    老部署升级后 yaml 里只有旧字段,若直接无视,崩溃 / 重启通知会**静默消失** ——
-    而这几条恰恰是最不能漏的消息。新字段一旦填了就完全接管(不再合并旧值)。
+    老部署的 yaml 里只有旧字段,无视它的话崩溃 / 重启通知会**静默消失**。新字段一旦填了就完全接管(不合并旧值)。
     """
     cfg = _base_cfg(crash_notify_group='GOLD')
     cfg['notify_groups'] = []
@@ -444,9 +440,9 @@ def test_persist_bind_reports_failure_without_touching_state(monkeypatch, _cfg_f
 
 
 def test_validator_flags_renamed_field_as_migration_not_unknown():
-    """★ 改过名的字段仍被运行时读作兼容值 —— 校验器不能说它"不会读取"。
+    """★ 改过名的字段仍被运行时读作兼容值 —— 校验器不能说它"不会读取",要提示改名去向。
 
-    面板里那句「未知字段(本插件不会读取)」会让人以为旧配置已经失效,进而误删掉唯一生效的通知群配置。这里要求提示的是改名去向。
+    提示成未知字段会让人误删掉唯一生效的通知群配置。
     """
     pytest.importorskip('aiohttp')
     from plugins.LGTBot_ElainaBot.mod.webui import page_config as pc

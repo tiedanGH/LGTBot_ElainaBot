@@ -79,13 +79,13 @@ def test_render_date_mode_layout():
 
     normal = stats_image.render_stats_image(_sample_stats(), sub_title='x')
     _w2, h_normal = uploader.get_image_size(normal)
-    # 日期模式无趋势但榜单 10 行,两种布局高度必不同——分支生效的低成本验证
+    # 日期模式无趋势但榜单 10 行,两种布局高度必不同
     assert h_date != h_normal
 
 
 def test_render_month_mode_layout():
     """按月模式:走 date_mode 布局(无趋势/榜单 10 行),第 4 卡切换为
-    「当月对局人次」+ 票根图标 —— 渲染不崩即分支与新图标生效。"""
+    「当月对局人次」+ 票根图标 —— 渲染不崩即分支与图标生效。"""
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
@@ -122,8 +122,7 @@ def _delta_only_stats(diff) -> dict:
 def _pill_colors(diff: int) -> set:
     """渲染「带胶囊」与「无胶囊」两版做像素差分,返回**只属于胶囊**的颜色集。
 
-    不能直接在整图里找颜色:_GREEN / _RED 同时用于图标底色与配额告警,满图都有,分辨不出胶囊到底画成了哪种。
-    两版布局完全一致(``_delta_pill`` 在 diff 为 None 时什么都不画),所以差异像素精确等于胶囊本身。
+    不能直接在整图里找颜色:_GREEN / _RED 同时用于图标底色与配额告警,满图都有。
     """
     from io import BytesIO
     from PIL import Image, ImageChops
@@ -146,8 +145,7 @@ def _pill_colors(diff: int) -> set:
 ])
 def test_delta_pill_is_up_red_down_green(diff, want, other):
     """★ 配色契约:涨跌胶囊同 dau 卡片取**涨红跌绿**(证券风格),与这两个常量
-    在图标 / 配额处的语义正好相反 —— 极易在后续改动里被"顺手改回来"。
-    写反了图上只是颜色互换,没有任何报错,所以直接查胶囊像素。"""
+    在图标 / 配额处的语义正好相反 —— 极易被"顺手改回来"。"""
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
@@ -171,8 +169,7 @@ def test_delta_pill_flat_is_neutral_grey():
 
 
 def test_bot_scale_row_only_when_data_present():
-    """好友 / 群聊总数那一行由 dispatcher 只在今日视图注入 —— 缺数据(历史日 /
-    月视图)时整行不画,画了就多一行高度。"""
+    """好友 / 群聊总数那一行缺数据(历史日 / 月视图)时整行不画,画了就多一行高度。"""
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
@@ -196,9 +193,7 @@ def _colors(png: bytes) -> set:
 def _first_bulk_y(png: bytes, rgb: tuple, min_run: int = 40):
     """该颜色**成片**出现(某一行里至少 ``min_run`` 个像素)的最靠上行号,没有则 None。
 
-    不能用"存在即算":accent 色系元素(顶栏色条 / 标题字)的抗锯齿边缘会混出大量
-    中间色,恰好撞上目标色值的概率不低 —— 实测顶栏就能撞出一个 _TOTAL_BG。
-    只有整块卡面 / 图标底这种成片填充才够 min_run,单像素噪声自然被滤掉。
+    只认成片填充:抗锯齿边缘会混出中间色,单个像素可能恰好撞上目标色值。
     """
     from io import BytesIO
     from PIL import Image
@@ -215,9 +210,7 @@ def test_bot_scale_delta_is_net_change_not_yesterday():
     """★ 这两张卡的胶囊语义与其它卡**不同**:传进来的已经是今日净变化本身,
     不是「昨日值」—— 当成昨日值去做减法会算出相反数。
 
-    判据取 ``_RED``(描边 + 文字色)的有无:本样本里没有别的 _RED 使用者
-    (配额未告警、今日行也没给对比数据),所以「净增出现红 / 净减不出现红」
-    能同时钉住两个方向。(不用 _GREEN 判:活跃玩家的 person 图标就是它。)
+    判据取 ``_RED`` 的有无:本样本里没有别的 _RED 使用者;不能用 _GREEN,person 图标就是它。
     """
     pytest.importorskip('PIL')
     if not stats_image._find_font():
@@ -259,10 +252,8 @@ def test_bot_scale_pill_is_outlined_today_pill_is_filled():
 
 
 def test_total_bg_is_visibly_distinct_from_today_bg():
-    """★ 不能只断言"用了 _TOTAL_BG" —— 那是同义反复(测试读的就是这个常量,
-    改常量等于同时改期望)。这里改为约束**色差本身**:与今日卡的 _PANEL2 至少有
-    一个通道相差 16 个色阶。反例:曾经用过的 _TAG_BG 最大只差 12,并排几乎分不出。
-    色相仍可自由调整,只要分层足够。"""
+    """★ 约束**色差本身**:_TOTAL_BG 与今日卡的 _PANEL2 至少有一个通道相差 16 个色阶,
+    差得少了并排几乎分不出;色相可自由调整。"""
     d = [abs(a - b) for a, b in zip(stats_image._TOTAL_BG, stats_image._PANEL2)]
     assert max(d) >= 16, (stats_image._TOTAL_BG, d)
     # 边框也应比常规边框更明显,否则整块卡的轮廓会被卡面吃掉
@@ -272,10 +263,9 @@ def test_total_bg_is_visibly_distinct_from_today_bg():
 
 def test_bot_scale_row_comes_first_and_has_distinct_bg():
     """★ 行序与底色(用户要求):累计总数行排在**数据总览标题正下方**,今日行在其下;
-    且底色换成更深一档的 ``_TAG_BG``,与今日行的 ``_PANEL2`` 区分。
+    且底色用更深一档的 ``_TOTAL_BG``,与今日行的 ``_PANEL2`` 区分。
 
-    _TOTAL_BG 是这一行**专用**的色值(顶栏副标题小药丸用的是 _TAG_BG),
-    所以"它最靠上出现在哪一行"就等于这一行的位置。
+    _TOTAL_BG 是这一行**专用**的色值,所以"它最靠上出现在哪一行"就等于这一行的位置。
     """
     pytest.importorskip('PIL')
     if not stats_image._find_font():
@@ -284,15 +274,14 @@ def test_bot_scale_row_comes_first_and_has_distinct_bg():
              bot_groups=1284, bot_friends=5391,
              bot_groups_delta=7, bot_friends_delta=-3)
     png = stats_image.render_stats_image(g, sub_title='')
-    # 阈值取 200px:卡面约 460px 宽,而描边胶囊的内部也填 _TOTAL_BG(~90px),
-    # 阈值放松到 40 的话胶囊就能冒充卡面,底色被改掉也测不出来
+    # 阈值取 200px:描边胶囊的内部也填 _TOTAL_BG,阈值太低胶囊就能冒充卡面
     y_total = _first_bulk_y(png, stats_image._TOTAL_BG, min_run=200)
     # 今日行的定位物:活跃玩家 person 图标的 52px 宽底块
     y_today = _first_bulk_y(png, stats_image._tint(stats_image._GREEN))
     assert y_total is not None and y_today is not None
     assert y_total < y_today, (y_total, y_today)               # 总数行在今日行之上
 
-    # 没有累计总数时,_TAG_BG 不该出现在卡片区(证明它确实是这一行带来的)
+    # 没有累计总数时,_TOTAL_BG 不该出现在卡片区(证明它确实是这一行带来的)
     plain = stats_image.render_stats_image(
         _sample_stats(with_trend=False, with_ranks=False), sub_title='')
     assert _first_bulk_y(plain, stats_image._TOTAL_BG, min_run=200) is None
@@ -311,7 +300,7 @@ def test_friend_icon_distinct_from_person():
 
 def test_bot_scale_row_uses_friend_icon_not_person(monkeypatch):
     """★ 光有 'friend' 图标不够,渲染时**真的要用它** —— 顺手写回 'person' 会让
-    好友总数和「今日活跃玩家」的图标一模一样。这里记下 _icon 实际收到的 kind。"""
+    好友总数和「今日活跃玩家」的图标一模一样。"""
     pytest.importorskip('PIL')
     if not stats_image._find_font():
         pytest.skip('无中文字体')
@@ -356,12 +345,7 @@ def test_bot_scale_tiles_sit_above_their_columns(monkeypatch, view, players, gro
 
 
 def test_period_word_matches_dispatcher_span_views():
-    """★ 跨模块措辞防漂移:图片的期间词必须与 dispatcher 文本保底的一致。
-
-    两条出口(图片 / 文本)各有一份措辞表,同一条指令图片写「当年」、渲染失败退
-    到文本却写「当日」是最容易发生、也最难被发现的漂移。这里按
-    ``_SPAN_VIEWS`` 的 flags 反推图片侧的取词,逐个视图对齐。
-    """
+    """★ 跨模块措辞防漂移:图片的期间词必须与 dispatcher 文本保底的一致 —— 两条出口各有一份措辞表。"""
     for view, cfg in dispatcher._SPAN_VIEWS.items():
         g = dict(cfg['flags'], date_mode=True)
         assert stats_image._period_word(g) == cfg['period'], view
@@ -372,8 +356,7 @@ def test_period_word_matches_dispatcher_span_views():
 def test_total_mode_scale_row_shows_no_pill():
     """★ 累计视图的总数行**不带角标**(用户要求):delta 为 None 时一个胶囊都不画。
 
-    判据取描边胶囊的边框色 ``_RED`` —— 关掉榜单 / 趋势后,这个色值在图里只可能
-    来自涨跌胶囊(奖牌色与 accent 系都不撞)。对照组给同一份数据加上 delta。
+    判据取描边胶囊的边框色 ``_RED`` —— 关掉榜单 / 趋势后,这个色值只可能来自涨跌胶囊。
     """
     pytest.importorskip('PIL')
     if not stats_image._find_font():
@@ -460,7 +443,7 @@ async def test_stats_command_replies_markdown_image(monkeypatch, _stats_env):
 
 
 async def test_stats_command_falls_back_to_text(monkeypatch, _stats_env):
-    """渲染失败(无 PIL / 字体)→ 回退原文本输出。"""
+    """渲染失败(无 PIL / 字体)→ 回退文本输出。"""
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
                         lambda g, sub: None)
@@ -491,10 +474,7 @@ def test_stats_image_md_separates_mention_from_image():
 
 
 def test_stats_image_md_is_the_only_place_building_that_markdown():
-    """图片回执的 markdown 只许有一处 —— 今日视图与四个窗口视图共用同一个出口。
-
-    历史上这两条出口各自拼过一份字符串,改格式时很容易只改一边。用字面量出现次数把它钉在 helper 里。
-    """
+    """图片回执的 markdown 只许有一处 —— 今日视图与四个窗口视图共用同一个出口,分开拼的话改格式容易只改一边。"""
     import inspect
     src = inspect.getsource(dispatcher)
     assert src.count('![数据统计 #') == 1, '数据统计图片 markdown 出现了多份拼装'

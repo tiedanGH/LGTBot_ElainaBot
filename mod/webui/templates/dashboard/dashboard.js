@@ -1,6 +1,5 @@
-/* ──── Dashboard:版本/统计/缓存/配置 ────
+/* ──── Dashboard 标签 ────
  * 隐藏 action 端点 key 与 webui/main.py 的 _DASH_* 常量一一对应。
- * 配置保存复用主框架 /api/config-file/save(接受 plugins/ 下绝对路径)。
  */
 
 const DASH_KEYS = {
@@ -21,20 +20,17 @@ const DASH_KEYS = {
 
 /* 机器人绑定换绑端点(register_route 真路由,带 ?appid= 参数) */
 const BIND_BOT_ROUTE = '/api/ext/lgtbot/bind-bot';
-/* 注:reload_config / dash-config-* / dash-reload-config 全部搬迁到「配置管理」
-   tab,见 templates/config/config.js (CFG_KEYS.reload_config) */
 
 /* 插件目录的 git 状态 ——
  *   'ok'     = .git 存在,「更新桥接层」按钮走 dashDoUpdate
- *   'no_git' = 市场下载场景,按钮文案切「📥 初始化为 git 仓库」,走 dashInitRepo */
+ *   'no_git' = 市场下载场景,按钮文案切「初始化为 git 仓库」,走 dashInitRepo */
 let dashRepoStatus = 'ok';
 
 /* 缓存最近一次拿到的 submodule info —— 给「更新子模块」按钮的 confirm
    弹窗决定文案(初始化 vs 更新),也用来拼完整 git 命令展示。 */
 let dashLastSubmoduleInfo = {};
 
-/* 桥接层(本插件)自身仓库跳转链接信息 {repo_url, repo_owner, repo_name} ——
-   首屏 get_data 与「检查更新」结果都会填,渲染时拼成「· 仓库 <a>owner/repo</a>」。 */
+/* 桥接层(本插件)自身仓库跳转链接信息 {repo_url, repo_owner, repo_name},首屏 get_data 与「检查更新」结果都会填。 */
 let dashBridgeRepo = {};
 
 function dashBridgeRepoLink() {
@@ -45,8 +41,8 @@ function dashBridgeRepoLink() {
          escapeHtml(r.repo_owner + '/' + r.repo_name) + '</a>';
 }
 
-/* no_git(插件市场安装)时桥接层行的第二行提示 —— 版本检测照常走 GitHub API,
-   不依赖本地 git;git 只影响「⬇ 更新桥接层」那条路,有新版本时可用「下载更新」替代 */
+/* no_git(插件市场安装)时桥接层行的第二行提示 —— 版本检测走 GitHub API 不依赖本地 git,
+   git 只影响「更新桥接层」那条路,有新版本时可用「下载更新」替代 */
 function dashGitWarnHtml() {
   return '<br><span class="dash-msg-warn dash-bridge-gitwarn">⚠️ 未检测到 .git/（可能从插件市场安装）：' +
          '可点「初始化为 git 仓库」启用 git 更新；或有新版本时直接「下载更新」覆盖更新。</span>';
@@ -61,7 +57,6 @@ function dashMarkBridgeUpdated() {
   if (!btn) return;
   btn.style.display = '';
   btn.disabled = false;
-  /* 从橙色警示态切成主按钮 */
   btn.classList.remove('dash-btn-warn');
   btn.classList.add('dash-btn-primary');
   setBtnIcon(btn, '#i-refresh', '刷新控制台');
@@ -75,16 +70,14 @@ function dashFmtBytes(n) {
   return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
-/* 版本号统一加 v 前缀:'1.5.0' → 'v1.5.0'(若已带 v/V 则不重复加)。
-   __plugin_meta__ 里 version='1.5.0' 不带 v;GitHub tag 是 'v1.5.0' 带 v,
-   规范化到同一形式后视觉对齐,避免「本地 1.5.0 / 远端 v1.5.0」混杂。 */
+/* 版本号统一加 v 前缀(已带 v/V 则不重复加):__plugin_meta__ 的 version 不带 v,GitHub tag 带 v。 */
 function dashFmtVersion(v) {
   if (!v) return '—';
   return /^v/i.test(v) ? v : 'v' + v;
 }
 
 /* ──── 进行中的对局 ──── */
-/* 开局至今的时长文案(客户端按 since epoch 秒粗算,秒/分/时/天四档)。 */
+/* 开局至今的时长文案(客户端按 since epoch 秒粗算)。 */
 function dashFmtSince(ts) {
   if (!ts) return '';
   const secs = Math.max(0, Math.floor(Date.now() / 1000 - ts));
@@ -171,12 +164,11 @@ function dashSetBotCollapsed(collapsed) {
   if (section) section.classList.toggle('is-collapsed', collapsed);
 }
 
-/* 折叠态只在首屏自动决定一次:已显式绑定(config.yaml 写了 bind_bot_appid 且该 bot 确实在线)→ 折叠,信息压缩进标题右侧摘要;
-   仍是「默认第一个」的回退状态 → 展开,提示用户去挑一个。之后任何刷新(换绑成功后的 dashRefreshAll 等)都不再动折叠态。 */
+/* 折叠态只在首屏自动决定一次:已显式绑定(config.yaml 写了 bind_bot_appid 且该 bot 确实在线)→ 折叠;
+   仍是「默认第一个」的回退状态 → 展开,提示用户去挑一个。之后任何刷新(如换绑成功后的 dashRefreshAll)都不再动折叠态。 */
 let dashBotInited = false;
 
-/* 群权限数量的两个小字段 —— 全量消息与主动推送是 QQ 后台**分别开通**的不同
-   权限(收得到全部消息 ≠ 发得出主动消息),数量通常不等,所以各显各的。 */
+/* 群权限数量的两个小字段 —— 全量消息与主动推送是 QQ 后台分别开通的两种权限,数量通常不等,所以各显各的。 */
 function dashBotPermHtml(bot) {
   const vol = (bot.full_volume == null) ? '—' : bot.full_volume;
   const push = (bot.proactive == null) ? '—' : bot.proactive;
@@ -188,8 +180,7 @@ function dashBotPermHtml(bot) {
            escapeHtml(String(push)) + '</span>';
 }
 
-/* 折叠时紧跟标题左对齐的绑定摘要:「已绑定」徽章打头,后接 appid / QQ / 权限数
-   (与展开后列表里同款)。bot 为空 = 未显式绑定,整个摘要连徽章一起不渲染。 */
+/* 折叠时紧跟标题的绑定摘要;bot 为空 = 未显式绑定,整个摘要连徽章一起不渲染。 */
 function dashRenderBotSummary(bot) {
   const el = document.getElementById('dash-bot-summary');
   if (!el) return;
@@ -322,7 +313,7 @@ function dashMdToHtml(md) {
 
 /* ──── Release 折叠卡(检查更新后出现,默认折叠) ────
  * data.release = {releases: [...]}:后端已筛成「比本地新的全部版本」(新→旧);
- * 已是最新时退化为只含最新一个。跨多个大版本升级(如 2.2.x → 2.4.0)会渲染多张卡片,各自独立展开查看。 */
+ * 已是最新时退化为只含最新一个。跨多个版本升级会渲染多张卡片,各自独立展开。 */
 function dashReleaseCard(r, latestLabel) {
   const dateStr = r.published_at ? r.published_at.slice(0, 10) : '';
   const title = (r.name || r.tag_name || '') + (dateStr ? '（' + dateStr + '）' : '');
@@ -330,7 +321,7 @@ function dashReleaseCard(r, latestLabel) {
     ? '<a class="dash-release-link" href="' + escapeHtml(r.html_url) +
       '" target="_blank" rel="noopener">↗ 在 GitHub 查看</a>'
     : '';
-  /* 单个(已最新)沿用「最新 Release：」前缀,与旧版一致;多个时每卡按版本自述 */
+  /* 单个时带「最新 Release：」前缀;多个时每卡按版本自述 */
   const prefix = latestLabel ? '最新 Release：' : '';
   return '<details class="dash-release">' +
       '<summary><svg class="ui-icon"><use href="#i-file-text"/></svg>' +
@@ -374,17 +365,15 @@ function dashSetSelfcheckCollapsed(collapsed) {
   if (section) section.classList.toggle('is-collapsed', collapsed);
 }
 
-/* 折叠态只在首屏按「有无异常 / 警告」自动决定一次(有红色异常或黄色警告都展开,
-   全绿才折叠);之后(重新检测 / 换绑 / 清缓存等任何刷新)只更新检查项与红黄计数,
-   **不改变折叠态** —— 此后折叠与否只由用户点标题控制。 */
+/* 折叠态只在首屏自动决定一次(全绿才折叠);之后任何刷新只更新检查项与红黄计数,
+   不改变折叠态 —— 此后折叠与否只由用户点标题控制。 */
 let dashSelfcheckInited = false;
 
 function dashRenderSelfCheck(sc) {
   if (!sc) return;
   dashRenderCheckItems('dash-runtime-list', sc.runtime, false);
   dashRenderCheckItems('dash-compile-list', sc.compile, true);
-  /* 严重异常 = 运行时硬依赖缺失(红点);warn 项缺失只计警告(黄点);
-     编译依赖缺失走「预编译无需」灰点,两者都不计 */
+  /* 严重异常 = 运行时硬依赖缺失;warn 项缺失只计警告;编译依赖缺失两者都不计 */
   const critical = (sc.runtime || []).filter(it => !it.ok && !it.warn).length;
   const warns    = (sc.runtime || []).filter(it => !it.ok && it.warn).length;
   const badge = document.getElementById('dash-selfcheck-badge');
@@ -392,30 +381,27 @@ function dashRenderSelfCheck(sc) {
   if (badge) {
     if (critical > 0) {
       badge.textContent = '⚠ ' + critical + ' 项异常';
-      badge.className = 'dash-selfcheck-badge bad';   // 红字
+      badge.className = 'dash-selfcheck-badge bad';
     } else if (warns > 0) {
       badge.textContent = '';                          // 有警告 → 不显示「环境正常」
       badge.className = 'dash-selfcheck-badge';
     } else {
-      badge.textContent = '✓ 环境正常';                // 无异常且无警告才算正常
-      badge.className = 'dash-selfcheck-badge ok';    // 绿字
+      badge.textContent = '✓ 环境正常';
+      badge.className = 'dash-selfcheck-badge ok';
     }
   }
   if (warnBadge) warnBadge.textContent = warns > 0 ? ('⚠ ' + warns + ' 项警告') : '';
   if (!dashSelfcheckInited) {
-    dashSetSelfcheckCollapsed(critical === 0 && warns === 0);   // 首屏:有异常或警告都展开,全绿才折叠
+    dashSetSelfcheckCollapsed(critical === 0 && warns === 0);
     dashSelfcheckInited = true;
   }
 }
 
 function dashApplyData(data) {
-  /* 进行中的对局 */
   dashRenderMatches(data);
 
-  /* 运行环境自检 */
   dashRenderSelfCheck(data.self_check);
 
-  /* 机器人绑定列表 */
   dashRenderBots(data);
 
   /* 启动自检的新版本 */
@@ -431,7 +417,7 @@ function dashApplyData(data) {
     statusEl.textContent = '引擎未运行';
     statusEl.className = 'dash-badge dash-badge-err';
   }
-  /* 引擎未运行 → 亮出「📦 预编译部署」跳转按钮(免编译快速部署引导) */
+  /* 引擎未运行 → 亮出「预编译部署」跳转按钮(免编译快速部署引导) */
   const jumpBtn = document.getElementById('dash-prebuilt-jump');
   if (jumpBtn) jumpBtn.style.display = data.engine_running ? 'none' : '';
 
@@ -450,7 +436,7 @@ function dashApplyData(data) {
     setBtnIcon(bBtn, '#i-inbox', '初始化为 git 仓库');
     bBtn.style.display = '';
   } else {
-    /* ok 时初始文案「点击检查更新查看版本」+ 仓库链接;检查更新后由 dashRenderBridgeStatus 覆盖成版本对比 */
+    /* 检查更新后由 dashRenderBridgeStatus 覆盖成版本对比 */
     bDetail.innerHTML = '点击「检查更新」查看版本' + dashBridgeRepoLink();
   }
 
@@ -478,7 +464,6 @@ function dashLoadInline() {
 }
 
 /* 整页刷新 → 抠出新的 dashboard-data JSON,只刷新本标签的状态(用户的标签切换 / 编辑器脏标记都不会被破坏)。
- * 由换绑 / 清缓存 / 初始化仓库等操作成功后程序化调用,也被「🔄 刷新」按钮复用。
  * ``quiet=true``(默认)吞掉异常只打 console —— 程序化调用方都是「顺带刷新」,
  * 不该因刷新失败覆盖掉自己的成功提示;按钮调用传 false 以便给出失败反馈。 */
 async function dashRefreshAll(quiet = true) {
@@ -517,9 +502,7 @@ async function dashCheckUpdate() {
   if (!dashBridgeNeedsReload) {
     document.getElementById('dash-do-update').style.display = 'none';
   }
-  /* 注意:dash-update-submodule 不一定隐藏 —— 如果 status=missing/empty,
-     在 dashApplyData 阶段就显示了「初始化子模块」按钮。
-     这里也先隐藏,新结果回来时 dashRenderSubmoduleStatus 会重新决定。 */
+  /* 子模块按钮在 missing / empty 时首屏就已显示「初始化子模块」;这里也先隐藏,由 dashRenderSubmoduleStatus 按新结果重新决定 */
   document.getElementById('dash-update-submodule').style.display = 'none';
   try {
     const data = await dashCallAction(DASH_KEYS.check_update);
@@ -553,7 +536,7 @@ function dashRenderBridgeStatus(bridge) {
   if (bridge && (bridge.repo_url || bridge.repo_owner)) dashBridgeRepo = bridge;
   const repoLink = dashBridgeRepoLink();
 
-  /* no_git(插件市场安装):版本检测走 GitHub API,;右侧按钮保持「初始化」,有新版本再追加「下载更新」 */
+  /* no_git(插件市场安装):版本检测走 GitHub API;右侧按钮保持「初始化」,有新版本再追加「下载更新」 */
   const noGit = dashRepoStatus === 'no_git';
   const gitWarn = noGit ? dashGitWarnHtml() : '';
   if (dlBtn) dlBtn.style.display = 'none';
@@ -587,12 +570,6 @@ function dashRenderBridgeStatus(bridge) {
 }
 
 /* ──── 子模块的检测结果渲染 ────
- * 三种情况:
- *   1. status=missing / empty —— 红字「未初始化」,按钮文案「初始化子模块」
- *   2. status=ok,但远端查询失败 —— 显示本地 commit + 远端错误
- *   3. status=ok,远端查询成功 —— 本地 / 远端 commit 对比
- *      · has_update=true  → 显示「更新子模块」按钮
- *      · has_update=false → 隐藏按钮,绿字「已是最新」
  * 同时把 sub 缓存到 dashLastSubmoduleInfo 给 confirm 弹窗用。
  */
 function dashRenderSubmoduleStatus(sub) {
@@ -690,9 +667,7 @@ async function dashDoUpdate() {
     if (data.success) dashMarkBridgeUpdated();
     if (data.stdout) html += '<pre class="dash-pre">stdout:\n' + escapeHtml(data.stdout) + '</pre>';
     if (data.stderr) html += '<pre class="dash-pre">stderr:\n' + escapeHtml(data.stderr) + '</pre>';
-    /* 失败时附加「💥 强制更新」按钮 —— 典型场景:工作区脏 (`would be
-       overwritten by merge`) / 本地与远端分叉无法 ff 等。本插件多数用户
-       不会主动 commit,远端有新版时本地几乎一定脏,所以兜底按钮是常用路径。 */
+    /* 失败时附加「💥 强制更新」按钮 —— 工作区脏 / 本地与远端分叉无法 ff 时的兜底 */
     if (!data.success) {
       html += '<div class="dash-update-force-row" style="margin-top:10px">' +
               '<button id="dash-do-update-force" class="dash-btn dash-btn-warn">' +
@@ -703,8 +678,7 @@ async function dashDoUpdate() {
               '</span></div>';
     }
     resEl.innerHTML = html;
-    /* 把刚渲染进 DOM 的强制更新按钮绑事件(每次失败都会重新注入,所以
-       不能用一次性 addEventListener 注册到固定 id) */
+    /* 强制更新按钮每次失败都会重新注入,只能渲染后现绑事件 */
     const forceBtn = document.getElementById('dash-do-update-force');
     if (forceBtn) forceBtn.addEventListener('click', dashDoUpdateForce);
   } catch (e) {
@@ -718,9 +692,8 @@ async function dashDoUpdate() {
 }
 
 /* ──── 强制更新桥接层(丢弃本地修改) ────
- * 普通 git pull 失败的兜底:fetch + reset --hard origin/main。会覆盖工作区
- * 已 tracked 的文件;data/、build/、lgtbot/ 因 .gitignore 排除不受影响。
- * danger 级双 confirm,避免误触丢失代码改动。 */
+ * 普通 git pull 失败的兜底,会覆盖已 tracked 的文件;data/、build/、lgtbot/ 因 .gitignore 排除不受影响。
+ * 双 confirm,避免误触丢失代码改动。 */
 async function dashDoUpdateForce() {
   const cmd = 'git fetch origin && git reset --hard origin/main';
   const ok1 = await dashConfirm(
@@ -841,8 +814,7 @@ async function dashInitRepo() {
   }
 }
 
-/* 桥接层行按钮的分发器: 按 dashRepoStatus 决定调哪个 handler。
-   一个 button 元素 + 一个 click listener,handler 根据状态分支。 */
+/* 桥接层行按钮的分发器: 按状态决定调哪个 handler。 */
 async function dashBridgeButtonClick() {
   if (dashBridgeNeedsReload) return location.reload();
   if (dashRepoStatus === 'no_git') return dashInitRepo();
@@ -888,16 +860,12 @@ async function dashDoUpdateSubmodule() {
     ? '\n\n首次初始化会克隆完整的 lgtbot 仓库 (含 50+ 游戏插件)，通常需要 30 秒至几分钟。'
     : '\n\n该命令会强制把本地子模块对齐到父仓库 gitlink，清除子模块内的本地修改。';
 
-  /* 第一次 confirm:warn 等级,展示完整命令 + 影响说明 */
   const ok1 = await dashConfirm(
     '确认' + verb + '子模块「' + path + '」？\n\n将在插件目录下执行命令：\n  ' + cmd + tail,
     {level: 'warn'}
   );
   if (!ok1) return;
 
-  /* 第二次 confirm:danger 等级,强调不可逆。
-     · init 场景:首次克隆,容量大,中断需手动清理
-     · update 场景:强制丢弃 lgtbot/ 内的本地修改 */
   const dangerText = isInit
     ? '再次确认：初始化子模块「' + path + '」?\n\n' +
       '将从远端克隆完整 lgtbot 仓库 (含 50+ 游戏子模块) 到本地。\n' +
@@ -939,16 +907,10 @@ async function dashDoUpdateSubmodule() {
   }
 }
 
-/* 注:dashShowConfigMsg / dashSaveConfig / dashRevertConfig 已搬迁至
-   templates/config/config.js (cfgSave / cfgRevert / cfgShowMsg) —— 那里支持
-   4 块编辑器(yaml / notice / trouble / engine),不再受限于"引擎配置"一项。 */
-
 /* ──── 缓存清理 ──── */
-/* DASH_CLEAR_PROMPTS:每个 which → confirm 文案数组,统一双次确认。
- *
- * 安全准则:所有缓存清理一律走双次确认 —— 第一次 warn 等级展示范围 + 影响,
- * 第二次 danger 等级强调不可逆。没有任何自动清理 / 定时清理 / 后台调度;
- * 此前图片缓存是单次确认,因有误触风险已统一改为双次。
+/* DASH_CLEAR_PROMPTS:每个 which → confirm 文案数组。
+ * 安全准则:所有缓存清理一律走双次确认(第一次 warn 展示范围 + 影响,第二次 danger 强调不可逆),
+ * 没有任何自动清理 / 定时清理 / 后台调度。
  */
 const DASH_CLEAR_PROMPTS = {
   avatar: [
@@ -989,9 +951,7 @@ const DASH_CLEAR_KEYS = {
 async function dashClearCache(which) {
   const prompts = DASH_CLEAR_PROMPTS[which];
   if (!prompts) return;
-  /* 依次弹出每条 prompt,任一取消即中断。
-     双次确认场景下最后一条用 danger(强调不可逆),前几条 warn;
-     单次确认场景直接 warn(常规风险)。 */
+  /* 依次弹出每条 prompt,任一取消即中断;多条时最后一条用 danger */
   for (let i = 0; i < prompts.length; i++) {
     const isLast = (i === prompts.length - 1);
     const level = (isLast && prompts.length > 1) ? 'danger' : 'warn';
@@ -1018,9 +978,8 @@ async function dashClearCache(which) {
   }
 }
 
-/* 「🔄 刷新」—— 重新统计三个缓存目录的文件数与大小。
-   复用 dashRefreshAll(整页 payload 里已含 cache 统计,后端每次都是实时 os.walk),
-   不新增端点;期间禁用按钮并在消息行给反馈。 */
+/* 「刷新」—— 重新统计三个缓存目录的文件数与大小。
+   整页 payload 里的 cache 统计每次都是实时 os.walk,直接复用 dashRefreshAll。 */
 async function dashRefreshCache() {
   const btn = document.getElementById('dash-cache-refresh');
   const msgEl = document.getElementById('dash-cache-msg');
@@ -1042,7 +1001,6 @@ window.addEventListener('DOMContentLoaded', () => {
   dashLoadInline();
 
   document.getElementById('dash-check-update').addEventListener('click', dashCheckUpdate);
-  /* 桥接层行按钮: dashRepoStatus 决定调 dashInitRepo 还是 dashDoUpdate */
   document.getElementById('dash-do-update').addEventListener('click', dashBridgeButtonClick);
   /* 免 git 下载更新(no_git + 有新版本时显示) */
   const dlBtn = document.getElementById('dash-do-download');
@@ -1053,11 +1011,10 @@ window.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-clear]').forEach(btn => {
     btn.addEventListener('click', () => dashClearCache(btn.dataset.clear));
   });
-  /* 缓存区「🔄 刷新占用」—— 重新统计文件数与大小 */
   const cacheRefreshBtn = document.getElementById('dash-cache-refresh');
   if (cacheRefreshBtn) cacheRefreshBtn.addEventListener('click', dashRefreshCache);
 
-  /* 引擎未运行时的「📦 预编译部署」跳转 → 切到该标签 */
+  /* 引擎未运行时的「预编译部署」跳转 → 切到该标签 */
   const jumpBtn = document.getElementById('dash-prebuilt-jump');
   if (jumpBtn) jumpBtn.addEventListener('click', () => {
     const t = document.querySelector('.tabs .tab[data-tab="prebuilt"]');
@@ -1075,13 +1032,12 @@ window.addEventListener('DOMContentLoaded', () => {
     const body = document.getElementById('dash-selfcheck-body');
     dashSetSelfcheckCollapsed(!(body && body.classList.contains('collapsed')));
   });
-  /* 运行环境自检「重新检测」→ 只重新拉 dashboard-data(含最新 self_check)刷新
-     检查项与红字计数,**不改变折叠态**(见 dashRenderSelfCheck 的首屏一次性规则) */
   const waitBtn = document.getElementById('dash-waiting-toggle');
   if (waitBtn) waitBtn.addEventListener('click', () => {
     dashWaitingShown = !dashWaitingShown;
     dashRenderMatches(dashLastRooms);   // 用上一次的数据就地重画,不等下一轮轮询
   });
+  /* 运行环境「重新检测」→ 只重新拉 dashboard-data 刷新检查项与计数,不改变折叠态 */
   const scBtn = document.getElementById('dash-selfcheck-refresh');
   if (scBtn) scBtn.addEventListener('click', dashRefreshAll);
 });

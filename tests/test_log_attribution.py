@@ -2,12 +2,10 @@
 # -*- coding: utf-8 -*-
 """log_attribution 的发送失败计数补丁 —— 挂点必须在框架层的回归。
 
-背景:引擎复用时 C++ 持有**旧 callbacks 模块**的回调函数(热重载遇到进行中
-对局不重新 start,CLAUDE.md §5),挂在 callbacks 调用点的新代码不在旧回调的
-执行路径上 —— 生产观察到发送失败从未被计数。收敛点因此下沉到
-``MessageSender._send_push`` 类级补丁(常驻进程,新旧模块统一经过),由
-``mark_outbound`` 的 ContextVar 决定是否计数。这里测纯函数 ``_note_push_result``
-与 ContextVar 门控语义;真实类补丁依赖框架 MessageSender,由生产路径覆盖。
+引擎复用时 C++ 仍调用**旧 callbacks 模块**的回调(CLAUDE.md §5),挂在 callbacks 里的计数走不到,
+所以计数挂在新旧模块都经过的 ``MessageSender._send_push`` 类级补丁上,由 ``mark_outbound`` 的
+ContextVar 决定是否计数。这里测纯函数 ``_note_push_result`` 与 ContextVar 门控语义;
+真实类补丁依赖框架 MessageSender,不在单测范围。
 """
 
 from __future__ import annotations

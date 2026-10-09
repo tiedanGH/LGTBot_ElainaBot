@@ -3,8 +3,7 @@
 """page_build 进程存活探测(_is_alive)测试。
 
 核心场景是**僵尸收尸**:_start_build 不保留 Popen 对象,子进程退出后没人 wait 就是僵尸,
-单靠 kill(0) 会误判"仍在编译"——编译 API 无人值守时 running 永远 True
-(编译实际成功但 API 不返回,还能被"成功终止")。修复后 _is_alive 先 waitpid(WNOHANG) 当场收尸再判死。
+单靠 kill(0) 会误判"仍在编译",所以 _is_alive 先 waitpid(WNOHANG) 当场收尸再判死。
 
 僵尸语义仅 POSIX;真子进程用例在 Windows 上自动跳过(CI 的 ubuntu 会跑)。
 """
@@ -34,8 +33,7 @@ def test_is_alive_rejects_bogus_pids():
 
 @_posix_only
 def test_is_alive_reaps_zombie_child():
-    """已退出但未 wait 的子进程(僵尸):_is_alive 应当场收尸并判死。
-    修复前 kill(0) 对僵尸返回成功 → 误判存活。"""
+    """已退出但未 wait 的子进程(僵尸):_is_alive 应当场收尸并判死 —— kill(0) 对僵尸也返回成功。"""
     if not os.path.isdir('/proc'):
         pytest.skip('需要 /proc(Linux)')
     p = subprocess.Popen(['/bin/sh', '-c', 'exit 0'])

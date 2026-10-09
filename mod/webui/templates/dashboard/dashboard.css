@@ -33,12 +33,10 @@
 
 .dash-update-result {
   margin-top: 12px; font-size: 12px;
-  /* 空时不占垂直空间;有内容时自然撑开 */
 }
 .dash-update-result:empty { display: none; }
 
-/* 桥接层 / 子模块各自的更新行(版本头部下方) —— flex 行,左文字右按钮,
-   背景比 section 略浅,与下方的 stat / cache card 视觉一致 */
+/* 桥接层 / 子模块各自的更新行(版本头部下方) */
 .dash-update-row {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;
@@ -52,7 +50,7 @@
 .dash-update-row .dash-update-detail {
   color: var(--text-muted); font-family: 'Consolas', 'Menlo', monospace;
 }
-/* no_git 的 git 警告:字号与第一行一致;inline-block 让 margin-top 生效,与上一行拉开 2px */
+/* no_git 的 git 警告:inline-block 才能让 margin-top 生效,与上一行拉开 */
 .dash-bridge-gitwarn {
   display: inline-block; margin-top: 2px;
   font-family: -apple-system, 'Segoe UI', sans-serif;
@@ -114,13 +112,12 @@
 }
 .dash-matches-live .ui-icon { width: 14px; height: 14px; }
 @keyframes dash-matches-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
-/* 屏幕越宽列数越多: 1 列 - 3 列 */
 .dash-matches-list {
   display: grid; gap: 8px; grid-template-columns: 1fr; margin-top: 10px;
 }
 @media (min-width: 720px)  { .dash-matches-list { grid-template-columns: repeat(2, 1fr); } }
 @media (min-width: 1200px) { .dash-matches-list { grid-template-columns: repeat(3, 1fr); } }
-/* 空态与对局行等高:两边都钉同一个 min-height 而不是各自凑 padding */
+/* 空态与对局行等高:两边钉同一个 min-height */
 .dash-match-row, .dash-matches-empty { min-height: 38px; }
 .dash-matches-empty {
   grid-column: 1 / -1;   /* 无对局时占满整行,不被网格挤成单列宽 */
@@ -208,7 +205,6 @@
   border: 1px solid var(--border); border-radius: 8px;
   padding: 8px 12px; font-size: 13px;
 }
-/* 仅相邻两卡之间留距 —— 单卡(已最新)外观与旧版一致 */
 .dash-release + .dash-release { margin-top: 8px; }
 .dash-release summary { cursor: pointer; color: var(--accent); user-select: none; }
 /* summary 改 flex 会连展开三角一起吃掉(display 不再是 list-item) */
@@ -240,7 +236,6 @@
 .dash-selfcheck-badge.warn { color: #e6a23c; }    /* 警告计数:黄字(与红字计数可并存) */
 .dash-selfcheck-badge:empty { display: none; }
 .dash-selfcheck-body.collapsed { display: none; }
-/* 折叠时标题下方不再需要间距 */
 #dash-selfcheck-section.is-collapsed .dash-section-header { margin-bottom: 0; }
 .dash-check-group { margin-top: 14px; }
 .dash-check-group:first-of-type { margin-top: 4px; }

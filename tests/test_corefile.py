@@ -2,13 +2,9 @@
 # -*- coding: utf-8 -*-
 """corefile.analyze 测试 —— 用**按格式合成**的 ELF64 core 验证 note 解析。
 
-为什么是合成而非真 core:开发机的 WSL 是 WSL1(内核 4.4-Microsoft),没有
-``/proc/sys/kernel/core_pattern`` 也不产生 core dump,拿不到真样本。合成件按
-``fs/binfmt_elf.c`` 的 note 写法构造(NT_PRSTATUS / NT_PRPSINFO / NT_SIGINFO /
-NT_FILE),覆盖的是解析代码本身:ELF 头 → PT_NOTE → note 迭代 → 各字段取值。
-
-结构偏移写错的风险由被测代码自己兜:RIP 命中映射区间是自校验(偏移错了几乎
-不可能落在任何区间内,于是只是不报模块、不会报错的模块);信号值也做了 0<sig<65 的合理性检查。
+合成件按 ``fs/binfmt_elf.c`` 的 note 写法构造(NT_PRSTATUS / NT_PRPSINFO / NT_SIGINFO / NT_FILE)。
+结构偏移写错的风险由被测代码自己兜:RIP 命中映射区间是自校验(偏移错了几乎不可能落在任何区间内,
+只会不报模块、不会报错模块);信号值也做了 0<sig<65 的合理性检查。
 """
 
 from __future__ import annotations
@@ -142,8 +138,7 @@ def test_analyze_rip_outside_all_mappings_reports_no_module(tmp_path):
 
 
 def test_analyze_game_from_nt_file_when_cmdline_truncated(tmp_path):
-    """★ NT_FILE 是游戏名的**主来源**:内核把 pr_psargs 截断到 80 字节,真实部署路径
-    一长就够不到 argv[1] 的游戏名。这里把 psargs 造成截断态,只能靠映射表认出来。"""
+    """★ NT_FILE 是游戏名的**主来源**:内核把 pr_psargs 截断到 80 字节,真实部署路径一长就够不到 argv[1] 的游戏名。"""
     so = '/srv/prod/ElainaBot_v2/plugins/LGTBot_ElainaBot/build/plugins/lgtbot_dxj/libgame.so'
     truncated = ('/srv/prod/ElainaBot_v2/plugins/LGTBot_ElainaBot/build/match_game_runner '
                  '/srv/pro')[:80]

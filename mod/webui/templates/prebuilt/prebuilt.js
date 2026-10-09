@@ -1,6 +1,6 @@
 /* ──── 预编译部署 tab ────
  * 构建来源切换 / 镜像测速·选择 / 预编译包列表 + 下载(进度轮询)。
- * 依赖自检已移到仪表盘。无参端点走 fragment 协议;下载 / 测速 / 选镜像走 register_route。
+ * 无参端点走 fragment 协议;下载 / 测速 / 选镜像走 register_route。
  */
 
 const PB_KEYS = {
@@ -86,8 +86,8 @@ function pbRenderMode(mode) {
   if (usePb) usePb.disabled = !mode.prebuilt_installed;
 }
 
-// 下载 / 上传安装成功后即时解锁「用预编译包」——按钮 disabled 原本只在首屏
-// get_data() 的 mode.prebuilt_installed 里算,不刷新页面就一直是禁用态。
+// 下载 / 上传安装成功后即时解锁「用预编译包」——按钮 disabled 只按首屏
+// get_data() 的 mode.prebuilt_installed 算,不刷新页面就一直是禁用态。
 function pbEnableUsePrebuilt() {
   const usePb = document.getElementById('pb-use-prebuilt');
   if (usePb) usePb.disabled = false;
@@ -179,8 +179,7 @@ async function pbSelectMirror(m) {
 /* 本机 {os, python},pbRenderList 时缓存,供下载确认弹窗拼「本机 X / 包 Y」对比文案 */
 let _pbLocal = {};
 
-/* 系统与 Python 分别对比(系统权重更高)。后端已给 os_match/py_match,
-   老数据没有时回退用 local 字段现算,保证任何时候都能细分。 */
+/* 系统与 Python 分别对比(系统权重更高);数据里没有 os_match/py_match 时回退用 local 字段现算。 */
 function pbMatchFlags(a) {
   const osOk = (a.os_match != null) ? !!a.os_match : (a.os === (_pbLocal.os || ''));
   const pyOk = (a.py_match != null) ? !!a.py_match : (a.python_tag === (_pbLocal.python || ''));
@@ -283,8 +282,7 @@ function pbStopPoll() { if (_pbPollTimer) { clearInterval(_pbPollTimer); _pbPoll
 async function pbPollOnce() {
   let st;
   try { st = (await pbCallAction(PB_KEYS.state)).state || {}; } catch (e) { return; }
-  // 读到空 state(文件缺失 / 极短暂的写入窗口)时不据此收尾
-  // 后端保证下载期间一定有 running=true 的 state,空只是瞬时,继续轮询等真实进度,别误判「已结束」。
+  // 空 state(文件缺失 / 写入瞬间)只是瞬时,继续轮询等真实进度,别误判「已结束」
   if (!st.stage && !st.running) return;
   pbRenderProgress(st);
   if (!st.running) {

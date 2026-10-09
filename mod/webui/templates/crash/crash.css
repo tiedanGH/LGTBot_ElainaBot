@@ -1,4 +1,4 @@
-/* 「💥 崩溃转储」标签样式 */
+/* 「崩溃转储」标签样式 */
 
 .crash-status-grid { --card-min: 220px; }
 .crash-status-card {
@@ -68,7 +68,7 @@
 .crash-sig.abrt { background: color-mix(in srgb, var(--img) 18%, transparent); color: var(--img); }
 .crash-sig.misc { background: var(--tag-bg); color: var(--tag-text); }
 
-/* ──── 游戏崩溃 core 区(结构与转储列表同款,只多两列) ──── */
+/* ──── 游戏崩溃 core 区(结构与转储列表同款,尾部两列换成崩溃模块 / 游戏) ──── */
 /* 标题后的数量括号 —— 转储列表与游戏 core 两个标题共用 */
 .crash-title-badge { font-size: 13px; font-weight: 600; color: var(--text-muted); }
 .crash-col-mod { white-space: nowrap; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }

@@ -11,19 +11,12 @@
 
 ★ 三层查询 ★
   L0  违规名内存集合 —— 集合大小只跟违规数挂钩,与总用户数无关。
-  L1  有界 LRU —— 只有 fail-closed 模式需要知道「审过没有」。
+  L1  有界缓存 —— 只有 fail-closed 模式需要知道「审过没有」。
   L2  SQLite 点查 —— 只在 async 侧与 fail-closed 的 miss 路径用。默认的 fail-open 只走 L0,热路径不碰磁盘。
 
-★ 规模实测(本机 SSD,违规率按万分之一) ★
-      行数    违规   L0 载入   点查(热)   角标 SQL      体积   内存 set 查
-    1 万       0    0.1 ms   9.10 us    0.05 ms    0.8 MB    25.9 ns
-   100 万      95    0.2 ms  14.12 us    0.25 ms   83.4 MB    28.5 ns
-  1000 万     969    1.0 ms  10.89 us    0.10 ms  863.5 MB    26.3 ns
-  点查耗时与行数基本无关:主导项是 Python sqlite3 的单次 execute 开销,不是 B-tree 深度。
-
 ★ 线程 ★
-  ``is_flagged`` 会被 C++ 引擎工作线程直调(经 ``callbacks.cb_get_user_name``),
-  所以只读内存 set。写连接是单个 ``check_same_thread=False`` 连接 + 一把锁。
+  ``should_mask`` 会被 C++ 引擎工作线程直调(经 ``callbacks.cb_get_user_name`` → ``userinfo.display_name``),
+  fail-open 下只读内存 set。写连接是单个 ``check_same_thread=False`` 连接 + 一把锁。
 """
 
 from __future__ import annotations
@@ -64,7 +57,7 @@ BATCH_SIZE = 40
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY_S = 2.0
 
-# 去抖:攒够 BATCH_SIZE 或等满这么久就发一批
+# 去抖:入队后等满这么久再按批送审
 _FLUSH_DELAY_S = 8.0
 # fail-closed 模式下「审过没有」的有界缓存
 _SEEN_MAX = 8192
@@ -211,7 +204,7 @@ def _db() -> sqlite3.Connection | None:
 
 
 def load_flagged() -> int:
-    """把违规名载入 L0。返回条数;失败返回 0 且集合保持原样。
+    """把违规名载入 L0。返回条数;失败时集合保持原样。
 
     一次 ``idx_pending`` 索引扫描,只取 flagged=1 那一段,与总行数无关。
     """
@@ -501,7 +494,7 @@ async def _flush_loop(delay: float) -> None:
             for key in list(_queue)[:max(1, BATCH_SIZE)]:
                 batch[key] = _queue.pop(key)
             if not await _review_and_store(batch):
-                # 拆批重试可能已经审掉一部分,只退回真的还没结论的
+                # 送审期间别处可能已落了结论,只退回真的还没结论的
                 _queue.update({k: v for k, v in batch.items()
                                if get_verdict(k) is None})
                 return
@@ -585,8 +578,7 @@ _SYSTEM_PROMPT = (
 def get_service():
     """现取中央 AI 服务实例;不可用返回 None。"""
     try:
-        # import 一并包住:框架在 import 期可能因运行环境差异抛非 ImportError
-        # 的异常(如旧 Python 上的 dataclass(slots=))
+        # import 一并包住:框架在 import 期可能抛非 ImportError 的异常(如旧 Python 上的 dataclass(slots=))
         from core.application import get_app
         app = get_app()
         manager = getattr(app, 'module_manager', None) if app else None
@@ -860,7 +852,7 @@ def scan_reset() -> tuple[bool, str]:
 def _collect_page(after: int) -> tuple:
     """取一页玩家 → ``(游标, 本页人数, 取到昵称的人数, {归一化键: 昵称})``。
 
-    整页的同步 I/O 都在这里,由调用方丢进线程跑:一页最多 500 次昵称查询 + 500 次结论点查,留在事件循环上会把 bot 卡住几秒。
+    整页的同步 I/O 都在这里,由调用方丢进线程跑:逐人的昵称查询 + 结论点查留在事件循环上会把 bot 卡住。
     """
     from . import userinfo
     page = _scan_page(after)

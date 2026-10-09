@@ -4,13 +4,12 @@
 
 被测的三条风险线:
 
-  1. **空态 / 关态不留痕**:平时开关是关的、文案是空的,此时欢迎菜单必须与没有
-     这功能时**逐字节一致** —— 多一个空行,所有用户每次 @bot 都看到菜单里凭空
-     多出一道缝。所以关态菜单用严格相等断言。
+  1. **空态 / 关态不留痕**:开关关着或文案为空时,欢迎菜单必须与没有这功能时
+     **逐字节一致**(多一个空行所有用户都看得到),所以关态菜单用严格相等断言。
   2. **状态必须活过重启**:``enabled`` 与已通知群写在 ``urgent_notice.json``,
      测试里通过"清缓存重新读盘"模拟 execv 重启。
   3. **两个动作互不越界**:关闭公告**不清**已通知群(重新启用不重复打扰老群);
-     重置已通知群**不改**开关。这两条是需求里点名的语义,各有独立断言。
+     重置已通知群**不改**开关。
 
 新群通知的触发点(建房命令)覆盖到:``/新游戏`` / ``/随机游戏`` / 单机局 / 按钮
 INTERACTION 路径,以及"发失败不落记录"这条兜底。
@@ -34,11 +33,7 @@ from plugins.LGTBot_ElainaBot.mod import backup, boot, buttons, dispatcher, urge
 
 @pytest.fixture(autouse=True)
 def urgent_paths(tmp_path, monkeypatch):
-    """把文案 / 状态两个文件都指到 tmp,并清掉模块内的状态缓存。
-
-    缓存必须清:``urgent._state`` 是模块级的,不清会把上一个测试的开关状态带进来
-    (monkeypatch 在测试结束时把这两个全局还原回 None,下个测试同样干净)。
-    """
+    """把文案 / 状态两个文件都指到 tmp,并清掉模块级的状态缓存(不清会把上一个测试的开关状态带进来)。"""
     monkeypatch.setattr(urgent, 'NOTICE_PATH', str(tmp_path / 'urgent_notice.txt'))
     monkeypatch.setattr(urgent, 'STATE_PATH', str(tmp_path / 'urgent_notice.json'))
     monkeypatch.setattr(urgent, '_state', None)
@@ -168,8 +163,7 @@ def test_enabled_survives_restart():
 def test_state_file_shape():
     """落盘结构固定三个字段,群号**定序**—— 否则每次写盘内容都在抖(备份 / diff 全是噪声)。
 
-    用 9 个群倒序写入:``list(set)`` 的迭代序由字符串哈希决定(默认开启哈希随机化,每个进程都不一样),
-    9 个元素刚好凑成 sorted 的概率约 1/9!,足以钉住"必须显式排序"。
+    用 9 个群倒序写入:集合迭代序受哈希随机化影响,元素少了可能碰巧有序,钉不住"必须显式排序"。
     """
     urgent.set_enabled(True)
     want = [f'G{i}' for i in range(1, 10)]
@@ -329,7 +323,6 @@ def test_notify_message_is_title_plus_raw_text():
     head = md.splitlines()[0]
     assert head.startswith('#') and '⚠️' in head
     assert '\n\n引擎维护中\n\n预计 20:00 恢复' in md
-    # 正文里不该出现引用前缀
     assert '>' not in md
 
 
@@ -436,10 +429,8 @@ async def test_other_group_still_gets_notified(enabled_notice):
 async def test_direct_message_never_notifies(enabled_notice):
     """私信不通知:已通知记录按群号存,私信没有"新群"可言。
 
-    这里刻意给私信事件挂上 ``channel_id`` —— 频道私信
-    (``DIRECT_MESSAGE_CREATE``)确实带 channel_id,而 dispatcher 传进来的 gid 是
-    ``group_id or channel_id``,**可能非空**。所以闸必须看 ``is_group``,
-    只判断"gid 有没有值"会把频道私信也通知一遍(还会污染已通知群记录)。
+    刻意给私信挂上 ``channel_id``:频道私信的 gid(``group_id or channel_id``)可能非空,
+    闸必须看 ``is_group``,只判断"gid 有没有值"会把频道私信也通知一遍。
     """
     ev = _ev(is_group=False)
     ev.channel_id = 'C1'
@@ -488,8 +479,7 @@ async def test_notify_burns_one_passive_ref(enabled_notice):
 def test_both_dispatch_paths_notify():
     """消息事件与按钮 INTERACTION 两条路径都要挂 —— 菜单快捷开局按钮走后者。
 
-    源码级断言:漏挂一条路径时,单测很难在集成层面察觉(两个 handler 都很长),
-    但"少一个调用点"是确定性的。
+    源码级断言:两个 handler 都很长,集成层面难察觉漏挂一条,"少一个调用点"却是确定的。
     """
     import inspect
     src = inspect.getsource(dispatcher)

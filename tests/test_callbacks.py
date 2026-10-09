@@ -11,7 +11,7 @@
     战绩」;此时游戏名也未知则整组不挂(pending_buttons 无该 key)
   · 只动本 target 的状态,不串别的群/用户
   · ``_send_text_quota_managed`` 私信无有效引用时的三种模式:白名单外
-    丢弃(老逻辑)/ DM_PUSH_ALL 全员主动直推 / 白名单命中直推
+    丢弃 / DM_PUSH_ALL 全员主动直推 / 白名单命中直推
 """
 
 from __future__ import annotations
@@ -28,8 +28,7 @@ from plugins.LGTBot_ElainaBot.mod import callbacks, quota, state
 def mark_push_group(gid: str, ok: bool = True) -> None:
     """把某群标记成(不)可主动推送 —— 直接写 helpers 的 TTL 缓存。
 
-    ``can_push_group`` 改成按群点查 DB + 缓存后,没有集合可写;这里预置一条
-    远期不过期的缓存项,等价于「DB 里该群 allow_proactive_msg 是 ok」。
+    预置一条远期不过期的缓存项,等价于「DB 里该群 allow_proactive_msg 是 ok」。
     """
     import time as _t
     from plugins.LGTBot_ElainaBot.mod import helpers as _h
@@ -133,7 +132,7 @@ def _patch_send_env(monkeypatch, sender, *, push_all, whitelist=frozenset()):
 
 
 async def test_dm_without_ref_dropped_in_legacy_mode(monkeypatch):
-    """老逻辑回归:白名单外私信 + 无有效 msg_id → 丢弃,不触发任何发送。"""
+    """白名单外私信 + 无有效 msg_id → 丢弃,不触发任何发送。"""
     sender = _fake_sender()
     _patch_send_env(monkeypatch, sender, push_all=False)
 
@@ -156,7 +155,7 @@ async def test_dm_without_ref_pushed_in_all_mode(monkeypatch):
 
 
 async def test_dm_whitelist_member_pushed_others_dropped(monkeypatch):
-    """白名单模式(老语义):命中的用户直推,未命中的仍丢弃。"""
+    """白名单模式:命中的用户直推,未命中的仍丢弃。"""
     sender = _fake_sender()
     _patch_send_env(monkeypatch, sender, push_all=False,
                     whitelist=frozenset({'SANDBOX_U'}))
@@ -184,7 +183,7 @@ def _exhaust_ref(key):
 
 async def test_active_push_daily_limit_falls_back_to_refresh(monkeypatch):
     """全量群今日主动消息用满 → 失去直推资格,退回「阻塞等刷新」机制;
-    额度未满时照常直推。跨天由日分桶自动重置(used 归 0),无需额外逻辑。"""
+    额度未满时照常直推。"""
     sender = _fake_sender()
     monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
     monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: None)
@@ -263,7 +262,7 @@ async def test_quota_exhausted_counted_for_normal_group(monkeypatch):
     # 普通群耗尽会阻塞等刷新 → mock 立即返回 None,避免测试挂满超时
     monkeypatch.setattr(callbacks.quota, 'wait_and_consume', AsyncMock(return_value=None))
     key = callbacks.helpers.target_key('GNORM', False)
-    _exhaust_ref(key)                              # 不加入 proactive_groups
+    _exhaust_ref(key)                              # 不标记可主动推送
 
     await callbacks._send_text_quota_managed('GNORM', False, 'hi', None)
 
@@ -396,8 +395,7 @@ def test_mid_quit_clears_dm_match_but_not_group():
     state.current_game['u:dm1'] = '单机游戏'
     callbacks.cb_match_event('dm1', True, 'game_started', '')
     assert 'u:dm1' in state.active_matches
-    # 开局广播会挂「游戏帮助」按钮并被该条广播的 cb_send_text_message pop 掉;
-    # 这里手动清掉模拟那次发送,好让下面的断言只检验 mid_quit 自身不挂按钮。
+    # 模拟开局广播发送时 pop 掉「游戏帮助」按钮,下面只检验 mid_quit 自身不挂按钮
     state.pending_buttons.pop('u:dm1', None)
     callbacks.cb_match_event('dm1', True, 'mid_quit', '')
     assert 'u:dm1' not in state.active_matches
@@ -413,7 +411,7 @@ def test_mid_quit_clears_dm_match_but_not_group():
 
 def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
     """新建房间(new_game)即标记「消息回复限制」教学(开局消息发得晚,配额可能已耗尽把提示吞掉);带开局私信的游戏在**非全量群**只发教学、私信提示被抑制,
-    **全量群**(教学不发)才标私信提示;私信新建不标私信提示;game_started 不再标教学。"""
+    **全量群**(教学不发)才标私信提示;私信新建不标私信提示;game_started 不标教学。"""
     game = next(iter(callbacks._DM_LIMITED_GAMES))     # 任取一个带开局私信的游戏
     callbacks._pending_dm_warn_keys.clear()
     callbacks._pending_tip_keys.clear()
@@ -436,7 +434,7 @@ def test_new_game_marks_reply_limit_tip_and_suppresses_dm_warn():
         callbacks.cb_match_event('usr1', True, 'new_game', game)
         assert 'u:usr1' in callbacks._pending_tip_keys
         assert 'u:usr1' not in callbacks._pending_dm_warn_keys
-        # game_started 不再标教学(教学已前移到建房)
+        # game_started 不标教学
         callbacks._pending_tip_keys.clear()
         callbacks.cb_match_event('grp1', False, 'game_started', '')
         assert 'g:grp1' not in callbacks._pending_tip_keys
@@ -580,7 +578,7 @@ def test_split_layout_supports_text_image_text():
 
 
 def test_split_layout_without_placeholder_falls_back_to_text_first():
-    """旧桥接层(无占位符)→ 文字在前、图片依次在后,与 2.7 行为一致。"""
+    """无占位符 → 文字在前、图片依次在后。"""
     assert callbacks._split_layout('说明文字', 2) == [
         ('text', '说明文字'), ('image', 0), ('image', 1)]
 
@@ -617,7 +615,7 @@ async def test_mixed_send_single_markdown_in_engine_order(monkeypatch):
 
 
 async def test_mixed_send_merges_multiple_images_into_one_message(monkeypatch):
-    """多图不再拆条:一条 markdown 内联全部图片(顺带省配额)。"""
+    """多图不拆条:一条 markdown 内联全部图片(顺带省配额)。"""
     sender = _fake_sender()
     _patch_send_env(monkeypatch, sender, push_all=False)
     urls = iter(['http://bed/1.png', 'http://bed/2.png'])
@@ -675,8 +673,7 @@ async def test_mixed_send_text_only_when_no_image_readable(monkeypatch):
 
 def test_mention_rewrite_registry_lives_in_persistent_dict():
     """@ 改写登记表必须挂持久 dict —— 登记方(新 dispatcher)与消费方(可能是
-    引擎复用时的旧 callbacks)只有经 boot._get_persistent() 才能看到同一份;
-    模块级 dict 会让改写永远不生效(线上回归:%中断 回执仍 @引擎管理员)。"""
+    引擎复用时的旧 callbacks)只有经 boot._get_persistent() 才能看到同一份。"""
     from plugins.LGTBot_ElainaBot.mod import boot
     shared = boot._get_persistent()['mention_rewrites']
     assert callbacks._mention_rewrites is shared      # 同一对象,非拷贝
@@ -863,9 +860,8 @@ async def _capture_send(monkeypatch, *, hint: bool, msg: str, pending=None) -> d
 # ─────────────────────────────────────────────────────────────────────────
 # 引用**按时间过期**:非全量群直接丢弃,不等刷新、不强发
 # ─────────────────────────────────────────────────────────────────────────
-# 官方只认 TTL 内的 msg_id / event_id —— 群 5 分钟。次数没用完但时间过了,那条引用已经没有任何意义:
-# 等刷新没有可续命的对象(还会占着 per-target Lock 15s 把后续消息一起拖住),主动消息又会被 QQ 拒。
-# 典型场景:冷群里超时触发的「游戏解散」广播。
+# 官方只认 TTL 内的 msg_id / event_id:时间过了的引用等刷新也续不上(还会占着 per-target Lock 15s
+# 把后续消息一起拖住),主动消息又会被 QQ 拒。
 
 def _expire_ref(key: str) -> None:
     """建一个引用后把它的过期时间推到过去 —— 次数一条没用,纯粹是时间到了。"""
@@ -891,7 +887,7 @@ async def test_group_drops_when_ref_expired_by_time(monkeypatch):
 
 
 async def test_group_still_waits_when_quota_exhausted_in_ttl(monkeypatch):
-    """★ 对照:TTL 内、只是 5 条用完 → 仍按原逻辑等刷新(这条路没被误伤)。"""
+    """★ 对照:TTL 内、只是 5 条用完 → 照常等刷新。"""
     sender = _fake_sender()
     monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
     monkeypatch.setattr(callbacks.metrics, 'record_quota_exhausted', lambda: None)
@@ -982,7 +978,7 @@ def test_send_result_reads_only_an_explicit_failure():
 
 
 async def test_rate_limited_push_backs_off_until_delivered(monkeypatch, push_env):
-    """★ 主动消息撞 40034100 不再丢:按退避表等待后重发,送达后才计主动消息用量。"""
+    """★ 主动消息撞 40034100 不丢:按退避表等待后重发,送达后才计主动消息用量。"""
     sender = _fake_sender()
     sender.send_to_group = AsyncMock(side_effect=[_err(40034100), _err(40034100), _OK])
     monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
@@ -1027,7 +1023,7 @@ async def test_rate_limit_wait_switches_to_a_fresh_passive_ref(monkeypatch, push
 
 
 async def test_forced_send_without_push_permission_is_not_retried(monkeypatch, push_env):
-    """没有主动推送资格的超时强发撞上频控不重试 —— 再等也没有名额可等(照旧只发一次)。"""
+    """没有主动推送资格的超时强发撞上频控不重试 —— 再等也没有名额可等。"""
     sender = _fake_sender()
     sender.send_to_group = AsyncMock(return_value=_err(40034100))
     monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
@@ -1042,7 +1038,7 @@ async def test_forced_send_without_push_permission_is_not_retried(monkeypatch, p
 
 
 async def test_dead_passive_ref_is_dropped_and_the_next_one_used(monkeypatch):
-    """★ 引用被 QQ 判失效(别的插件也回复了同一条消息,次数被用掉)→ 移出池子换下一条重发。"""
+    """★ 引用被 QQ 判失效 → 移出池子换下一条重发。"""
     sender = _fake_sender()
     sender.send_to_group = AsyncMock(side_effect=[_err(40034128), _OK])
     monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
@@ -1073,7 +1069,7 @@ async def test_dead_ref_falls_back_to_active_push(monkeypatch, push_env):
 
 @pytest.mark.parametrize('with_ref', [False, True])
 async def test_other_send_errors_are_not_retried(monkeypatch, push_env, with_ref):
-    """其他错误(如内容违规)照旧只发一次,由框架记错误日志。"""
+    """其他错误(如内容违规)只发一次,由框架记错误日志。"""
     sender = _fake_sender()
     sender.send_to_group = AsyncMock(return_value=_err(40034006))
     monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': sender)
@@ -1207,8 +1203,7 @@ async def test_restart_notice_no_rooms_is_noop(monkeypatch):
               mark_push_group('GN', False)), {}),         # 有房间但没推送权限
 ])
 async def test_restart_notice_logs_even_when_nothing_sent(monkeypatch, setup, kwargs):
-    """★ 「一条都没发」必须留下日志 —— 这正是线上那次的症状:重启前后一条重启通知日志都没有,分不清是没房间、被跳过,还是没推送权限。
-    静默 return等于把三种原因压成同一种"什么都没发生"。"""
+    """★ 「一条都没发」也必须留下日志,否则分不清是没房间、被跳过,还是没推送权限。"""
     lines = []
     monkeypatch.setattr(callbacks.log, 'info', lambda m, *a, **k: lines.append(m))
     monkeypatch.setattr(callbacks.helpers, 'get_sender', lambda appid='': None)

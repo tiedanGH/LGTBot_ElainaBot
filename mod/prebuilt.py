@@ -15,8 +15,8 @@ CI(`.github/workflows/prebuilt.yml`)三发行版各编一份运行时子集,发�
     切换需重启。
   · 镜像测速 / 选择(``test_mirrors`` / ``get|set_selected_mirror``)。
 
-注:**依赖自检**(runtime + compile deps)逻辑在 ``webui/page_dashboard.py`` —— 自检
-UI 在仪表盘,就近内聚;本模块只提供 ``mode_info()`` 供其组装 mode 字段。
+注:**依赖自检**(runtime + compile deps)逻辑在 ``webui/page_dashboard.py``(自检 UI 在仪表盘);
+本模块只提供 ``mode_info()`` 供其组装 mode 字段。
 
 镜像:优先复用主框架 ``web.tools._updater``(镜像表 + 测速 + 排序缓存),import
 失败时兜底一份内置精简镜像表,不硬依赖框架内部结构。
@@ -56,8 +56,8 @@ INSTALLED_MANIFEST = os.path.join(PREBUILT_DIR, 'manifest.json')
 
 PREBUILT_TAG = 'prebuilt'
 _DOWNLOAD_TIMEOUT_S = 1800.0     # 预编译包大,给足超时
-# sha 段一般是 7~40 位十六进制;但打包机若 git 不可用(如容器里 dubious ownership),
-# pack_prebuilt.sh 会退化成字面量 ``unknown`` —— 也接受,否则该档会被静默丢弃、列表里看不到。
+# sha 段一般是 7~40 位十六进制;打包机 git 不可用时 pack_prebuilt.sh 会退化成字面量 ``unknown``
+# —— 也接受,否则该档会被静默丢弃、列表里看不到。
 _ASSET_RE = re.compile(r'^lgtbot-(?P<os>.+)-py(?P<py>\d+\.\d+)-(?P<sha>[0-9a-f]{7,40}|unknown)\.zip$')
 
 # import 失败时的兜底镜像前缀(空串 = GitHub 直连)。框架可用时以框架排序为准。
@@ -210,8 +210,7 @@ def read_state() -> dict:
 
 
 def _write_state(**kw) -> None:
-    # 原子写:先写 .tmp 再 os.replace,避免前端轮询恰好读到半写文件 → json 解析失败
-    # 退化成空 state,进而误判「已结束」而收尾。
+    # 原子写:前端轮询读到半写文件会解析成空 state,误判「已结束」而收尾。
     os.makedirs(_PREBUILT_DATA, exist_ok=True)
     tmp = STATE_PATH + '.tmp'
     try:
@@ -225,9 +224,8 @@ def _write_state(**kw) -> None:
 def cancel_cleanup() -> None:
     """兜底清理:删掉下载临时文件 + 把 state 置为「已取消」(running=False)。
 
-    两种场景都用它:① 用户取消时若已无活动下载 task(卡死残留 / 进程重启后 state 仍
-    running);② 活动 task 被 task.cancel() 后,其自身的 CancelledError 分支已写终态,
-    此处不重复调用。核心目的:让前端一定能从「下载中」死锁里解除。
+    用于取消时已无活动下载 task(卡死残留 / 进程重启后 state 仍 running),让前端一定能从
+    「下载中」死锁里解除;有活动 task 时由其 CancelledError 分支自己写终态,不调这里。
     """
     try:
         os.remove(_DOWNLOAD_TMP)
@@ -457,8 +455,8 @@ def _extract_and_swap(zip_path: str) -> dict:
     """校验 zip → 解压到 staging → chmod +x → 原子换入 build_prebuilt/。同步阻塞。
 
     换入失败(引擎运行中,加载中的 .so 在 WSL /mnt、Windows 语义盘上会锁住整目录 rename → EACCES)时**降级为暂存**:
-    staging 挪到 ``build_prebuilt.pending``,boot 下次启动最早期(尚未加载任何 .so)完成换入 —— 预编译包本就需重启生效,
-    对用户流程无额外负担。返回 ``{'success': True, 'pending': bool}``。"""
+    staging 挪到 ``build_prebuilt.pending``,boot 下次启动最早期(尚未加载任何 .so)完成换入 —— 预编译包本就需重启生效。
+    返回 ``{'success': True, 'pending': bool}``。"""
     import zipfile
     shutil.rmtree(_STAGING_DIR, ignore_errors=True)
     os.makedirs(_STAGING_DIR, exist_ok=True)
@@ -512,9 +510,8 @@ async def download(asset_name: str, preferred_mirror: str | None = None) -> dict
 
     ``preferred_mirror`` 优先(其次读 marker),失败再按排序兜底其余镜像。
     """
-    # 立刻落盘「下载中」—— 必须在慢速 list_remote() 之前:下载在后台 task 里跑,
-    # 前端收到 HTTP 响应后按 1s 轮询读 state.json。若首个 running=True 迟到(卡在 list_remote 的网络调用后),
-    # 轮询会先读到空 / 上一次遗留的旧 state → 进度条闪一下即隐藏、并误判「已结束」而停止轮询,真实进度再不刷新(刷新页面才恢复)。
+    # 立刻落盘「下载中」—— 必须在慢速 list_remote() 之前:前端收到响应就开始轮询 state.json,
+    # 先读到空 / 上一次遗留的旧 state 会误判「已结束」而停止轮询。
     os.makedirs(_PREBUILT_DATA, exist_ok=True)
     _write_state(running=True, stage='download', asset=asset_name,
                  progress=0, downloaded=0, total=0, error='')
@@ -559,8 +556,7 @@ async def download(asset_name: str, preferred_mirror: str | None = None) -> dict
         loop = asyncio.get_running_loop()
         swap = await loop.run_in_executor(None, _extract_and_swap, _DOWNLOAD_TMP)
     except asyncio.CancelledError:
-        # 用户取消(page_prebuilt 对本 task 调 task.cancel()):置「已取消」终态,
-        # finally 会删掉未完成的临时文件。re-raise 让 task 正常标记为已取消。
+        # 用户取消(page_prebuilt 调 task.cancel()):写「已取消」终态后 re-raise,临时文件由 finally 删
         _write_state(running=False, stage='cancelled', asset=asset_name, error='')
         log.info(f'[prebuilt] 下载已取消: {asset_name}')
         raise
@@ -603,7 +599,7 @@ async def _download_one(url: str, asset: dict) -> None:
                     f.write(chunk)
                     downloaded += len(chunk)
                     now = time.monotonic()
-                    if now - last_write >= 0.4:      # 限流写盘,~2.5 次/秒
+                    if now - last_write >= 0.4:      # 限流写盘
                         last_write = now
                         pct = int(downloaded / total * 100) if total else 0
                         _write_state(running=True, stage='download', asset=asset['name'],
@@ -614,12 +610,10 @@ async def _download_one(url: str, asset: dict) -> None:
 
 
 def install_uploaded(zip_path: str) -> dict:
-    """安装用户**手动上传**的预编译包 zip —— 复用下载路径的校验 + 原子换入。
+    """安装用户**手动上传**的预编译包 zip —— 校验、staging、原子换入与 ``download`` 完全一致。
 
-    与 ``download`` 的区别仅在来源(本地上传 vs 远程下载),校验(zip 签名 +
-    manifest sha256 + zip-slip 白名单)、staging、原子换入 ``build_prebuilt/``
-    完全一致。同步实现,调用方(upload_handler)已把上传流写到 ``zip_path``,
-    这里在 executor 里跑避免阻塞事件循环。取完即删临时文件。
+    同步实现:调用方(upload_handler)已把上传流写到 ``zip_path``,并在 executor 里调用本函数。
+    取完即删临时文件。
     """
     _write_state(running=True, stage='verify', asset='(本地上传)', progress=100, error='')
     try:

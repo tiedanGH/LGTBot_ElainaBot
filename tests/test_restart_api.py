@@ -236,11 +236,8 @@ async def test_auto_watcher_restarts_after_grace(monkeypatch):
 
 
 async def test_auto_watcher_snapshots_rooms_before_releasing_engine(monkeypatch):
-    """★ 回归:等待中房间必须在 ``check_and_prepare_restart`` **之前**快照。
-
-    释放引擎会让上游把所有 match ``Terminate(true)``(bot_core.cc),等待中房间随之解散、
-    ``terminate`` 回调把它们从 ``state.waiting_rooms`` 里抹掉。
-    先释放后读表 → 永远读到空 → 一条重启通知都发不出去。这里让 fake 预检**真的**清表,通知仍必须拿到那个房间。
+    """★ 等待中房间必须在 ``check_and_prepare_restart`` **之前**快照:释放引擎会让上游
+    ``Terminate`` 所有 match,``terminate`` 回调随即清空 ``state.waiting_rooms``,先释放后读表一条通知都发不出去。
 
     顺带钉住通知群去重:自动重启已经给通知群单独推过一条,房间通知要跳过它们。
     """

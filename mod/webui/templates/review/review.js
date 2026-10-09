@@ -167,7 +167,7 @@ function reviewApplyScan(scan) {
 
   const errEl = document.getElementById('review-scan-error');
   const err = scan.last_error || {};
-  /* 指定了模型时中央不做故障切换,这类错误只能靠改选择解决,把话说到位 */
+  /* 指定了模型时中央不做故障切换,这类错误只能靠改选择解决 */
   const hint = (err.permanent && (reviewData || {}).model)
     ? '　指定模型时中央不会故障切换，请在上方改选接口 / 模型。' : '';
   errEl.textContent = err.message
@@ -175,7 +175,6 @@ function reviewApplyScan(scan) {
     : '';
   errEl.className = 'review-scan-error' + (err.permanent ? ' permanent' : '');
 
-  /* 扫描进行中才轮询 */
   if (scan.running && reviewScanTimer === null) {
     reviewScanTimer = setInterval(reviewRefresh, 5000);
   } else if (!scan.running && reviewScanTimer !== null) {

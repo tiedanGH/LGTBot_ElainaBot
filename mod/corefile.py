@@ -17,13 +17,12 @@ core 文件是 ELF,PT_NOTE 段里带若干 note,本模块只读这几个:
     ``…/plugins/<game>/libgame.so`` 直接给出游戏名,且不像 psargs 那样被截断
 把 RIP 落在哪个映射区间里一查,还能说出崩溃发生在游戏 .so 还是引擎核心库。
 
-**做不到什么(不是偷懒,是硬限制)**
-真正的调用栈(哪一行代码)需要栈回溯:解析 ``.eh_frame`` / DWARF CFI 逐帧展开,
-并且要有与 core **完全匹配**的二进制 + 调试符号。Release 构建默认不带符号,
-纯 Python 也没有可靠的 unwinder。这一步应当交给 gdb:
+**做不到什么**
+真正的调用栈(哪一行代码)需要解析 ``.eh_frame`` / DWARF CFI 逐帧展开,还要有与 core
+**完全匹配**的二进制 + 调试符号(Release 构建默认不带)。这一步交给 gdb:
 ``gdb <build>/match_game_runner <core 文件>`` 然后 ``bt``。
 
-解析全程只读文件头 + PT_NOTE 段(通常几十 KB),不会把几百 MB 的 core 读进内存。
+解析全程只读文件头 + PT_NOTE 段,不会把整个 core 读进内存。
 任何异常 / 格式不符都返回 ``ok=False`` 并带原因,绝不抛给调用方。
 """
 
@@ -242,8 +241,7 @@ def analyze(path: str) -> dict:
                 out['game'] = m.group(1)
                 break
 
-    # 崩溃 PC 落在哪个映射里 —— 顺带自校验:偏移若算错,RIP 几乎不可能命中任何区间,
-    # 那就只是不报模块,而不会报出一个错的
+    # 崩溃 PC 落在哪个映射里 —— 偏移若算错,RIP 几乎不可能命中任何区间,只会不报模块而不会报错的
     if rip:
         for s, e, p in maps:
             if s <= rip < e and p:

@@ -34,8 +34,7 @@ function crashSigClass(sig) {
   return 'misc';
 }
 
-/* 引擎崩溃重启卡片:累计次数 + 最近一次时间。不再列分信号明细(SIGSEGV ×N …)—— 下方转储列表每条都带信号列,一眼能看到,
-   在卡片上重复一遍只是把这行挤长。payload 里的 crash_by_sig 仍保留给指标面板用。 */
+/* 引擎崩溃重启卡片:累计次数 + 最近一次时间;分信号明细在下方转储列表逐条可见,卡片上不重复。 */
 function crashApplyRestart(r) {
   r = r || {};
   const total = r.crash_total || 0;
@@ -103,7 +102,6 @@ function crashApplyData(data) {
   crashSyncSelection();   // 重渲染后重置全选框 + 删除按钮计数
 }
 
-/* 选中的文件名列表 */
 function crashSelected() {
   return [...document.querySelectorAll('.crash-check:checked')].map(c => c.dataset.name);
 }
@@ -172,8 +170,7 @@ function coreApplyData(data) {
     const name = escapeHtml(c.name || '');
     const d = escapeHtml(String(c.dir_idx));
     const a = c.analysis || {};
-    /* 出错地址 / 命令行 / 所在目录塞进 title,鼠标悬停即见,不占列宽 */
-    /* 文件名列宽固定,长名会省略号 —— title 里先给完整文件名,再带诊断信息 */
+    /* 文件名列宽固定,长名会省略号 —— title 里先给完整文件名,再带出错地址 / 命令行 / 所在目录 */
     const tip = [
       c.name || '',
       (a.fault_addr != null) ? '出错地址 0x' + Number(a.fault_addr).toString(16) : '',

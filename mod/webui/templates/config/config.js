@@ -1,11 +1,8 @@
 /* ──── 配置管理 tab ────
  * 编辑器共享同一套读 / dirty 跟踪 / 保存 / revert 逻辑,通过 cfgEditors 表驱动。
- * 保存分两路:
- *   · config.yaml / lgtbot.json(带 target 字段)→ 本插件校验端点
- *     /api/ext/lgtbot/config/save —— 服务端语法 + schema 校验通过才落盘,
- *     校验失败返回 errors 列表,文件保持原样
- *   · 纯文本编辑器(公告 / 疑难解答等)→ 同一个端点,只是没有可校验的语法
- * 热重载按钮调 __lgtbot_dash_reload_config(从原 dashboard 搬迁,key 不变)。
+ * 保存一律走本插件端点 /api/ext/lgtbot/config/save:config.yaml / lgtbot.json 要过服务端
+ * 语法 + schema 校验,失败返回 errors 列表、文件保持原样;纯文本编辑器没有可校验的语法。
+ * 热重载按钮调 __lgtbot_dash_reload_config。
  */
 
 const CFG_KEYS = {
@@ -17,9 +14,9 @@ const CFG_VALIDATED_SAVE_ROUTE = '/api/ext/lgtbot/config/save';
 
 /* 每个编辑器一份状态:
  *   dataKey  —— get_data() 返回的 JSON 里对应哪个 key(缺失 = 后端没渲染该区块)
- *   absPath  —— 保存请求要原样回传给 /api/config-file/save 的绝对路径
+ *   absPath  —— 文件绝对路径,只用于展示(保存路径由服务端按 target 解析)
  *   original —— 最近一次从后端拉到的内容,用来做 dirty 检测 + 「恢复」
- *   format   —— 主框架保存端点的格式 hint(yaml / json / text)
+ *   format   —— yaml / json / text,json 保存前先在前端过一遍语法
  *   editorId / pathId / msgId / saveBtnId —— 对应 DOM 元素 id
  *
  * 表项 → 数据的对应全靠 dataKey,cfgApplyData 直接遍历本表 —— 服务端按运行时

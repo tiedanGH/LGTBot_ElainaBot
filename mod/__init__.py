@@ -1,12 +1,8 @@
 """LGTBot 插件内部子模块包。
 
-为什么用 ``mod/`` 而非 ``app/``:主框架 ``web/tools/_plugin_mgr/scan.py`` 只把
-插件根的 ``app/`` 子目录递归扫成 Web 面板「插件管理」里可独立 toggle 的子模块,
-``mod/`` 不进扫描 —— 本目录下每个文件都是协作实现 LGTBot 集成的内部模块,
-**关闭任一个都会让整个插件崩溃**(boot 关了 C++ 不加载、dispatcher 关了消息
-不派发等)。放 ``mod/`` 对 Web UI 隐身,杜绝误触。两个名字对加载器
-(``core/plugin/_loader.py::_import_plugin`` 扫所有非 ``_/.`` 开头的子目录注册
-成 sub-package)等价。
+用 ``mod/`` 而非 ``app/``:主框架 ``web/tools/_plugin_mgr/scan.py`` 会把插件根的 ``app/`` 扫成
+Web 面板「插件管理」里可独立 toggle 的子模块,而这里**关闭任一个都会让整个插件崩溃**;
+两个名字对加载器(``core/plugin/_loader.py::_import_plugin``)等价。
 
 模块划分:
     state             共享运行时状态容器(跨重载持久;via boot._get_persistent)

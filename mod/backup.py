@@ -4,30 +4,13 @@
 管理员自定义 txt)打包成 zip,**存到插件目录外**(框架根 `data/backup/lgtbot/`)。
 
 设计要点:
-  · 备份位置:``<framework_root>/data/backup/lgtbot/`` —— 框架根而非插件根,
-    路径反推见 ``_FRAMEWORK_ROOT``,基于 ``boot.PLUGIN_DIR`` 上溯两级。
-  · SQLite 在线备份用 ``sqlite3.Connection.backup()`` API,SQLite 内部锁
-    保证一致 snapshot,即使 LGTBot 引擎正在写也安全(只复制已 commit 页)。
-  · 触发:启动 60s 后查最新 zip mtime 是否 > 24h(`schedule_on_load_check`);
-    WebUI 手动按钮(`create_backup`)。**不**做 long-running cron,reload
-    / restart 每次都触发检查,够用。
-  · 轮转:每次成功备份后保留最近 ``RETENTION_COUNT=7`` 份,按 mtime 排序删多余。
-  · 恢复:`restore_backup()` 用 ``os.replace`` 把每个文件**原子 rename** 到目标
-    位置,**不停引擎**。lgtbot 引擎对 ``lgtbot.db`` 没有常驻连接 —— 见子模块
-    ``bot_core/db_manager.cc`` 的 ``ExecuteTransaction``:每条指令现 ``sqlite3_open
-    (path)`` 跑事务再 close。所以原子替换 disk 文件后,**下一条 ``/战绩`` 等
-    指令立即按新 path 打开看到恢复的数据**,真正热生效,无需重启。``os.replace``
-    的原子性保证每次 open 看到的要么旧完整 db、要么新完整 db,绝不撞上
-    ``extractall`` 那种 ``open(path,'wb')`` O_TRUNC 写一半的撕裂态。公告 /
-    疑难解答 ``*.txt`` 也是 dispatcher 每条指令现读,同样立即生效。
-  · **唯一需要重启**的是 ``lgtbot.json`` 引擎配置:它在 ``LGTBot_Create`` 时
-    解析进引擎内存,不随指令重读;恢复后由 UI 提示用户手动点「🔁 重启 LGTBot」
-    (走 ``dispatcher.check_and_prepare_restart`` 的活跃游戏预检 + 单次释放)。
-
-安全准则(对齐 page_dashboard.py 的 audit 风格):
-  · 所有 create / restore / delete 都 ``log.info`` 一条 audit 行,带文件名
-    + 操作结果,方便事后追溯「这个备份谁动的」。
-  · 自动备份只在「距今 > AUTO_INTERVAL_S」时触发,不在任何高频 hook 内调用。
+  · SQLite 用 ``sqlite3.Connection.backup()`` 在线备份,引擎正在写也能拿到一致 snapshot。
+  · 触发:启动 60s 后最新 zip 早于 24h 才备份(`schedule_on_load_check`);WebUI 手动按钮
+    (`create_backup`)。不做常驻定时器、不挂任何高频 hook,reload / restart 时各检查一次。
+  · 轮转:每次成功备份后按 mtime 保留最近 ``RETENTION_COUNT`` 份。
+  · 恢复:`restore_backup()` 逐个文件 ``os.replace`` 原子换入,**不停引擎**即热生效
+    (原理见其 docstring);只有 ``lgtbot.json`` 引擎配置要重启 LGTBot 才重新加载。
+  · 所有 create / restore / delete 都 ``log.info`` 一条带文件名 + 操作结果的 audit 行。
 """
 
 from __future__ import annotations
@@ -47,15 +30,12 @@ log = get_logger(PLUGIN, 'LGTBot')
 
 
 # ──────── 路径常量 ────────────────────────────────────────────────────────
-# 把备份放在**框架根** data/backup/lgtbot/,而非插件目录内。
-#
-# 反推:boot.PLUGIN_DIR = <root>/plugins/LGTBot_ElainaBot
-# 上溯两级得 <root>(框架根);主框架已有 <root>/data/backup/ 目录,
-# 选用子目录 lgtbot/ 归类,文件名不会与主框架自己的 zip 冲突。
+# boot.PLUGIN_DIR = <root>/plugins/LGTBot_ElainaBot,上溯两级得框架根;
+# 放主框架 <root>/data/backup/ 下的 lgtbot/ 子目录,不与主框架自己的 zip 冲突。
 _FRAMEWORK_ROOT = os.path.dirname(os.path.dirname(boot.PLUGIN_DIR))
 BACKUP_DIR = os.path.join(_FRAMEWORK_ROOT, 'data', 'backup', 'lgtbot')
 
-# 轮转 / 自动备份参数。MVP 阶段硬编码。
+# 轮转 / 自动备份参数
 RETENTION_COUNT = 7              # 保留最近 N 份
 AUTO_INTERVAL_S = 24 * 3600.0    # 启动检查阈值:最新 zip 早于 24h 才触发新备份
 _ON_LOAD_DELAY_S = 60.0          # @on_load 后等 N 秒再检查,避开启动忙峰
@@ -75,7 +55,7 @@ def _collect_sources() -> list[tuple[str, str, str]]:
     candidates: list[tuple[str, str, str]] = [
         # SQLite 核心数据(战绩 / 成就)
         ('data/engine/lgtbot.db',     boot.DB_PATH,        'sqlite'),
-        # 引擎 JSON 配置(boot.CONF_PATH = data/engine/lgtbot.json)
+        # 引擎 JSON 配置
         ('data/engine/lgtbot.json',   boot.CONF_PATH,      'plain'),
         # 插件 yaml 配置
         ('data/config.yaml',          os.path.join(boot.DATA_DIR, 'config.yaml'),   'plain'),
@@ -105,8 +85,7 @@ def _backup_sqlite_to_tmp(src_path: str, tmp_path: str) -> bool:
     src = None
     dst = None
     try:
-        # readonly 打开避免误写源 db;timeout 5s 等待引擎释放锁(MB 级 db
-        # backup 通常 < 1s,5s 富余)
+        # readonly 打开避免误写源 db;timeout 等待引擎释放锁
         src = sqlite3.connect(f'file:{src_path}?mode=ro', uri=True, timeout=5.0)
         dst = sqlite3.connect(tmp_path)
         src.backup(dst)
@@ -136,14 +115,7 @@ def _zip_filename_now() -> str:
 
 
 def create_backup() -> dict:
-    """执行一次完整备份,返回 ``{success, zip_path, size_bytes, included, skipped, message}``。
-
-    流程:
-      1. 收集源文件清单(只含磁盘上存在的)
-      2. SQLite 文件先用 backup() API 复制到 tmp dir
-      3. 全部 plain 文件 + tmp dir 中的 sqlite 拷贝 → zipfile.ZIP_DEFLATED 打包
-      4. 清 tmp dir + prune_old + 返回结果
-    """
+    """执行一次完整备份,返回 ``{success, zip_path, size_bytes, included, skipped, message}``。"""
     os.makedirs(BACKUP_DIR, exist_ok=True)
     sources = _collect_sources()
     if not sources:
@@ -166,7 +138,6 @@ def create_backup() -> dict:
         with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
             for arc_name, abs_src, kind in sources:
                 if kind == 'sqlite':
-                    # SQLite 先 backup() 到 tmp,再 zip 进去
                     tmp_db = os.path.join(tmp_dir, os.path.basename(arc_name))
                     if _backup_sqlite_to_tmp(abs_src, tmp_db):
                         zf.write(tmp_db, arcname=arc_name)
@@ -196,7 +167,6 @@ def create_backup() -> dict:
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    # 必须至少有一个文件入包,否则视为失败
     if not included:
         log.warning('[backup] 所有源文件都跳过了,删空 zip')
         try:
@@ -265,31 +235,24 @@ def restore_backup(zip_name: str) -> dict:
 
     流程:
       1. 预检 zip 成员(zip-slip + 必须 ``data/`` 开头)
-      2. 整 zip 解到 plugin_dir 下的临时目录 ``.restore_tmp_<ts>/``(与目标同 fs
-         → 后续 rename 必能原子);不直接解到 ``data/``,因为 ``zipfile.extractall``
-         对已有文件是 ``open(path, 'wb')`` 同 inode O_TRUNC 截断:若引擎某条指令
-         的 ``sqlite3_open`` 恰好撞上这个写一半的窗口,会读到撕裂的 db → 报错或
-         拿到残缺页
-      3. 临时目录中每个文件用 ``os.replace`` 原子 rename 到 ``data/`` 对应位置 ——
-         POSIX rename(2) 是原子的:任意时刻 ``open(path)`` 看到的要么旧完整文件、
-         要么新完整文件,绝无中间态
+      2. 整 zip 解到 plugin_dir 下的临时目录 ``.restore_tmp_<ts>/``(与目标同 fs,
+         rename 才原子);不直接解到 ``data/``:``extractall`` 对已有文件是原地 O_TRUNC
+         截断,引擎某条指令的 ``sqlite3_open`` 撞上写一半的窗口会读到撕裂的 db
+      3. 每个文件 ``os.replace`` 原子换入 ``data/`` 对应位置,任意时刻 open 看到的
+         要么旧完整文件、要么新完整文件
       4. 对刚替换过的 ``*.db`` 文件,把旁路 ``-journal`` / ``-wal`` / ``-shm``
-         也 rename 为 ``.stale_<ts>`` 备查 —— 否则下次启动 SQLite 见 journal
-         可能误以为是 "未完成事务" 做 rollback,把恢复的数据回滚成残缺态
+         rename 为 ``.stale_<ts>`` 备查 —— 否则 SQLite 会把它们当未完成事务回滚,
+         把恢复的数据滚成残缺态
 
-    热生效(无需重启):引擎对 ``lgtbot.db`` **没有常驻连接** —— 子模块
-    ``bot_core/db_manager.cc:ExecuteTransaction`` 每条指令现 ``sqlite3_open(path)``
-    跑事务再 close。所以原子替换后,**下一条指令立即按新 path 看到恢复的数据**。
-    公告 / 疑难解答 ``*.txt`` 由 dispatcher 每条指令现读,同样立即生效。
+    热生效:引擎对 ``lgtbot.db`` **没有常驻连接**(``bot_core/db_manager.cc:ExecuteTransaction``
+    每条指令现开现关),原子替换后下一条指令立即看到恢复的数据。公告 / 疑难解答 ``*.txt``
+    由 dispatcher 每条指令现读,同样立即生效。
 
-    需重启:仅 ``lgtbot.json`` 引擎配置 —— 它在 ``LGTBot_Create`` 时解析进内存,
-    不随指令重读。``data/config.yaml`` 插件配置在 ``@on_load`` 时 apply,下次插件
-    热重载 / 重启时生效。这两类由 UI 提示用户按需点「🔁 重启 LGTBot」。
+    需重启:``lgtbot.json`` 在 ``LGTBot_Create`` 时解析进引擎内存;``data/config.yaml``
+    在 ``@on_load`` 时 apply。由 UI 提示用户按需点「🔁 重启 LGTBot」。
 
-    **本函数不停引擎、不重启**。重启(及活跃游戏预检 / 拒绝)完全交给
-    ``dispatcher.check_and_prepare_restart`` 这条独立路径,与 restore 解耦 ——
-    早期实现先调 ``release_bot_if_not_processing_games`` 再覆盖,会 null-deref
-    引擎并在后续重启时 double-free,现已移除。
+    **本函数不停引擎、不重启**,重启只走 ``dispatcher.check_and_prepare_restart``。
+    不要在覆盖前调 ``release_bot_if_not_processing_games``:会 null-deref 引擎,之后重启再 double-free。
     """
     if not zip_name or '/' in zip_name or '\\' in zip_name or '..' in zip_name:
         return {'success': False, 'message': '非法备份文件名'}
@@ -408,11 +371,7 @@ def prune_old(retention: int = RETENTION_COUNT) -> list[str]:
 
 def schedule_on_load_check() -> None:
     """@on_load 钩子调用 —— 后台 asyncio task,等 60s 后查最新 zip 是否过期,
-    过期(> 24h)就触发一次新备份。
-
-    设计:不开 long-running 定时器,只在 startup / reload 时检查一次。运行
-    时长 ≥ 24h 的部署其实很少见(用户经常 reload 插件 / 重启进程),每次
-    冷启动机会跑这一遍足够。
+    过期(> 24h)就触发一次新备份。不开常驻定时器,只在 startup / reload 时检查一次。
 
     异常吞掉,不影响主流程。
     """
@@ -447,8 +406,7 @@ async def _on_load_check_coro() -> None:
     else:
         log.info('[backup] 尚无任何备份,触发首次自动备份')
 
-    # 真正跑备份 —— create_backup 是同步阻塞,但耗时短(< 2s),
-    # 在 asyncio loop 上同步跑可接受(不影响其他协程的总体延迟)。
+    # create_backup 同步阻塞,但耗时短,直接在 asyncio loop 上跑
     try:
         result = create_backup()
         if result.get('success'):

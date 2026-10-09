@@ -57,8 +57,7 @@ def test_parse_asset_valid():
 
 
 def test_parse_asset_accepts_unknown_sha():
-    # 打包机 git 不可用时 sha 段退化成字面量 unknown —— 仍要能解析出来,否则该档
-    # 在列表里被静默丢弃(debian-12 容器里就踩过这个坑)。
+    # 打包机 git 不可用时 sha 段退化成字面量 unknown —— 仍要能解析出来,否则该档在列表里被静默丢弃。
     a = prebuilt._parse_asset({'name': 'lgtbot-debian-12-py3.11-unknown.zip'})
     assert a is not None
     assert a['os'] == 'debian-12' and a['python_tag'] == '3.11' and a['sha'] == 'unknown'
@@ -153,8 +152,7 @@ def test_set_mode_prebuilt_requires_dir():
 
 
 def test_set_mode_prebuilt_then_local():
-    # 预编译「可用」以 build_prebuilt/build/ 存在为准(与 boot 判据一致),仅有空
-    # build_prebuilt/ 不算 —— 故这里要建到 build/ 子目录才允许切换。
+    # 预编译「可用」以 build_prebuilt/build/ 存在为准(与 boot 判据一致),所以要建到 build/ 子目录才允许切换。
     os.makedirs(os.path.join(prebuilt.PREBUILT_DIR, 'build'), exist_ok=True)
     r = prebuilt.set_mode(True)
     assert r['success'] and prebuilt.current_mode() == 'prebuilt'
@@ -210,8 +208,7 @@ def test_mode_info_shape():
 
 
 def test_prebuilt_ready_requires_build_subdir():
-    # 预编译包解压后保留 build/ 前缀 → 真正可用要 build_prebuilt/build/ 存在;
-    # 仅有空的 build_prebuilt/ 不算(boot 会因缺 build/ 回落本地)。
+    # 预编译包解压后保留 build/ 前缀,要 build_prebuilt/build/ 存在才算就绪(缺 build/ 时 boot 会回落本地)。
     assert not prebuilt.prebuilt_ready()
     os.makedirs(prebuilt.PREBUILT_DIR, exist_ok=True)
     assert not prebuilt.prebuilt_ready()               # 只有壳目录,不算就绪
@@ -298,12 +295,10 @@ def test_extract_and_swap_installs(tmp_path):
         'build/config_runner': b'#!runner',
     })
     prebuilt._extract_and_swap(pkg)
-    # build_prebuilt/ 被填充,关键文件到位
     assert os.path.isfile(os.path.join(prebuilt.PREBUILT_DIR, 'LGTBot_ElainaBot.so'))
     assert os.path.isfile(os.path.join(prebuilt.PREBUILT_DIR, 'build', 'libbot_core.so'))
     assert os.path.isfile(os.path.join(prebuilt.PREBUILT_DIR, 'build', 'plugins', 'wordle', 'libgame.so'))
     assert os.path.isfile(prebuilt.INSTALLED_MANIFEST)
-    # staging 已清理
     assert not os.path.isdir(prebuilt._STAGING_DIR)
 
 
@@ -546,9 +541,8 @@ def test_self_check_shape():
 
 
 def test_self_check_runtime_static_fallback():
-    """无构建产物(或无 ldd)时回退静态检查:runtime 含预编译产物实测的 4 个外部依赖;
-    ldd 证实非运行时依赖的 Boost.System(header-only)/ glog(默认 OFF)/ gflags
-    (--as-needed 丢弃)不再出现;Qt 图片渲染是唯一 warn 项。"""
+    """无构建产物(或无 ldd)时回退静态检查:runtime 只列真正的运行时依赖,
+    Boost.System(header-only)/ glog(默认 OFF)/ gflags(--as-needed 丢弃)不在其中;Qt 图片渲染是唯一 warn 项。"""
     sc = _dash().self_check()
     rt_names = ' '.join(c['name'] for c in sc['runtime'])
     for kw in ('Boost.Python', 'libcurl 运行时', 'SQLite3 运行时', 'Protobuf 运行时'):
@@ -561,7 +555,7 @@ def test_self_check_runtime_static_fallback():
     assert len(warns) == 1 and warns[0]['name'].startswith('图片渲染 Qt')
     comp_names = ' '.join(c['name'] for c in sc['compile'])
     assert 'protoc' in comp_names and 'CMake' in comp_names and '开发头' in comp_names
-    assert 'Qt' not in comp_names              # Qt 从 compile 移到 runtime warn
+    assert 'Qt' not in comp_names              # Qt 只算 runtime warn,不是编译依赖
 
 
 def test_self_check_runtime_missing_reports_red(monkeypatch):
