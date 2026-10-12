@@ -24,7 +24,7 @@ from core.message.event import (
 )
 
 from . import (state, quota, helpers, boot, buttons, uploader, userinfo, audit,
-               metrics, stats_image, urgent, nickname_review)
+               metrics, stats_image, urgent, nickname_review, notice)
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -96,7 +96,7 @@ _LGT_MSG_EVENTS = frozenset({
 _P_QUERY_ID = r'^(?i:查询id)\s+(\S+)$'
 _P_MENU     = r'^/?菜单$'
 _P_MORE     = r'^/?更多功能$'
-_P_NOTICE   = r'^/?更新公告$'
+_P_NOTICE   = r'^/?(?:更新公告(?:\s*(\d{8})(?:\s*[-~～]\s*(\d{8}))?)?|(历史更新公告))$'
 _P_TROUBLE  = r'^/?疑难解答$'
 _P_ABOUT    = r'^/?关于$'
 _P_RESTART  = r'^重启(?:\s+(.+))?$'
@@ -638,17 +638,22 @@ async def lgtbot_more_features(event, match):
     await event.reply(md, buttons=buttons.build_more_features_buttons())
 
 
+_NOTICE_RE = re.compile(_P_NOTICE)
+
+
 @handler(_P_NOTICE,
          name='更新公告',
-         desc='读取 data/update_notice.txt 实时返回公告内容',
+         desc='实时读取公告数据文件：「历史更新公告」列出更早的日期区间，「更新公告 日期」按时间查看',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_update_notice(event, match):
-    """收到「更新公告」(文本或按钮)→ 把 txt 文件内容包在代码块里 reply。
+    """收到「更新公告」/「历史更新公告」/「更新公告 <日期区间>」(文本或按钮)。
 
-    若 ``important_update.txt`` 非空,在常规「公告详情」代码块上方再渲染一个
-    ``重要更新`` 代码块作为置顶提示;为空时该区块不出现。
+    · 更新公告:重要更新最近几段 + 公告详情最新一个日期段,底部一个「历史更新公告」回调按钮
+    · 历史更新公告:新发一条日期区间列表,每行是回填指令(不占键盘行;cmd-input 回填后由用户发出)
+    · 更新公告 <日期区间>:发这段时间的重要更新与公告详情
+    两份 txt 每次现读,分段规则见 notice 模块。
     """
     if helpers.is_foreign_event(event):
         return
@@ -657,21 +662,61 @@ async def lgtbot_update_notice(event, match):
             await event.ack_interaction(code=0)
         except Exception:
             pass
-    notice = _read_update_notice()
-    important = _read_important_update()
+    m = match or _NOTICE_RE.match((event.content or '').strip())
+    start, end, older = m.groups() if m else (None, None, None)
+    details = notice.split_sections(_read_update_notice())
+    important = notice.split_sections(_read_important_update())
+    if older:
+        await _reply_notice_ranges(event, details, important)
+    elif start:
+        await _reply_notice_range(event, details, important, start, end or start)
+    else:
+        await _reply_notice_latest(event, details, important)
+
+
+async def _reply_notice_latest(event, details: list, important: list) -> None:
+    recent = notice.recent(important, notice.IMPORTANT_LINES)
     # 代码块包裹 —— 保留换行 / 缩进 / 特殊字符原样显示,管理员可以贴格式化文本。
-    parts = ['## 📢 更新公告', '', '---', '']
-    if important:
-        parts.append(f'```重要更新\n{important}\n```')
+    parts = ['## 📢 最新更新公告', '']
+    if recent:
+        parts.append(f'```重要更新\n{notice.render(recent)}\n```')
         parts.append('')
-    parts.append(f'```公告详情\n{notice}\n```')
+    parts.append(f'```公告详情\n{notice.render(details[:1])}\n```')
     md = '\n'.join(parts)
-    # 赞助功能开启时在公告下方挂一行「赞助支持」。
-    entry = buttons.build_sponsor_entry_buttons()
-    if entry:
-        await event.reply(md, buttons=entry)
+    rows = buttons.build_notice_buttons(older=bool(notice.older_ranges(details, important)))
+    if rows:
+        await event.reply(md, buttons=rows)
     else:
         await event.reply(md)
+
+
+async def _reply_notice_ranges(event, details: list, important: list) -> None:
+    ranges = notice.older_ranges(details, important)
+    lines = ['## 📜 历史更新公告', '']
+    if ranges:
+        lines += ['> 📅 可直接点击下方蓝字，查看历史时间段的更新公告', '']
+        lines += [buttons.cmd_input(f'更新公告 {notice.range_arg(a, b)}', f'{notice.range_label(a, b)}')
+                  for a, b in ranges]
+    else:
+        lines.append('暂无历史更新公告')
+    await event.reply('\n'.join(lines))
+
+
+async def _reply_notice_range(event, details: list, important: list, a: str, b: str) -> None:
+    da, db = notice.parse_day(a), notice.parse_day(b)
+    imp = notice.in_range(important, da, db) if da and db else []
+    det = notice.in_range(details, da, db) if da and db else []
+    days = [s.day for s in imp + det]
+    if days:
+        parts = ['## 📜 历史更新公告', f'> 📅 {notice.range_label(max(days), min(days))}', '']
+        if imp:
+            parts += [f'```重要更新\n{notice.render(imp)}\n```', '']
+        if det:
+            parts += [f'```公告详情\n{notice.render(det)}\n```', '']
+        md = '\n'.join(parts).rstrip()
+    else:
+        md = '## 📜 历史更新公告\n\n这个日期区间里没有更新公告'
+    await event.reply(md, buttons=buttons.build_notice_buttons(older=True, sponsor=False))
 
 
 # ──────── 「数据统计」的四个窗口视图(按日 / 按月 / 按年 / 累计总计) ─────────

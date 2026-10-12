@@ -76,6 +76,8 @@ BTN_MENU_GAME_LIST  = btn('🎲 游戏列表', '/游戏列表', type=1, style=4)
 BTN_MORE_FEATURES   = btn('🧩 更多功能', '更多功能', type=1, style=1)
 # 「更多功能」子菜单
 BTN_ANNOUNCEMENT    = btn('📢 更新公告', '更新公告', type=1, style=4)
+# 「更新公告」底部
+BTN_NOTICE_OLDER    = btn('📜 历史更新公告', '历史更新公告', type=1, style=4)
 BTN_DATA_STATS      = btn('📈 数据统计', '数据统计', type=1, style=4)
 BTN_TROUBLESHOOT    = btn('❓ 疑难解答', '疑难解答', type=1, style=0)
 BTN_ABOUT           = btn('ℹ️ 关于框架', '/关于', style=1)
@@ -243,10 +245,15 @@ def build_about_buttons() -> list[list[dict]]:
 def build_sponsor_entry_buttons() -> list[list[dict]]:
     """单独一行「赞助支持」入口;赞助功能关闭时返回空列表。
 
-    给本身没有按钮组的回执用(目前是「更新公告」)—— 调用方需自行处理空列表
+    给本身没有按钮组的回执用(目前拼在「更新公告」底部)—— 调用方需自行处理空列表
     (``event.reply`` 不传 buttons),不要把空列表当键盘传下去。
     """
     return [[BTN_SPONSOR]] if SPONSOR_ENABLED else []
+
+
+def build_notice_buttons(older: bool, sponsor: bool = True) -> list[list[dict]]:
+    """「更新公告」底部:有更早的日期段时一行「历史更新公告」,``sponsor`` 时再接赞助入口。可能为空,同上处理。"""
+    return ([[BTN_NOTICE_OLDER]] if older else []) + (build_sponsor_entry_buttons() if sponsor else [])
 
 
 def build_sponsor_buttons() -> list[list[dict]]:
