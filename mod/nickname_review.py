@@ -733,6 +733,7 @@ _CURSOR_KEY = 'scan_cursor'
 _SCANNED_KEY = 'scan_scanned'
 _RESOLVED_KEY = 'scan_resolved'
 _QUEUED_KEY = 'scan_queued'
+_COMPLETED_KEY = 'scan_completed'
 _SCAN_STOP = 'nickname_review_scan_stop'
 
 
@@ -791,18 +792,30 @@ def _meta_int(k: str) -> int:
     return int(raw) if raw.isdigit() else 0
 
 
+def _note_completed(scanned: int, total: int) -> bool:
+    """进度条满格(``0 < total <= scanned``)就记下 ``_COMPLETED_KEY``,返回是否跑满过。"""
+    if _meta_get(_COMPLETED_KEY) == '1':
+        return True
+    if 0 < total <= scanned:
+        _meta_set(_COMPLETED_KEY, '1')
+        return True
+    return False
+
+
 def scan_status() -> dict:
-    """批量扫描进度,面板轮询。"""
+    """批量扫描进度,面板轮询。扫完时没看到满格(如刚好暂停在最后一页)的,这里补记跑满。"""
     p = boot._get_persistent()
     t = p.get(_SCAN_KEY)
     calls = call_counts()
+    scanned, total = _meta_int(_SCANNED_KEY), scan_total()
     return {
         'running': bool(t is not None and not t.done()),
         'cursor': _meta_int(_CURSOR_KEY),
-        'scanned': _meta_int(_SCANNED_KEY),
+        'scanned': scanned,
         'resolved': _meta_int(_RESOLVED_KEY),
         'queued': _meta_int(_QUEUED_KEY),
-        'total': scan_total(),
+        'total': total,
+        'completed': _note_completed(scanned, total),
         'calls_today': calls['today'],
         'calls_total': calls['total'],
         'last_error': last_error(),
@@ -882,6 +895,8 @@ async def _scan_loop() -> None:
                 _collect_page, counters[_CURSOR_KEY])
             counters[_CURSOR_KEY] = cursor
             if not count:
+                # 读表失败也拿到空页,所以跑满按进度条满格算,不凭空页
+                _note_completed(counters[_SCANNED_KEY], await asyncio.to_thread(scan_total))
                 log.info(f'[昵称审核] 批量扫描完成:共 {counters[_SCANNED_KEY]} 名玩家，'
                          f'取到昵称 {counters[_RESOLVED_KEY]} 个，'
                          f'新送审 {counters[_QUEUED_KEY]} 个')

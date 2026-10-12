@@ -152,7 +152,18 @@ async function reviewSaveSettings(btn) {
   await reviewRefresh();
 }
 
+/* 存量扫描在模板里排最后;还没跑满过时挪到违规记录上面,跑满过一次就回到最后,之后进度条被新玩家拉回去也不挪回来。 */
+function reviewPlaceScan(completed) {
+  const sec = document.getElementById('review-scan-section');
+  const top = document.getElementById('review-flag-section');
+  const last = document.getElementById('review-allow-section');
+  if (!sec || !top || !last) return;
+  if (!completed && top.previousElementSibling !== sec) top.before(sec);
+  if (completed && last.nextElementSibling !== sec) last.after(sec);
+}
+
 function reviewApplyScan(scan) {
+  reviewPlaceScan(!!scan.completed);
   const total = scan.total || 0;
   const done = Math.min(scan.scanned || 0, total || (scan.scanned || 0));
   const pct = total > 0 ? Math.min(100, Math.round(done * 100 / total)) : 0;

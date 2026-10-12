@@ -78,7 +78,40 @@
     </div>
   </section>
 
-  <!-- ──── 存量批量扫描 ──── -->
+  <!-- ──── 违规记录 ──── -->
+  <section class="dash-section" id="review-flag-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-alert"/></svg><span>违规记录</span></h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">未处理</span>
+        <span id="review-pending" class="dash-meta-value">—</span>
+        <button id="review-toggle-handled" class="dash-btn dash-btn-small">展开已处理</button>
+      </div>
+    </div>
+    <div id="review-list" class="review-list"></div>
+    <p class="review-note">
+      「翻案」把昵称转入下方白名单：立即恢复真名显示，且批量重扫<b>不会</b>再标回违规。
+      「已处理」只是消掉标签角标的提醒，不改变判定。误杀请用翻案。
+    </p>
+  </section>
+
+  <!-- ──── 白名单记录 ──── -->
+  <section class="dash-section" id="review-allow-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-check-circle"/></svg><span>白名单记录</span></h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">共</span>
+        <span id="review-allowed-count" class="dash-meta-value">—</span>
+      </div>
+    </div>
+    <div id="review-allow-list" class="review-list"></div>
+    <p class="review-note">
+      白名单里的昵称按真名显示，批量重扫不会改动它们。
+      「撤销白名单」把它退回违规记录的待处理；「判定违规」直接认定违规并标记为已处理。
+    </p>
+  </section>
+
+  <!-- ──── 存量批量扫描(还没跑满过时由 JS 挪到违规记录上面)──── -->
   <section class="dash-section" id="review-scan-section">
     <div class="dash-section-header">
       <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-backup"/></svg><span>存量批量审核</span></h2>
@@ -98,39 +131,6 @@
     <p class="review-note">
       扫描范围是<b>引擎数据库里真正玩过游戏的玩家</b>，非框架的全部用户。
       已有结论的昵称会被跳过，不重复调用。进度按游标保存，<b>暂停 / 重启后可续跑</b>。
-    </p>
-  </section>
-
-  <!-- ──── 违规记录 ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-alert"/></svg><span>违规记录</span></h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">未处理</span>
-        <span id="review-pending" class="dash-meta-value">—</span>
-        <button id="review-toggle-handled" class="dash-btn dash-btn-small">展开已处理</button>
-      </div>
-    </div>
-    <div id="review-list" class="review-list"></div>
-    <p class="review-note">
-      「翻案」把昵称转入下方白名单：立即恢复真名显示，且批量重扫<b>不会</b>再标回违规。
-      「已处理」只是消掉标签角标的提醒，不改变判定。误杀请用翻案。
-    </p>
-  </section>
-
-  <!-- ──── 白名单记录 ──── -->
-  <section class="dash-section">
-    <div class="dash-section-header">
-      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-check-circle"/></svg><span>白名单记录</span></h2>
-      <div class="dash-section-meta">
-        <span class="dash-meta-label">共</span>
-        <span id="review-allowed-count" class="dash-meta-value">—</span>
-      </div>
-    </div>
-    <div id="review-allow-list" class="review-list"></div>
-    <p class="review-note">
-      白名单里的昵称按真名显示，批量重扫不会改动它们。
-      「撤销白名单」把它退回违规记录的待处理；「判定违规」直接认定违规并标记为已处理。
     </p>
   </section>
 

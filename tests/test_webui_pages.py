@@ -901,6 +901,22 @@ def test_review_scan_section_needs_both_switch_and_llm():
     assert "classList.toggle('disabled', !(d.enabled && d.llm_available))" in html
 
 
+def test_review_scan_section_sits_last_unless_never_completed():
+    """★ 存量扫描在模板里就排在白名单下面;payload 的 scan.completed 为假时才挪到违规记录上面,跑满后回到最后。"""
+    pr = _page_review()
+    assert 'completed' in pr._payload()['scan']
+    wm = _main()
+    html = wm._render_html()
+    order = [html.index(f'id="{s}"') for s in
+             ('review-flag-section', 'review-allow-section', 'review-scan-section')]
+    assert order == sorted(order)
+    i = html.index('function reviewPlaceScan(completed)')
+    body = html[i:i + 500]
+    assert "if (!completed && top.previousElementSibling !== sec) top.before(sec);" in body
+    assert "if (completed && last.nextElementSibling !== sec) last.after(sec);" in body
+    assert 'reviewPlaceScan(!!scan.completed)' in html
+
+
 def test_review_tab_sits_between_crash_and_audit():
     wm = _main()
     html = wm._render_html()

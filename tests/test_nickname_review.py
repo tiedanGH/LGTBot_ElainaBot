@@ -671,6 +671,54 @@ def test_scan_reset_clears_every_counter():
     assert (st['cursor'], st['scanned'], st['resolved'], st['queued']) == (0, 0, 0, 0)
 
 
+def test_scan_counts_as_completed_once_the_bar_is_full(monkeypatch):
+    """★ 进度条满格才算跑满过一次,并记进结论库;总量为 0(还没有引擎库)或没扫满都不算。"""
+    nr._meta_set(nr._SCANNED_KEY, '4')
+    monkeypatch.setattr(nr, 'scan_total', lambda: 5)
+    assert nr.scan_status()['completed'] is False
+    monkeypatch.setattr(nr, 'scan_total', lambda: 0)
+    assert nr.scan_status()['completed'] is False
+    monkeypatch.setattr(nr, 'scan_total', lambda: 4)
+    assert nr.scan_status()['completed'] is True
+    assert nr._meta_get(nr._COMPLETED_KEY) == '1'
+
+
+def test_completed_scan_stays_completed_after_new_players_and_reset(monkeypatch):
+    """★ 跑满只置不清:新玩家把进度条拉回去、重置游标,都还算跑满过 —— 新玩家入场时已经单独送审。"""
+    nr._meta_set(nr._SCANNED_KEY, '4')
+    monkeypatch.setattr(nr, 'scan_total', lambda: 4)
+    assert nr.scan_status()['completed'] is True
+    monkeypatch.setattr(nr, 'scan_total', lambda: 9)
+    assert nr.scan_status()['completed'] is True
+    nr.scan_reset()
+    st = nr.scan_status()
+    assert st['scanned'] == 0 and st['completed'] is True
+
+
+async def test_scan_loop_marks_completed_when_it_reaches_the_end(monkeypatch):
+    """★ 扫到表尾那一刻就记跑满,不等面板来看 —— 面板打开之前,新玩家可能已经把进度条拉回去了。"""
+    from plugins.LGTBot_ElainaBot.mod import userinfo
+    pages = {0: [(1, 'u1'), (2, 'u2')]}
+    monkeypatch.setattr(nr, '_scan_page', lambda after, limit=500: pages.get(after, []))
+    monkeypatch.setattr(userinfo, 'get_name', lambda uid: '')
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'scan_total', lambda: 2)
+    await nr._scan_loop()
+    assert nr._meta_get(nr._COMPLETED_KEY) == '1'          # 没经过 scan_status
+
+
+async def test_scan_loop_does_not_mark_completed_on_a_failed_read(monkeypatch):
+    """读引擎玩家表失败同样拿到空页 —— 没扫满就不能记跑满。"""
+    from plugins.LGTBot_ElainaBot.mod import userinfo
+    pages = {0: [(1, 'u1'), (2, 'u2')]}                    # 第二页读失败,也是空列表
+    monkeypatch.setattr(nr, '_scan_page', lambda after, limit=500: pages.get(after, []))
+    monkeypatch.setattr(userinfo, 'get_name', lambda uid: '')
+    monkeypatch.setattr(nr, 'get_service', lambda: object())
+    monkeypatch.setattr(nr, 'scan_total', lambda: 5)
+    await nr._scan_loop()
+    assert nr._meta_get(nr._COMPLETED_KEY) == ''
+
+
 async def test_queued_counts_only_batches_that_were_actually_reviewed(monkeypatch):
     """★ 「新送审」只算真的审过的那些 —— 中途中央挂了,那一批退回队列,不能计进去。"""
     from plugins.LGTBot_ElainaBot.mod import userinfo
