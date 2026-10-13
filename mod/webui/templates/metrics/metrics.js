@@ -139,7 +139,7 @@ function metricsRenderGame(game, activePush) {
   metricsTodayCard('today-groups', g.today_groups, g.yesterday_groups_same_span,
                    g.recent10_groups, g.prev10_groups, '群聊', '今日进行游戏的群聊');
   metricsTodayCard('today-attendances', g.today_attendances, g.yesterday_attendances_same_span,
-                   g.recent10_attendances, g.prev10_attendances, '对局人次', '今日参与对局的总人次');
+                   g.recent10_attendances, g.prev10_attendances, '人次', '今日参与对局的总人次');
 
   /* 今日主动消息:大数字 = 总条数,小字 = 平均每群 / 每人(2 位小数) */
   const ap = activePush || {};
