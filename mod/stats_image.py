@@ -13,7 +13,7 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
       3. 今日对局(同上)/ 近 10 日对局(对比上一个 10 日整期)
       4. 可选的主动消息额度行:有上限时一整条(用量 / 上限 + 进度条,今日总计跟在后面),
          不限量时拆成左右两张(本会话用量 / 今日全部群或全部私信的总计)
-  · 近 10 日对局趋势:通栏条形图(当日高亮在最右)
+  · 近 10 日活跃趋势:对局 + 活跃玩家双柱
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条。榜单条目带 ``unranked``
     时(当天的对局全是不计分的)在名称后跟一个灰色「不计分」胶囊
 
@@ -436,7 +436,7 @@ def _render(g: dict, sub_title: str, elapsed_ms: int | None = None) -> bytes | N
     overview_h = (76 + tile_h * 2 + tile_gap + 2
                   + ((tile_h + tile_gap) if show_scale else 0)
                   + ((tile_h + tile_gap) if show_pq else 0))
-    trend_h = 268 if trend else 0
+    trend_h = _TREND_H if trend else 0
     rank_h = 88 + list_rows * 74 + 14                       # 标题 + 行 ×N
     footer_h = 56
     height = pad + head_h + gap + overview_h + gap \
@@ -611,30 +611,11 @@ def _render(g: dict, sub_title: str, elapsed_ms: int | None = None) -> bytes | N
                     radius=6, fill=fg)
     y += overview_h + gap
 
-    # ── 近 10 日对局趋势(当日 accent 高亮在最右,历史柱 35% 淡色)──
+    # ── 近 10 日活跃趋势 ──
     if trend:
-        _section(d, (pad, y, width - pad, y + trend_h))
-        _sec_title(d, pad + 28, y + 24, '近 10 日对局趋势')
-        bars = list(reversed(trend))                        # 旧→新
-        max_c = max((t['count'] for t in bars), default=0) or 1
-        area_x, area_w = pad + 48, inner_w - 96
-        base_y, area_h = y + trend_h - 62, 110
-        slot = area_w // len(bars)
-        bw = min(46, slot - 16)
-        nf, df = _font(20), _font(18)
-        dim = _tint(_ACCENT, base=_PANEL, alpha=0.35)       # 历史柱淡色
-        d.line([(area_x - 8, base_y), (area_x + area_w + 8 - (area_w % slot), base_y)],
-               fill=_BORDER, width=1)
-        for j, t in enumerate(bars):
-            bx = area_x + j * slot + (slot - bw) // 2
-            color = _ACCENT if j == len(bars) - 1 else dim
-            bh = _vbar(d, bx, base_y, bw, t['count'], max_c, area_h, color, 6)
-            cnt = str(t['count'])
-            d.text((bx + (bw - _text_w(d, cnt, nf)) // 2, base_y - bh - 28),
-                   cnt, font=nf, fill=_TEXT_MUTED)
-            day = (t.get('date') or '')[5:]                 # MM-DD
-            d.text((bx + (bw - _text_w(d, day, df)) // 2, base_y + 10),
-                   day, font=df, fill=_TEXT_FAINT)
+        _activity_trend(d, (pad, y, width - pad, y + trend_h), f'近 {len(trend)} 日活跃趋势',
+                        [(str(t.get('date') or '')[5:], t.get('count'), t.get('players'))
+                         for t in reversed(trend)])
         y += trend_h + gap
 
     # ── 排行榜:今日游戏榜(accent)/ 玩家参与榜(橙);历史日期为当日双榜 ──
@@ -848,45 +829,51 @@ def _game_header(d, box, name: str, sub_title: str) -> None:
         d.text((wx, y0 + 48), wm, font=wf, fill=_TEXT_FAINT)
 
 
-# 趋势卡:柱区最高 _BAR_H,柱顶数字占 _NUM_H;柱底往下是日期
+# 活跃趋势卡(统计卡按日、游戏卡按周):柱区最高 _BAR_H,柱顶数字占 _NUM_H;柱底往下是日期
 _BAR_H, _NUM_H = 140, 22
 _BAR_BASE = 76 + _NUM_H + _BAR_H + 20
-_GAME_TREND_H = _BAR_BASE + 52
+_TREND_H = _BAR_BASE + 52
 _PAIR_BW, _PAIR_GAP = 23, 4         # 一组两根柱的柱宽 / 柱间距
 
 
-def _game_trend(d, box, trend: list) -> None:
-    """近 N 周趋势(``trend`` 新→旧):每桶两根柱并排 —— 对局(accent)+ 活跃玩家(绿),共用一个纵轴。
+def _legend(d, x1: int, cy: int, items) -> None:
+    """图例从 ``x1`` 往左排,色块与文字都以 ``cy`` 为垂直中线。
 
-    最新一桶实色在最右,往前的淡色;数字写在各自柱顶,同色。玩家侧查询失败(players 为 None)时只画对局柱。
+    文字按墨迹居中:中文字体字框顶部留白大,按字框摆会整体偏下。
+    """
+    lf = _font(20)
+    lx = x1
+    for text, fg in items:
+        _l, top, _r, bottom = d.textbbox((0, 0), text, font=lf)
+        lx -= _text_w(d, text, lf)
+        d.text((lx, cy - (top + bottom) // 2), text, font=lf, fill=_TEXT_MUTED)
+        lx -= 22
+        d.rounded_rectangle((lx, cy - 7, lx + 14, cy + 7), radius=3, fill=fg)
+        lx -= 24
+
+
+def _activity_trend(d, box, title: str, bars: list) -> None:
+    """活跃趋势:每桶两根柱并排 —— 对局(accent)+ 活跃玩家(绿),共用一个纵轴。
+
+    ``bars`` 旧→新,每项 ``(柱底日期, 对局数, 玩家数)``;数字写在各自柱顶。玩家数缺失(None)时只画对局柱。
     """
     x0, y0, x1, _y1 = box
     _section(d, box)
-    _sec_title(d, x0 + 28, y0 + 24, f'近 {len(trend)} 周趋势')
-    lf = _font(20)
-    lx = x1 - 28
-    for text, fg in (('活跃玩家', _GREEN), ('对局', _ACCENT)):     # 图例从右往左排
-        lx -= _text_w(d, text, lf)
-        d.text((lx, y0 + 30), text, font=lf, fill=_TEXT_MUTED)
-        lx -= 22
-        d.rounded_rectangle((lx, y0 + 35, lx + 14, y0 + 49), radius=3, fill=fg)
-        lx -= 24
-    bars = list(reversed(trend))                        # 旧→新
-    series = [(_ACCENT, 'matches')]
-    if all(t.get('players') is not None for t in bars):
-        series.append((_GREEN, 'players'))
-    top = max((int(t.get(k) or 0) for t in bars for _c, k in series), default=0) or 1
+    _sec_title(d, x0 + 28, y0 + 24, title)
+    _legend(d, x1 - 28, y0 + 42, (('活跃玩家', _GREEN), ('对局', _ACCENT)))
+    colors = [_ACCENT] + ([_GREEN] if all(b[2] is not None for b in bars) else [])
+    top = max((int(b[1 + k] or 0) for b in bars for k in range(len(colors))), default=0) or 1
     area_x, area_w = x0 + 48, (x1 - x0) - 96
     base_y = y0 + _BAR_BASE
     slot = area_w // len(bars)
     df = _font(18)
     d.line([(area_x - 8, base_y), (area_x + slot * len(bars) + 8, base_y)], fill=_BORDER, width=1)
-    for j, t in enumerate(bars):
+    for j, (day, *vals) in enumerate(bars):
         mid = area_x + j * slot + slot // 2
         latest = j == len(bars) - 1
-        for k, (fg, key) in enumerate(series):
-            v = int(t.get(key) or 0)
-            if len(series) == 1:
+        for k, fg in enumerate(colors):
+            v = int(vals[k] or 0)
+            if len(colors) == 1:
                 bx = mid - _PAIR_BW // 2
             else:
                 bx = mid - _PAIR_GAP // 2 - _PAIR_BW if k == 0 else mid + _PAIR_GAP // 2
@@ -897,8 +884,14 @@ def _game_trend(d, box, trend: list) -> None:
             nf = _fit_font(d, s, _PAIR_BW + _PAIR_GAP, sizes=(16, 14, 12))
             d.text((bx + _PAIR_BW // 2 - _text_w(d, s, nf) // 2, base_y - bh - _NUM_H), s,
                    font=nf, fill=fg if v else _TEXT_FAINT)
-        day = str(t.get('start') or '')[5:]             # MM-DD
         d.text((mid - _text_w(d, day, df) // 2, base_y + 10), day, font=df, fill=_TEXT_FAINT)
+
+
+def _game_trend(d, box, trend: list) -> None:
+    """游戏卡的近 N 周活跃趋势(``trend`` 新→旧,柱底写每周的起始日)。"""
+    _activity_trend(d, box, f'近 {len(trend)} 周活跃趋势',
+                    [(str(t.get('start') or '')[5:], t.get('matches'), t.get('players'))
+                     for t in reversed(trend)])
 
 
 def _board_rows(gs: dict) -> list:
@@ -990,7 +983,7 @@ def _render_game(gs: dict, sub_title: str, elapsed_ms: int | None = None) -> byt
 
     head_h, tile_h, tile_gap = 118, 138, 18
     overview_h = 76 + tile_h * 4 + tile_gap * 3 + 2
-    trend_h = _GAME_TREND_H if trend else 0
+    trend_h = _TREND_H if trend else 0
     rank_h = 88 + rows * 74 + (_ME_ROW_H if any(b['me_row'] for b in boards) else 0) + 14
     footer_h = 56
     height = (pad + head_h + gap + overview_h + gap

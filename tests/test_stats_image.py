@@ -832,6 +832,42 @@ def test_old_trend_zero_days_are_a_thin_line(monkeypatch):
     assert hs[-1] == stats_image._ZERO_BAR_H and hs[-2] == 6        # 今天 0 局在最右,昨天 1 局
 
 
+def test_stats_card_trend_is_the_activity_double_bars(monkeypatch):
+    """★ 统计卡的趋势图同游戏卡:「近 10 日活跃趋势」,每天对局 + 活跃玩家两根柱,当天实色在最右。"""
+    _need_font()
+    from collections import Counter
+    from PIL import ImageDraw
+    recs = []
+    real = ImageDraw.Draw
+    monkeypatch.setattr(ImageDraw, 'Draw', lambda im: recs.append(_DrawRecorder(real(im))) or recs[-1])
+    assert stats_image.render_stats_image(_sample_stats(), 'x')
+    rec = recs[0]
+    assert '近 10 日活跃趋势' in [t for _xy, t, _f, _fill in rec.texts]
+    tint = lambda c: stats_image._tint(c, base=stats_image._PANEL, alpha=0.35)      # noqa: E731
+    base_y = Counter(b[3] for b, f in rec.rects
+                     if f in (stats_image._GREEN, tint(stats_image._GREEN))).most_common(1)[0][0]
+    bars = [(b, f) for b, f in rec.rects if b[3] == base_y]
+    for fg in (stats_image._ACCENT, stats_image._GREEN):
+        fills = [f for _b, f in bars if f in (fg, tint(fg))]
+        assert len(fills) == 10 and fills[-1] == fg and set(fills[:-1]) == {tint(fg)}
+
+
+def test_trend_legend_text_is_centred_on_its_swatch():
+    """★ 图例文字按墨迹与色块垂直居中(中文字体字框顶部留白大,按字框摆会偏下);游戏卡标题为「近 12 周活跃趋势」。"""
+    _need_font()
+    from PIL import Image, ImageDraw
+    trend = [{'start': f'2026-07-{i + 1:02d}', 'matches': 3, 'players': 2} for i in range(12)]
+    rec = _DrawRecorder(ImageDraw.Draw(Image.new('RGB', (1000, 400))))
+    stats_image._game_trend(rec, (36, 0, 964, stats_image._TREND_H), trend)
+    assert '近 12 周活跃趋势' in [t for _xy, t, _f, _fill in rec.texts]
+    for text, fg in (('对局', stats_image._ACCENT), ('活跃玩家', stats_image._GREEN)):
+        xy, _t, f, _fill = next(x for x in rec.texts if x[1] == text)
+        ink = _ink_box(xy, text, f)
+        swatch = next(b for b, fill in rec.rects if fill == fg and b[3] - b[1] == 14)
+        assert abs((ink[1] + ink[3]) / 2 - (swatch[1] + swatch[3]) / 2) <= 1, (text, ink, swatch)
+        assert swatch[2] < ink[0]                                    # 色块在文字左边
+
+
 def test_my_row_on_both_boards_when_only_one_lists_me():
     """★ 只在一张榜上时两张榜底部都补行;在榜的那张写榜上的名次(前三照样画奖牌色)。"""
     base = _game_sample()
@@ -970,7 +1006,7 @@ def _overlap(a, b) -> bool:
 def _draw_trend(trend):
     from PIL import Image, ImageDraw
     rec = _DrawRecorder(ImageDraw.Draw(Image.new('RGB', (1000, 400))))
-    stats_image._game_trend(rec, (36, 0, 964, stats_image._GAME_TREND_H), trend)
+    stats_image._game_trend(rec, (36, 0, 964, stats_image._TREND_H), trend)
     base_y = stats_image._BAR_BASE
     bars = [(box, fill) for box, fill in rec.rects if box[3] == base_y]
     # 标题行(含图例)在 y < 56,日期在柱底之下,都不算
