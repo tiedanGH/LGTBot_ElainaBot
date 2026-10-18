@@ -164,8 +164,8 @@ function dashSetBotCollapsed(collapsed) {
   if (section) section.classList.toggle('is-collapsed', collapsed);
 }
 
-/* 折叠态只在首屏自动决定一次:已显式绑定(config.yaml 写了 bind_bot_appid 且该 bot 确实在线)→ 折叠;
-   仍是「默认第一个」的回退状态 → 展开,提示用户去挑一个。之后任何刷新(如换绑成功后的 dashRefreshAll)都不再动折叠态。 */
+/* 绑定状态只认 config.yaml 里存下的 bind_bot_appid(bind_configured):没存就是未绑定,哪怕只有一个 bot、
+   运行时正暂用着它,也要点「绑定」写进配置。有绑定数据 → 首屏折叠,绑定成功后再折叠一次;其他刷新不动折叠态。 */
 let dashBotInited = false;
 
 /* 群权限数量的两个小字段 —— 全量消息与主动推送是 QQ 后台分别开通的两种权限,数量通常不等,所以各显各的。 */
@@ -180,14 +180,16 @@ function dashBotPermHtml(bot) {
            escapeHtml(String(push)) + '</span>';
 }
 
-/* 折叠时紧跟标题的绑定摘要;bot 为空 = 未显式绑定,整个摘要连徽章一起不渲染。 */
-function dashRenderBotSummary(bot) {
+/* 折叠时紧跟标题的绑定摘要;bot 为空 = 未绑定,不渲染(标题旁另有「未绑定机器人」提示)。
+   offline:绑定的 bot 没加载,运行时正暂用别的 bot。 */
+function dashRenderBotSummary(bot, offline) {
   const el = document.getElementById('dash-bot-summary');
   if (!el) return;
   if (!bot) { el.innerHTML = ''; return; }
   const qq = bot.qq ? ('QQ：' + bot.qq) : 'QQ 未配置';
   el.innerHTML =
     '<span class="dash-badge dash-badge-ok">已绑定</span>' +
+    (offline ? '<span class="dash-badge dash-badge-warn">未加载</span>' : '') +
     '<span class="dash-bot-idline">' +
       '<span class="dash-mono">' + escapeHtml(bot.appid) + '</span>' +
       '<span class="dash-bot-qq">' + escapeHtml(qq) + '</span>' +
@@ -199,20 +201,21 @@ function dashRenderBots(data) {
   const wrap = document.getElementById('dash-bot-list');
   if (!wrap) return;
   const bots = data.bots || [];
-  const bound = data.bound_appid || '';
   const configured = data.bind_configured || '';
-  const isExplicit = !!configured && configured === bound;
-  dashRenderBotSummary(isExplicit ? bots.find(b => b.appid === bound) : null);
+  dashRenderBotSummary(configured ? (bots.find(b => b.appid === configured) || {appid: configured}) : null,
+                       !!configured && configured !== (data.bound_appid || ''));
+  const unbound = document.getElementById('dash-bot-unbound');
+  if (unbound) unbound.style.display = configured ? 'none' : '';
   if (!dashBotInited) {
     dashBotInited = true;
-    dashSetBotCollapsed(isExplicit);
+    dashSetBotCollapsed(!!configured);
   }
   if (!bots.length) {
     wrap.innerHTML = '<span class="dash-msg-warn">未在主框架配置中发现任何机器人</span>';
     return;
   }
   wrap.innerHTML = bots.map(b => {
-    const isBound = b.appid === bound;
+    const isBound = b.appid === configured;
     const qq = b.qq ? ('QQ：' + b.qq) : 'QQ 未配置';
     return '<div class="dash-bot-row' + (isBound ? ' bound' : '') + '">' +
       '<span class="dash-bot-idline">' +
@@ -248,7 +251,10 @@ async function dashBindBot(appid) {
     const r = await fetch(url, { cache: 'no-store' });
     const data = await r.json();
     if (msgEl) msgEl.textContent = (data.success ? '✅ ' : '❌ ') + (data.message || '');
-    if (data.success) dashRefreshAll();
+    if (data.success) {
+      dashSetBotCollapsed(true);
+      dashRefreshAll();
+    }
   } catch (e) {
     if (msgEl) msgEl.textContent = '❌ 请求失败：' + e.message;
   }

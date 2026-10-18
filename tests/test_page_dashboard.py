@@ -152,7 +152,7 @@ def test_bot_section_collapse_markup_and_rules():
     # 摘要仅折叠态可见
     assert '#dash-bot-section:not(.is-collapsed) .dash-bot-summary' in css
     assert '.dash-bot-body.collapsed' in css
-    # 折叠态只在首屏定一次,之后换绑刷新不得再改(否则绑定结果提示会被收走)
+    # 折叠态首屏定一次;之后只有绑定成功会再折叠,其他刷新不动
     assert 'dashBotInited' in js
 
 

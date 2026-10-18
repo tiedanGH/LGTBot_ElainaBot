@@ -271,6 +271,7 @@
   }
   #dash-bot-section.is-collapsed .dash-bot-summary { display: contents; }
   .dash-bot-summary > .dash-badge { justify-self: start; }
+  #dash-bot-unbound { justify-self: start; }
   .dash-bot-summary > .dash-bot-idline,
   .dash-bot-summary > .dash-bot-permline {
     grid-column: 1 / -1;
