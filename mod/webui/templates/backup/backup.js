@@ -5,12 +5,13 @@
  */
 
 const BACKUP_KEYS = {
-  create:    '__lgtbot_backup_create',
   list:      '__lgtbot_backup_list',
 };
 
 /* register_route 注册的真实路由前缀(见 webui/main.py 的 _BACKUP_*_ROUTE) */
 const BACKUP_ROUTE_BASE = '/api/ext/lgtbot/backup';
+/* 手动备份:服务端在工作线程里打包(不卡 bot 收发),响应同样是 #result 片段 */
+const BACKUP_CREATE_ROUTE = '/api/ext/lgtbot/backup/create';
 
 
 function backupFmtBytes(n) {
@@ -117,7 +118,11 @@ function backupLoadInline() {
 
 
 async function backupCallAction(key) {
-  const r = await fetch(apiUrl(key), { cache: 'no-store' });
+  return backupFetchFragment(apiUrl(key));
+}
+
+async function backupFetchFragment(url) {
+  const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const text = await r.text();
   const doc = new DOMParser().parseFromString(text, 'text/html');
@@ -165,7 +170,7 @@ async function backupCreate() {
   setBtnIcon(btn, '#i-hourglass', '备份中……');
   backupShowMsg('正在打包数据库与配置……', 'info');
   try {
-    const data = await backupCallAction(BACKUP_KEYS.create);
+    const data = await backupFetchFragment(BACKUP_CREATE_ROUTE + TOKEN_QS);
     if (data.success) {
       backupShowMsg('✅ ' + (data.message || '已生成备份') + (data.zip_name ? ' (' + data.zip_name + ')' : ''), 'ok');
       if (data.skipped && data.skipped.length > 0) {

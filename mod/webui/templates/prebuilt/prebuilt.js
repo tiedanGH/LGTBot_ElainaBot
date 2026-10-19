@@ -4,13 +4,14 @@
  */
 
 const PB_KEYS = {
-  list:           '__lgtbot_prebuilt_list',
   state:          '__lgtbot_prebuilt_state',
   cancel:         '__lgtbot_prebuilt_cancel',
   switchLocal:    '__lgtbot_prebuilt_switch_local',
   switchPrebuilt: '__lgtbot_prebuilt_switch_prebuilt',
 };
 const PB_DOWNLOAD_ROUTE = '/api/ext/lgtbot/prebuilt/download';
+/* 远程包列表:服务端在工作线程里联网(不卡 bot 收发),响应同样是 #result 片段 */
+const PB_LIST_ROUTE = '/api/ext/lgtbot/prebuilt/list';
 const PB_TESTMIRRORS_ROUTE = '/api/ext/lgtbot/prebuilt/test-mirrors';
 const PB_MIRROR_ROUTE = '/api/ext/lgtbot/prebuilt/mirror';
 const PB_UPLOAD_ROUTE = '/api/ext/lgtbot/prebuilt/upload';
@@ -26,7 +27,10 @@ let _pbListLoaded = false;
 
 /* ──── 通用 ──── */
 async function pbCallAction(key) {
-  const r = await fetch(apiUrl(key), { cache: 'no-store' });
+  return pbFetchFragment(apiUrl(key));
+}
+async function pbFetchFragment(url) {
+  const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
   const el = doc.getElementById('result');
@@ -230,7 +234,7 @@ function pbRenderList(data) {
 async function pbRefreshList() {
   pbShowMsg('获取远程列表……', 'info');
   try {
-    const data = await pbCallAction(PB_KEYS.list);
+    const data = await pbFetchFragment(PB_LIST_ROUTE + TOKEN_QS);
     pbRenderList(data);
     pbShowMsg(data.success ? '' : ('❌ ' + (data.message || data.error || '获取失败')), data.success ? 'info' : 'err');
   } catch (e) { pbShowMsg('❌ ' + e.message, 'err'); }

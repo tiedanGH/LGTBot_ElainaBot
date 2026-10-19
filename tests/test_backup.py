@@ -443,3 +443,56 @@ def test_backup_row_keeps_name_time_size_on_one_line_on_mobile():
         assert col in m, col
     assert 'white-space: nowrap;' in m
     assert '.backup-col-name { word-break: normal; }' in m
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 不卡事件循环:备份 / 恢复都在工作线程里跑,两者互斥
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_backup_and_restore_never_overlap():
+    """★ 恢复正在替换文件时打包会读到半新半旧的数据:任一在跑,另一个直接返回失败,不排队。"""
+    lock = backup._lock()
+    assert lock.acquire(blocking=False)
+    try:
+        assert backup.create_backup() == {'success': False, 'message': backup._BUSY, 'included': [], 'skipped': []}
+        assert backup.restore_backup('x.zip') == {'success': False, 'message': backup._BUSY}
+    finally:
+        lock.release()
+    _make_plain_file(os.path.join(boot.DATA_DIR, 'update_notice.txt'))
+    assert backup.create_backup()['success'] is True
+
+
+async def test_auto_backup_runs_off_the_event_loop():
+    """自动备份要整库读一遍打包,放进工作线程,不在事件循环上跑。"""
+    import threading
+    seen = {}
+
+    def fake_create():
+        seen['thread'] = threading.current_thread()
+        return {'success': True, 'zip_name': 'x.zip'}
+
+    with patch.object(backup, 'create_backup', fake_create), \
+         patch.object(backup, 'list_backups', lambda: []), \
+         patch.object(backup, '_ON_LOAD_DELAY_S', 0):
+        await backup._on_load_check_coro()
+    assert seen['thread'] is not threading.main_thread()
+
+
+async def test_restore_route_runs_off_the_event_loop():
+    """面板「恢复」解压替换整个 data/,同样放进工作线程。"""
+    pytest.importorskip('aiohttp')
+    import threading
+    from plugins.LGTBot_ElainaBot.mod.webui import page_backup
+    seen = {}
+
+    def fake_restore(name):
+        seen['thread'], seen['name'] = threading.current_thread(), name
+        return {'success': True, 'replaced_files': []}
+
+    class _Req:
+        query = {'name': 'x.zip'}
+
+    with patch.object(backup, 'restore_backup', fake_restore), \
+         patch.object(page_backup.audit, 'record', lambda *a, **k: None):
+        await page_backup.restore_handler(_Req())
+    assert seen['name'] == 'x.zip' and seen['thread'] is not threading.main_thread()

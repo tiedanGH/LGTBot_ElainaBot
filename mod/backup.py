@@ -19,6 +19,7 @@ import asyncio
 import os
 import shutil
 import sqlite3
+import threading
 import time
 import zipfile
 from datetime import datetime
@@ -114,8 +115,28 @@ def _zip_filename_now() -> str:
     return 'LGTBot_' + datetime.now().strftime('%Y-%m-%d_%H%M%S') + '.zip'
 
 
+# 备份与恢复都在工作线程里跑(面板路由 / 自动备份),同一时间只许一个:恢复正替换文件时打包会读到半新半旧的数据。
+# 锁挂在持久 dict,热重载后仍认得正在跑的那个。
+_LOCK_KEY = 'backup_lock'
+_BUSY = '已有备份或恢复在进行中，请稍后再试'
+
+
+def _lock() -> threading.Lock:
+    return boot._get_persistent().setdefault(_LOCK_KEY, threading.Lock())
+
+
 def create_backup() -> dict:
     """执行一次完整备份,返回 ``{success, zip_path, size_bytes, included, skipped, message}``。"""
+    lock = _lock()
+    if not lock.acquire(blocking=False):
+        return {'success': False, 'message': _BUSY, 'included': [], 'skipped': []}
+    try:
+        return _create_backup()
+    finally:
+        lock.release()
+
+
+def _create_backup() -> dict:
     os.makedirs(BACKUP_DIR, exist_ok=True)
     sources = _collect_sources()
     if not sources:
@@ -231,6 +252,17 @@ def list_backups() -> list[dict]:
 
 
 def restore_backup(zip_name: str) -> dict:
+    """见 ``_restore_backup``;与备份互斥,另一个在跑时直接返回失败。"""
+    lock = _lock()
+    if not lock.acquire(blocking=False):
+        return {'success': False, 'message': _BUSY}
+    try:
+        return _restore_backup(zip_name)
+    finally:
+        lock.release()
+
+
+def _restore_backup(zip_name: str) -> dict:
     """把 zip 内容**原子覆盖**到 ``plugins/LGTBot_ElainaBot/data/``,引擎继续运行不挂。
 
     流程:
@@ -406,9 +438,9 @@ async def _on_load_check_coro() -> None:
     else:
         log.info('[backup] 尚无任何备份,触发首次自动备份')
 
-    # create_backup 同步阻塞,但耗时短,直接在 asyncio loop 上跑
+    # 打包要整库读一遍,放进工作线程,不卡事件循环
     try:
-        result = create_backup()
+        result = await asyncio.to_thread(create_backup)
         if result.get('success'):
             log.info(f'[backup] 自动备份完成: {result.get("zip_name")}')
             audit.record('backup', '自动备份', str(result.get('zip_name') or ''),

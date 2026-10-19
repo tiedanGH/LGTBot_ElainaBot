@@ -27,6 +27,7 @@ Python 侧职责:
 
 from __future__ import annotations
 
+import asyncio
 import html as _html
 import json
 import os
@@ -139,7 +140,7 @@ async def restore_handler(request: 'web.Request') -> 'web.Response':
             status=400,
         )
     try:
-        result = backup.restore_backup(name)
+        result = await asyncio.to_thread(backup.restore_backup, name)
     except Exception as e:
         log.error(f'恢复备份 {name} 异常: {e}')
         audit.record('backup', '恢复备份', f'{name}; {e}', ok=False)

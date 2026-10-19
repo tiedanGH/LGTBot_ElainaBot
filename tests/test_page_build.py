@@ -129,3 +129,16 @@ def test_killed_build_audit_shows_terminated(build_env, monkeypatch):
     started, killed = _build_entries(audit)
     assert 'pending' not in started and started['ok'] is False and started['detail'] == '已终止 (PID 4242)'
     assert killed['action'] == '终止编译' and killed['detail'] == 'PID 4242'
+
+
+def test_no_build_starts_or_second_remove_while_build_dir_is_being_removed(build_env):
+    """★ 删除 build/ 在工作线程里跑:删的期间起编译直接拒绝(否则编译和 rmtree 同时动 build/),再点删除也拒绝。"""
+    lock = page_build._build_dir_lock()
+    assert lock.acquire(blocking=False)
+    try:
+        r = page_build._start_build(['bash', 'build.sh'], '完整编译')
+        assert r['success'] is False and '删除 build/' in r['message']
+        assert '请勿重复' in page_build.render_build_remove()
+    finally:
+        lock.release()
+    assert page_build._start_build(['bash', 'build.sh'], '完整编译')['success'] is True

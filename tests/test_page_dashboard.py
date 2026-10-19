@@ -263,13 +263,12 @@ def test_submodule_status_without_git_is_empty_either_way(monkeypatch, tmp_path)
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 更新类动作(git pull / 子模块 / 下载):工作线程里跑,不卡事件循环
+# 改动仓库的更新动作互斥(工作线程里跑,见 webui.main._threaded)
 # ─────────────────────────────────────────────────────────────────────────
 
-def _fragment_body(resp) -> dict:
+def _fragment_json(text: str) -> dict:
     import html
     import json
-    text = resp.text
     return json.loads(html.unescape(text[text.index('>') + 1:text.rindex('</pre>')]))
 
 
@@ -280,54 +279,39 @@ def no_update_lock():
     boot._get_persistent().pop(_pd()._UPDATE_LOCK_KEY, None)
 
 
-async def test_update_route_keeps_the_event_loop_running(no_update_lock):
-    """★ git pull 跑多久,bot 的收发就照常跑多久:动作在工作线程里执行,期间事件循环继续调度别的协程。"""
-    import asyncio
+def test_repo_changing_updates_never_overlap(no_update_lock):
+    """★ 改动仓库的几个更新同一时间只跑一个,免得两个 git 进程抢 index.lock:后到的立刻回「进行中」;结束后锁放开(出异常也放)。"""
     import threading
-    import time
     pd = _pd()
-    seen = {}
+    started, release, results = threading.Event(), threading.Event(), []
 
-    def slow_pull():
-        seen['thread'] = threading.current_thread()
-        time.sleep(0.4)
-        return pd._fragment({'success': True, 'message': 'done'})
-
-    ticks = []
-
-    async def bot_traffic():
-        while True:
-            ticks.append(1)
-            await asyncio.sleep(0.02)
-
-    traffic = asyncio.ensure_future(bot_traffic())
-    resp = await pd.update_route(slow_pull)(None)
-    traffic.cancel()
-    assert _fragment_body(resp) == {'success': True, 'message': 'done'}
-    assert seen['thread'] is not threading.main_thread()
-    assert len(ticks) >= 10                     # 0.4s 里每 20ms 一次,卡住的话只会有 1 次
-
-
-async def test_repo_changing_updates_never_overlap(no_update_lock):
-    """改动仓库的动作同一时间只跑一个:第二个立刻回「进行中」;只读的检查更新照常并行;结束后锁放开(出异常也放)。"""
-    import asyncio
-    import time
-    pd = _pd()
-
+    @pd._exclusive_update
     def slow():
-        time.sleep(0.3)
+        started.set()
+        release.wait(2)
         return pd._fragment({'success': True})
 
-    first = asyncio.ensure_future(pd.update_route(slow)(None))
-    await asyncio.sleep(0.05)
-    second = _fragment_body(await pd.update_route(slow)(None))
-    assert second['success'] is False and '进行中' in second['message']
-    check = _fragment_body(await pd.update_route(lambda: pd._fragment({'success': True}), exclusive=False)(None))
-    assert check['success'] is True
-    assert _fragment_body(await first)['success'] is True
+    t = threading.Thread(target=lambda: results.append(slow()))
+    t.start()
+    assert started.wait(2)
+    busy = _fragment_json(slow())
+    assert busy['success'] is False and '进行中' in busy['message']
+    release.set()
+    t.join(2)
+    assert _fragment_json(results[0])['success'] is True
 
+    @pd._exclusive_update
     def boom():
         raise RuntimeError('git 崩了')
     with pytest.raises(RuntimeError):
-        await pd.update_route(boom)(None)
-    assert _fragment_body(await pd.update_route(lambda: pd._fragment({'success': True}))(None))['success'] is True
+        boom()
+    assert _fragment_json(pd._exclusive_update(lambda: pd._fragment({'success': True}))())['success'] is True
+
+
+def test_only_repo_changing_updates_are_exclusive():
+    """互斥只加在改动仓库的五个动作上;只读的检查更新随时能点。"""
+    pd = _pd()
+    for name in ('render_do_update', 'render_do_update_force', 'render_update_submodule',
+                 'render_init_repo', 'render_download_update'):
+        assert hasattr(getattr(pd, name), '__wrapped__'), name
+    assert not hasattr(pd.render_check_update, '__wrapped__')

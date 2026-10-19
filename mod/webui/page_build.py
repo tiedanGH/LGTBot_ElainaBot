@@ -66,6 +66,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import threading
 import time
 from datetime import datetime
 
@@ -291,6 +292,14 @@ def _wrap_for_subprocess() -> list:
     return ['bash', '-c', _BUILD_WRAPPER]
 
 
+# 删除 build/ 在工作线程里跑(webui.main._threaded),删的期间不许再起编译、也不许再删一次;锁挂在持久 dict,跨热重载仍认得
+BUILD_DIR_LOCK_KEY = 'build_dir_lock'
+
+
+def _build_dir_lock() -> threading.Lock:
+    return boot._get_persistent().setdefault(BUILD_DIR_LOCK_KEY, threading.Lock())
+
+
 def _start_build(argv: list, display: str, kind: str = 'build',
                  src: str = audit.SRC_PANEL) -> dict:
     """启动一个编译子进程。
@@ -306,6 +315,8 @@ def _start_build(argv: list, display: str, kind: str = 'build',
 
     成功返回 ``{success: True, message, pid}``,失败 ``{success: False, message}``。
     """
+    if _build_dir_lock().locked():
+        return {'success': False, 'message': '正在删除 build/ 目录，请等它结束后再启动'}
     state = get_build_state()
     if state['running']:
         return {
@@ -734,7 +745,7 @@ def _write_meta_done(display: str, argv: list, returncode: int) -> None:
 
 
 def render_build_remove() -> str:
-    """🗑 删除 build/ 目录 —— 同步 ``shutil.rmtree``,不启动子进程。
+    """🗑 删除 build/ 目录 —— 工作线程里 ``shutil.rmtree``,期间持 build 目录锁,不启动子进程。
 
     Python 直接调用 rmtree(不走 subprocess),避免任何 shell 介入。
     完成后写 state.json(``kind='meta'``)让 UI 标记「已完成」。
@@ -743,6 +754,16 @@ def render_build_remove() -> str:
     confirm 后触发(见 build.js::buildRemove);后端不主动调用。
     rmtree 前后各 ``log.info`` 一条 audit 日志便于事后排查。
     """
+    lock = _build_dir_lock()
+    if not lock.acquire(blocking=False):
+        return _fragment({'success': False, 'message': '正在删除 build/ 目录，请勿重复操作'})
+    try:
+        return _remove_build_dir()
+    finally:
+        lock.release()
+
+
+def _remove_build_dir() -> str:
     state = get_build_state()
     if state['running']:
         return _fragment({

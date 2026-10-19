@@ -34,6 +34,7 @@ JSON 都拼进同一份 HTML —— 这样无论用户当前在哪个标签上�
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 import os
@@ -82,12 +83,12 @@ _BUILD_CUSTOM_KEY  = '__lgtbot_dash_build_custom'
 _BUILD_NEWTARGET_KEY = '__lgtbot_dash_build_newtarget'
 _BUILD_KILL_KEY    = '__lgtbot_dash_build_kill'
 _BUILD_CLEAN_KEY   = '__lgtbot_dash_build_clean'
-_BUILD_REMOVE_KEY  = '__lgtbot_dash_build_remove'
+_BUILD_REMOVE_KEY  = '__lgtbot_dash_build_remove'     # 已走 _BUILD_REMOVE_ROUTE,只保留在 _HIDDEN_KEYS 里
 _BUILD_LOG_KEY     = '__lgtbot_dash_build_log'
 _BUILD_API_TOKEN_KEY = '__lgtbot_build_api_token'
 
 # 数据备份标签的 action 端点(JS 侧 BACKUP_KEYS 与此一一对应)
-_BACKUP_CREATE_KEY  = '__lgtbot_backup_create'
+_BACKUP_CREATE_KEY  = '__lgtbot_backup_create'        # 已走 _BACKUP_CREATE_ROUTE
 _BACKUP_LIST_KEY    = '__lgtbot_backup_list'
 # 操作审计标签的唯一 action 端点(只读刷新)
 _AUDIT_LIST_KEY     = '__lgtbot_audit_list'
@@ -101,7 +102,7 @@ _REVIEW_SCAN_RESET_KEY = '__lgtbot_review_scan_reset'
 # 指标面板标签的唯一 action 端点(统一刷新:数据统计 + 运行指标 + 游戏数据)
 _METRICS_REFRESH_KEY = '__lgtbot_metrics_refresh'
 # 预编译部署标签的无参 action 端点(JS 侧 PREBUILT_KEYS 与此一一对应)
-_PREBUILT_LIST_KEY            = '__lgtbot_prebuilt_list'        # 远程包列表(网络)
+_PREBUILT_LIST_KEY            = '__lgtbot_prebuilt_list'        # 已走 _PREBUILT_LIST_ROUTE
 _PREBUILT_STATE_KEY           = '__lgtbot_prebuilt_state'       # 下载进度(轮询)
 _PREBUILT_CANCEL_KEY          = '__lgtbot_prebuilt_cancel'      # 取消下载 + 清理临时文件
 _PREBUILT_SWITCH_LOCAL_KEY    = '__lgtbot_prebuilt_switch_local'    # 切回本地编译
@@ -112,22 +113,29 @@ _BACKUP_DELETE_ROUTE   = '/api/ext/lgtbot/backup/delete'
 _BACKUP_DOWNLOAD_ROUTE = '/api/ext/lgtbot/backup/download'
 # 仪表盘「机器人绑定」换绑端点(要接 ?appid= 参数,同样走 register_route)
 _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
-# 检查 / 执行更新(走 register_route 在工作线程里跑,见 page_dashboard.update_route;JS 侧 DASH_ROUTES)
+# 检查 / 执行更新(走 register_route 在工作线程里跑,见 _threaded;JS 侧 DASH_ROUTES)
 _DASH_CHECK_UPDATE_ROUTE     = '/api/ext/lgtbot/update/check'
 _DASH_DO_UPDATE_ROUTE        = '/api/ext/lgtbot/update/pull'        # 更新桥接层 (git pull --ff-only origin main)
 _DASH_DO_UPDATE_FORCE_ROUTE  = '/api/ext/lgtbot/update/force'       # 强制更新桥接层 (git reset --hard origin/main)
 _DASH_UPDATE_SUBMODULE_ROUTE = '/api/ext/lgtbot/update/submodule'   # 更新 / 初始化 lgtbot 子模块
 _DASH_INIT_REPO_ROUTE        = '/api/ext/lgtbot/update/init-repo'   # 市场用户:把插件目录初始化为 git 仓库
 _DASH_DOWNLOAD_UPDATE_ROUTE  = '/api/ext/lgtbot/update/download'    # 免 git:下载源码 zip 覆盖更新
+# 预编译包远程列表 / 手动备份 / 删除 build/ 目录(同样在工作线程里跑;JS 侧各自的 *_ROUTE)
+_PREBUILT_LIST_ROUTE  = '/api/ext/lgtbot/prebuilt/list'
+_BACKUP_CREATE_ROUTE  = '/api/ext/lgtbot/backup/create'
+_BUILD_REMOVE_ROUTE   = '/api/ext/lgtbot/build/remove'
 
-# 更新类路由 → (path, 同步实现, 是否与其他改动仓库的动作互斥);只读的「检查更新」不互斥
-_DASH_UPDATE_ROUTES = (
-    (_DASH_CHECK_UPDATE_ROUTE, page_dashboard.render_check_update, False),
-    (_DASH_DO_UPDATE_ROUTE, page_dashboard.render_do_update, True),
-    (_DASH_DO_UPDATE_FORCE_ROUTE, page_dashboard.render_do_update_force, True),
-    (_DASH_UPDATE_SUBMODULE_ROUTE, page_dashboard.render_update_submodule, True),
-    (_DASH_INIT_REPO_ROUTE, page_dashboard.render_init_repo, True),
-    (_DASH_DOWNLOAD_UPDATE_ROUTE, page_dashboard.render_download_update, True),
+# 慢动作路由 → 同步实现(返回 <pre id="result"> 片段),由 _threaded 放进工作线程;互斥在各实现内部
+_THREADED_ROUTES = (
+    (_DASH_CHECK_UPDATE_ROUTE, page_dashboard.render_check_update),
+    (_DASH_DO_UPDATE_ROUTE, page_dashboard.render_do_update),
+    (_DASH_DO_UPDATE_FORCE_ROUTE, page_dashboard.render_do_update_force),
+    (_DASH_UPDATE_SUBMODULE_ROUTE, page_dashboard.render_update_submodule),
+    (_DASH_INIT_REPO_ROUTE, page_dashboard.render_init_repo),
+    (_DASH_DOWNLOAD_UPDATE_ROUTE, page_dashboard.render_download_update),
+    (_PREBUILT_LIST_ROUTE, page_prebuilt.render_list),
+    (_BACKUP_CREATE_ROUTE, page_backup.render_create),
+    (_BUILD_REMOVE_ROUTE, page_build.render_build_remove),
 )
 # 顶栏「计划重启」切换(要接 ?reason= 维护原因,故走 register_route 而非隐藏 action)
 _PLANNED_RESTART_ROUTE = '/api/ext/lgtbot/planned-restart'
@@ -434,6 +442,16 @@ def _register_hidden_action(key: str, provider):
     web_pages._registry[key] = _LazyHtmlDict(base, provider)
 
 
+def _threaded(fn):
+    """把同步的慢动作包成 register_route 用的异步 handler:工作线程里执行,响应仍是 ``<pre id="result">`` 片段。
+
+    隐藏 action 的 provider 由框架在事件循环里同步调用,git / 网络 / 打包 / 删目录这类慢动作会让整个 bot 的收发卡到结束。
+    """
+    async def handler(request):
+        return web.Response(text=await asyncio.to_thread(fn), content_type='text/html')
+    return handler
+
+
 def register():
     """在 ``web_pages._registry`` 中注册主页与所有 action 端点,并挂上带参的真路由。
 
@@ -477,14 +495,12 @@ def register():
     _register_hidden_action(_BUILD_NEWTARGET_KEY, page_build.render_build_new_target)
     _register_hidden_action(_BUILD_KILL_KEY,    page_build.render_build_kill)
     _register_hidden_action(_BUILD_CLEAN_KEY,   page_build.render_build_clean)
-    _register_hidden_action(_BUILD_REMOVE_KEY,  page_build.render_build_remove)
     _register_hidden_action(_BUILD_LOG_KEY,     page_build.render_build_log)
     _register_hidden_action(_BUILD_API_TOKEN_KEY, build_api.render_api_token)
 
     # 数据备份 action 端点
     # · create / list:无参,沿用 _register_hidden_action 的 fragment 协议
     # · restore / delete / download:要从 ?name= 拿参数,走 web_pages.register_route 真路由
-    _register_hidden_action(_BACKUP_CREATE_KEY, page_backup.render_create)
     _register_hidden_action(_BACKUP_LIST_KEY,   page_backup.render_list)
 
     # 操作审计 action 端点(只读刷新;审计流不设清空 / 删除端点)
@@ -504,7 +520,6 @@ def register():
     _register_hidden_action(_METRICS_REFRESH_KEY, page_metrics.render_refresh)
 
     # 预编译部署 action 端点(远程列表 / 进度轮询 / 本地·预编译切换)
-    _register_hidden_action(_PREBUILT_LIST_KEY,            page_prebuilt.render_list)
     _register_hidden_action(_PREBUILT_STATE_KEY,           page_prebuilt.render_state)
     _register_hidden_action(_PREBUILT_CANCEL_KEY,          page_prebuilt.render_cancel)
     _register_hidden_action(_PREBUILT_SWITCH_LOCAL_KEY,    page_prebuilt.render_switch_local)
@@ -514,8 +529,8 @@ def register():
     web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
     web_pages.register_route('GET', _BACKUP_DOWNLOAD_ROUTE, page_backup.download_handler, auth=True)
     web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)
-    for route, fn, exclusive in _DASH_UPDATE_ROUTES:
-        web_pages.register_route('GET', route, page_dashboard.update_route(fn, exclusive), auth=True)
+    for route, fn in _THREADED_ROUTES:
+        web_pages.register_route('GET', route, _threaded(fn), auth=True)
     web_pages.register_route('GET', _PLANNED_RESTART_ROUTE, planned_restart_handler, auth=True)
     web_pages.register_route('GET', _RESTART_PANEL_ROUTE, restart_panel_handler, auth=True)
     web_pages.register_route('GET', _CRASH_VIEW_ROUTE, page_crash.view_handler, auth=True)
@@ -551,7 +566,7 @@ def unregister():
     web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
     web_pages.unregister_route('GET', _BACKUP_DOWNLOAD_ROUTE)
     web_pages.unregister_route('GET', _BIND_BOT_ROUTE)
-    for route, _fn, _exclusive in _DASH_UPDATE_ROUTES:
+    for route, _fn in _THREADED_ROUTES:
         web_pages.unregister_route('GET', route)
     web_pages.unregister_route('GET', _PLANNED_RESTART_ROUTE)
     web_pages.unregister_route('GET', _RESTART_PANEL_ROUTE)

@@ -27,6 +27,7 @@ Python 侧职责:
 from __future__ import annotations
 
 import asyncio
+import functools
 import glob
 import html as _html
 import io
@@ -877,26 +878,22 @@ def _fetch_releases() -> dict:
     return {'releases': newer if newer else rels[:1], 'error': ''}
 
 
-# 检查 / 执行更新要跑 git 或下载,几十秒到几分钟。隐藏 action 的 provider 是框架在事件循环里同步调用的,
-# 直接跑会让整个 bot 的收发卡到结束、再一口气补发;所以这几个走 register_route,由 update_route 放进工作线程。
-# 改动仓库的几个同一时间只跑一个,免得两个 git 进程抢 index.lock;锁挂在持久 dict,热重载后仍认得正在跑的那个。
+# 检查 / 执行更新在工作线程里跑(webui.main._threaded)。改动仓库的几个同一时间只跑一个,免得两个 git 进程抢 index.lock;
+# 锁挂在持久 dict,热重载后仍认得正在跑的那个。
 _UPDATE_LOCK_KEY = 'dash_update_lock'
 
 
-def update_route(fn, exclusive: bool = True):
-    """把同步的更新动作包成 register_route 用的异步 handler,响应仍是 ``<pre id="result">`` 片段。"""
-    async def handler(request):
-        lock = boot._get_persistent().setdefault(_UPDATE_LOCK_KEY, threading.Lock()) if exclusive else None
-        if lock is not None and not lock.acquire(blocking=False):
-            body = _fragment({'success': False, 'message': '已有更新操作在进行中，请等它结束后再试'})
-        else:
-            try:
-                body = await asyncio.to_thread(fn)
-            finally:
-                if lock is not None:
-                    lock.release()
-        return web.Response(text=body, content_type='text/html')
-    return handler
+def _exclusive_update(fn):
+    @functools.wraps(fn)
+    def wrapper() -> str:
+        lock = boot._get_persistent().setdefault(_UPDATE_LOCK_KEY, threading.Lock())
+        if not lock.acquire(blocking=False):
+            return _fragment({'success': False, 'message': '已有更新操作在进行中，请等它结束后再试'})
+        try:
+            return fn()
+        finally:
+            lock.release()
+    return wrapper
 
 
 def render_check_update() -> str:
@@ -931,10 +928,11 @@ def _git_output_summary(proc, success: bool) -> str:
     return text.splitlines()[0][:120] if text else f'returncode={proc.returncode}'
 
 
+@_exclusive_update
 def render_do_update() -> str:
     """更新桥接层 —— 在 ``boot.PLUGIN_DIR`` 执行 ``git pull --ff-only``。
 
-    经 ``update_route`` 在工作线程里跑;``--ff-only`` 模式下 git 不会进入交互。失败不会破坏工作区。
+    在工作线程里跑;``--ff-only`` 模式下 git 不会进入交互。失败不会破坏工作区。
     """
     plugin_dir = boot.PLUGIN_DIR
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):
@@ -980,6 +978,7 @@ def render_do_update() -> str:
     })
 
 
+@_exclusive_update
 def render_do_update_force() -> str:
     """强制更新桥接层 —— ``git fetch origin`` + ``git reset --hard origin/main``。
 
@@ -1048,6 +1047,7 @@ def render_do_update_force() -> str:
     })
 
 
+@_exclusive_update
 def render_update_submodule() -> str:
     """更新或初始化 lgtbot 子模块 ——
     ``git -C <plugin_dir> submodule update --init --recursive --force <path>``。
@@ -1136,6 +1136,7 @@ def _git_run(cmd: list, timeout: float = 60.0):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+@_exclusive_update
 def render_init_repo() -> str:
     """把 ``boot.PLUGIN_DIR`` 原地变成与上游同步的 git 仓库。
 
@@ -1327,6 +1328,7 @@ def _apply_source_zip(content: bytes) -> dict:
     return {'files': files}
 
 
+@_exclusive_update
 def render_download_update() -> str:
     """免 git 覆盖更新:下载最新 release 的源码 zip 直接覆盖插件目录。
 

@@ -20,10 +20,11 @@ const BUILD_KEYS = {
   newTarget: '__lgtbot_dash_build_newtarget',
   kill:   '__lgtbot_dash_build_kill',
   clean:  '__lgtbot_dash_build_clean',
-  remove: '__lgtbot_dash_build_remove',
   log:    '__lgtbot_dash_build_log',
   apiToken: '__lgtbot_build_api_token',
 };
+/* 删除 build/:服务端在工作线程里删(不卡 bot 收发),响应同样是 #result 片段 */
+const BUILD_REMOVE_ROUTE = '/api/ext/lgtbot/build/remove';
 
 /* 自定义目标名白名单(同后端):字母/数字/下划线/连字符,1-63 字符,
    首字符必须是字母或下划线 */
@@ -166,7 +167,11 @@ function buildLoadInline() {
 
 /* 调隐藏 action 端点,解 <pre id="result"> 里的 JSON */
 async function buildCallAction(key) {
-  const r = await fetch(apiUrl(key), { cache: 'no-store' });
+  return buildFetchFragment(apiUrl(key));
+}
+
+async function buildFetchFragment(url) {
+  const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const text = await r.text();
   const doc = new DOMParser().parseFromString(text, 'text/html');
@@ -448,7 +453,7 @@ async function buildRemove() {
   );
   if (!ok2) return;
   try {
-    const data = await buildCallAction(BUILD_KEYS.remove);
+    const data = await buildFetchFragment(BUILD_REMOVE_ROUTE + TOKEN_QS);
     if (data.success) {
       await dashAlert('✅ ' + (data.message || 'build/ 已删除'), {level: 'info'});
     } else {

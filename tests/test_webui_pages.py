@@ -1225,18 +1225,45 @@ def test_fold_grids_declare_their_real_card_count():
 
 
 
-def test_update_actions_are_threaded_routes_not_hidden_actions(_clean_registry):
-    """★ 检查 / 执行更新走 register_route(异步 handler,工作线程里跑);隐藏 action 的 provider 在事件循环里同步执行。"""
+def test_slow_actions_are_threaded_routes_not_hidden_actions(_clean_registry):
+    """★ 慢动作(检查 / 执行更新、预编译列表、手动备份、删 build/)走 register_route 的异步 handler,工作线程里跑;
+    隐藏 action 的 provider 在事件循环里同步执行。JS 里的路径要和这里一一对上。"""
     wm = _main()
     wm.register()
-    for route, _fn, _exclusive in wm._DASH_UPDATE_ROUTES:
-        entry = _clean_registry._routes[('GET', route)]
-        assert entry['auth'] is True
+    for route, _fn in wm._THREADED_ROUTES:
+        assert _clean_registry._routes[('GET', route)]['auth'] is True
     for key in (wm._DASH_CHECK_UPDATE_KEY, wm._DASH_DO_UPDATE_KEY, wm._DASH_DO_UPDATE_FORCE_KEY,
-                wm._DASH_UPDATE_SUBMODULE_KEY, wm._DASH_INIT_REPO_KEY, wm._DASH_DOWNLOAD_UPDATE_KEY):
+                wm._DASH_UPDATE_SUBMODULE_KEY, wm._DASH_INIT_REPO_KEY, wm._DASH_DOWNLOAD_UPDATE_KEY,
+                wm._PREBUILT_LIST_KEY, wm._BACKUP_CREATE_KEY, wm._BUILD_REMOVE_KEY):
         assert key not in _clean_registry._registry
-    from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard
-    js = page_dashboard.TAB_JS
-    block = js[js.index('const DASH_ROUTES = {'):]
-    block = block[:block.index('};')]
-    assert sorted(re.findall(r"'(/api/ext/[^']+)'", block)) == sorted(r for r, _f, _e in wm._DASH_UPDATE_ROUTES)
+    html = wm._render_html()
+    for route, _fn in wm._THREADED_ROUTES:
+        assert f"'{route}'" in html, route
+
+
+async def test_threaded_route_keeps_the_event_loop_running():
+    """★ 慢动作跑多久,bot 的收发就照常跑多久:动作在工作线程里执行,期间事件循环继续调度别的协程。"""
+    import asyncio
+    import threading
+    import time
+    wm = _main()
+    seen = {}
+
+    def slow():
+        seen['thread'] = threading.current_thread()
+        time.sleep(0.4)
+        return '<pre id="result">{}</pre>'
+
+    ticks = []
+
+    async def bot_traffic():
+        while True:
+            ticks.append(1)
+            await asyncio.sleep(0.02)
+
+    traffic = asyncio.ensure_future(bot_traffic())
+    resp = await wm._threaded(slow)(None)
+    traffic.cancel()
+    assert resp.text == '<pre id="result">{}</pre>' and resp.content_type == 'text/html'
+    assert seen['thread'] is not threading.main_thread()
+    assert len(ticks) >= 10                     # 0.4s 里每 20ms 一次,卡住的话只会有 1 次

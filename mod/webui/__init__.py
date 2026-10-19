@@ -29,9 +29,6 @@ Python 模块(仅做逻辑 + 模板加载):
     templates/users/       「用户数据」标签 HTML / CSS / JS
 
 action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不出现在侧边栏列表,仅供 JS fetch 触发):
-    __lgtbot_dash_check_update          Dashboard「检查更新」(同时查桥接层 / 子模块上游)
-    __lgtbot_dash_do_update             Dashboard「更新桥接层」(git pull --ff-only)
-    __lgtbot_dash_update_submodule      Dashboard「更新 / 初始化 lgtbot 子模块」
     __lgtbot_dash_clear_avatar / _7d    Dashboard 头像缓存「清理全部 / 保留 7 天」
     __lgtbot_dash_clear_gen    / _7d    Dashboard 图片缓存「清理全部 / 保留 7 天」
     __lgtbot_dash_clear_match_all / _7d Dashboard 赛况缓存「清理全部 / 保留 7 天」
@@ -39,8 +36,14 @@ action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不
                                         引擎编译 启动入口(完整 / 增量 / 桥接层 /
                                         列出目标 / 自定义目标)
     __lgtbot_dash_build_kill            引擎编译 终止当前进程
-    __lgtbot_dash_build_clean / remove  引擎编译 清理重编 / 删 build/ 目录
+    __lgtbot_dash_build_clean           引擎编译 清理重编
     __lgtbot_dash_build_log             引擎编译 轮询拉日志 + 状态
+
+慢动作走 register_route,由 ``main._threaded`` 放进工作线程(隐藏 action 的 provider 在框架事件循环里同步调用):
+    /api/ext/lgtbot/update/*            Dashboard 检查更新 / 更新桥接层 / 强制更新 / 子模块 / 初始化仓库 / 下载更新
+    /api/ext/lgtbot/prebuilt/list       预编译部署 远程包列表
+    /api/ext/lgtbot/backup/create       数据备份 手动备份
+    /api/ext/lgtbot/build/remove        引擎编译 删 build/ 目录
 
 「重启」端点返回 ``<div id="msg">…</div>`` 片段太小,直接在 ``main.py::
 _render_restart`` 里 inline 字符串;Dashboard 端点返回的 ``<pre id="result">

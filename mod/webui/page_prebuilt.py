@@ -66,7 +66,7 @@ def get_data() -> str:
 # ──────── 无参 fragment 端点 ───────────────────────────────────────────────
 
 def render_list() -> str:
-    """远程预编译包列表(同步 urllib,经排序镜像)。"""
+    """远程预编译包列表(同步 urllib,经排序镜像;在工作线程里跑)。"""
     try:
         data = prebuilt.list_remote()
     except Exception as e:
