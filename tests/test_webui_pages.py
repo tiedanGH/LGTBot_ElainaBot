@@ -1222,3 +1222,21 @@ def test_fold_grids_declare_their_real_card_count():
         p.feed(_tab_template(wm, tab, 'html'))
         assert [n for _d, n in p.found] == want, tab
         assert all(d == n for d, n in p.found), (tab, p.found)
+
+
+
+def test_update_actions_are_threaded_routes_not_hidden_actions(_clean_registry):
+    """★ 检查 / 执行更新走 register_route(异步 handler,工作线程里跑);隐藏 action 的 provider 在事件循环里同步执行。"""
+    wm = _main()
+    wm.register()
+    for route, _fn, _exclusive in wm._DASH_UPDATE_ROUTES:
+        entry = _clean_registry._routes[('GET', route)]
+        assert entry['auth'] is True
+    for key in (wm._DASH_CHECK_UPDATE_KEY, wm._DASH_DO_UPDATE_KEY, wm._DASH_DO_UPDATE_FORCE_KEY,
+                wm._DASH_UPDATE_SUBMODULE_KEY, wm._DASH_INIT_REPO_KEY, wm._DASH_DOWNLOAD_UPDATE_KEY):
+        assert key not in _clean_registry._registry
+    from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard
+    js = page_dashboard.TAB_JS
+    block = js[js.index('const DASH_ROUTES = {'):]
+    block = block[:block.index('};')]
+    assert sorted(re.findall(r"'(/api/ext/[^']+)'", block)) == sorted(r for r, _f, _e in wm._DASH_UPDATE_ROUTES)

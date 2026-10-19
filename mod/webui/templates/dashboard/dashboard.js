@@ -1,21 +1,25 @@
 /* ──── Dashboard 标签 ────
- * 隐藏 action 端点 key 与 webui/main.py 的 _DASH_* 常量一一对应。
+ * 隐藏 action 端点 key 与 webui/main.py 的 _DASH_*_KEY 常量一一对应,更新类路由与 _DASH_*_ROUTE 一一对应。
  */
 
 const DASH_KEYS = {
-  check_update:       '__lgtbot_dash_check_update',
-  do_update:          '__lgtbot_dash_do_update',
-  do_update_force:    '__lgtbot_dash_do_update_force',
-  update_submodule:   '__lgtbot_dash_update_submodule',
   clear_avatar:       '__lgtbot_dash_clear_avatar',
   clear_avatar_7d:    '__lgtbot_dash_clear_avatar_7d',
   clear_gen:          '__lgtbot_dash_clear_gen',
   clear_gen_7d:       '__lgtbot_dash_clear_gen_7d',
   clear_match_all:    '__lgtbot_dash_clear_match_all',
   clear_match_7d:     '__lgtbot_dash_clear_match_7d',
-  init_repo:          '__lgtbot_dash_init_repo',
-  download_update:    '__lgtbot_dash_download_update',
   matches:            '__lgtbot_dash_matches',
+};
+
+/* 检查 / 执行更新:服务端在工作线程里跑 git 和下载(不卡 bot 收发),走 register_route 真路由 */
+const DASH_ROUTES = {
+  check_update:       '/api/ext/lgtbot/update/check',
+  do_update:          '/api/ext/lgtbot/update/pull',
+  do_update_force:    '/api/ext/lgtbot/update/force',
+  update_submodule:   '/api/ext/lgtbot/update/submodule',
+  init_repo:          '/api/ext/lgtbot/update/init-repo',
+  download_update:    '/api/ext/lgtbot/update/download',
 };
 
 /* 机器人绑定换绑端点(register_route 真路由,带 ?appid= 参数) */
@@ -486,9 +490,17 @@ async function dashRefreshAll(quiet = true) {
   }
 }
 
-/* 调隐藏 action 端点,从 <pre id="result"> 抠出 JSON */
+/* 调隐藏 action 端点 / 更新类路由,从 <pre id="result"> 抠出 JSON */
 async function dashCallAction(key) {
-  const r = await fetch(apiUrl(key), { cache: 'no-store' });
+  return dashFetchFragment(apiUrl(key));
+}
+
+async function dashCallRoute(route) {
+  return dashFetchFragment(route + TOKEN_QS);
+}
+
+async function dashFetchFragment(url) {
+  const r = await fetch(url, { cache: 'no-store' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const text = await r.text();
   const doc = new DOMParser().parseFromString(text, 'text/html');
@@ -511,7 +523,7 @@ async function dashCheckUpdate() {
   /* 子模块按钮在 missing / empty 时首屏就已显示「初始化子模块」;这里也先隐藏,由 dashRenderSubmoduleStatus 按新结果重新决定 */
   document.getElementById('dash-update-submodule').style.display = 'none';
   try {
-    const data = await dashCallAction(DASH_KEYS.check_update);
+    const data = await dashCallRoute(DASH_ROUTES.check_update);
     // 检查更新结果里也带 repo_status (submodule info 自带);同步给桥接层渲染
     if (data.submodule) {
       dashRepoStatus = data.submodule.repo_status || 'ok';
@@ -662,7 +674,7 @@ async function dashDoUpdate() {
   btn.disabled = true;
   setBtnIcon(btn, '#i-hourglass', '更新中……');
   try {
-    const data = await dashCallAction(DASH_KEYS.do_update);
+    const data = await dashCallRoute(DASH_ROUTES.do_update);
     let html = '<div class="dash-msg-info">执行命令：<code class="dash-mono">' +
                escapeHtml(cmd) + '</code></div>';
     if (data.success) {
@@ -724,7 +736,7 @@ async function dashDoUpdateForce() {
     setBtnIcon(forceBtn, '#i-hourglass', '强制更新中……');
   }
   try {
-    const data = await dashCallAction(DASH_KEYS.do_update_force);
+    const data = await dashCallRoute(DASH_ROUTES.do_update_force);
     let html = '<div class="dash-msg-info">执行命令：<code class="dash-mono">' +
                escapeHtml(cmd) + '</code></div>';
     if (data.success) {
@@ -777,7 +789,7 @@ async function dashInitRepo() {
   setBtnIcon(btn, '#i-hourglass', '初始化中……');
   resEl.innerHTML = '';
   try {
-    const data = await dashCallAction(DASH_KEYS.init_repo);
+    const data = await dashCallRoute(DASH_ROUTES.init_repo);
     const parts = [];
     if (data.success) {
       parts.push('<div class="dash-msg-ok">' + escapeHtml(data.message) + '</div>');
@@ -844,7 +856,7 @@ async function dashDoDownloadUpdate() {
   const resEl = document.getElementById('dash-update-result');
   if (dlBtn) { dlBtn.disabled = true; setBtnIcon(dlBtn, '#i-download', '下载中……'); }
   try {
-    const data = await dashCallAction(DASH_KEYS.download_update);
+    const data = await dashCallRoute(DASH_ROUTES.download_update);
     resEl.innerHTML = data.success
       ? '<div class="dash-msg-ok">' + escapeHtml(data.message || '✅ 更新完成') + '</div>'
       : '<div class="dash-msg-err">❌ ' + escapeHtml(data.message || '更新失败') + '</div>';
@@ -889,7 +901,7 @@ async function dashDoUpdateSubmodule() {
   btn.disabled = true;
   setBtnIcon(btn, '#i-hourglass', isInit ? '初始化中……' : '更新中……');
   try {
-    const data = await dashCallAction(DASH_KEYS.update_submodule);
+    const data = await dashCallRoute(DASH_ROUTES.update_submodule);
     let html = '';
     if (data.command) {
       html += '<div class="dash-msg-info">执行命令：<code class="dash-mono">' +

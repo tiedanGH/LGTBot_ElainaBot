@@ -54,13 +54,14 @@ PAGE_KEY = 'lgtbot'
 RESTART_KEY = '__lgtbot_restart'
 PLANNED_RESTART_KEY = '__lgtbot_planned_restart'
 
-# Dashboard 的各 action 端点(JS 侧 DASH_KEYS 与此一一对应)
+# 检查 / 执行更新的**历史** action key,只保留在 _HIDDEN_KEYS 里
 _DASH_CHECK_UPDATE_KEY      = '__lgtbot_dash_check_update'
-_DASH_DO_UPDATE_KEY         = '__lgtbot_dash_do_update'           # 更新桥接层 (git pull --ff-only origin main)
-_DASH_DO_UPDATE_FORCE_KEY   = '__lgtbot_dash_do_update_force'     # 强制更新桥接层 (git reset --hard origin/main)
-_DASH_UPDATE_SUBMODULE_KEY  = '__lgtbot_dash_update_submodule'    # 更新 / 初始化 lgtbot 子模块
-_DASH_INIT_REPO_KEY         = '__lgtbot_dash_init_repo'           # 市场用户:把插件目录初始化为 git 仓库
-_DASH_DOWNLOAD_UPDATE_KEY   = '__lgtbot_dash_download_update'     # 免 git:下载源码 zip 覆盖更新
+_DASH_DO_UPDATE_KEY         = '__lgtbot_dash_do_update'
+_DASH_DO_UPDATE_FORCE_KEY   = '__lgtbot_dash_do_update_force'
+_DASH_UPDATE_SUBMODULE_KEY  = '__lgtbot_dash_update_submodule'
+_DASH_INIT_REPO_KEY         = '__lgtbot_dash_init_repo'
+_DASH_DOWNLOAD_UPDATE_KEY   = '__lgtbot_dash_download_update'
+# Dashboard 的各 action 端点(JS 侧 DASH_KEYS 与此一一对应)
 _DASH_CLEAR_AVATAR_KEY      = '__lgtbot_dash_clear_avatar'
 _DASH_CLEAR_AVATAR_7D_KEY   = '__lgtbot_dash_clear_avatar_7d'
 _DASH_CLEAR_GEN_KEY         = '__lgtbot_dash_clear_gen'
@@ -111,6 +112,23 @@ _BACKUP_DELETE_ROUTE   = '/api/ext/lgtbot/backup/delete'
 _BACKUP_DOWNLOAD_ROUTE = '/api/ext/lgtbot/backup/download'
 # 仪表盘「机器人绑定」换绑端点(要接 ?appid= 参数,同样走 register_route)
 _BIND_BOT_ROUTE       = '/api/ext/lgtbot/bind-bot'
+# 检查 / 执行更新(走 register_route 在工作线程里跑,见 page_dashboard.update_route;JS 侧 DASH_ROUTES)
+_DASH_CHECK_UPDATE_ROUTE     = '/api/ext/lgtbot/update/check'
+_DASH_DO_UPDATE_ROUTE        = '/api/ext/lgtbot/update/pull'        # 更新桥接层 (git pull --ff-only origin main)
+_DASH_DO_UPDATE_FORCE_ROUTE  = '/api/ext/lgtbot/update/force'       # 强制更新桥接层 (git reset --hard origin/main)
+_DASH_UPDATE_SUBMODULE_ROUTE = '/api/ext/lgtbot/update/submodule'   # 更新 / 初始化 lgtbot 子模块
+_DASH_INIT_REPO_ROUTE        = '/api/ext/lgtbot/update/init-repo'   # 市场用户:把插件目录初始化为 git 仓库
+_DASH_DOWNLOAD_UPDATE_ROUTE  = '/api/ext/lgtbot/update/download'    # 免 git:下载源码 zip 覆盖更新
+
+# 更新类路由 → (path, 同步实现, 是否与其他改动仓库的动作互斥);只读的「检查更新」不互斥
+_DASH_UPDATE_ROUTES = (
+    (_DASH_CHECK_UPDATE_ROUTE, page_dashboard.render_check_update, False),
+    (_DASH_DO_UPDATE_ROUTE, page_dashboard.render_do_update, True),
+    (_DASH_DO_UPDATE_FORCE_ROUTE, page_dashboard.render_do_update_force, True),
+    (_DASH_UPDATE_SUBMODULE_ROUTE, page_dashboard.render_update_submodule, True),
+    (_DASH_INIT_REPO_ROUTE, page_dashboard.render_init_repo, True),
+    (_DASH_DOWNLOAD_UPDATE_ROUTE, page_dashboard.render_download_update, True),
+)
 # 顶栏「计划重启」切换(要接 ?reason= 维护原因,故走 register_route 而非隐藏 action)
 _PLANNED_RESTART_ROUTE = '/api/ext/lgtbot/planned-restart'
 # 顶栏「重启 LGTBot」(要接 ?reason= 更新内容,同上,故走 register_route)
@@ -436,12 +454,6 @@ def register():
 
 
     # Dashboard action 端点
-    _register_hidden_action(_DASH_CHECK_UPDATE_KEY,      page_dashboard.render_check_update)
-    _register_hidden_action(_DASH_DO_UPDATE_KEY,         page_dashboard.render_do_update)
-    _register_hidden_action(_DASH_DO_UPDATE_FORCE_KEY,   page_dashboard.render_do_update_force)
-    _register_hidden_action(_DASH_UPDATE_SUBMODULE_KEY,  page_dashboard.render_update_submodule)
-    _register_hidden_action(_DASH_INIT_REPO_KEY,         page_dashboard.render_init_repo)
-    _register_hidden_action(_DASH_DOWNLOAD_UPDATE_KEY,   page_dashboard.render_download_update)
     _register_hidden_action(_DASH_CLEAR_AVATAR_KEY,      page_dashboard.render_clear_avatar)
     _register_hidden_action(_DASH_CLEAR_AVATAR_7D_KEY,   page_dashboard.render_clear_avatar_7d)
     _register_hidden_action(_DASH_CLEAR_GEN_KEY,         page_dashboard.render_clear_gen)
@@ -502,6 +514,8 @@ def register():
     web_pages.register_route('GET', _BACKUP_DELETE_ROUTE, page_backup.delete_handler, auth=True)
     web_pages.register_route('GET', _BACKUP_DOWNLOAD_ROUTE, page_backup.download_handler, auth=True)
     web_pages.register_route('GET', _BIND_BOT_ROUTE, page_dashboard.bind_bot_handler, auth=True)
+    for route, fn, exclusive in _DASH_UPDATE_ROUTES:
+        web_pages.register_route('GET', route, page_dashboard.update_route(fn, exclusive), auth=True)
     web_pages.register_route('GET', _PLANNED_RESTART_ROUTE, planned_restart_handler, auth=True)
     web_pages.register_route('GET', _RESTART_PANEL_ROUTE, restart_panel_handler, auth=True)
     web_pages.register_route('GET', _CRASH_VIEW_ROUTE, page_crash.view_handler, auth=True)
@@ -537,6 +551,8 @@ def unregister():
     web_pages.unregister_route('GET', _BACKUP_DELETE_ROUTE)
     web_pages.unregister_route('GET', _BACKUP_DOWNLOAD_ROUTE)
     web_pages.unregister_route('GET', _BIND_BOT_ROUTE)
+    for route, _fn, _exclusive in _DASH_UPDATE_ROUTES:
+        web_pages.unregister_route('GET', route)
     web_pages.unregister_route('GET', _PLANNED_RESTART_ROUTE)
     web_pages.unregister_route('GET', _RESTART_PANEL_ROUTE)
     web_pages.unregister_route('GET', _CRASH_VIEW_ROUTE)

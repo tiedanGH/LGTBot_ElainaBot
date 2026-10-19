@@ -35,6 +35,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -876,6 +877,28 @@ def _fetch_releases() -> dict:
     return {'releases': newer if newer else rels[:1], 'error': ''}
 
 
+# 检查 / 执行更新要跑 git 或下载,几十秒到几分钟。隐藏 action 的 provider 是框架在事件循环里同步调用的,
+# 直接跑会让整个 bot 的收发卡到结束、再一口气补发;所以这几个走 register_route,由 update_route 放进工作线程。
+# 改动仓库的几个同一时间只跑一个,免得两个 git 进程抢 index.lock;锁挂在持久 dict,热重载后仍认得正在跑的那个。
+_UPDATE_LOCK_KEY = 'dash_update_lock'
+
+
+def update_route(fn, exclusive: bool = True):
+    """把同步的更新动作包成 register_route 用的异步 handler,响应仍是 ``<pre id="result">`` 片段。"""
+    async def handler(request):
+        lock = boot._get_persistent().setdefault(_UPDATE_LOCK_KEY, threading.Lock()) if exclusive else None
+        if lock is not None and not lock.acquire(blocking=False):
+            body = _fragment({'success': False, 'message': '已有更新操作在进行中，请等它结束后再试'})
+        else:
+            try:
+                body = await asyncio.to_thread(fn)
+            finally:
+                if lock is not None:
+                    lock.release()
+        return web.Response(text=body, content_type='text/html')
+    return handler
+
+
 def render_check_update() -> str:
     """同时检查桥接层(本插件)与 lgtbot 子模块(上游 commit)两边的更新。
 
@@ -911,7 +934,7 @@ def _git_output_summary(proc, success: bool) -> str:
 def render_do_update() -> str:
     """更新桥接层 —— 在 ``boot.PLUGIN_DIR`` 执行 ``git pull --ff-only``。
 
-    同步阻塞 web worker 数秒(直到 git 完成;``--ff-only`` 模式下 git 不会进入交互)。失败不会破坏工作区。
+    经 ``update_route`` 在工作线程里跑;``--ff-only`` 模式下 git 不会进入交互。失败不会破坏工作区。
     """
     plugin_dir = boot.PLUGIN_DIR
     if not os.path.isdir(os.path.join(plugin_dir, '.git')):

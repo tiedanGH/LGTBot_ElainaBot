@@ -260,3 +260,74 @@ def test_submodule_status_without_git_is_empty_either_way(monkeypatch, tmp_path)
     assert pd._get_submodule_info()['status'] == 'empty'
     (sub / 'CMakeLists.txt').write_text('x')
     assert pd._get_submodule_info()['status'] == 'empty'
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 更新类动作(git pull / 子模块 / 下载):工作线程里跑,不卡事件循环
+# ─────────────────────────────────────────────────────────────────────────
+
+def _fragment_body(resp) -> dict:
+    import html
+    import json
+    text = resp.text
+    return json.loads(html.unescape(text[text.index('>') + 1:text.rindex('</pre>')]))
+
+
+@pytest.fixture
+def no_update_lock():
+    boot._get_persistent().pop(_pd()._UPDATE_LOCK_KEY, None)
+    yield
+    boot._get_persistent().pop(_pd()._UPDATE_LOCK_KEY, None)
+
+
+async def test_update_route_keeps_the_event_loop_running(no_update_lock):
+    """★ git pull 跑多久,bot 的收发就照常跑多久:动作在工作线程里执行,期间事件循环继续调度别的协程。"""
+    import asyncio
+    import threading
+    import time
+    pd = _pd()
+    seen = {}
+
+    def slow_pull():
+        seen['thread'] = threading.current_thread()
+        time.sleep(0.4)
+        return pd._fragment({'success': True, 'message': 'done'})
+
+    ticks = []
+
+    async def bot_traffic():
+        while True:
+            ticks.append(1)
+            await asyncio.sleep(0.02)
+
+    traffic = asyncio.ensure_future(bot_traffic())
+    resp = await pd.update_route(slow_pull)(None)
+    traffic.cancel()
+    assert _fragment_body(resp) == {'success': True, 'message': 'done'}
+    assert seen['thread'] is not threading.main_thread()
+    assert len(ticks) >= 10                     # 0.4s 里每 20ms 一次,卡住的话只会有 1 次
+
+
+async def test_repo_changing_updates_never_overlap(no_update_lock):
+    """改动仓库的动作同一时间只跑一个:第二个立刻回「进行中」;只读的检查更新照常并行;结束后锁放开(出异常也放)。"""
+    import asyncio
+    import time
+    pd = _pd()
+
+    def slow():
+        time.sleep(0.3)
+        return pd._fragment({'success': True})
+
+    first = asyncio.ensure_future(pd.update_route(slow)(None))
+    await asyncio.sleep(0.05)
+    second = _fragment_body(await pd.update_route(slow)(None))
+    assert second['success'] is False and '进行中' in second['message']
+    check = _fragment_body(await pd.update_route(lambda: pd._fragment({'success': True}), exclusive=False)(None))
+    assert check['success'] is True
+    assert _fragment_body(await first)['success'] is True
+
+    def boom():
+        raise RuntimeError('git 崩了')
+    with pytest.raises(RuntimeError):
+        await pd.update_route(boom)(None)
+    assert _fragment_body(await pd.update_route(lambda: pd._fragment({'success': True}))(None))['success'] is True
