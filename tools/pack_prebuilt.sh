@@ -62,6 +62,21 @@ done
 # 每个游戏目录(libgame.so + icon.png + resource/)整体搬入
 cp -a build/plugins/. "$STAGE/build/plugins/"
 
+# 编译树里其余被链接的共享库(如新版 lgtbot 的 libreproc,在 build/ 深层子目录):
+# CI 上靠烤进二进制的 RUNPATH 找到,用户机上没有编译树。按 ldd 的实际解析结果把整条符号链接链收进 build/ 顶层 ——
+# boot 只预加载不带版本号的 build/lib*.so,子进程按 LD_LIBRARY_PATH 找带版本号的 soname,两种名字都要有。
+BUILD_REAL="$(realpath build)"
+while IFS= read -r -d '' f; do
+  ldd "$f" 2>/dev/null || true
+done < <(find "$STAGE" -type f \( -name '*.so*' -o -perm -u+x \) -print0) \
+  | awk '$2 == "=>" && $3 ~ /^\// { print $1, $3 }' | sort -u \
+  | while read -r name path; do
+      case "$(realpath "$path")" in "$BUILD_REAL"/*) ;; *) continue ;; esac
+      [ -e "$STAGE/build/$name" ] && continue
+      cp -a "$(dirname "$path")/${name%%.so*}".so* "$STAGE/build/"
+      echo "  + ${path#"$ROOT"/}"
+    done
+
 # ── manifest.json(遍历 stage 计 sha256;写入 stage 后一并入包)────────────
 OS_TAG="$OS_TAG" PYTAG="$PYTAG" BOOST="$BOOST" \
 BRIDGE_SHA="$BRIDGE_SHA" SUB_SHA="$SUB_SHA" BUILD_TIME="$BUILD_TIME" \

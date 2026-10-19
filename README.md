@@ -84,7 +84,7 @@ cd ../.. && python3 main.py
 
 - **零配置加载** —— 作为 ElainaBot 插件，路径全部自包含在 `plugins/LGTBot_ElainaBot/`
 - **预编译部署** —— **无需本地 Boost.Python / C++20 工具链**即可上线
-  - CI 为 Ubuntu 22.04 / 24.04、Debian 12 预编译引擎 + 全部游戏，发布到滚动 release
+  - CI 为 Ubuntu 22.04 / 24.04、Debian 12 预编译引擎 + 全部游戏，自检脱离编译树也能加载后发布到滚动 release
   - 面板内镜像测速 / 选择、下载或手动上传、本地 ↔ 预编译一键切换（重启生效）
 - **市场安装兼容** —— 仪表盘可初始化 git 仓库
 
@@ -233,13 +233,14 @@ plugins/LGTBot_ElainaBot/
 │   └── lgtbot_icon.png      站标 64×64，Web 面板顶栏内联成 data URI
 │
 ├── tools/
-│   ├── pack_prebuilt.sh     CI 打包脚本：收运行时子集 + manifest.json → dist/*.zip
+│   ├── pack_prebuilt.sh     CI 打包脚本：收运行时子集 + 编译树里链接的共享库 + manifest.json → dist/*.zip
+│   ├── check_prebuilt.py    CI 打包后自检：按面板方式解压，查依赖都在包里 + 照 boot 方式导入桥接层，不过不发布
 │   └── trim_prebuilt_release.py  CI 发布前清理：滚动 release 仅保留最新 + 上一批两个版本
 │
 ├── .github/workflows/       GitHub Actions CI
 │   ├── cmake.yml            Ubuntu 编译 + ctest + 桥接冒烟
 │   ├── pytest.yml           Python 单元测试
-│   ├── prebuilt.yml         三发行版矩阵预编译 → 打包 → 发滚动 prebuilt release
+│   ├── prebuilt.yml         三发行版矩阵预编译 → 打包 → 自检 → 发滚动 prebuilt release
 │   └── update-lgtbot.yml    每周自动 bump lgtbot 子模块（变更则触发 prebuilt）
 │
 ├── lgtbot/                  ⬇ git submodule（LGTBot 上游源码）
@@ -251,7 +252,7 @@ plugins/LGTBot_ElainaBot/
 │
 ├── build_prebuilt/          📦 下载的预编译包解压目录（与 build/ 并存）
 │   ├── LGTBot_ElainaBot.so   预编译的桥接层（预编译模式下 boot 从此 import）
-│   ├── build/               编译产物（同顶层 build/ 布局：libbot_core.so / runner / plugins/…）
+│   ├── build/               编译产物（同顶层 build/ 布局：libbot_core.so / runner / plugins/…；编译树深处链接的 libreproc 等也收在这一层）
 │   └── manifest.json        包元数据（平台 / Python / sha，用于对比更新）
 │
 └── data/                    🗂 运行时数据（自动创建）

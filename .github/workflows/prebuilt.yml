@@ -18,6 +18,7 @@ on:
       - 'lgtbot'
       - '.github/workflows/prebuilt.yml'
       - 'tools/pack_prebuilt.sh'
+      - 'tools/check_prebuilt.py'
 
 permissions:
   contents: write
@@ -81,6 +82,12 @@ jobs:
         run: |
           chmod +x tools/pack_prebuilt.sh
           bash tools/pack_prebuilt.sh ${{ matrix.os_tag }}
+
+      - name: Check prebuilt package
+        run: |
+          mv build build.hidden
+          python3 tools/check_prebuilt.py dist/*.zip
+          mv build.hidden build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
