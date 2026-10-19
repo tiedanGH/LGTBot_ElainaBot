@@ -48,7 +48,7 @@
 
 状态文件:
   · ``data/build/state.json``  {pid, start_time, cmd_display, cmd_argv,
-                                started_iso, finished, running}
+                                started_iso, finished, running, audit_id}
   · ``data/build/build.log``   编译输出(每次启动覆盖)
   · ``data/build/build_target_input.json``  自定义 target 参数(JS POST 写入)
 
@@ -206,6 +206,17 @@ def _compute_elapsed(state: dict) -> int | None:
     return max(0, int(ft - st))
 
 
+def _audit_result(state: dict, rc) -> tuple:
+    """任务结束时审计条目的 ``(是否成功, 文案)``,文案仍带 PID;没有退出码 = 被信号打断。"""
+    pid = state.get('pid')
+    meta = state.get('kind') == 'meta'
+    if rc == 0:
+        return True, f'{"已完成" if meta else "编译成功"} (PID {pid})'
+    if rc is None:
+        return False, f'已中断 (PID {pid})'
+    return False, f'{"失败" if meta else "编译失败"} (PID {pid}，退出码 {rc})'
+
+
 def get_build_state() -> dict:
     """对外:返回完整状态 dict。
 
@@ -233,6 +244,7 @@ def get_build_state() -> dict:
         if elapsed is not None:
             state['elapsed_sec'] = elapsed
         _write_state(state)
+        audit.finish(state.get('audit_id', ''), *_audit_result(state, rc))
     return {
         'running': running,
         'pid': pid if running else None,
@@ -357,6 +369,8 @@ def _start_build(argv: list, display: str, kind: str = 'build',
     finally:
         log_f.close()  # 子进程已 dup fd,父进程不需要持有
 
+    # 审计先记「等待中」;结束时 get_build_state 收尾(或 _kill_build 终止)按 audit_id 改写成结果
+    audit_id = audit.record('build', display, f'已启动 (PID {proc.pid})', src=src, pending=True)
     _write_state({
         'pid': proc.pid,
         'start_time': time.time(),
@@ -367,11 +381,10 @@ def _start_build(argv: list, display: str, kind: str = 'build',
         'finished': False,
         'running': True,
         'returncode': None,
+        'audit_id': audit_id,
     })
 
     log.info(f'[build] 已启动：{display} (PID {proc.pid}， kind={kind})')
-    # 只记「已启动」—— 编译结果由 build 状态页(state.json + 日志)负责展示
-    audit.record('build', display, f'已启动 (PID {proc.pid})', src=src)
     return {'success': True, 'message': f'已启动：{display}', 'pid': proc.pid}
 
 
@@ -413,6 +426,7 @@ def _kill_build(src: str = audit.SRC_PANEL) -> dict:
     if elapsed is not None:
         s['elapsed_sec'] = elapsed
     _write_state(s)
+    audit.finish(s.get('audit_id', ''), False, f'已终止 (PID {pid})')
 
     # 在日志末尾追加一条提示,方便用户对应得上
     try:

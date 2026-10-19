@@ -13,6 +13,7 @@
   · 损坏容错:audit.json 解析失败时尽力改名 ``.corrupt_<ts>`` 留证,从空续记。
   · 放 ``data/audit/`` 子目录:框架配置入口看不到;backup 的打包白名单不含此目录,恢复旧备份不会把审计历史一起回滚。
   · **不提供任何清空 API / 端点**(防自毁审计);容量靠保留期到点清理,不限条数。
+  · 结果要过一阵才知道的操作(引擎编译)先记 ``pending``,结果出来后 ``finish()`` 按 id 改写同一条。
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import json
 import os
 import threading
 import time
+import uuid
 
 from core.base.logger import get_logger, PLUGIN
 
@@ -97,27 +99,57 @@ def _atomic_write(entries: list) -> None:
 
 
 def record(cat: str, action: str, detail: str = '',
-           ok: bool = True, src: str = SRC_PANEL) -> None:
-    """追加一条审计记录并同步落盘。
+           ok: bool = True, src: str = SRC_PANEL, pending: bool = False) -> str:
+    """追加一条审计记录并同步落盘,返回记录 id(失败返回 ``''``)。
 
     永不抛异常 —— 任何失败仅 log.warning,业务动作不受影响。
     返回即已持久化(重启入口靠这一点保证 os.execv 前落盘)。
+    ``pending`` 的记录面板显示「等待中」,之后用 ``finish(id, …)`` 写入结果。
     """
     try:
         now = int(time.time())
+        entry = {
+            'id': uuid.uuid4().hex,
+            'ts': now,
+            'cat': str(cat),
+            'action': str(action),
+            'detail': str(detail)[:500],
+            'ok': bool(ok),
+            'src': str(src),
+        }
+        if pending:
+            entry['pending'] = True
         with _lock:
             entries = _load_raw()
-            entries.append({
-                'ts': now,
-                'cat': str(cat),
-                'action': str(action),
-                'detail': str(detail)[:500],
-                'ok': bool(ok),
-                'src': str(src),
-            })
+            entries.append(entry)
             _atomic_write(_prune(entries, now))
+        return entry['id']
     except Exception as e:
-        log.warning(f'[audit] 记录失败(不影响业务): {e}')
+        log.warning(f'[audit] 记录失败: {e}')
+        return ''
+
+
+def finish(entry_id: str, ok: bool, detail: str) -> bool:
+    """把 ``record(pending=True)`` 那条记录改成最终结果(时间仍是发起时刻)。
+
+    id 为空 / 记录已过保留期 → False,不新增记录。永不抛异常。
+    """
+    if not entry_id:
+        return False
+    try:
+        with _lock:
+            entries = _load_raw()
+            for e in entries:
+                if e.get('id') == entry_id:
+                    e['ok'] = bool(ok)
+                    e['detail'] = str(detail)[:500]
+                    e.pop('pending', None)
+                    _atomic_write(entries)
+                    return True
+        return False
+    except Exception as e:
+        log.warning(f'[audit] 写入结果失败: {e}')
+        return False
 
 
 def get_entries() -> list:

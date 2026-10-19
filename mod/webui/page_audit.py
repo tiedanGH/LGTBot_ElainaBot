@@ -25,6 +25,7 @@ import os
 import time
 
 from .. import audit
+from . import page_build
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 
@@ -51,6 +52,8 @@ def _payload() -> dict:
     entries 新 → 旧全量下发(保留期内的全部),类别筛选在客户端做;
     categories 把 ``audit.CATEGORIES``(单一真相源)转成 JS 好用的形状。
     """
+    # 编译结果在读编译状态时才落定
+    page_build.get_build_state()
     st = audit.file_status()
     return {
         'entries': audit.get_entries(),

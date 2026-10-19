@@ -274,3 +274,42 @@ def test_record_defaults_to_panel_source_and_ok():
     audit.record('cache', '清理缓存')
     e = _read_file()[-1]
     assert e['ok'] is True and e['src'] == audit.SRC_PANEL and e['detail'] == ''
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 等待中的记录:record(pending=True) → finish(id, …)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_pending_record_is_rewritten_in_place_by_finish():
+    """★ 结果要过一阵才知道的操作:先记「等待中」,finish 按 id 改写**同一条**(时间不动、不新增),别的记录不受影响。"""
+    audit.record('cache', '清理缓存')
+    rid = audit.record('build', '完整编译', '已启动 (PID 42)', pending=True)
+    assert rid
+    before = _read_file()
+    assert before[-1]['pending'] is True and 'pending' not in before[0]
+    assert audit.finish(rid, False, '编译失败 (PID 42，退出码 2)') is True
+    after = _read_file()
+    assert len(after) == 2 and after[0] == before[0]
+    e = after[-1]
+    assert 'pending' not in e and e['ok'] is False
+    assert e['detail'] == '编译失败 (PID 42，退出码 2)' and e['ts'] == before[-1]['ts']
+
+
+def test_finish_with_unknown_or_empty_id_changes_nothing():
+    rid = audit.record('build', '完整编译', '已启动 (PID 42)', pending=True)
+    snapshot = _read_file()
+    assert audit.finish('', True, 'x') is False
+    assert audit.finish('not-an-id', True, 'x') is False
+    assert _read_file() == snapshot
+    assert audit.finish(rid, True, '编译成功 (PID 42)') is True
+
+
+def test_finish_swallows_write_failure(monkeypatch):
+    rid = audit.record('build', '完整编译', '已启动 (PID 42)', pending=True)
+
+    def _boom(*a, **k):
+        raise OSError('disk full')
+    monkeypatch.setattr(audit.os, 'replace', _boom)
+    assert audit.finish(rid, True, '编译成功 (PID 42)') is False      # 不应抛出
+    assert _read_file()[-1]['pending'] is True

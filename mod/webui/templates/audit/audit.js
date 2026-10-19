@@ -134,9 +134,11 @@ function auditRenderTable() {
         ? '<span class="audit-detail-text" title="' + escapeHtml(detail) + '">' + escapeHtml(detail) + '</span>'
         : '<span class="audit-detail-text">—</span>'}</td>
       <td class="audit-col-src"><span class="${auditSrcBadgeClass(e.src)}">${escapeHtml(e.src || '—')}</span></td>
-      <td class="audit-col-result">${e.ok
-        ? '<span class="dash-msg-ok">✅ 成功</span>'
-        : '<span class="dash-msg-err">❌ 失败</span>'}</td>
+      <td class="audit-col-result">${e.pending
+        ? '<span class="dash-msg-info">⏳ 等待中</span>'
+        : e.ok
+          ? '<span class="dash-msg-ok">✅ 成功</span>'
+          : '<span class="dash-msg-err">❌ 失败</span>'}</td>
     </tr>`;
   }).join('');
 

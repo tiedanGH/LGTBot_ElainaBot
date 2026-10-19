@@ -62,6 +62,19 @@ def test_audit_payload_mirrors_module_state(tmp_path, monkeypatch):
                                        'label': audit.CATEGORIES['build'][1]}
 
 
+def test_audit_payload_settles_a_finished_build_first(tmp_path, monkeypatch):
+    """★ 编译结果在读编译状态时才落定 —— 审计页刷新先读一次,刚跑完的编译不会一直停在「等待中」。"""
+    page_audit, _m, _l = _pages()
+    from plugins.LGTBot_ElainaBot.mod.webui import page_build
+    monkeypatch.setattr(audit, 'AUDIT_DIR', str(tmp_path))
+    monkeypatch.setattr(audit, 'AUDIT_PATH', str(tmp_path / 'audit.json'))
+    rid = audit.record('build', '完整编译', '已启动 (PID 7)', pending=True)
+    monkeypatch.setattr(page_build, 'get_build_state',
+                        lambda: audit.finish(rid, True, '编译成功 (PID 7)'))
+    (e,) = page_audit._payload()['entries']
+    assert 'pending' not in e and e['detail'] == '编译成功 (PID 7)'
+
+
 def test_audit_render_list_is_success_fragment(tmp_path, monkeypatch):
     page_audit, _m, _l = _pages()
     monkeypatch.setattr(audit, 'AUDIT_DIR', str(tmp_path))

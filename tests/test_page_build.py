@@ -63,3 +63,69 @@ def test_is_alive_running_child_and_foreign_pid():
         p.terminate()
         p.wait()
     assert page_build._is_alive(os.getpid()) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 操作审计:启动只记「等待中」,结束 / 终止时改写同一条
+# ─────────────────────────────────────────────────────────────────────────
+
+class _FakeProc:
+    pid = 4242
+
+
+@pytest.fixture
+def build_env(tmp_path, monkeypatch):
+    """状态 / 日志 / 退出码文件指到 tmp,Popen 换成假进程;返回 (设存活, 设退出码) 两个开关。"""
+    import shutil
+    from plugins.LGTBot_ElainaBot.mod import audit
+    shutil.rmtree(audit.AUDIT_DIR, ignore_errors=True)
+    for name in ('STATE_PATH', 'LOG_PATH', 'STATUS_PATH'):
+        monkeypatch.setattr(page_build, name, str(tmp_path / name.lower()))
+    monkeypatch.setattr(page_build.subprocess, 'Popen', lambda *a, **k: _FakeProc())
+    alive = {'v': True}
+    monkeypatch.setattr(page_build, '_is_alive', lambda pid: alive['v'])
+
+    def set_exit(code):
+        alive['v'] = False
+        if code is not None:
+            (tmp_path / 'status_path').write_text(str(code), encoding='utf-8')
+    yield set_exit, audit
+    shutil.rmtree(audit.AUDIT_DIR, ignore_errors=True)
+
+
+def _build_entries(audit):
+    return [e for e in reversed(audit.get_entries()) if e['cat'] == 'build']
+
+
+@pytest.mark.parametrize('kind, code, ok, detail', [
+    ('build', 0, True, '编译成功 (PID 4242)'),
+    ('build', 2, False, '编译失败 (PID 4242，退出码 2)'),
+    ('build', None, False, '已中断 (PID 4242)'),
+    ('meta', 0, True, '已完成 (PID 4242)'),
+])
+def test_build_audit_waits_then_shows_the_result(build_env, kind, code, ok, detail):
+    """★ 启动时审计只记「等待中」(已启动 + PID);结束后同一条改成实际结果,仍带 PID,不再一律显示成功。"""
+    set_exit, audit = build_env
+    assert page_build._start_build(['bash', 'build.sh'], '完整编译', kind=kind)['success']
+    (e,) = _build_entries(audit)
+    assert e['pending'] is True and e['detail'] == '已启动 (PID 4242)' and e['action'] == '完整编译'
+    page_build.get_build_state()                      # 还在跑:不落定
+    assert _build_entries(audit)[0]['pending'] is True
+    set_exit(code)
+    page_build.get_build_state()
+    page_build.get_build_state()                      # 再读也不重复改写 / 新增
+    (e,) = _build_entries(audit)
+    assert 'pending' not in e and e['ok'] is ok and e['detail'] == detail
+
+
+def test_killed_build_audit_shows_terminated(build_env, monkeypatch):
+    """手动终止:启动那条改成「已终止」(失败),另有一条「终止编译」记录这次操作本身。"""
+    set_exit, audit = build_env
+    page_build._start_build(['bash', 'build.sh'], '完整编译')
+    monkeypatch.setattr(page_build.os, 'getpgid', lambda pid: pid, raising=False)
+    monkeypatch.setattr(page_build.os, 'killpg', lambda pgid, sig: set_exit(None), raising=False)
+    monkeypatch.setattr(page_build.time, 'sleep', lambda s: None)
+    assert page_build._kill_build()['success']
+    started, killed = _build_entries(audit)
+    assert 'pending' not in started and started['ok'] is False and started['detail'] == '已终止 (PID 4242)'
+    assert killed['action'] == '终止编译' and killed['detail'] == 'PID 4242'
