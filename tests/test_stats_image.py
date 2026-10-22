@@ -868,6 +868,37 @@ def test_trend_legend_text_is_centred_on_its_swatch():
         assert swatch[2] < ink[0]                                    # 色块在文字左边
 
 
+def test_section_titles_centre_on_their_colour_bars(monkeypatch):
+    """★ 带左侧色条的区块标题按墨迹与色条垂直居中(按字框摆会偏下),同一行的图例色块、门槛胶囊也落在色条中线上;两张卡的区块标题都算。"""
+    _need_font()
+    from PIL import ImageDraw
+    recs = []
+    real = ImageDraw.Draw
+    monkeypatch.setattr(ImageDraw, 'Draw', lambda im: recs.append(_DrawRecorder(real(im))) or recs[-1])
+    assert stats_image.render_stats_image(_sample_stats(), 'x')
+    assert stats_image.render_game_stats_image(_game_sample(power_min=5))
+    legend = (stats_image._ACCENT, stats_image._GREEN)
+    seen, row_marks = set(), 0
+    for rec in recs:
+        for bar, _fill in rec.rects:
+            if (bar[2] - bar[0], bar[3] - bar[1]) != (8, 30):
+                continue
+            mid = (bar[1] + bar[3]) / 2
+            xy, text, f, _c = min((t for t in rec.texts if t[0][0] == bar[2] + 14),
+                                  key=lambda t: abs(t[0][1] - bar[1]))
+            ink = _ink_box(xy, text, f)
+            assert abs((ink[1] + ink[3]) / 2 - mid) <= 1, (text, ink, bar)
+            seen.add(text)
+            for box, fill in rec.rects:
+                in_row = box[0] > bar[2] and box[1] < bar[3] and bar[1] < box[3]
+                if in_row and (fill == stats_image._TAG_BG or (fill in legend and box[3] - box[1] == 14)):
+                    assert (box[1] + box[3]) / 2 == mid, (text, box)       # 都是整数坐标的矩形,中线严格相等
+                    row_marks += 1
+    assert {'数据总览', '近 10 日活跃趋势', '今日游戏榜', '玩家参与榜',
+            '近 12 周活跃趋势', '局数排行', '实力排行'} <= seen
+    assert row_marks >= 5                    # 两张卡的图例色块各两个 + 实力排行的门槛胶囊
+
+
 def test_my_row_on_both_boards_when_only_one_lists_me():
     """★ 只在一张榜上时两张榜底部都补行;在榜的那张写榜上的名次(前三照样画奖牌色)。"""
     base = _game_sample()

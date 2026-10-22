@@ -168,10 +168,19 @@ def _tile(d, box, radius=8, fill=_PANEL2, outline=_BORDER):
     d.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=1)
 
 
-def _sec_title(d, x, y, text):
-    """左侧 accent 色条 + 标题(同面板 dash-section-title 的视觉记号)。"""
-    d.rounded_rectangle((x, y + 2, x + 8, y + 32), radius=4, fill=_ACCENT)
-    _bold_text(d, (x + 22, y), text, _font(28), _TEXT)
+_SEC_MID = 17     # 标题色条中线相对标题行顶的偏移;同一行的图例、胶囊都对齐这条线
+
+
+def _sec_title(d, x, y, text, fg=_ACCENT) -> int:
+    """左侧色条 + 标题(同面板 dash-section-title 的视觉记号),返回标题右缘。
+
+    标题按墨迹与色条垂直居中:中文字体字框顶部留白大,按字框摆会整体偏下。
+    """
+    d.rounded_rectangle((x, y + _SEC_MID - 15, x + 8, y + _SEC_MID + 15), radius=4, fill=fg)
+    f = _font(28)
+    _l, top, _r, bottom = d.textbbox((0, 0), text, font=f)
+    _bold_text(d, (x + 22, y + _SEC_MID - (top + bottom) // 2), text, f, _TEXT)
+    return x + 22 + _text_w(d, text, f)
 
 
 def _delta_pill(d, x, y, diff, h=40, *, outline=False, bg=None) -> int:
@@ -209,9 +218,12 @@ def _tag_w(d, text: str) -> int:
     return _text_w(d, text, _font(18)) + 20
 
 
+_TAG_H = 26
+
+
 def _tag(d, x, y, text: str, fg=_TEXT_MUTED, bg=_TAG_BG) -> None:
     f = _font(18)
-    d.rounded_rectangle((x, y, x + _tag_w(d, text), y + 26), radius=13, fill=bg)
+    d.rounded_rectangle((x, y, x + _tag_w(d, text), y + _TAG_H), radius=_TAG_H // 2, fill=bg)
     d.text((x + 10, y + 1), text, font=f, fill=fg)
 
 
@@ -626,8 +638,7 @@ def _render(g: dict, sub_title: str, elapsed_ms: int | None = None) -> bytes | N
     for i, (label, items, key, fg) in enumerate(ranks):
         cx = pad + i * (half_w + gap)
         _section(d, (cx, y, cx + half_w, y + rank_h))
-        d.rounded_rectangle((cx + 28, y + 26, cx + 36, y + 56), radius=4, fill=fg)
-        _bold_text(d, (cx + 50, y + 24), label, _font(28), _TEXT)
+        _sec_title(d, cx + 28, y + 24, label, fg)
         if not items:
             d.text((cx + 28, y + 92), '暂无数据', font=_font(24), fill=_TEXT_FAINT)
             continue
@@ -860,7 +871,7 @@ def _activity_trend(d, box, title: str, bars: list) -> None:
     x0, y0, x1, _y1 = box
     _section(d, box)
     _sec_title(d, x0 + 28, y0 + 24, title)
-    _legend(d, x1 - 28, y0 + 42, (('活跃玩家', _GREEN), ('对局', _ACCENT)))
+    _legend(d, x1 - 28, y0 + 24 + _SEC_MID, (('活跃玩家', _GREEN), ('对局', _ACCENT)))
     colors = [_ACCENT] + ([_GREEN] if all(b[2] is not None for b in bars) else [])
     top = max((int(b[1 + k] or 0) for b in bars for k in range(len(colors))), default=0) or 1
     area_x, area_w = x0 + 48, (x1 - x0) - 96
@@ -952,11 +963,9 @@ def _game_boards(d, x0: int, y: int, inner_w: int, gap: int, h: int, boards: lis
     for i, b in enumerate(boards):
         cx, fg, items = x0 + i * (half_w + gap), b['fg'], b['rows']
         _section(d, (cx, y, cx + half_w, y + h))
-        d.rounded_rectangle((cx + inset, y + 26, cx + inset + 8, y + 56), radius=4, fill=fg)
-        tf = _font(28)
-        _bold_text(d, (cx + inset + 22, y + 24), b['title'], tf, _TEXT)
+        title_x1 = _sec_title(d, cx + inset, y + 24, b['title'], fg)
         if b['tag']:
-            _tag(d, cx + inset + 22 + _text_w(d, b['title'], tf) + 12, y + 30, b['tag'])
+            _tag(d, title_x1 + 12, y + 24 + _SEC_MID - _TAG_H // 2, b['tag'])
         if not items:
             d.text((cx + inset, y + 92), '暂无数据', font=_font(24), fill=_TEXT_FAINT)
         max_c = b['full'] or max([int(it[2] or 0) for it in items] + [1])
