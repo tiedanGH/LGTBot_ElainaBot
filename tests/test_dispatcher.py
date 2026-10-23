@@ -1379,7 +1379,7 @@ async def test_stats_command_warns_when_group_lacks_full_volume(monkeypatch):
 def _game_detail(**over) -> dict:
     """metrics.query_game_detail 的一份查到了的结果。"""
     d = {'available': True, 'errors': [], 'found': True, 'suggestions': [],
-         'game_name': '天赋云巢', 'game_count': 45, 'rank': 2, 'week_rank': 3,
+         'game_name': '天赋云巢', 'game_count': 45, 'rank': 2, 'week_rank': 3, 'week_game_count': 20,
          'matches': 635, 'attendances': 2706, 'avg_players': 4.26,
          'min_players': 2, 'max_players': 8, 'groups': 16, 'group_matches': 120,
          'group_players': 23, 'last_time': '2026-08-08 15:52:10',
@@ -1422,7 +1422,7 @@ async def test_game_stats_text_fallback(monkeypatch):
     for frag in ('累计对局: 635 局（2706 人次）', '累计玩家: 105 人（本群 23 人）',
                  '近7日对局: 110 局（↓5）', '近7日玩家: 52 人（↑2）',
                  '平均人数: 4.26 人（2–8 人）', '游戏群聊: 16 个（本群 120 局）',
-                 '热度排名: 第 2 / 45（近7日第 3）', '最后一局: 2026-08-08 15:52',
+                 '热度排名: 第 2 / 45（近7日第 3 / 20）', '最后一局: 2026-08-08 15:52',
                  '👑 局数排行:\n  1、铁蛋 (317局)',
                  '🏅 实力排行（≥10局）:\n  1、铁蛋 (78.30% · 11局)',
                  '我的: 36 局（第 21 名）· 实力 52.00%（第 37 名）'):

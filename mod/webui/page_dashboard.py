@@ -1382,8 +1382,15 @@ def render_download_update() -> str:
 # 缓存清理
 # ─────────────────────────────────────────────────────────────────────────
 
-def _clear_dir(path: str) -> tuple[bool, str, int]:
-    """递归删除 ``path`` 下全部直接子项，保留 ``path`` 本身;返回 ``(ok, msg, n)``.
+def _entry_size(entry) -> int:
+    """直接子项占用的字节数:文件取自身大小,目录递归累加。"""
+    if entry.is_dir(follow_symlinks=False):
+        return _dir_size_and_count(entry.path)['bytes']
+    return entry.stat(follow_symlinks=False).st_size
+
+
+def _clear_dir(path: str) -> tuple[bool, str, int, int]:
+    """递归删除 ``path`` 下全部直接子项，保留 ``path`` 本身;返回 ``(ok, msg, n, 释放字节数)``.
 
     Audit:本函数被调用前必然走过 UI 的两次 confirm(见 dashboard.js 的
     ``DASH_CLEAR_PROMPTS``)。这里 ``log.info`` 一条 audit 日志便于事后排查
@@ -1391,41 +1398,43 @@ def _clear_dir(path: str) -> tuple[bool, str, int]:
     """
     if not os.path.isdir(path):
         log.info(f'[cache-clear] 跳过(目录不存在):{path}')
-        return True, '目录不存在，无需清理', 0
+        return True, '目录不存在，无需清理', 0, 0
     log.info(f'[cache-clear] 开始清理:{path}')
-    removed = 0
+    removed = freed = 0
     errs: list = []
     try:
         for entry in os.scandir(path):
             try:
+                size = _entry_size(entry)
                 if entry.is_dir(follow_symlinks=False):
                     shutil.rmtree(entry.path, ignore_errors=False)
                 else:
                     os.remove(entry.path)
                 removed += 1
+                freed += size
             except Exception as e:
                 errs.append(f'{entry.name}: {e}')
     except Exception as e:
         log.warning(f'[cache-clear] 扫描失败: {path}:{e}')
-        return False, f'扫描目录失败：{e}', removed
+        return False, f'扫描目录失败：{e}', removed, freed
     if errs:
         log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败: {path} (删除 {removed} 项)')
-        return False, ';'.join(errs[:5]), removed
+        return False, ';'.join(errs[:5]), removed, freed
     log.info(f'[cache-clear] 完成: {path} (删除 {removed} 项)')
-    return True, '清理完成', removed
+    return True, '清理完成', removed, freed
 
 
-def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int]:
+def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int, int]:
     """删除 ``path`` 下 mtime 早于 ``days`` 天的直接子项(对「每对局一目录」结构有意义)。
 
     Audit:同 ``_clear_dir``,执行前后 INFO 日志。
     """
     if not os.path.isdir(path):
         log.info(f'[cache-clear] 跳过 (目录不存在):{path}')
-        return True, '目录不存在，无需清理', 0
+        return True, '目录不存在，无需清理', 0, 0
     log.info(f'[cache-clear] 开始保留近 {days} 天: {path}')
     cutoff = time.time() - days * 86400
-    removed = 0
+    removed = freed = 0
     errs: list = []
     try:
         for entry in os.scandir(path):
@@ -1433,21 +1442,23 @@ def _clear_dir_keep_recent(path: str, days: int = 7) -> tuple[bool, str, int]:
                 st = entry.stat(follow_symlinks=False)
                 if st.st_mtime >= cutoff:
                     continue
+                size = _entry_size(entry)
                 if entry.is_dir(follow_symlinks=False):
                     shutil.rmtree(entry.path, ignore_errors=False)
                 else:
                     os.remove(entry.path)
                 removed += 1
+                freed += size
             except Exception as e:
                 errs.append(f'{entry.name}:{e}')
     except Exception as e:
         log.warning(f'[cache-clear] 扫描失败: {path}:{e}')
-        return False, f'扫描目录失败：{e}', removed
+        return False, f'扫描目录失败：{e}', removed, freed
     if errs:
         log.warning(f'[cache-clear] 完成但有 {len(errs)} 项失败: {path} (保留近 {days} 天，删除 {removed} 项)')
-        return False, ';'.join(errs[:5]), removed
+        return False, ';'.join(errs[:5]), removed, freed
     log.info(f'[cache-clear] 完成保留近 {days} 天: {path} (删除 {removed} 项)')
-    return True, f'已保留近 {days} 天数据', removed
+    return True, f'已保留近 {days} 天数据', removed, freed
 
 
 def _cache_dir(name: str) -> str:
@@ -1455,44 +1466,44 @@ def _cache_dir(name: str) -> str:
     return os.path.join(boot.IMG_PATH, _CACHE_DIRNAMES.get(name, name))
 
 
-def _audit_clear(action: str, ok: bool, msg: str, n: int) -> None:
+def _audit_clear(action: str, ok: bool, msg: str, n: int, freed: int) -> None:
     """清缓存审计:目录不存在(n=0)也照记 —— 用户确实按下了清理按钮。"""
-    audit.record('cache', action, f'删除 {n} 项' + ('' if ok else f'; {msg}'), ok=ok)
+    audit.record('cache', action, f'删除 {n} 项、释放 {audit.fmt_mb(freed)}' + ('' if ok else f'; {msg}'), ok=ok)
 
 
 def render_clear_avatar() -> str:
-    ok, msg, n = _clear_dir(_cache_dir('avatar'))
-    _audit_clear('清理头像缓存 (全部)', ok, msg, n)
+    ok, msg, n, freed = _clear_dir(_cache_dir('avatar'))
+    _audit_clear('清理头像缓存 (全部)', ok, msg, n, freed)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_avatar_7d() -> str:
-    ok, msg, n = _clear_dir_keep_recent(_cache_dir('avatar'), days=7)
-    _audit_clear('清理头像缓存 (保留7天)', ok, msg, n)
+    ok, msg, n, freed = _clear_dir_keep_recent(_cache_dir('avatar'), days=7)
+    _audit_clear('清理头像缓存 (保留7天)', ok, msg, n, freed)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_gen() -> str:
-    ok, msg, n = _clear_dir(_cache_dir('gen'))
-    _audit_clear('清理图片缓存 (全部)', ok, msg, n)
+    ok, msg, n, freed = _clear_dir(_cache_dir('gen'))
+    _audit_clear('清理图片缓存 (全部)', ok, msg, n, freed)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_gen_7d() -> str:
-    ok, msg, n = _clear_dir_keep_recent(_cache_dir('gen'), days=7)
-    _audit_clear('清理图片缓存 (保留7天)', ok, msg, n)
+    ok, msg, n, freed = _clear_dir_keep_recent(_cache_dir('gen'), days=7)
+    _audit_clear('清理图片缓存 (保留7天)', ok, msg, n, freed)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_match_all() -> str:
-    ok, msg, n = _clear_dir(_cache_dir('match'))
-    _audit_clear('清理赛况缓存 (全部)', ok, msg, n)
+    ok, msg, n, freed = _clear_dir(_cache_dir('match'))
+    _audit_clear('清理赛况缓存 (全部)', ok, msg, n, freed)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 
 def render_clear_match_7d() -> str:
-    ok, msg, n = _clear_dir_keep_recent(_cache_dir('match'), days=7)
-    _audit_clear('清理赛况缓存 (保留7天)', ok, msg, n)
+    ok, msg, n, freed = _clear_dir_keep_recent(_cache_dir('match'), days=7)
+    _audit_clear('清理赛况缓存 (保留7天)', ok, msg, n, freed)
     return _fragment({'success': ok, 'message': msg, 'removed': n})
 
 

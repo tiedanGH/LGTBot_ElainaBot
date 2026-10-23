@@ -708,7 +708,7 @@ def _game_sample(**over) -> dict:
     today = datetime.now().date()
     gs = {
         'available': True, 'found': True, 'game_name': '天赋云巢', 'game_count': 45,
-        'rank': 2, 'week_rank': 3, 'matches': 635, 'attendances': 2706, 'avg_players': 4.26,
+        'rank': 2, 'week_rank': 3, 'week_game_count': 20, 'matches': 635, 'attendances': 2706, 'avg_players': 4.26,
         'min_players': 2, 'max_players': 8, 'groups': 16, 'group_matches': 120,
         'group_players': 23, 'last_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'week_matches': 110, 'prev_week_matches': 115,
@@ -927,10 +927,10 @@ def test_game_overview_tiles(monkeypatch):
     assert [label for label, _p in seen] == ['累计对局', '累计玩家', '近7日对局', '近7日玩家',
                                             '平均人数', '游戏群聊', '热度排名', '最后一局']
     pills = dict(seen)
-    assert pills['累计对局'] == ('info', ('', '2,706', ' 人次'))     # 奇数位的段加粗
+    assert pills['累计对局'] == ('info', ('', '2,706', ' 人次'))
     assert pills['累计玩家'] == ('info', ('本群 ', '23', ' 人'))
     assert pills['游戏群聊'] == ('info', ('本群 ', '120', ' 局'))
-    assert pills['热度排名'] == ('info', ('近7日 ', '#3'))
+    assert pills['热度排名'] == ('info', ('近7日 ', '#3', ' / 20'))
     assert pills['平均人数'] == ('info', '2–8 人') and isinstance(pills['最后一局'][1], str)
 
     seen.clear()
@@ -941,7 +941,8 @@ def test_game_overview_tiles(monkeypatch):
     assert pills['热度排名'] == ('info', ('近7日 ', '无对局'))   # 近 7 日没有对局也挂胶囊
 
 
-@pytest.mark.parametrize('parts', [('近7日 ', '无对局'), ('本群 ', '23', ' 人'), ('', '2,706', ' 人次')])
+@pytest.mark.parametrize('parts', [('近7日 ', '无对局'), ('近7日 ', '#10', ' / 20'),
+                                   ('本群 ', '23', ' 人'), ('', '2,706', ' 人次')])
 def test_info_pill_bolds_odd_segments(monkeypatch, parts):
     """胶囊分段画,奇数位的段加粗:粗体描边多出的那点算进占宽,段与段首尾相接不重叠,两端仍各留 13px。"""
     _need_font()

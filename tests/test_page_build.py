@@ -84,9 +84,12 @@ def build_env(tmp_path, monkeypatch):
     monkeypatch.setattr(page_build.subprocess, 'Popen', lambda *a, **k: _FakeProc())
     alive = {'v': True}
     monkeypatch.setattr(page_build, '_is_alive', lambda pid: alive['v'])
+    clock = {'t': 1_700_000_000.0}
+    monkeypatch.setattr(page_build.time, 'time', lambda: clock['t'])
 
     def set_exit(code):
         alive['v'] = False
+        clock['t'] += 125                     # 每次都「编译」了 2 分 5 秒
         if code is not None:
             (tmp_path / 'status_path').write_text(str(code), encoding='utf-8')
     yield set_exit, audit
@@ -98,13 +101,13 @@ def _build_entries(audit):
 
 
 @pytest.mark.parametrize('kind, code, ok, detail', [
-    ('build', 0, True, '编译成功 (PID 4242)'),
-    ('build', 2, False, '编译失败 (PID 4242，退出码 2)'),
-    ('build', None, False, '已中断 (PID 4242)'),
+    ('build', 0, True, '编译成功 (PID 4242，用时 2 分 5 秒)'),
+    ('build', 2, False, '编译失败 (PID 4242，退出码 2，用时 2 分 5 秒)'),
+    ('build', None, False, '已中断 (PID 4242，用时 2 分 5 秒)'),
     ('meta', 0, True, '已完成 (PID 4242)'),
 ])
 def test_build_audit_waits_then_shows_the_result(build_env, kind, code, ok, detail):
-    """★ 启动时审计只记「等待中」(已启动 + PID);结束后同一条改成实际结果,仍带 PID,不再一律显示成功。"""
+    """★ 启动时审计只记「等待中」(已启动 + PID);结束后同一条改成实际结果,带 PID 与编译用时(列出目标这类非编译任务不带用时)。"""
     set_exit, audit = build_env
     assert page_build._start_build(['bash', 'build.sh'], '完整编译', kind=kind)['success']
     (e,) = _build_entries(audit)
@@ -127,8 +130,15 @@ def test_killed_build_audit_shows_terminated(build_env, monkeypatch):
     monkeypatch.setattr(page_build.time, 'sleep', lambda s: None)
     assert page_build._kill_build()['success']
     started, killed = _build_entries(audit)
-    assert 'pending' not in started and started['ok'] is False and started['detail'] == '已终止 (PID 4242)'
+    assert 'pending' not in started and started['ok'] is False and started['detail'] == '已终止 (PID 4242，用时 2 分 5 秒)'
     assert killed['action'] == '终止编译' and killed['detail'] == 'PID 4242'
+
+
+@pytest.mark.parametrize('sec, text', [(0, '0 秒'), (59, '59 秒'), (60, '1 分 0 秒'), (3599, '59 分 59 秒'),
+                                       (3600, '1 时 0 分'), (3725, '1 时 2 分')])
+def test_audit_duration_matches_the_panel_format(sec, text):
+    """审计里的编译用时与编译面板「用时」标签同一套写法(build.js 的 buildFmtDuration)。"""
+    assert page_build._fmt_duration(sec) == text
 
 
 def test_no_build_starts_or_second_remove_while_build_dir_is_being_removed(build_env):

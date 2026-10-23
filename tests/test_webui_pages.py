@@ -1217,7 +1217,7 @@ def test_fold_grids_declare_their_real_card_count():
                 self.found.append(tuple(e))
 
     wm = _main()
-    for tab, want in (('metrics', [6, 5, 6, 4]), ('backup', [4]), ('crash', [5]), ('review', [4])):
+    for tab, want in (('metrics', [6, 6, 6, 4]), ('backup', [4]), ('crash', [5]), ('review', [4])):
         p = Grids()
         p.feed(_tab_template(wm, tab, 'html'))
         assert [n for _d, n in p.found] == want, tab

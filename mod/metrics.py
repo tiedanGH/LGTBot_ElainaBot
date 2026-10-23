@@ -18,6 +18,7 @@
     供「平均每群 / 每用户」展示。挂 callbacks._deliver 的主动分支,只计送达的
     (无 msg_id/event_id 的推送:全量直推 / 沙箱直推 / 超时强发)。
   · 主动消息频控(40034100):退避后补发成功 / 等满上限仍被拒而丢弃的条数(挂 callbacks._deliver)。
+  · 近 30 天:刷新等待超时与非预期发送失败另按日分桶(``daily``),只留最近 30 天,供面板大数字;累计值照旧。
 
 持久化照 mod/audit.py 模式:threading.Lock + 整文件原子重写(tmp + os.replace)
 + 损坏改名 ``.corrupt_<ts>`` 留证 + **record 永不抛异常**(指标失败绝不影响
@@ -66,7 +67,13 @@ _DEFAULTS = {
     'send_fail_by_code': {},
     'rate_limit_recovered': 0,
     'rate_limit_dropped': 0,
+    'quota_wait_timeout_30d': 0,
+    'send_fail_total_30d': 0,
 }
+
+# 面板大数字只看近 WINDOW_DAYS 天(含今天)的计数;超出窗口的日桶在写入时删掉
+WINDOW_DAYS = 30
+_DAILY_KEYS = ('quota_wait_timeout', 'send_fail_total')
 
 _lock = threading.Lock()
 
@@ -104,6 +111,38 @@ def _atomic_write(d: dict) -> None:
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(d, f, ensure_ascii=False)
     os.replace(tmp, METRICS_PATH)
+
+
+def _window_start() -> str:
+    return (datetime.now().date() - timedelta(days=WINDOW_DAYS - 1)).isoformat()
+
+
+def _bump_daily(d: dict, key: str) -> None:
+    """今天的日桶 ``key`` +1,顺手删掉窗口外的旧日桶。"""
+    start = _window_start()
+    daily = d.get('daily')
+    if not isinstance(daily, dict):
+        daily = {}
+    daily = {day: b for day, b in daily.items() if day >= start and isinstance(b, dict)}
+    bucket = daily.setdefault(datetime.now().date().isoformat(), {})
+    bucket[key] = int(bucket.get(key) or 0) + 1
+    d['daily'] = daily
+
+
+def _window_sums(raw: dict) -> dict:
+    """近 WINDOW_DAYS 天各日桶求和,键为 ``<计数名>_30d``;窗口外还没被写入时删掉的旧桶也不算。"""
+    start = _window_start()
+    sums = dict.fromkeys(_DAILY_KEYS, 0)
+    daily = raw.get('daily')
+    if not isinstance(daily, dict):
+        daily = {}
+    for day, bucket in daily.items():
+        if day >= start and isinstance(bucket, dict):
+            for k in _DAILY_KEYS:
+                v = bucket.get(k)
+                if isinstance(v, int):
+                    sums[k] += v
+    return {f'{k}_30d': v for k, v in sums.items()}
 
 
 def _bump(mutator) -> None:
@@ -244,6 +283,7 @@ def record_quota_wait_timeout() -> None:
     """刷新等待超时:等新引用 15s 未果,走强发 / 降级路径。"""
     def _m(d: dict) -> None:
         d['quota_wait_timeout'] = int(d.get('quota_wait_timeout') or 0) + 1
+        _bump_daily(d, 'quota_wait_timeout')
     _bump(_m)
 
 
@@ -275,6 +315,7 @@ def record_send_failure(code) -> None:
         d['send_fail_all'] = int(d.get('send_fail_all') or 0) + 1
         if not ignored:
             d['send_fail_total'] = int(d.get('send_fail_total') or 0) + 1
+            _bump_daily(d, 'send_fail_total')
         by = d.get('send_fail_by_code')
         if not isinstance(by, dict):
             by = {}
@@ -294,6 +335,7 @@ def record_rate_limit(dropped: bool) -> None:
         d[k] = int(d.get(k) or 0) + 1
         if dropped:
             d['send_fail_total'] = int(d.get('send_fail_total') or 0) + 1
+            _bump_daily(d, 'send_fail_total')
     _bump(_m)
 
 
@@ -309,6 +351,7 @@ def snapshot() -> dict:
         for k, default in _DEFAULTS.items():
             v = raw.get(k, default)
             out[k] = v if isinstance(v, type(default)) else default
+        out.update(_window_sums(raw))
         return out
     except Exception as e:
         log.warning(f'[metrics] 快照读取失败: {e}')
@@ -912,7 +955,7 @@ def _blank_game_detail(*errors: str) -> dict:
     """单游戏统计的完整键集(查不到 / 查失败的项为 None 或空)。"""
     return {
         'available': False, 'errors': list(errors), 'found': False, 'suggestions': [],
-        'game_name': '', 'game_count': None, 'rank': None, 'week_rank': None,
+        'game_name': '', 'game_count': None, 'rank': None, 'week_rank': None, 'week_game_count': None,
         'matches': None, 'attendances': None, 'avg_players': None,
         'min_players': None, 'max_players': None,
         'groups': None, 'group_matches': None, 'last_time': '',
@@ -978,6 +1021,7 @@ def query_game_detail(query: str, uid: str = '', gid: str = '',
         out['game_count'] = len(counts)
         out['rank'] = 1 + sum(1 for c, _w in counts.values() if c > mine_c)
         out['week_rank'] = (1 + sum(1 for _c, w in counts.values() if w > mine_w)) if mine_w else None
+        out['week_game_count'] = sum(1 for _c, w in counts.values() if w)
         out['week_matches'] = mine_w
 
         def _rows(sql: str, args: tuple, tag: str):

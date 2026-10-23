@@ -987,7 +987,7 @@ def _game_stats_text(uid: str, gs: dict, elapsed_ms: int) -> str:
         return f'（{s}）' if s else ''
 
     att, gm, wr = gs.get('attendances'), gs.get('group_matches'), gs.get('week_rank')
-    gp = gs.get('group_players')
+    gp, wn = gs.get('group_players'), gs.get('week_game_count')
     lines = [
         f'<@{uid}>',
         f'🎮 《{md(gs.get("game_name") or "")}》游戏统计 (截至{time.strftime("%H:%M")})',
@@ -1000,7 +1000,7 @@ def _game_stats_text(uid: str, gs: dict, elapsed_ms: int) -> str:
         f'👥 平均人数: {lab["avg"]} 人{_paren(lab["range"])}',
         f'💬 游戏群聊: {_n(gs.get("groups"))} 个{_paren("" if gm is None else f"本群 {gm} 局")}',
         f'🏆 热度排名: 第 {_n(gs.get("rank"))} / {_n(gs.get("game_count"))}'
-        f'{_paren(f"近7日第 {wr}" if wr else "近7日无对局")}',
+        f'{_paren(f"近7日第 {wr} / {wn}" if wr else "近7日无对局")}',
         f'🕒 最后一局: {lab["last_full"]}{_paren(lab["ago"])}',
     ]
     tops = (gs.get('top_players') or [])[:3]

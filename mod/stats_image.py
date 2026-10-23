@@ -1014,6 +1014,7 @@ def _render_game(gs: dict, sub_title: str, elapsed_ms: int | None = None) -> byt
 
     gm, rank, n_games, wr = (gs.get('group_matches'), gs.get('rank'),
                              gs.get('game_count'), gs.get('week_rank'))
+    week_rank = ('近7日 ', f'#{wr}', f' / {gs.get("week_game_count")}') if wr else ('近7日 ', '无对局')
     att, gp = gs.get('attendances'), gs.get('group_players')
     tiles = [
         ('累计对局', _fmt(gs.get('matches')), '', 'die', _ACCENT,
@@ -1028,7 +1029,7 @@ def _render_game(gs: dict, sub_title: str, elapsed_ms: int | None = None) -> byt
         ('游戏群聊', _fmt(gs.get('groups')), '', 'group', _ORANGE,
          ('info', ('本群 ', _fmt(gm), ' 局') if gm is not None else ''), False),
         ('热度排名', f'#{rank}' if rank else '—', f'/ {n_games}' if rank and n_games else '',
-         'trophy', _RANK_COLORS[0], ('info', ('近7日 ', f'#{wr}' if wr else '无对局')), False),
+         'trophy', _RANK_COLORS[0], ('info', week_rank), False),
         ('最后一局', lab['last'], '', 'clock', _PINK, ('info', lab['ago']), False),
     ]
     tile_w = (inner_w - 28 * 2 - tile_gap) // 2

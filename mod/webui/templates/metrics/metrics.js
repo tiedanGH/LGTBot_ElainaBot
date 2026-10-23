@@ -65,19 +65,24 @@ function metricsRenderRuntime(rt) {
     badge.title = h.label || '';
   }
 
-  /* 配额压力:大数字 = 等待超时次数,小字 = 耗尽次数 */
+  /* 配额压力:大数字 = 近 30 天刷新等待超时次数,小字 = 累计次数 */
   document.getElementById('metrics-quota-timeout').textContent =
-    (r.quota_wait_timeout || 0) + ' 次';
+    (r.quota_wait_timeout_30d || 0) + ' 次';
   document.getElementById('metrics-quota-sub').textContent =
-    '配额耗尽 ' + (r.quota_exhausted || 0) + ' 次';
+    '累计 ' + (r.quota_wait_timeout || 0) + ' 次';
 
-  /* 异常发送失败:大数字 = 非预期的 API 拒绝(排除 40034105 配额超时的无权限主动拒绝;40034100 频控按重发后仍丢弃的条数计),
-  小字 = 全部失败次数(含预期拒绝)。按码分布只留存 metrics.json,不上 UI —— 码一多会把卡片挤破。 */
+  /* 异常发送失败:大数字 = 近 30 天非预期的 API 拒绝(排除 40034105 配额超时的无权限主动拒绝;40034100 频控按重发后仍丢弃的条数计),
+  小字 = 累计次数。按码分布只留存 metrics.json,不上 UI —— 码一多会把卡片挤破。 */
   document.getElementById('metrics-send-fail').textContent =
-    (r.send_fail_total || 0) + ' 次';
-  const failAll = r.send_fail_all || 0;
+    (r.send_fail_total_30d || 0) + ' 次';
   document.getElementById('metrics-send-fail-sub').textContent =
-    failAll > 0 ? ('全部发送失败 ' + failAll + ' 次') : '暂无失败记录';
+    '累计 ' + (r.send_fail_total || 0) + ' 次';
+
+  /* 消息发送失败(总计):大数字 = 全部发送失败(含预期拒绝),小字 = 配额耗尽累计次数 */
+  document.getElementById('metrics-send-fail-all').textContent =
+    (r.send_fail_all || 0) + ' 次';
+  document.getElementById('metrics-send-fail-all-sub').textContent =
+    '配额耗尽总计 ' + (r.quota_exhausted || 0) + ' 次';
 
   /* 重启次数(面板 / 指令触发的主动重启):小字上次重启时间 */
   document.getElementById('metrics-restart-total').textContent =

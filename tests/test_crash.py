@@ -310,7 +310,7 @@ def test_safe_core_path_rejects_traversal_and_bad_index(tmp_path):
 
 async def test_core_delete_pairs_name_with_dir(tmp_path, monkeypatch):
     """★ name 与 d 必须**按下标配对** —— 同名 core 可能两个目录都有,配错就删错文件。
-    数量不匹配直接 400;删除结果计入审计并回报释放的字节数。"""
+    数量不匹配直接 400;删除结果回报释放的字节数,审计里写成 MB(两位小数,同崩溃转储面板)。"""
     pc = _crash()
     if len(pc.CORE_DIRS) < 2:
         pytest.skip('只有一个 core 目录,配对语义无从验证')
@@ -321,15 +321,16 @@ async def test_core_delete_pairs_name_with_dir(tmp_path, monkeypatch):
     try:
         same = 'core-match_game_runn-1-100'
         _write_core(pc, 0, same, 100, body=b'a' * 10)
-        _write_core(pc, 1, same, 100, body=b'b' * 20)
+        _write_core(pc, 1, same, 100, body=b'b' * 1572864)
         # 只删目录 1 的那个 —— 目录 0 的同名文件必须留下
         resp = await pc.core_delete_handler(_FakeCoreReq([(same, 1)]))
         import json as _json
         data = _json.loads(resp.text)
-        assert data['success'] is True and data['freed_bytes'] == 20
+        assert data['success'] is True and data['freed_bytes'] == 1572864
         assert os.path.exists(os.path.join(pc.CORE_DIRS[0], same))
         assert not os.path.exists(os.path.join(pc.CORE_DIRS[1], same))
         assert len(audit_calls) == 1 and audit_calls[0][0][0] == 'cache'
+        assert audit_calls[0][0][2] == '删除 1 个、释放 1.50 MB'
 
         # name / d 数量不匹配 → 400,不动文件
         resp2 = await pc.core_delete_handler(

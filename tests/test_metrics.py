@@ -157,7 +157,55 @@ def test_snapshot_without_file_returns_all_zero():
                     'quota_exhausted': 0, 'quota_wait_timeout': 0,
                     'send_fail_total': 0, 'send_fail_all': 0,
                     'send_fail_by_code': {},
-                    'rate_limit_recovered': 0, 'rate_limit_dropped': 0}
+                    'rate_limit_recovered': 0, 'rate_limit_dropped': 0,
+                    'quota_wait_timeout_30d': 0, 'send_fail_total_30d': 0}
+
+
+def _day_ago(n: int) -> str:
+    return (datetime.now().date() - timedelta(days=n)).isoformat()
+
+
+def _write_file(d: dict) -> None:
+    with open(metrics.METRICS_PATH, 'w', encoding='utf-8') as f:
+        json.dump(d, f)
+
+
+def test_recent_30_days_count_only_the_window():
+    """★ 配额超时与非预期发送失败另按日分桶:面板大数字只算近 30 天(含今天)。"""
+    metrics.record_quota_wait_timeout()
+    metrics.record_quota_wait_timeout()
+    metrics.record_send_failure(22009)
+    metrics.record_send_failure(40034105)            # 预期失败
+    metrics.record_send_failure(40034100)            # 频控被拒,会退避重发
+    metrics.record_rate_limit(dropped=False)
+    metrics.record_rate_limit(dropped=True)          # 真丢掉了
+    d = _read_file()
+    d['daily'][_day_ago(29)] = {'quota_wait_timeout': 5, 'send_fail_total': 7}       # 窗口最早一天
+    d['daily'][_day_ago(30)] = {'quota_wait_timeout': 100, 'send_fail_total': 100}   # 刚出窗口
+    _write_file(d)
+    snap = metrics.snapshot()
+    assert (snap['quota_wait_timeout_30d'], snap['send_fail_total_30d']) == (7, 9)
+    assert (snap['quota_wait_timeout'], snap['send_fail_total']) == (2, 2)
+    metrics.record_quota_wait_timeout()
+    assert sorted(_read_file()['daily']) == [_day_ago(29), _day_ago(0)]
+    assert metrics.snapshot()['quota_wait_timeout_30d'] == 8
+
+
+def test_recent_window_tolerates_a_broken_daily_field():
+    """日桶字段坏了(不是 dict / 桶不是 dict / 值不是整数)按空处理,下次写入重建,累计计数照常。"""
+    metrics.record_quota_wait_timeout()
+    d = _read_file()
+    d['daily'] = 'junk'
+    _write_file(d)
+    assert metrics.snapshot()['quota_wait_timeout_30d'] == 0
+    metrics.record_quota_wait_timeout()
+    d = _read_file()
+    d['daily'][_day_ago(1)] = ['junk']
+    d['daily'][_day_ago(2)] = {'quota_wait_timeout': 'x', 'send_fail_total': 3}
+    _write_file(d)
+    snap = metrics.snapshot()
+    assert (snap['quota_wait_timeout_30d'], snap['send_fail_total_30d']) == (1, 3)
+    assert snap['quota_wait_timeout'] == 2
 
 
 def test_corrupt_file_renamed_and_recovers():
@@ -840,6 +888,7 @@ def _detail_db():
         ('天赋云巢', 14, 'G3', [('U6', 3), ('U1', 1)]),              # 两个窗口都不含
         *[('五子棋', d, 'G1', ['U1', 'U2']) for d in (0, 1, 2, 20, 30, 40)],
         ('大富翁', 3, 'G1', ['U7', 'U8']),
+        ('老游戏', 20, 'G1', ['U1', 'U2']),                          # 近 7 日没有对局
     ])
 
 
@@ -859,8 +908,8 @@ def test_game_detail_overview_windows_and_rank():
     assert gs['week_players'] == 3                       # U1/U2/U3
     assert gs['prev_week_players'] == 4                  # U1/U3/U4/U5
     assert gs['last_time'] == _ts(0)
-    # 累计五子棋 6 局居首;近 7 日五子棋 3 > 天赋云巢 2 > 大富翁 1
-    assert (gs['rank'], gs['game_count'], gs['week_rank']) == (2, 3, 2)
+    # 累计五子棋 6 局居首;近 7 日五子棋 3 > 天赋云巢 2 > 大富翁 1,老游戏近 7 日没有对局,不进近 7 日的总数
+    assert (gs['rank'], gs['game_count'], gs['week_rank'], gs['week_game_count']) == (2, 4, 2, 3)
 
 
 def test_game_detail_count_board_and_my_rank():

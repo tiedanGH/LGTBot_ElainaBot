@@ -9,7 +9,9 @@ page_dashboard 顶部 import aiohttp,dev 机常无 → importorskip 守卫。
 
 from __future__ import annotations
 
+import os
 import re
+import time
 
 import pytest
 
@@ -315,3 +317,42 @@ def test_only_repo_changing_updates_are_exclusive():
                  'render_init_repo', 'render_download_update'):
         assert hasattr(getattr(pd, name), '__wrapped__'), name
     assert not hasattr(pd.render_check_update, '__wrapped__')
+
+
+def _sized(path, size: int, days_ago: float = 0) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.truncate(size)
+    if days_ago:
+        _age(path, days_ago)
+
+
+def _age(path, days_ago: float) -> None:
+    t = time.time() - days_ago * 86400
+    os.utime(path, (t, t))
+
+
+def test_cache_clear_audit_reports_freed_mb(tmp_path, monkeypatch):
+    """★ 清缓存的审计带上释放的空间(MB 两位小数,同崩溃转储面板):子目录递归累加,「保留 7 天」只算真正删掉的。"""
+    pd = _pd()
+    seen = []
+    monkeypatch.setattr(pd.audit, 'record',
+                        lambda cat, action, detail='', ok=True, **kw: seen.append((action, detail, ok)))
+    monkeypatch.setattr(pd, '_cache_dir', lambda name: str(tmp_path / name))
+
+    _sized(tmp_path / 'avatar' / 'a.png', 1048576)
+    _sized(tmp_path / 'avatar' / 'sub' / 'b.png', 524288)
+    pd.render_clear_avatar()
+    assert seen[-1] == ('清理头像缓存 (全部)', '删除 2 项、释放 1.50 MB', True)
+    assert os.listdir(tmp_path / 'avatar') == []
+
+    _sized(tmp_path / 'match' / 'old.png', 1048576, days_ago=10)
+    _sized(tmp_path / 'match' / 'old_dir' / 'x.png', 262144)
+    _age(tmp_path / 'match' / 'old_dir', 10)          # 目录 mtime 在里面建文件时被刷新,建完再改旧
+    _sized(tmp_path / 'match' / 'new.png', 2097152)
+    pd.render_clear_match_7d()
+    assert seen[-1] == ('清理赛况缓存 (保留7天)', '删除 2 项、释放 1.25 MB', True)
+    assert os.listdir(tmp_path / 'match') == ['new.png']
+
+    pd.render_clear_gen()                             # 目录不存在也照记
+    assert seen[-1] == ('清理图片缓存 (全部)', '删除 0 项、释放 0.00 MB', True)

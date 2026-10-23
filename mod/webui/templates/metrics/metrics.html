@@ -61,7 +61,7 @@
         <span id="metrics-path" class="dash-meta-value dash-mono">—</span>
       </div>
     </div>
-    <div class="metrics-status-grid fold-grid" style="--cards: 5">
+    <div class="metrics-status-grid fold-grid" style="--cards: 6">
       <div class="metrics-status-card">
         <div class="metrics-status-label metrics-label-row">
           <span>图床成功率</span>
@@ -71,14 +71,19 @@
         <div id="metrics-upload-sub" class="metrics-status-sub">暂无上传记录</div>
       </div>
       <div class="metrics-status-card">
-        <div class="metrics-status-label">配额压力（超时次数）</div>
+        <div class="metrics-status-label">配额压力（30 天）</div>
         <div id="metrics-quota-timeout" class="metrics-status-value metrics-value-big">—</div>
-        <div id="metrics-quota-sub" class="metrics-status-sub">配额耗尽 — 次</div>
+        <div id="metrics-quota-sub" class="metrics-status-sub">累计 — 次</div>
       </div>
       <div class="metrics-status-card">
-        <div class="metrics-status-label">异常发送失败（API 拒绝）</div>
+        <div class="metrics-status-label">API 异常（30 天）</div>
         <div id="metrics-send-fail" class="metrics-status-value metrics-value-big">—</div>
-        <div id="metrics-send-fail-sub" class="metrics-status-sub">—</div>
+        <div id="metrics-send-fail-sub" class="metrics-status-sub">累计 — 次</div>
+      </div>
+      <div class="metrics-status-card">
+        <div class="metrics-status-label">消息发送失败（总计）</div>
+        <div id="metrics-send-fail-all" class="metrics-status-value metrics-value-big">—</div>
+        <div id="metrics-send-fail-all-sub" class="metrics-status-sub">配额耗尽总计 — 次</div>
       </div>
       <div class="metrics-status-card">
         <div class="metrics-status-label">重启次数</div>

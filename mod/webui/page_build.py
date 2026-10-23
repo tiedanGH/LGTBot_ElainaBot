@@ -207,15 +207,32 @@ def _compute_elapsed(state: dict) -> int | None:
     return max(0, int(ft - st))
 
 
+def _fmt_duration(sec: int) -> str:
+    """同面板 buildFmtDuration:「N 秒」/「N 分 M 秒」/「H 时 M 分」。"""
+    if sec < 60:
+        return f'{sec} 秒'
+    if sec < 3600:
+        return f'{sec // 60} 分 {sec % 60} 秒'
+    return f'{sec // 3600} 时 {sec % 3600 // 60} 分'
+
+
+def _audit_detail(state: dict, *extra: str) -> str:
+    """结束审计括号里的说明:PID + 额外项 + 编译用时;列出目标这类非编译任务不带用时。"""
+    parts = [f'PID {state.get("pid")}', *extra]
+    elapsed = state.get('elapsed_sec')
+    if state.get('kind') != 'meta' and isinstance(elapsed, int):
+        parts.append(f'用时 {_fmt_duration(elapsed)}')
+    return '，'.join(parts)
+
+
 def _audit_result(state: dict, rc) -> tuple:
-    """任务结束时审计条目的 ``(是否成功, 文案)``,文案仍带 PID;没有退出码 = 被信号打断。"""
-    pid = state.get('pid')
+    """任务结束时审计条目的 ``(是否成功, 文案)``,文案带 PID 与编译用时;没有退出码 = 被信号打断。"""
     meta = state.get('kind') == 'meta'
     if rc == 0:
-        return True, f'{"已完成" if meta else "编译成功"} (PID {pid})'
+        return True, f'{"已完成" if meta else "编译成功"} ({_audit_detail(state)})'
     if rc is None:
-        return False, f'已中断 (PID {pid})'
-    return False, f'{"失败" if meta else "编译失败"} (PID {pid}，退出码 {rc})'
+        return False, f'已中断 ({_audit_detail(state)})'
+    return False, f'{"失败" if meta else "编译失败"} ({_audit_detail(state, f"退出码 {rc}")})'
 
 
 def get_build_state() -> dict:
@@ -437,7 +454,7 @@ def _kill_build(src: str = audit.SRC_PANEL) -> dict:
     if elapsed is not None:
         s['elapsed_sec'] = elapsed
     _write_state(s)
-    audit.finish(s.get('audit_id', ''), False, f'已终止 (PID {pid})')
+    audit.finish(s.get('audit_id', ''), False, f'已终止 ({_audit_detail(s)})')
 
     # 在日志末尾追加一条提示,方便用户对应得上
     try:

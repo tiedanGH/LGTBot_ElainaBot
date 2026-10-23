@@ -59,6 +59,11 @@ CATEGORIES = {
 _lock = threading.Lock()
 
 
+def fmt_mb(n: int) -> str:
+    """审计文案里的文件大小:MB 保留 2 位小数(同崩溃转储面板)。"""
+    return f'{n / 1048576:.2f} MB'
+
+
 def _load_raw() -> list:
     """读 audit.json 为 list(文件内按时间正序)。必须在持有 _lock 时调用。
 
