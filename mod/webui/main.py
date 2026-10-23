@@ -124,6 +124,9 @@ _DASH_DOWNLOAD_UPDATE_ROUTE  = '/api/ext/lgtbot/update/download'    # 免 git:�
 _PREBUILT_LIST_ROUTE  = '/api/ext/lgtbot/prebuilt/list'
 _BACKUP_CREATE_ROUTE  = '/api/ext/lgtbot/backup/create'
 _BUILD_REMOVE_ROUTE   = '/api/ext/lgtbot/build/remove'
+# 配置管理「游戏开关」:列表要起子进程读游戏信息,同样在工作线程里跑;保存是带 JSON 体的 POST
+_GAMES_LIST_ROUTE     = '/api/ext/lgtbot/games/list'
+_GAMES_SAVE_ROUTE     = '/api/ext/lgtbot/games/save'
 
 # 慢动作路由 → 同步实现(返回 <pre id="result"> 片段),由 _threaded 放进工作线程;互斥在各实现内部
 _THREADED_ROUTES = (
@@ -136,6 +139,7 @@ _THREADED_ROUTES = (
     (_PREBUILT_LIST_ROUTE, page_prebuilt.render_list),
     (_BACKUP_CREATE_ROUTE, page_backup.render_create),
     (_BUILD_REMOVE_ROUTE, page_build.render_build_remove),
+    (_GAMES_LIST_ROUTE, page_config.render_games_list),
 )
 # 顶栏「计划重启」切换(要接 ?reason= 维护原因,故走 register_route 而非隐藏 action)
 _PLANNED_RESTART_ROUTE = '/api/ext/lgtbot/planned-restart'
@@ -542,6 +546,7 @@ def register():
     web_pages.register_route('GET', _REVIEW_VERDICT_ROUTE, page_review.verdict_handler, auth=True)
     web_pages.register_route('GET', _REVIEW_SETTINGS_ROUTE, page_review.settings_handler, auth=True)
     web_pages.register_route('POST', _CONFIG_SAVE_ROUTE, page_config.save_config_handler, auth=True)
+    web_pages.register_route('POST', _GAMES_SAVE_ROUTE, page_config.games_save_handler, auth=True)
     # 预编译:下载 / 镜像测速 / 记住下载镜像(均 POST)
     web_pages.register_route('POST', _PREBUILT_DOWNLOAD_ROUTE, page_prebuilt.download_handler, auth=True)
     web_pages.register_route('POST', _PREBUILT_TESTMIRRORS_ROUTE, page_prebuilt.test_mirrors_handler, auth=True)
@@ -579,6 +584,7 @@ def unregister():
     web_pages.unregister_route('GET', _REVIEW_VERDICT_ROUTE)
     web_pages.unregister_route('GET', _REVIEW_SETTINGS_ROUTE)
     web_pages.unregister_route('POST', _CONFIG_SAVE_ROUTE)
+    web_pages.unregister_route('POST', _GAMES_SAVE_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_DOWNLOAD_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_TESTMIRRORS_ROUTE)
     web_pages.unregister_route('POST', _PREBUILT_MIRROR_ROUTE)

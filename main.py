@@ -45,6 +45,7 @@ from plugins.LGTBot_ElainaBot.mod import dispatcher        # noqa: F401  @handle
 from plugins.LGTBot_ElainaBot.mod import callbacks         # C++ 回调（被 LGTBot_ElainaBot.start 注入）
 from plugins.LGTBot_ElainaBot.mod import config as _config
 from plugins.LGTBot_ElainaBot.mod import backup as _backup            # noqa: F401  数据库备份(自动 + 手动 + 恢复)
+from plugins.LGTBot_ElainaBot.mod import game_switch as _game_switch  # 游戏开关:启动前跳过停用的游戏
 from plugins.LGTBot_ElainaBot.mod import log_attribution as _log_attribution  # noqa: F401
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -144,7 +145,7 @@ async def _setup():
 
     log.info(f'初始化 LGTBot 引擎: 游戏数={game_count}, db={boot.DB_PATH}, conf={boot.CONF_PATH}')
     ok = boot.LGTBot_ElainaBot.start(
-        boot.GAME_PATH, boot.DB_PATH, boot.CONF_PATH, boot.IMG_PATH, admins,
+        _game_switch.prepare_game_path(), boot.DB_PATH, boot.CONF_PATH, boot.IMG_PATH, admins,
         callbacks.cb_get_user_name, callbacks.cb_get_user_avatar_url,
         callbacks.cb_send_text_message, callbacks.cb_send_image_message,
         callbacks.cb_match_event,

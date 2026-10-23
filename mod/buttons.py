@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import random
 
+from . import game_switch
+
 
 # ──────── 按钮构造函数 ──────────────────────────────────────────────────────
 
@@ -152,7 +154,7 @@ def build_game_over_buttons(game_name: str | None = None,
     row: list[dict] = []
     if include_record:
         row.append(BTN_RECORD)
-    if game_name:
+    if game_name and game_name not in game_switch.disabled_names():
         row.append(btn('🔄 重开一局', f'/新游戏 {game_name}', style=4))
     return [row] if row else []
 
@@ -353,12 +355,14 @@ def build_menu_buttons(appid: str = '') -> list[list[dict]]:
     uin = _helpers.get_bot_uin(appid)
     invite_link = _build_robot_invite_link(uin, appid)
 
-    # 游戏快捷区最多 2 行;配置超出时每次随机抽,让用户每次 @bot 都能看到不同的游戏组合
+    # 游戏快捷区最多 2 行;配置超出时每次随机抽,让用户每次 @bot 都能看到不同的游戏组合。停用的游戏不出现。
+    disabled = game_switch.disabled_names()
+    games = [n for n in MENU_GAMES if n not in disabled]
     display_max = MENU_GAMES_PER_ROW * 2
-    if len(MENU_GAMES) > display_max:
-        display_games = random.sample(MENU_GAMES, display_max)
+    if len(games) > display_max:
+        display_games = random.sample(games, display_max)
     else:
-        display_games = list(MENU_GAMES)
+        display_games = games
 
     game_rows: list[list[dict]] = []
     for i in range(0, len(display_games), MENU_GAMES_PER_ROW):

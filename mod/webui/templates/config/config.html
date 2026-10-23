@@ -12,9 +12,10 @@
     <!-- 描述文字与按钮桌面端并排,窄屏上下堆叠(见 config.css 的 .cfg-yaml-tip-row) -->
     <div class="cfg-yaml-tip-row">
       <p class="dash-pluginconf-desc">
-        也可使用主框架自带的插件管理编辑器（支持可视化编辑）：
+        也可使用主框架插件管理的编辑器（支持可视化编辑）：
       </p>
       <a class="dash-btn dash-btn-primary" href="/web/plugins" target="_blank" rel="noopener"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">前往主框架插件模块编辑</span></a>
+      <button id="cfg-games-jump" class="dash-btn cfg-games-jump" title="跳转到下方的「游戏开关」"><svg class="ui-icon btn-icon"><use href="#i-gamepad"/></svg><span class="btn-label">跳转到游戏开关</span></button>
     </div>
     <textarea id="cfg-yaml-editor" class="dash-editor" spellcheck="false"
               autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
@@ -116,6 +117,33 @@
         <button id="cfg-trouble-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
         <button id="cfg-trouble-revert" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-undo"/></svg><span class="btn-label">恢复</span></button>
         <span id="cfg-trouble-msg" class="dash-config-msg"></span>
+      </div>
+    </section>
+
+    <!-- ──── 游戏开关 (games_disabled.json),占满两栏 ──── -->
+    <section id="cfg-games" class="dash-section cfg-wide">
+      <div class="dash-section-header">
+        <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-gamepad"/></svg><span>游戏开关</span></h2>
+        <div class="dash-section-meta">
+          <span class="dash-meta-label">已启用</span>
+          <span id="cfg-games-count" class="dash-meta-value">—</span>
+        </div>
+      </div>
+      <div class="cfg-games-toolbar">
+        <span class="cfg-games-search"><svg class="ui-icon btn-icon"><use href="#i-search"/></svg><input type="text" id="cfg-games-search" placeholder="搜索 游戏名 或 目录名" autocomplete="off" spellcheck="false"></span>
+        <div id="cfg-games-filter" class="cfg-games-filter">
+          <button class="cfg-games-chip active" data-filter="all">全部</button>
+          <button class="cfg-games-chip" data-filter="on">启用中</button>
+          <button class="cfg-games-chip" data-filter="off">已停用</button>
+          <button id="cfg-games-chip-pending" class="cfg-games-chip cfg-games-chip-pending" data-filter="pending" disabled>待重启</button>
+        </div>
+      </div>
+      <div id="cfg-games-list" class="cfg-games-grid"><div class="cfg-games-empty">加载中……</div></div>
+      <div class="dash-editor-actions">
+        <button id="cfg-games-save" class="dash-btn dash-btn-primary" disabled><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
+        <button id="cfg-games-revert" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-undo"/></svg><span class="btn-label">恢复</span></button>
+        <button id="cfg-games-enable-all" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-check-circle"/></svg><span class="btn-label">全部启用</span></button>
+        <span id="cfg-games-msg" class="dash-config-msg"></span>
       </div>
     </section>
 

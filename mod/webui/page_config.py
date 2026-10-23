@@ -11,6 +11,8 @@
   6. ❤️ 赞助鸣谢 (data/sponsors.txt)         同上；**仅 sponsor_enabled 开启时渲染**，关闭时整段区块与数据都不进页面
   7. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
 
+另有「游戏开关」卡片(data/games_disabled.json):列表走 _threaded 路由,保存走 ``/api/ext/lgtbot/games/save``,逻辑在 game_switch。
+
 保存全部走本文件的 ``/api/ext/lgtbot/config/save``:七个编辑器写的都是插件自己
 data/ 下的文件,落盘、校验、审计理应由插件自己负责,不依赖框架通用端点
 (它的可编辑类型白名单会变,纯文案的 .txt 就不在其中)。
@@ -20,6 +22,7 @@ data/ 下的文件,落盘、校验、审计理应由插件自己负责,不依赖
 
 from __future__ import annotations
 
+import asyncio
 import html as _html
 import json
 import os
@@ -28,7 +31,7 @@ import yaml
 from aiohttp import web
 
 from core.base.logger import get_logger, PLUGIN
-from .. import audit, boot, urgent
+from .. import audit, boot, game_switch, urgent
 from .. import config as _plugin_config
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -353,6 +356,50 @@ def render_urgent_reset() -> str:
     audit.record('config', '重置紧急公告已通知群', f'清除 {n} 群')
     return _urgent_payload(f'✅ 已清除 {n} 个群的通知记录，这些群下次建房会再次收到公告',
                            cleared=n)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 游戏开关 —— 列表走 _threaded 路由(读游戏信息要起子进程),保存走 POST
+# ─────────────────────────────────────────────────────────────────────────
+
+def render_games_list() -> str:
+    """「游戏开关」卡片数据:全部游戏 + 已保存的停用名单 + 本次引擎启动时实际停用的名单。"""
+    try:
+        return _fragment(dict(success=True, **game_switch.panel_state()))
+    except Exception as e:
+        log.warning(f'读取游戏开关数据失败: {e}')
+        return _fragment({'success': False, 'message': f'读取游戏列表失败: {e}'})
+
+
+def _game_labels(modules: list, games: list) -> str:
+    names = {g['module']: g['name'] or g['module'] for g in games}
+    return '、'.join(names.get(m, m) for m in modules)
+
+
+async def games_save_handler(request: 'web.Request') -> 'web.Response':
+    """``POST /api/ext/lgtbot/games/save`` —— body ``{"disabled": [模块名, ...]}``,回带最新卡片数据。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({'success': False, 'message': '请求体不是合法 JSON'}, status=400)
+    disabled = body.get('disabled') if isinstance(body, dict) else None
+    if not isinstance(disabled, list) or not all(isinstance(m, str) for m in disabled):
+        return web.json_response({'success': False, 'message': 'disabled 应为模块名列表'}, status=400)
+    try:
+        ok, message, changes = await asyncio.to_thread(game_switch.save_selection, disabled)
+    except OSError as e:
+        log.error(f'写入游戏开关名单失败: {e}')
+        audit.record('config', '游戏开关', f'写盘失败: {e}', ok=False)
+        return web.json_response({'success': False, 'message': f'写盘失败: {e}'})
+    state = await asyncio.to_thread(game_switch.panel_state)
+    if not ok:
+        audit.record('config', '游戏开关', message, ok=False)
+    elif changes.get('disabled') or changes.get('enabled'):
+        parts = [f'{verb} {_game_labels(changes[k], state["games"])}'
+                 for k, verb in (('disabled', '停用'), ('enabled', '恢复')) if changes[k]]
+        log.info(f'🎮 [游戏开关] {"；".join(parts)}')
+        audit.record('config', '游戏开关', '；'.join(parts)[:150])
+    return web.json_response(dict(success=ok, message=message, **state))
 
 
 # ─────────────────────────────────────────────────────────────────────────

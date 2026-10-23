@@ -100,6 +100,8 @@ def test_create_backup_produces_zip_with_expected_content():
     _make_plain_file(boot.CONF_PATH, '{"k":"v"}')
     _make_plain_file(os.path.join(boot.DATA_DIR, 'config.yaml'), 'admin_uids: []\n')
     _make_plain_file(os.path.join(boot.DATA_DIR, 'update_notice.txt'), 'hello')
+    from plugins.LGTBot_ElainaBot.mod import game_switch
+    game_switch.save_disabled({'backup_probe': '备份探针'})
     # 已停用的私有昵称缓存:文件还留在 data/ 里也不该入包
     _make_dummy_sqlite(os.path.join(boot.DATA_DIR, 'user_cache.db'))
 
@@ -115,6 +117,7 @@ def test_create_backup_produces_zip_with_expected_content():
     assert 'data/engine/lgtbot.json' in names
     assert 'data/config.yaml' in names
     assert 'data/update_notice.txt' in names
+    assert 'data/games_disabled.json' in names       # 游戏开关名单随备份走
     # user_cache.db 即使源文件存在也不应入包(被 _collect_sources 排除)
     assert 'data/user_cache.db' not in names
 

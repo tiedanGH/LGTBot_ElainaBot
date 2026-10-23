@@ -11,6 +11,7 @@ Python 模块(仅做逻辑 + 模板加载):
                    / update_notice.txt / urgent_notice.txt / troubleshooting.txt
                    / sponsors.txt / lgtbot.json)+ 热重载 action
                    + 紧急公告的「启用 / 关闭」与「重置已通知群」两个 action
+                   + 「游戏开关」卡片的列表 / 保存端点
     page_build     「引擎编译」标签:子进程跑 bash build.sh,跨 WebUI 进程
                    重启仍能续看(state.json + build.log),支持中途终止;
                    ANSI 颜色解析为结构化段交前端渲染
@@ -44,6 +45,7 @@ action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不
     /api/ext/lgtbot/prebuilt/list       预编译部署 远程包列表
     /api/ext/lgtbot/backup/create       数据备份 手动备份
     /api/ext/lgtbot/build/remove        引擎编译 删 build/ 目录
+    /api/ext/lgtbot/games/list          配置管理 游戏开关列表(子进程读游戏信息)
 
 「重启」端点返回 ``<div id="msg">…</div>`` 片段太小,直接在 ``main.py::
 _render_restart`` 里 inline 字符串;Dashboard 端点返回的 ``<pre id="result">

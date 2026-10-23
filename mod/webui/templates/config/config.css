@@ -102,3 +102,110 @@ a.dash-btn { text-decoration: none; }
 .dash-pluginconf-changes li {
   white-space: nowrap; overflow-x: auto;
 }
+
+/* 游戏开关 */
+.cfg-wide { grid-column: 1 / -1; }
+.cfg-games-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.cfg-games-search {
+  position: relative; display: inline-flex; align-items: center;
+  flex: 0 1 320px; min-width: 240px;
+}
+.cfg-games-search .ui-icon {
+  position: absolute; left: 9px; color: var(--text-faint); pointer-events: none;
+}
+.cfg-games-search input {
+  width: 100%; padding: 5px 10px 5px 30px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; font-size: 12px;
+  transition: border-color .15s;
+}
+.cfg-games-search input::placeholder { color: var(--text-faint); }
+.cfg-games-search input:focus { border-color: var(--accent); outline: none; }
+.cfg-games-filter { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.cfg-games-chip {
+  padding: 4px 10px; border-radius: 14px; font-size: 12px; line-height: 1.4;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text-muted);
+  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.cfg-games-chip:hover { border-color: var(--accent); }
+.cfg-games-chip.active {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--accent-text); font-weight: 600;
+}
+/* 「插件配置」内跳转按钮 */
+.cfg-games-jump {
+  margin-left: auto; padding: 5px 13px;
+  border: 2px solid var(--accent); color: var(--accent);
+}
+.cfg-games-jump:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 88%, #000);
+  color: color-mix(in srgb, var(--accent) 88%, #000);
+}
+@media (max-width: 600px) {
+  .cfg-games-jump { margin-left: 0; }
+}
+/* 跳转后卡片描边闪一下 */
+.cfg-games-flash { animation: cfg-games-flash 1.2s ease-out; }
+@keyframes cfg-games-flash {
+  0%, 35% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+/* 「待重启」胶囊:有待重启的游戏时浅橙色并带数量,没有时置灰不可点 */
+.cfg-games-chip-pending {
+  background: color-mix(in srgb, var(--img) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--img) 40%, var(--border));
+  color: var(--img);
+}
+.cfg-games-chip-pending:hover { border-color: var(--img); }
+.cfg-games-chip-pending.active {
+  --pending-solid: color-mix(in srgb, var(--img) 80%, #000);
+  background: var(--pending-solid); border-color: var(--pending-solid); color: #fff;
+}
+.cfg-games-chip:disabled, .cfg-games-chip:disabled:hover {
+  background: var(--panel); border-color: var(--border); color: var(--text-faint);
+  cursor: not-allowed; opacity: .6;
+}
+.cfg-games-grid {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  max-height: 460px; overflow-y: auto; padding: 1px;
+}
+.cfg-games-empty {
+  grid-column: 1 / -1; padding: 12px 0;
+  font-size: 12px; color: var(--text-muted);
+}
+.cfg-game {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border);
+  transition: border-color .15s;
+}
+.cfg-game:hover { border-color: var(--border-2); }
+.cfg-game.dirty { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.cfg-game.off .cfg-game-text { opacity: .55; }
+.cfg-game-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.cfg-game-name, .cfg-game-sub {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cfg-game-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.cfg-game-sub { font-size: 11px; color: var(--text-faint); }
+.cfg-game-tags { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.cfg-game-tags .dash-badge { font-size: 10px; padding: 1px 6px; white-space: nowrap; }
+/* 开关:复选框画成滑块,勾选 = 启用 */
+.cfg-game-switch {
+  appearance: none; -webkit-appearance: none; margin: 0; flex-shrink: 0;
+  position: relative; width: 30px; height: 17px; border-radius: 9px;
+  background: var(--border-2); cursor: pointer; transition: background .15s;
+}
+.cfg-game-switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  transition: transform .15s;
+}
+.cfg-game-switch:checked { background: var(--in); }
+.cfg-game-switch:checked::after { transform: translateX(13px); }
+.cfg-game-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

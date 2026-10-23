@@ -284,6 +284,174 @@ async function cfgReloadConfig() {
   }
 }
 
+/* ──── 游戏开关 ────
+ * 列表走 _threaded 路由(<pre id="result"> 片段),保存走 POST JSON,回带同一份状态:
+ *   games    [{module, name, developer, description, error}]
+ *   disabled 已保存的停用模块
+ *   applied  运行中的引擎启动时实际停用的模块,引擎没在跑为 null
+ * 开关只改本地草稿 draft,点「保存」才提交。 */
+const CFG_GAMES_LIST_ROUTE = '/api/ext/lgtbot/games/list';
+const CFG_GAMES_SAVE_ROUTE = '/api/ext/lgtbot/games/save';
+const cfgGames = {games: [], saved: new Set(), applied: null, draft: new Set(), filter: 'all', msg: null};
+
+function cfgGamesLabel(m) {
+  const g = cfgGames.games.find(x => x.module === m);
+  return g ? (g.name || g.module) : m;
+}
+
+function cfgGamesApply(data) {
+  cfgGames.games = data.games || [];
+  cfgGames.saved = new Set(data.disabled || []);
+  cfgGames.applied = Array.isArray(data.applied) ? new Set(data.applied) : null;
+  cfgGames.draft = new Set(cfgGames.saved);
+}
+
+function cfgGamesChanges() {
+  return {
+    disabled: [...cfgGames.draft].filter(m => !cfgGames.saved.has(m)),
+    enabled: [...cfgGames.saved].filter(m => !cfgGames.draft.has(m)),
+  };
+}
+
+/* 已保存、但运行中的引擎启动时没加载的游戏 —— 重启 LGTBot 后才从游戏列表里增删 */
+function cfgGamesPending() {
+  if (!cfgGames.applied) return new Set();
+  return new Set(cfgGames.games.map(g => g.module)
+    .filter(m => cfgGames.saved.has(m) !== cfgGames.applied.has(m)));
+}
+
+function cfgGamesShowMsg(text, kind) {
+  const el = document.getElementById('cfg-games-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'dash-config-msg dash-msg-' + (kind || 'info');
+}
+
+function cfgGamesStatus(pending) {
+  const ch = cfgGamesChanges();
+  if (ch.disabled.length || ch.enabled.length) return ['有未保存的修改', 'warn'];
+  if (!cfgGames.games.length) return ['', 'info'];
+  if (!cfgGames.applied) return ['引擎未运行，保存的名单在下次启动时生效', 'info'];
+  if (pending.size) return [pending.size + ' 个游戏要重启 LGTBot 后才在游戏列表里更新（拦截已生效）', 'warn'];
+  return ['', 'info'];
+}
+
+function cfgGamesRender() {
+  const list = document.getElementById('cfg-games-list');
+  if (!list) return;
+  const q = (document.getElementById('cfg-games-search').value || '').trim().toLowerCase();
+  const pending = cfgGamesPending();
+  /* 没有待重启的游戏时「待重启」胶囊置灰不可点,停在这个筛选上退回「全部」 */
+  if (cfgGames.filter === 'pending' && !pending.size) cfgGames.filter = 'all';
+  const pendingChip = document.getElementById('cfg-games-chip-pending');
+  if (pendingChip) {
+    pendingChip.disabled = !pending.size;
+    pendingChip.textContent = pending.size ? '待重启 ' + pending.size : '待重启';
+  }
+  document.querySelectorAll('#cfg-games-filter .cfg-games-chip')
+    .forEach(c => c.classList.toggle('active', c.dataset.filter === cfgGames.filter));
+  const shown = cfgGames.games.filter(g => {
+    const off = cfgGames.draft.has(g.module);
+    if ((cfgGames.filter === 'on' && off) || (cfgGames.filter === 'off' && !off)) return false;
+    if (cfgGames.filter === 'pending' && !pending.has(g.module)) return false;
+    return !q || g.module.toLowerCase().includes(q) || (g.name || '').toLowerCase().includes(q);
+  });
+  if (!cfgGames.games.length) {
+    list.innerHTML = '<div class="cfg-games-empty">当前构建来源下没有游戏：尚未编译，或尚未安装预编译包</div>';
+  } else if (!shown.length) {
+    list.innerHTML = '<div class="cfg-games-empty">没有符合条件的游戏</div>';
+  } else {
+    list.innerHTML = shown.map(g => {
+      const off = cfgGames.draft.has(g.module);
+      const dirty = off !== cfgGames.saved.has(g.module);
+      const tags = [];
+      if (dirty) tags.push('<span class="dash-badge">未保存</span>');
+      else if (pending.has(g.module)) tags.push('<span class="dash-badge dash-badge-warn">重启后生效</span>');
+      if (g.error) tags.push('<span class="dash-badge dash-badge-err" title="' + escapeHtml(g.error) + '">信息读取失败</span>');
+      const sub = [g.module, g.developer].filter(Boolean).join(' · ');
+      return '<label class="cfg-game' + (off ? ' off' : '') + (dirty ? ' dirty' : '') +
+             '" title="' + escapeHtml(g.description || '') + '">' +
+             '<input type="checkbox" class="cfg-game-switch" data-module="' + escapeHtml(g.module) + '"' +
+             (off ? '' : ' checked') + '>' +
+             '<span class="cfg-game-text"><span class="cfg-game-name">' + escapeHtml(g.name || g.module) + '</span>' +
+             '<span class="cfg-game-sub">' + escapeHtml(sub) + '</span></span>' +
+             (tags.length ? '<span class="cfg-game-tags">' + tags.join('') + '</span>' : '') +
+             '</label>';
+    }).join('');
+  }
+  const count = document.getElementById('cfg-games-count');
+  if (count) {
+    const n = cfgGames.games.length;
+    count.textContent = n ? (n - cfgGames.draft.size) + ' / ' + n : '—';
+  }
+  const ch = cfgGamesChanges();
+  const save = document.getElementById('cfg-games-save');
+  if (save && save.dataset.busyIcon === undefined) save.disabled = !(ch.disabled.length || ch.enabled.length);
+  const all = document.getElementById('cfg-games-enable-all');
+  if (all) all.disabled = !cfgGames.draft.size;
+  if (cfgGames.msg) cfgGamesShowMsg(cfgGames.msg[0], cfgGames.msg[1]);
+  else cfgGamesShowMsg(...cfgGamesStatus(pending));
+}
+
+async function cfgGamesLoad() {
+  try {
+    const r = await fetch(CFG_GAMES_LIST_ROUTE + TOKEN_QS, {cache: 'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    const el = doc.getElementById('result');
+    if (!el) throw new Error('响应不含 #result');
+    const data = JSON.parse(el.textContent);
+    if (!data.success) throw new Error(data.message || '读取失败');
+    cfgGamesApply(data);
+    cfgGamesRender();
+  } catch (e) {
+    const list = document.getElementById('cfg-games-list');
+    if (list) list.innerHTML = '<div class="cfg-games-empty dash-msg-err">❌ 读取游戏列表失败：' +
+                               escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function cfgGamesSave() {
+  const ch = cfgGamesChanges();
+  const lines = [];
+  if (ch.disabled.length) lines.push('将停用：' + ch.disabled.map(cfgGamesLabel).join('、'));
+  if (ch.enabled.length) lines.push('将恢复：' + ch.enabled.map(cfgGamesLabel).join('、'));
+  const ok = await dashConfirm(
+    '确认保存游戏开关？\n\n' + lines.join('\n') + '\n\n' +
+    '停用的游戏保存后立即不能开局，进行中的对局不受影响。\n重启 LGTBot 后游戏列表与随机游戏才会更新。',
+    {level: 'warn', okText: '保存'}
+  );
+  if (!ok) return;
+  const btn = document.getElementById('cfg-games-save');
+  setBtnBusy(btn, '保存中……');
+  try {
+    const r = await fetch(CFG_GAMES_SAVE_ROUTE + TOKEN_QS, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({disabled: [...cfgGames.draft]}),
+    });
+    const data = await r.json();
+    if (data.success) {
+      cfgGamesApply(data);
+      cfgGames.msg = ['✅ ' + data.message, 'ok'];
+    } else {
+      cfgGames.msg = ['❌ 未保存 —— ' + (data.message || '保存失败'), 'err'];
+    }
+  } catch (e) {
+    cfgGames.msg = ['❌ 请求失败：' + e.message, 'err'];
+  } finally {
+    clearBtnBusy(btn);
+    cfgGamesRender();
+  }
+}
+
+/* 草稿变动,刷新底部提示文字 */
+function cfgGamesEdit(fn) {
+  fn();
+  cfgGames.msg = null;
+  cfgGamesRender();
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   cfgLoadInline();
 
@@ -312,4 +480,40 @@ window.addEventListener('DOMContentLoaded', () => {
   if (urgentToggle) urgentToggle.addEventListener('click', cfgUrgentToggle);
   const urgentReset = document.getElementById('cfg-urgent-reset');
   if (urgentReset) urgentReset.addEventListener('click', cfgUrgentReset);
+
+  /* 游戏开关:开关 / 搜索 / 筛选只动本地草稿与显示,保存才提交 */
+  const gamesList = document.getElementById('cfg-games-list');
+  if (gamesList) {
+    gamesList.addEventListener('change', e => {
+      const cb = e.target.closest('.cfg-game-switch');
+      if (!cb) return;
+      const m = cb.dataset.module;
+      cfgGamesEdit(() => cb.checked ? cfgGames.draft.delete(m) : cfgGames.draft.add(m));
+    });
+    document.getElementById('cfg-games-search').addEventListener('input', cfgGamesRender);
+    document.getElementById('cfg-games-filter').addEventListener('click', e => {
+      const chip = e.target.closest('.cfg-games-chip');
+      if (!chip || chip.disabled) return;
+      cfgGames.filter = chip.dataset.filter;
+      cfgGamesRender();
+    });
+    document.getElementById('cfg-games-save').addEventListener('click', cfgGamesSave);
+    document.getElementById('cfg-games-revert').addEventListener('click',
+      () => cfgGamesEdit(() => { cfgGames.draft = new Set(cfgGames.saved); }));
+    document.getElementById('cfg-games-enable-all').addEventListener('click',
+      () => cfgGamesEdit(() => cfgGames.draft.clear()));
+    cfgGamesLoad();
+  }
+
+  /* 「插件配置」的跳转按钮:滚到游戏开关卡片,落定后描边闪一下 */
+  const jump = document.getElementById('cfg-games-jump');
+  const gamesCard = document.getElementById('cfg-games');
+  if (jump && gamesCard) {
+    jump.addEventListener('click', () => {
+      gamesCard.scrollIntoView({behavior: 'smooth', block: 'start'});
+      gamesCard.classList.remove('cfg-games-flash');
+      setTimeout(() => gamesCard.classList.add('cfg-games-flash'), 300);
+    });
+    gamesCard.addEventListener('animationend', () => gamesCard.classList.remove('cfg-games-flash'));
+  }
 });

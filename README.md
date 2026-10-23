@@ -87,6 +87,9 @@ cd ../.. && python3 main.py
   - CI 为 Ubuntu 22.04 / 24.04、Debian 12 预编译引擎 + 全部游戏，自检脱离编译树也能加载后发布到滚动 release
   - 面板内镜像测速 / 选择、下载或手动上传、本地 ↔ 预编译一键切换（重启生效）
 - **市场安装兼容** —— 仪表盘可初始化 git 仓库
+- **游戏开关** —— 引擎照常全量编译，面板「配置管理」里按游戏停用
+  - 保存后立即拦截开局，欢迎菜单与「重开一局」按钮不再出现；重启 LGTBot 后引擎跳过加载，游戏列表与随机游戏随之更新
+  - 新部署默认停用 9 个风险游戏：在面板内可恢复
 
 ### 💬 消息与交互
 
@@ -186,6 +189,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── dispatcher.py        @handler 注册（消息派发 + INTERACTION 处理）
 │   ├── config.py            data/config.yaml 读写
 │   ├── urgent.py            紧急公告：文案 + 总开关 / 已通知群记录（落盘，重启仍生效）
+│   ├── game_switch.py       游戏开关：停用名单 + 引擎启动前拼出只含启用游戏的视图目录 + 开局拦截比对的显示名
 │   ├── notice.py            更新公告分段：按日期行切分，最新一段 + 更早的日期区间列表与查询
 │   ├── nickname_review.py   昵称 AI 审核：结论库（SQLite，按昵称文本永久缓存）+ 送审队列 + 存量批量扫描
 │   ├── userinfo.py          主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
@@ -248,7 +252,8 @@ plugins/LGTBot_ElainaBot/
 ├── build/                   ⚙️ CMake 本地编译产物（运行时不可删）
 │   ├── libbot_core.so       引擎核心库（运行时由 boot.py 用 ctypes 预加载）
 │   ├── markdown2image       游戏图片渲染器
-│   └── plugins/<game>/libgame.so   各游戏插件
+│   ├── plugins/<game>/libgame.so   各游戏插件
+│   └── plugins_enabled/     游戏开关的视图目录：有停用游戏时每次引擎启动前重建（预编译包同样建在 build_prebuilt/build/ 下）
 │
 ├── build_prebuilt/          📦 下载的预编译包解压目录（与 build/ 并存）
 │   ├── LGTBot_ElainaBot.so   预编译的桥接层（预编译模式下 boot 从此 import）
@@ -258,6 +263,7 @@ plugins/LGTBot_ElainaBot/
 └── data/                    🗂 运行时数据（自动创建）
     ├── config.yaml          插件配置（Web UI 可在线编辑）
     ├── urgent_notice.json   紧急公告：启用状态 + 已通知群记录（面板按钮维护）
+    ├── games_disabled.json  游戏开关：停用的游戏（首次启动引擎时写入默认名单，面板「配置管理」维护）
     ├── match_runner_cwd.sh  自动生成：游戏子进程启动 wrapper（保证赛况图能渲染）
     ├── user_cache.db        *旧版昵称缓存遗留文件（已完全停用，可删除）*
     ├── build/               引擎编译状态 + 日志（WebUI「引擎编译」标签使用）

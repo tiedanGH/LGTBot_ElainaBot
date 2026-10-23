@@ -583,6 +583,41 @@ async def test_planned_restart_notice_carries_support_buttons(patched_downstream
     assert event.reply.await_args.kwargs['buttons'] == buttons.build_support_buttons()
 
 
+def test_disabled_game_check_matches_the_game_token(monkeypatch):
+    """停用游戏闸只认「新游戏 <名字>」的名字整词,其他指令与带同样前缀的游戏不拦。"""
+    from plugins.LGTBot_ElainaBot.mod import game_switch
+    monkeypatch.setattr(game_switch, 'disabled_names', lambda: frozenset({'LIE'}))
+    hit = dispatcher._is_disabled_game
+    assert hit('/新游戏 LIE') and hit('新游戏 LIE 单机') and hit('#新游戏  LIE')
+    for content in ('/新游戏 LIE2', '/新游戏', '/规则 LIE', '/随机游戏', '/新游戏 五子棋'):
+        assert not hit(content), content
+
+
+async def test_disabled_game_never_reaches_the_engine(patched_downstream, engine_calls, monkeypatch):
+    """面板停用的游戏:消息与按钮回调两条路径都回停用提示 + 游戏列表按钮,不派发;别的游戏照常进引擎。"""
+    from plugins.LGTBot_ElainaBot.mod import buttons, game_switch
+    _state.started = True
+    monkeypatch.setattr(game_switch, 'disabled_names', lambda: frozenset({'LIE'}))
+
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='/新游戏 LIE', message_id='M1')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_dispatch(ev, None)
+    assert ev.reply.await_args.args[0] == dispatcher._DISABLED_GAME_NOTICE
+    assert ev.reply.await_args.kwargs['buttons'] == buttons.build_game_list_buttons()
+
+    ev = _mock_event(is_direct=True, user_id='U1', content='/新游戏 LIE', event_id='E1')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_interaction_dispatch(ev, None)
+    ev.ack_interaction.assert_awaited()
+    assert ev.reply.await_args.args[0] == dispatcher._DISABLED_GAME_NOTICE
+    assert engine_calls == []
+
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='/新游戏 五子棋', message_id='M2')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_dispatch(ev, None)
+    assert len(engine_calls) == 1
+
+
 def test_planned_restart_notice_shows_reason_and_remaining():
     """维护提示带「剩余进行中对局数」与管理员填写的「维护原因」;
     原因经 markdown 转义;无对局时改说「随时可能重启」;关闭维护模式清掉原因。"""

@@ -24,7 +24,7 @@ from core.message.event import (
 )
 
 from . import (state, quota, helpers, boot, buttons, uploader, userinfo, audit,
-               metrics, stats_image, urgent, nickname_review, notice)
+               metrics, stats_image, urgent, nickname_review, notice, game_switch)
 from .webui import page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
@@ -280,6 +280,19 @@ def _should_block_new_game(content: str) -> bool:
     return (state.is_planned_restart()
             and not state.is_planned_restart_auto()
             and bool(_NEW_GAME_RE.match(content)))
+
+
+def _is_disabled_game(content: str) -> bool:
+    """「/新游戏 X」的 X 是面板里停用的游戏 —— 引擎重启前它还在已加载列表里,要在这里拦下。"""
+    m = _NEW_GAME_NAME_RE.match(content)
+    return bool(m) and m.group(1) in game_switch.disabled_names()
+
+
+_DISABLED_GAME_NOTICE = (
+    '## 🚫 游戏已停用\n'
+    '\n'
+    '此游戏已被管理员停用，暂时无法开局，看看其他游戏吧。'
+)
 
 
 def _planned_restart_notice() -> str:
@@ -1400,6 +1413,13 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
         await event.reply(_planned_restart_notice(), buttons=buttons.build_support_buttons())
         return
 
+    # 停用游戏闸:面板停用的游戏立即不能开局,无需引擎重启。
+    if _is_disabled_game(content):
+        page_logs.log_incoming(uid, gid if event.is_group else '', content)
+        page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[游戏已停用提示]')
+        await event.reply(_DISABLED_GAME_NOTICE, buttons=buttons.build_game_list_buttons())
+        return
+
     # 昵称写回:框架自身按「首见即定」记录 users.name,这里补"最新化" ——
     # 与内存缓存比对,真变化才经 db_queue 落框架库(活跃跟踪已由框架完成)。
     if uid:
@@ -1550,6 +1570,13 @@ async def lgtbot_interaction_dispatch(event, match):
         page_logs.log_incoming(uid, gid if event.is_group else '', content)
         page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[计划重启维护提示]')
         await event.reply(_planned_restart_notice(), buttons=buttons.build_support_buttons())
+        return
+
+    # 停用游戏闸(与 lgtbot_dispatch 对称)
+    if _is_disabled_game(content):
+        page_logs.log_incoming(uid, gid if event.is_group else '', content)
+        page_logs.log_outgoing(gid or uid, not (event.is_group and gid), '[游戏已停用提示]')
+        await event.reply(_DISABLED_GAME_NOTICE, buttons=buttons.build_game_list_buttons())
         return
 
     # 昵称写回(与 lgtbot_dispatch 对称);INTERACTION 的 username 常为空,note_username 第一层闸直接返回。

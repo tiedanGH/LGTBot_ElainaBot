@@ -68,6 +68,8 @@ def _collect_sources() -> list[tuple[str, str, str]]:
         ('data/urgent_notice.json',   os.path.join(boot.DATA_DIR, 'urgent_notice.json'),   'plain'),
         ('data/troubleshooting.txt',  os.path.join(boot.DATA_DIR, 'troubleshooting.txt'),  'plain'),
         ('data/sponsors.txt',         os.path.join(boot.DATA_DIR, 'sponsors.txt'),         'plain'),
+        # 游戏开关的停用名单
+        ('data/games_disabled.json',  os.path.join(boot.DATA_DIR, 'games_disabled.json'),  'plain'),
     ]
     return [(arc, abs_p, kind) for arc, abs_p, kind in candidates
             if os.path.isfile(abs_p)]

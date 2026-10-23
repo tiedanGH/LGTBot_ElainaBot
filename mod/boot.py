@@ -190,8 +190,8 @@ _PERSIST_ATTR = '_elaina_persistent'
 _ENGINE_RUNNING_ATTR = '_elaina_engine_running'
 
 # 持久化字典的所有默认 key 集中在这里,从 _get_persistent() 取就保证 key 一定存在。
-# (log_attribution_ctxvar 是 ContextVar 实例,延迟构造 —— 这里只占位 None,
-#  log_attribution._get_ctxvar() 检测到 None 时再 ContextVar(...) 一次性填上。)
+# log_attribution_ctxvar 是 ContextVar 实例,延迟构造 —— 这里只占位 None
+# log_attribution._get_ctxvar() 检测到 None 时再 ContextVar(...) 一次性填上。
 _PERSIST_DEFAULTS: dict = {
     'pending_buttons':         {},
     'active_ref':              {},
@@ -206,6 +206,7 @@ _PERSIST_DEFAULTS: dict = {
     'waiting_rooms':           {},
     'nickname_review_queue':   {},
     'nickname_review_flagged': set(),
+    'games_applied_disabled':  None,
 }
 
 
