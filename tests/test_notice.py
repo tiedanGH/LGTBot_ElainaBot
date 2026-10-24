@@ -137,7 +137,6 @@ def _ev(content='更新公告', is_interaction=False):
     ev.is_group, ev.is_interaction, ev.group_id, ev.user_id = True, is_interaction, 'G1', 'U1'
     ev.content = content
     ev.reply = AsyncMock()
-    ev.ack_interaction = AsyncMock()
     return ev
 
 

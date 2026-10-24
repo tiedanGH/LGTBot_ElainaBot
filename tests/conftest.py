@@ -109,6 +109,10 @@ def _clean_runtime_state():
     _persistent['waiting_rooms'].clear()
     _persistent['nickname_review_queue'].clear()
     _persistent['nickname_review_flagged'].clear()
+    # 按钮冷却记录是 dispatcher 的模块级 dict,不在 _persistent 里;清理来防止假用户会串进后面的用例
+    _dispatcher = sys.modules.get('plugins.LGTBot_ElainaBot.mod.dispatcher')
+    if _dispatcher is not None:
+        _dispatcher._button_last.clear()
 
     try:
         from plugins.LGTBot_ElainaBot.mod import uploader

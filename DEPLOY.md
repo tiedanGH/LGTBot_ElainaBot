@@ -187,6 +187,8 @@ admin_uids: []
 image_hosting: 'any'
 # 被动消息配额（5条）耗尽时等待用户点击「刷新」按钮的最长秒数，超时改走主动消息
 refresh_wait_timeout: 15.0
+# 回调按钮的用户级冷却秒数（刷新按钮除外）：冷却内点任意回调按钮机器人不做任何回复；设 0 关闭
+button_cooldown: 3.0
 # 单个群 / 用户每日主动消息条数上限（QQ 官方接口限制）；用满后当日退回刷新按钮机制，次日 0 点恢复；0 = 不限制
 active_push_daily_limit: 1000
 # 把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @
@@ -219,6 +221,7 @@ sponsor_enabled: false
 | `admin_uids`              | `list[str]` | `[]`    | LGTBot 内部管理员的 QQ openid 列表                                                                                                            |
 | `image_hosting`           | `str`       | `'any'` | markdown 图片内嵌使用的图床。`any`（默认）按主框架优先级自动依次尝试；也可指定单个（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`）省去逐个重试；失败走 msg_type=7 |
 | `refresh_wait_timeout`    | `float`     | `15.0`  | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                                                        |
+| `button_cooldown`         | `float`     | `3.0`   | 回调按钮的用户级冷却秒数，从上一次放行的点击算起：期间再点同一按钮回官方状态「重复操作」、点其他按钮回「操作频繁」，机器人不回复也不转发引擎；「🔄 刷新会话」不受限。`0` 关闭，负数自动归 0                                    |
 | `active_push_daily_limit` | `int`       | `1000`  | **单个群 / 单个用户**每日主动消息条数上限（QQ 官方接口限制，官方调整后改这里即可）。用满后该群 / 用户当日失去主动直推资格，退回「刷新按钮」被动机制；**次日 0 点自动重置**。`0` = 不限制。                            |
 | `text_at_as_mention`      | `bool`      | `true`  | 把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @。                                                                                          |
 | `image_upload_dedup_ttl`  | `float`     | `60.0`  | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用                          |

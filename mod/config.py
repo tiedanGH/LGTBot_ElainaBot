@@ -7,6 +7,7 @@
   · admin_uids: list[str]            LGTBot 内部管理员 openid 列表
   · image_hosting: str               markdown 图片内嵌使用的图床名（默认 any = 自动依次尝试；留空 = 禁用）
   · refresh_wait_timeout: float      被动消息配额耗尽后等待刷新按钮的秒数
+  · button_cooldown: float           回调按钮按用户共用的冷却秒数（刷新按钮除外），0 = 关闭
   · active_push_daily_limit: int     单个群 / 用户每日主动消息条数上限（0 = 不限）
   · text_at_as_mention: bool        全量群里「@机器人名称」文本前缀是否算 @
   · image_upload_dedup_ttl: float    同份图片重复上传去重 TTL（秒），0 = 关闭去重
@@ -35,6 +36,7 @@ DEFAULT_CONFIG = {
     'admin_uids': [],
     'image_hosting': 'any',
     'refresh_wait_timeout': 15.0,
+    'button_cooldown': 3.0,
     'active_push_daily_limit': 1000,
     'text_at_as_mention': True,
     'image_upload_dedup_ttl': 60.0,
@@ -49,6 +51,7 @@ CONFIG_COMMENTS = {
     'admin_uids': 'LGTBot 内部管理员 openid 列表，这些用户可执行 LGTBot 管理命令（如 %帮助 等）',
     'image_hosting': '游戏图片走 markdown 内嵌时使用的图床。默认 any 自动依次尝试全部可用图床，单选提升效率。可选值以 image_hosting 模块为准：cos / bilibili / chatglm / xingye / nature / qq_file；留空 = 不启用图床。失败回退 msg_type=7',
     'refresh_wait_timeout': '被动消息配额耗尽时，等待用户点击「刷新」按钮的最长秒数，超时后改走主动消息',
+    'button_cooldown': '回调按钮的用户级冷却秒数（刷新按钮除外）：冷却内点任意回调按钮机器人不做任何回复；设 0 关闭',
     'active_push_daily_limit': '单个群 / 用户每日主动消息条数上限（QQ 官方接口限制，默认 1000）。用满后该群 / 用户当日退回「刷新按钮」被动机制，次日 0 点自动恢复；设 0 = 不限制',
     'text_at_as_mention': '把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @',
     'image_upload_dedup_ttl': '同份图片重复上传去重 TTL（秒），并发请求会共享上传结果；设 0 关闭去重，负数自动归 0',
@@ -196,6 +199,21 @@ def _apply_runtime_tunables(cfg: dict):
         elif quota.REFRESH_WAIT_TIMEOUT != timeout_f:
             log.info(f'refresh_wait_timeout: {quota.REFRESH_WAIT_TIMEOUT}s → {timeout_f}s')
             quota.REFRESH_WAIT_TIMEOUT = timeout_f
+
+    # ── button_cooldown ───────────────────────────────────────────────────
+    raw_cd = cfg.get('button_cooldown', 3.0)
+    try:
+        cd_f = float(raw_cd)
+    except (TypeError, ValueError):
+        log.warning(f'button_cooldown 应为数值，已忽略 (got {raw_cd!r})')
+    else:
+        if cd_f < 0:
+            log.info(f'button_cooldown 负数已归 0 (关闭冷却) (原值 {cd_f})')
+            cd_f = 0.0
+        if _dispatcher.BUTTON_COOLDOWN != cd_f:
+            log.info(f'button_cooldown: {_dispatcher.BUTTON_COOLDOWN}s → {cd_f}s'
+                     + ('（关闭）' if cd_f == 0 else ''))
+            _dispatcher.BUTTON_COOLDOWN = cd_f
 
     # ── active_push_daily_limit ───────────────────────────────────────────
     # 用满后该目标当日退回「刷新按钮」被动机制(callbacks._active_push_allowed),次日 0 点随日分桶自动重置。

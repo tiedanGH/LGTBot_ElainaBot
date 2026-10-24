@@ -227,6 +227,7 @@ def _snapshot_runtime_tunables() -> dict:
         'bind_bot_appid': _state.bind_bot_appid or '',
         'image_hosting': _uploader.SELECTED_BACKEND or '',
         'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
+        'button_cooldown': float(_dispatcher.BUTTON_COOLDOWN),
         'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
         'notify_groups': list(_callbacks.NOTIFY_GROUPS),
         'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),

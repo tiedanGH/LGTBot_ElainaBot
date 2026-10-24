@@ -512,6 +512,39 @@ async def lgtbot_query_user(event, match):
     await event.reply(md)
 
 
+# ──────── 回调按钮应答 + 用户级冷却 ───────────────────────────────────────
+# 官方 PUT /interactions 的 code:0 成功 / 1 操作失败 / 2 操作频繁 / 3 重复操作 / 4 没有权限 / 5 仅管理员操作。
+# 一律经 set_callback_code 交给框架回执(WS 走 PUT、Webhook 随 op12 返回):每个 interaction 只能应答一次。
+_CB_OK, _CB_BUSY, _CB_REPEAT = 0, 2, 3
+
+BUTTON_COOLDOWN = 3.0   # 非刷新回调按钮按用户共用的冷却秒数(config.yaml 的 button_cooldown 下发;0 = 关闭)
+# uid → (上次放行的 monotonic 时刻, 那次的按钮 data)。冷却从放行那次起算,冷却中的点击不顺延
+_button_last: dict[str, tuple[float, str]] = {}
+
+
+def _answer_button(event) -> bool:
+    """应答一次非刷新回调按钮。冷却中返回 False,调用方直接 return:不回复、不派发、不登记被动引用。
+
+    冷却内再点同一个按钮回「重复操作」,点别的按钮回「操作频繁」。刷新按钮不走这里,每次点击都照常续一轮额度。
+    """
+    uid = event.user_id or ''
+    data = (event.content or '').strip()
+    now = time.monotonic()
+    if uid and BUTTON_COOLDOWN > 0:
+        last = _button_last.get(uid)
+        if last is not None and now - last[0] < BUTTON_COOLDOWN:
+            code = _CB_REPEAT if data == last[1] else _CB_BUSY
+            event.set_callback_code(code)
+            log.debug(f'⏳ [按钮冷却] {uid} 冷却中点击，回{"重复操作" if code == _CB_REPEAT else "操作频繁"}')
+            return False
+        if len(_button_last) >= 1024:
+            for k in [k for k, (t, _) in _button_last.items() if now - t >= BUTTON_COOLDOWN]:
+                del _button_last[k]
+        _button_last[uid] = (now, data)
+    event.set_callback_code(_CB_OK)
+    return True
+
+
 # ──────── 「📋 更多功能」子菜单 + 更新公告(所有人可用) ─────────────────────
 # 这些 handler 同时监听消息事件和 INTERACTION_CREATE:按钮在 ``buttons.py`` 里是 type=2(点击回填输入框、
 # 用户手动发送),但 bot.yaml 配了 ``button_enter_to_send: true`` 时框架会转成 type=1,点击直接触发 INTERACTION。
@@ -607,11 +640,8 @@ async def lgtbot_welcome_menu(event, match):
     """
     if helpers.is_foreign_event(event):
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
     if not state.started:
         return
     uid = event.user_id or ''
@@ -634,11 +664,8 @@ async def lgtbot_more_features(event, match):
     """
     if helpers.is_foreign_event(event):
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
     md = (
         '## 🧩 更多功能\n'
         '\n'
@@ -670,11 +697,8 @@ async def lgtbot_update_notice(event, match):
     """
     if helpers.is_foreign_event(event):
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
     m = match or _NOTICE_RE.match((event.content or '').strip())
     start, end, older = m.groups() if m else (None, None, None)
     details = notice.split_sections(_read_update_notice())
@@ -1101,11 +1125,8 @@ async def lgtbot_data_stats(event, match):
     """
     if helpers.is_foreign_event(event):
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
 
     # ── 窗口查询分支(总 / 按年 / 按月 / 按日)—— 参数解析见 _parse_stats_arg ──
     arg = ''
@@ -1257,11 +1278,8 @@ async def lgtbot_troubleshooting(event, match):
     """
     if helpers.is_foreign_event(event):
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
     content = _read_troubleshooting()
     md = (
         '## ❓ 疑难解答\n'
@@ -1301,18 +1319,12 @@ async def lgtbot_sponsor(event, match):
     if not buttons.SPONSOR_ENABLED:
         # INTERACTION 只可能来自历史消息里的旧按钮(开关关闭后不再生成按钮),ack 掉即可 —— 引擎没有对应的元指令可转发。
         if event.is_interaction:
-            try:
-                await event.ack_interaction(code=0)
-            except Exception:
-                pass
+            _answer_button(event)
             return
         await lgtbot_dispatch(event, match, _from_exclusive=True)
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
     md = (
         '## ❤️ 赞助鸣谢\n'
         '\n'
@@ -1482,7 +1494,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 # QQ INTERACTION_CREATE 事件由 type=1 callback 按钮点击触发,event.content 是按钮的 data 字段。
 # 两个 handler 用互斥 regex 划分职责:
 #   1. 「🔄 刷新会话」按钮(data == quota.RELAY_BUTTON_DATA)—— lgtbot_interaction_relay 只 ack + 用 event_id
-#      续一轮被动引用配额,不走 LGTBot 引擎。
+#      续一轮被动引用配额,不走 LGTBot 引擎,也不受按钮冷却限制:每次点击都是一轮完整的新额度。
 #   2. 其他所有 data 等同于用户主动发送这段文字 —— lgtbot_interaction_dispatch 镜像 lgtbot_dispatch 派进引擎,
 #      配额用 event_id 续(INTERACTION 没有 msg_id,但 event_id 是独立的一轮新额度)。
 
@@ -1494,10 +1506,7 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
 async def lgtbot_interaction_relay(event, match):
     if helpers.is_foreign_event(event):
         return
-    try:
-        await event.ack_interaction(code=0)
-    except Exception:
-        pass
+    event.set_callback_code(_CB_OK)
 
     if not event.event_id:
         return
@@ -1520,17 +1529,15 @@ async def lgtbot_interaction_dispatch(event, match):
     """非刷新 callback:把 button data 当用户消息派发给 LGTBot 引擎。
 
     与 lgtbot_dispatch 的消息处理流程几乎一致,差异仅:
-      · 必须先 ack_interaction —— 否则客户端 3s 后弹"请求超时"
+      · 必须先应答(_answer_button)—— 否则客户端 3s 后弹"请求超时";按钮冷却中到此为止
       · 配额刷新键用 event.event_id('event_id' 类型),而不是 msg_id
         (INTERACTION 没 msg_id,但 event_id 同样能撑起一轮被动回复额度)
     """
     if helpers.is_foreign_event(event):
         return
-    # ack 优先于一切,确保在 3s 时限内回执
-    try:
-        await event.ack_interaction(code=0)
-    except Exception:
-        pass
+    # 应答优先于一切,确保在 3s 时限内回执
+    if not _answer_button(event):
+        return
 
     if not state.started:
         return
@@ -1861,11 +1868,8 @@ async def lgtbot_match_list(event, match):
     """
     if helpers.is_foreign_event(event):
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
     if not state.started:
         await event.reply('⏳ LGTBot 引擎尚未就绪，请稍后再试')
         return
@@ -1925,11 +1929,8 @@ async def lgtbot_admin_interrupt(event, match):
     """
     if helpers.is_foreign_event(event):
         return
-    if event.is_interaction:
-        try:
-            await event.ack_interaction(code=0)
-        except Exception:
-            pass
+    if event.is_interaction and not _answer_button(event):
+        return
     if not state.started:
         await event.reply('⏳ LGTBot 引擎尚未就绪，请稍后再试')
         return

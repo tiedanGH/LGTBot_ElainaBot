@@ -41,6 +41,7 @@ def _reset_tunables(monkeypatch):
     (uploader.SELECTED_BACKEND / URL_CACHE_TTL 由 conftest 的 autouse 复位。)"""
     monkeypatch.setattr(state, 'bind_bot_appid', '')
     monkeypatch.setattr(quota, 'REFRESH_WAIT_TIMEOUT', 15.0)
+    monkeypatch.setattr(dispatcher, 'BUTTON_COOLDOWN', 3.0)
     monkeypatch.setattr(callbacks, 'NOTIFY_GROUPS', ())
     monkeypatch.setattr(callbacks, 'SANDBOX_DM_USERS', frozenset())
     monkeypatch.setattr(callbacks, 'DM_PUSH_ALL', False)
@@ -203,6 +204,17 @@ def test_image_upload_dedup_ttl_negative_clamped_to_zero():
     assert uploader.URL_CACHE_TTL == 30.0
     config._apply_runtime_tunables(_base_cfg(image_upload_dedup_ttl='nope'))
     assert uploader.URL_CACHE_TTL == 30.0                # 非数值保留现值
+
+
+def test_button_cooldown_zero_turns_off_and_negative_clamped():
+    config._apply_runtime_tunables(_base_cfg(button_cooldown='1.5'))
+    assert dispatcher.BUTTON_COOLDOWN == 1.5
+    config._apply_runtime_tunables(_base_cfg(button_cooldown='x'))
+    assert dispatcher.BUTTON_COOLDOWN == 1.5             # 非数值保留现值
+    config._apply_runtime_tunables(_base_cfg(button_cooldown=-2))
+    assert dispatcher.BUTTON_COOLDOWN == 0.0             # 负数同 0:关闭冷却
+    config._apply_runtime_tunables(_base_cfg(button_cooldown=3))
+    assert dispatcher.BUTTON_COOLDOWN == 3.0
 
 
 def test_image_hosting_unknown_backend_disabled_when_list_known(monkeypatch):

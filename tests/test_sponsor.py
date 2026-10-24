@@ -37,7 +37,6 @@ def _ev(*, is_interaction=False, is_group=True, content='赞助支持'):
     ev.user_id = 'U1'
     ev.content = content
     ev.reply = AsyncMock()
-    ev.ack_interaction = AsyncMock()
     return ev
 
 
@@ -169,7 +168,7 @@ async def test_sponsor_stale_button_only_acked_when_disabled(monkeypatch):
     ev = _ev(is_interaction=True)
     with patch.object(dispatcher, 'lgtbot_dispatch', new=AsyncMock()) as fwd:
         await dispatcher.lgtbot_sponsor(ev, None)
-    ev.ack_interaction.assert_awaited_once()
+    ev.set_callback_code.assert_called_once_with(0)
     ev.reply.assert_not_awaited()
     fwd.assert_not_awaited()
 

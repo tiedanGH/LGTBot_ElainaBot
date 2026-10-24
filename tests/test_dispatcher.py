@@ -62,8 +62,6 @@ def _mock_event(*, event_type=None, is_group=False, is_direct=False,
     ev.is_at_self = is_at_self
     ev.username = username
     ev.is_interaction = False
-    # ack_interaction 是 async,MagicMock 默认返 MagicMock 不可 await,要明确 AsyncMock
-    ev.ack_interaction = AsyncMock()
     return ev
 
 
@@ -209,6 +207,121 @@ async def test_interaction_dispatch_mutex_branches(patched_downstream):
 
     assert 'g:GROUP_D' in quota._active_ref
     assert 'u:USER_GD' not in quota._active_ref
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 6b. 回调按钮用户级冷却:同一按钮回「重复操作」、别的按钮回「操作频繁」,刷新按钮不受限
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _click(content, event_id, *, user_id='U_CD'):
+    ev = _mock_event(is_group=True, group_id='G_CD', user_id=user_id,
+                     event_id=event_id, content=content)
+    ev.is_interaction = True
+    ev.reply = AsyncMock()
+    return ev
+
+
+async def test_button_cooldown_answers_repeat_or_busy_and_does_nothing(patched_downstream, engine_calls):
+    """★ 冷却内再点同一按钮回 3、点别的按钮回 2:不进引擎、不回复、不登记被动引用。"""
+    _state.started = True
+    first = _click('/规则 决胜五子', 'E1')
+    await dispatcher.lgtbot_interaction_dispatch(first, None)
+    first.set_callback_code.assert_called_once_with(0)
+    assert len(engine_calls) == 1
+
+    same, other = _click('/规则 决胜五子', 'E2'), _click('/加入', 'E3')
+    await dispatcher.lgtbot_interaction_dispatch(same, None)
+    await dispatcher.lgtbot_interaction_dispatch(other, None)
+
+    same.set_callback_code.assert_called_once_with(3)
+    other.set_callback_code.assert_called_once_with(2)
+    assert len(engine_calls) == 1
+    assert [r['ref_value'] for r in quota._active_ref['g:G_CD']] == ['E1']
+    same.reply.assert_not_awaited()
+    other.reply.assert_not_awaited()
+
+
+async def test_button_cooldown_is_per_user_and_shared_by_all_buttons(patched_downstream, engine_calls):
+    """菜单按钮与派进引擎的按钮共用一份冷却;换个用户不受影响;文本指令既不计入也不受限。"""
+    _state.started = True
+    menu = _click('菜单', 'E_MENU')
+    await dispatcher.lgtbot_welcome_menu(menu, None)
+    menu.set_callback_code.assert_called_once_with(0)
+
+    rule = _click('/规则 决胜五子', 'E_RULE')
+    await dispatcher.lgtbot_interaction_dispatch(rule, None)
+    rule.set_callback_code.assert_called_once_with(2)
+    assert engine_calls == []
+
+    other_user = _click('/规则 决胜五子', 'E_OTHER', user_id='U_OTHER')
+    await dispatcher.lgtbot_interaction_dispatch(other_user, None)
+    other_user.set_callback_code.assert_called_once_with(0)
+    assert len(engine_calls) == 1
+
+    text = _mock_event(is_group=True, group_id='G_CD', user_id='U_CD', message_id='M_TXT', content='菜单')
+    await dispatcher.lgtbot_welcome_menu(text, None)
+    text.set_callback_code.assert_not_called()
+    assert patched_downstream['_send_welcome_menu'].await_count == 2
+
+
+async def test_button_cooldown_counts_from_the_last_accepted_click(patched_downstream, engine_calls, monkeypatch):
+    """冷却从放行那次起算,冷却中的点击不顺延;过了冷却照常放行;button_cooldown=0 关闭冷却。"""
+    _state.started = True
+    await dispatcher.lgtbot_interaction_dispatch(_click('/加入', 'E1'), None)
+    accepted_at = dispatcher._button_last['U_CD'][0]
+    await dispatcher.lgtbot_interaction_dispatch(_click('/加入', 'E2'), None)
+    assert dispatcher._button_last['U_CD'] == (accepted_at, '/加入')
+
+    dispatcher._button_last['U_CD'] = (accepted_at - dispatcher.BUTTON_COOLDOWN, '/加入')
+    late = _click('/加入', 'E3')
+    await dispatcher.lgtbot_interaction_dispatch(late, None)
+    late.set_callback_code.assert_called_once_with(0)
+
+    monkeypatch.setattr(dispatcher, 'BUTTON_COOLDOWN', 0)
+    again = _click('/加入', 'E4')
+    await dispatcher.lgtbot_interaction_dispatch(again, None)
+    again.set_callback_code.assert_called_once_with(0)
+    assert len(engine_calls) == 3
+
+
+async def test_refresh_clicks_skip_the_cooldown_and_each_adds_a_full_round(patched_downstream, engine_calls):
+    """★ 刷新按钮连点每次都应答成功、各登记一轮完整额度(群 5 次)且全部用得上;
+    既不开启冷却,也不改变冷却里「上一次点的按钮」。"""
+    _state.started = True
+    for i in range(3):
+        ev = _click(quota.RELAY_BUTTON_DATA, f'R{i}')
+        await dispatcher.lgtbot_interaction_relay(ev, None)
+        ev.set_callback_code.assert_called_once_with(0)
+    assert dispatcher._button_last == {}
+    assert [quota.try_consume_ref('g:G_CD') is not None for _ in range(16)] == [True] * 15 + [False]
+
+    await dispatcher.lgtbot_interaction_dispatch(_click('/规则 决胜五子', 'E_RULE'), None)
+    relay = _click(quota.RELAY_BUTTON_DATA, 'R3')
+    await dispatcher.lgtbot_interaction_relay(relay, None)
+    relay.set_callback_code.assert_called_once_with(0)
+    again = _click('/规则 决胜五子', 'E_AGAIN')
+    await dispatcher.lgtbot_interaction_dispatch(again, None)
+    again.set_callback_code.assert_called_once_with(3)
+    assert 'R3' in [r['ref_value'] for r in quota._active_ref['g:G_CD']]
+
+
+def test_every_button_entry_answers_through_the_cooldown_gate():
+    """★ 接 INTERACTION 的 handler 一律经 _answer_button 应答(刷新按钮除外)—— 新入口漏了它,冷却就对这个按钮失效。"""
+    import inspect
+    from core.plugin.decorators import _pending_handlers
+    funcs = {h['func'] for h in _pending_handlers
+             if h['func'].__module__ == dispatcher.__name__
+             and dispatcher.INTERACTION_CREATE in (h['event_types'] or ())}
+    assert {'lgtbot_interaction_dispatch', 'lgtbot_interaction_relay',
+            'lgtbot_welcome_menu', 'lgtbot_data_stats'} <= {f.__name__ for f in funcs}
+    for f in funcs:
+        src = inspect.getsource(f)
+        assert 'ack_interaction' not in src, f.__name__
+        if f.__name__ == 'lgtbot_interaction_relay':
+            assert '_answer_button' not in src
+        else:
+            assert '_answer_button(' in src, f.__name__
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -608,7 +721,7 @@ async def test_disabled_game_never_reaches_the_engine(patched_downstream, engine
     ev = _mock_event(is_direct=True, user_id='U1', content='/新游戏 LIE', event_id='E1')
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_interaction_dispatch(ev, None)
-    ev.ack_interaction.assert_awaited()
+    ev.set_callback_code.assert_called_once_with(0)
     assert ev.reply.await_args.args[0] == dispatcher._DISABLED_GAME_NOTICE
     assert engine_calls == []
 
@@ -1981,7 +2094,7 @@ async def test_anonymous_button_click_never_reaches_engine(patched_downstream, e
 
     await dispatcher.lgtbot_interaction_dispatch(ev, None)
 
-    ev.ack_interaction.assert_awaited()
+    ev.set_callback_code.assert_called_once_with(0)
     assert engine_calls == [] and quota._active_ref == {}
     ev.reply.assert_awaited_once()
 
