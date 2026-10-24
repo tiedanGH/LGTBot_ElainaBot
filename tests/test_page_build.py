@@ -134,6 +134,20 @@ def test_killed_build_audit_shows_terminated(build_env, monkeypatch):
     assert killed['action'] == '终止编译' and killed['detail'] == 'PID 4242'
 
 
+def test_running_build_reports_seconds_on_the_server_clock(build_env, monkeypatch):
+    """★ 编译中的已运行秒数由服务端按自己的时钟算好下发,不依赖浏览器的时区与时钟;结束后只留 elapsed_sec。"""
+    set_exit, _ = build_env
+    now = {'t': 1_700_000_000.0}
+    monkeypatch.setattr(page_build.time, 'time', lambda: now['t'])
+    page_build._start_build(['bash', 'build.sh'], '完整编译')
+    assert page_build.get_build_state()['running_sec'] == 0
+    now['t'] += 125.6
+    assert page_build.get_build_state()['running_sec'] == 125
+    set_exit(0)
+    st = page_build.get_build_state()
+    assert st['running_sec'] is None and st['elapsed_sec'] == 125
+
+
 @pytest.mark.parametrize('sec, text', [(0, '0 秒'), (59, '59 秒'), (60, '1 分 0 秒'), (3599, '59 分 59 秒'),
                                        (3600, '1 时 0 分'), (3725, '1 时 2 分')])
 def test_audit_duration_matches_the_panel_format(sec, text):

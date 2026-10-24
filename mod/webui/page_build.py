@@ -263,6 +263,9 @@ def get_build_state() -> dict:
             state['elapsed_sec'] = elapsed
         _write_state(state)
         audit.finish(state.get('audit_id', ''), *_audit_result(state, rc))
+    # 已运行秒数在服务端算好:started_iso 是不带时区的服务器本地时间,浏览器的时区 / 时钟与服务器不一致时据它算出的用时不可信
+    start = state.get('start_time')
+    running_sec = max(0, int(time.time() - start)) if running and isinstance(start, (int, float)) else None
     return {
         'running': running,
         'pid': pid if running else None,
@@ -270,6 +273,7 @@ def get_build_state() -> dict:
         'cmd_argv': state.get('cmd_argv', []),
         'kind': state.get('kind', 'build'),
         'started_iso': state.get('started_iso', ''),
+        'running_sec': running_sec,
         'finished': state.get('finished', False),
         'returncode': state.get('returncode'),
         'elapsed_sec': state.get('elapsed_sec'),

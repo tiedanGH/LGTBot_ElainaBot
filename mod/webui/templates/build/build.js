@@ -46,18 +46,7 @@ function buildFmtBytes(n) {
   return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
-function buildFmtElapsed(isoTime) {
-  if (!isoTime) return '';
-  const start = new Date(isoTime).getTime();
-  if (isNaN(start)) return '';
-  const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
-  if (sec < 60) return '已运行 ' + sec + ' 秒';
-  if (sec < 3600) return '已运行 ' + Math.floor(sec / 60) + ' 分 ' + (sec % 60) + ' 秒';
-  return '已运行 ' + Math.floor(sec / 3600) + ' 时 ' +
-         Math.floor((sec % 3600) / 60) + ' 分';
-}
-
-/* 把秒数格式化为「N 分 M 秒」/ 「H 时 M 分」,用于已完成任务的「用时」标签 */
+/* 把秒数格式化为「N 分 M 秒」/ 「H 时 M 分」,用于「已运行」与已完成任务的「用时」标签 */
 function buildFmtDuration(sec) {
   if (sec == null || sec < 0) return '';
   if (sec < 60) return sec + ' 秒';
@@ -105,7 +94,9 @@ function buildApplyState(state, logSegments, logSize) {
     badge.className = 'dash-badge dash-badge-warn';
     cmdEl.textContent = '$ ' + (state.cmd_argv || []).join(' ') +
                         '   (PID ' + state.pid + ')';
-    sinceEl.textContent = buildFmtElapsed(state.started_iso);
+    /* running_sec 由服务端按自己的时钟算好:浏览器与服务器的时区 / 时钟可能不一致 */
+    const ran = buildFmtDuration(state.running_sec);
+    sinceEl.textContent = ran ? '已运行 ' + ran : '';
     killBtn.style.display = '';
   } else if (state && state.finished && state.cmd_display) {
     /* 已完成:根据 kind + returncode 决定 badge;kind='meta' 是列出目标 / 删 build 这类非编译任务 */
