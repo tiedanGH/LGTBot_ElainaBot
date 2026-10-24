@@ -3,7 +3,7 @@
 """
 「配置管理」标签 —— 七块编辑器集中管理本插件的所有用户可编辑文本/配置:
 
-  1. 🔧 插件配置 (data/config.yaml)         + 「前往插件模块」link + 热重载按钮
+  1. 🔧 插件配置 (data/config.yaml)         可视化 / 源文件两种编辑,字段顺序固定为代码顺序 + 热重载按钮
   2. ⚠️ 重要更新 (data/important_update.txt) 置顶提示，空则不渲染区块
   3. 📢 更新公告 (data/update_notice.txt)    保存即时热加载(下次指令触发就生效)
   4. 🚨 紧急公告 (data/urgent_notice.txt)    欢迎菜单里的引用块；**另有「启用 / 关闭」与「重置已通知群」两个动作**，状态存 data/urgent_notice.json
@@ -164,6 +164,7 @@ def get_data() -> str:
             'abs_path': os.path.abspath(_CONFIG_YAML_PATH),
             'content': cfg_content,
             'read_error': cfg_err,
+            'form': _config_form(cfg_content, cfg_err),
         },
         'important_update': {
             'abs_path': os.path.abspath(_IMPORTANT_UPDATE_PATH),
@@ -230,10 +231,10 @@ def _snapshot_runtime_tunables() -> dict:
         'button_cooldown': float(_dispatcher.BUTTON_COOLDOWN),
         'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
         'notify_groups': list(_callbacks.NOTIFY_GROUPS),
-        'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
         'sandbox_dm_users': ['all'] if _callbacks.DM_PUSH_ALL else sorted(_callbacks.SANDBOX_DM_USERS),
-        'menu_game_buttons': list(_buttons.MENU_GAMES),
+        'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
         'sponsor_enabled': bool(_buttons.SPONSOR_ENABLED),
+        'menu_game_buttons': list(_buttons.MENU_GAMES),
     }
 
 
@@ -483,7 +484,7 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
                                 f'建议加引号写成 {str(val)!r}')
             elif not isinstance(val, str):
                 errors.append(f'{key} 应为字符串，当前是 {type(val).__name__}')
-        elif isinstance(default, float):
+        elif isinstance(default, (int, float)):
             if isinstance(val, bool) or not isinstance(val, (int, float)):
                 errors.append(f'{key} 应为数值，当前是 {type(val).__name__}')
 
@@ -515,6 +516,87 @@ def _validate_config_yaml(text: str) -> tuple[list, list]:
         else:
             warnings.append(f'未知字段 {key}(本插件不会读取)')
     return errors, warnings
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 插件配置的可视化编辑 —— 字段表从 config.DEFAULT_CONFIG 推导,顺序即 config.yaml 的字段顺序
+# ─────────────────────────────────────────────────────────────────────────
+
+def _field_kind(default) -> str:
+    # bool 必须先判:Python 里 bool 是 int 的子类
+    if isinstance(default, bool):
+        return 'bool'
+    if isinstance(default, list):
+        return 'list'
+    if isinstance(default, int):
+        return 'int'
+    if isinstance(default, float):
+        return 'float'
+    return 'str'
+
+
+def _form_fields() -> list:
+    """可视化编辑的字段表,顺序与 DEFAULT_CONFIG 一致;拿得到图床名单时图床给下拉选项。"""
+    fields = []
+    for key, default in _plugin_config.DEFAULT_CONFIG.items():
+        field = {'key': key, 'label': _plugin_config.CONFIG_LABELS.get(key, key),
+                 'hint': _plugin_config.CONFIG_COMMENTS.get(key, ''), 'kind': _field_kind(default)}
+        if key == 'image_hosting':
+            backends = sorted(_valid_backends())
+            if backends:
+                field.update(kind='select', options=['any', *backends, ''])
+        fields.append(field)
+    return fields
+
+
+def _config_form(text: str, read_error: str = '') -> dict:
+    """可视化编辑所需数据。读不到或校验不过时只带错误(values 为 None),前端停在源文件模式。
+
+    缺失或为空的字段按默认值显示;``extra`` 是本插件不读取的字段,可视化保存时原样留在文件末尾。
+    """
+    form = {'fields': _form_fields(), 'values': None, 'extra': [], 'errors': []}
+    errors = [f'读取失败: {read_error}'] if read_error else _validate_config_yaml(text)[0]
+    if errors:
+        form['errors'] = errors
+        return form
+    data = yaml.safe_load(text) or {}
+    form['values'] = {k: (d if data.get(k) is None else data[k])
+                      for k, d in _plugin_config.DEFAULT_CONFIG.items()}
+    form['extra'] = [str(k) for k in data if k not in _plugin_config.DEFAULT_CONFIG]
+    return form
+
+
+def _yaml_from_values(values: dict, current: str) -> tuple:
+    """可视化保存:按字段类型检查表单值,并入源文件里本插件不读取的字段,按代码顺序渲染。返回 ``(yaml 文本, 类型错误)``。"""
+    try:
+        merged = yaml.safe_load(current) if current.strip() else {}
+    except yaml.YAMLError:
+        merged = {}
+    if not isinstance(merged, dict):
+        merged = {}
+    errors = []
+    for key, default in _plugin_config.DEFAULT_CONFIG.items():
+        if key not in values:
+            continue
+        val, kind = values[key], _field_kind(default)
+        if kind == 'bool':
+            ok = isinstance(val, bool)
+        elif kind == 'list':
+            ok = isinstance(val, list) and all(isinstance(v, str) for v in val)
+        elif kind in ('int', 'float'):
+            ok = isinstance(val, (int, float)) and not isinstance(val, bool)
+            # JSON 分不出 15 与 15.0,按字段类型还原,文件里保持模板的写法
+            if ok and kind == 'float':
+                val = float(val)
+            elif ok and float(val).is_integer():
+                val = int(val)
+        else:
+            ok = isinstance(val, str)
+        if ok:
+            merged[key] = val
+        else:
+            errors.append(f'{_plugin_config.CONFIG_LABELS.get(key, key)}（{key}）的值类型不对')
+    return _plugin_config.render_config_yaml(merged), errors
 
 
 def _validate_plain_text(text: str) -> list:
@@ -557,8 +639,53 @@ def _atomic_write(path: str, content: str) -> None:
     os.replace(tmp, path)
 
 
+def _save_config_yaml(content, values, dry_run: bool) -> 'web.Response':
+    """config.yaml 的保存:源文件文本(``content``)或可视化表单值(``values``)。
+
+    落盘前一律按 DEFAULT_CONFIG 整理字段顺序,回带最终文本与表单数据,前端两种视图据此同步。
+    ``dry_run`` 只换算不落盘,供两种模式切换时互转:表单值换成文本(有校验错误也照给,让用户在源文件里改),
+    文本换成表单值(校验不过就不给)。
+    """
+    if values is not None:
+        current, _err = _read_file(_CONFIG_YAML_PATH)
+        text, errors = _yaml_from_values(values, current)
+        mode = '可视化'
+    else:
+        text, errors, mode = content, [], '源文件'
+    warnings: list = []
+    if not errors:
+        errors, warnings = _validate_config_yaml(text)
+    if dry_run:
+        form = _config_form(text) if values is None and not errors else None
+        return web.json_response({'success': not errors, 'errors': errors, 'warnings': warnings,
+                                  'content': text, 'form': form})
+    if errors:
+        log.info(f'🛡️ [配置校验] config_yaml 保存被拒: {errors}')
+        audit.record('config', '保存 config.yaml',
+                     '校验拒绝: ' + '; '.join(str(e) for e in errors)[:150], ok=False)
+        return web.json_response({'success': False, 'errors': errors, 'warnings': warnings})
+
+    ordered = _plugin_config.order_config_yaml(text)
+    reordered = ordered != text
+    try:
+        _atomic_write(_CONFIG_YAML_PATH, ordered)
+    except Exception as e:
+        log.error(f'写入 config_yaml 失败: {e}')
+        audit.record('config', '保存 config.yaml', f'写盘失败: {e}', ok=False)
+        return web.json_response({'success': False, 'errors': [f'写盘失败: {e}']})
+    log.info(f'💾 [配置校验] config_yaml 校验通过并已保存({mode})'
+             + ('，已按代码顺序整理字段' if reordered else '')
+             + (f'(警告 {len(warnings)} 条)' if warnings else ''))
+    audit.record('config', '保存 config.yaml',
+                 f'{mode}，{len(ordered)} 字符'
+                 + ('，已整理字段顺序' if reordered else '')
+                 + (f'，{len(warnings)} 条警告' if warnings else ''))
+    return web.json_response({'success': True, 'errors': [], 'warnings': warnings, 'content': ordered,
+                              'form': _config_form(ordered), 'reordered': reordered})
+
+
 async def save_config_handler(request: 'web.Request') -> 'web.Response':
-    """``POST /api/ext/lgtbot/config/save`` —— body ``{"target", "content"}``。
+    """``POST /api/ext/lgtbot/config/save`` —— body ``{"target", "content"}``;config.yaml 另收 ``values`` 与 ``dry_run``。
 
     校验失败返回 ``{'success': False, 'errors': [...]}``,**不落盘**;
     通过则原子写入并把警告一并带回给前端展示。
@@ -567,8 +694,15 @@ async def save_config_handler(request: 'web.Request') -> 'web.Response':
         body = await request.json()
     except Exception:
         return web.json_response({'success': False, 'errors': ['请求体不是合法 JSON']}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({'success': False, 'errors': ['请求体应为 JSON 对象']}, status=400)
     target = str(body.get('target') or '')
     content = body.get('content')
+    values = body.get('values')
+    if target == 'config_yaml' and (isinstance(content, str) or isinstance(values, dict)):
+        return _save_config_yaml(None if isinstance(values, dict) else content,
+                                 values if isinstance(values, dict) else None,
+                                 body.get('dry_run') is True)
     if target not in _SAVE_TARGETS or not isinstance(content, str):
         return web.json_response({'success': False, 'errors': ['target 无效或缺少 content']}, status=400)
 
@@ -595,5 +729,5 @@ async def save_config_handler(request: 'web.Request') -> 'web.Response':
              + (f'(警告 {len(warnings)} 条)' if warnings else ''))
     audit.record('config', f'保存 {fname}',
                  f'{len(content)} 字符'
-                 + (f',{len(warnings)} 条警告' if warnings else ''))
+                 + (f'，{len(warnings)} 条警告' if warnings else ''))
     return web.json_response({'success': True, 'errors': [], 'warnings': warnings})

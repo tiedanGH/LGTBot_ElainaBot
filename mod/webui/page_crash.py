@@ -369,7 +369,7 @@ async def core_delete_handler(request: 'web.Request') -> 'web.Response':
             failed.append(name)
     ok = bool(deleted) and not failed
     audit.record('cache', '删除游戏 core',
-                 f'删除 {len(deleted)} 个、释放 {audit.fmt_mb(freed)}'
+                 f'删除 {len(deleted)} 个，释放 {audit.fmt_mb(freed)}'
                  + (f',失败 {len(failed)} 个' if failed else ''),
                  ok=ok, src=audit.SRC_PANEL)
     msg = (f'已删除 {len(deleted)} 个 core 文件'

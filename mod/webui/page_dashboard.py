@@ -1468,7 +1468,7 @@ def _cache_dir(name: str) -> str:
 
 def _audit_clear(action: str, ok: bool, msg: str, n: int, freed: int) -> None:
     """清缓存审计:目录不存在(n=0)也照记 —— 用户确实按下了清理按钮。"""
-    audit.record('cache', action, f'删除 {n} 项、释放 {audit.fmt_mb(freed)}' + ('' if ok else f'; {msg}'), ok=ok)
+    audit.record('cache', action, f'删除 {n} 项，释放 {audit.fmt_mb(freed)}' + ('' if ok else f'; {msg}'), ok=ok)
 
 
 def render_clear_avatar() -> str:

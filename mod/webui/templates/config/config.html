@@ -2,23 +2,30 @@
 
   <!-- ──── 插件配置 (config.yaml) ──── -->
   <section class="dash-section">
+    <!-- 标题栏:标题 / 编辑方式 / 跳转按钮 / 文件路径 -->
     <div class="dash-section-header">
       <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-config"/></svg><span>插件配置</span></h2>
+      <div id="pcfg-mode" class="pcfg-mode" role="group" aria-label="编辑方式">
+        <button type="button" class="pcfg-mode-btn" data-mode="visual"><svg class="ui-icon btn-icon"><use href="#i-eye"/></svg><span class="btn-label">可视化</span></button>
+        <button type="button" class="pcfg-mode-btn" data-mode="source"><svg class="ui-icon btn-icon"><use href="#i-file-text"/></svg><span class="btn-label">源文件</span></button>
+      </div>
+      <div class="pcfg-jump-row">
+        <button id="cfg-games-jump" class="dash-btn cfg-games-jump" title="跳转到下方的「游戏开关」"><svg class="ui-icon btn-icon"><use href="#i-gamepad"/></svg><span class="btn-label">跳转到游戏开关</span></button>
+      </div>
       <div class="dash-section-meta">
         <span class="dash-meta-label">文件</span>
         <span id="cfg-yaml-path" class="dash-meta-value dash-mono">—</span>
       </div>
     </div>
-    <!-- 描述文字与按钮桌面端并排,窄屏上下堆叠(见 config.css 的 .cfg-yaml-tip-row) -->
-    <div class="cfg-yaml-tip-row">
-      <p class="dash-pluginconf-desc">
-        也可使用主框架插件管理的编辑器（支持可视化编辑）：
-      </p>
-      <a class="dash-btn dash-btn-primary" href="/web/plugins" target="_blank" rel="noopener"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">前往主框架插件模块编辑</span></a>
-      <button id="cfg-games-jump" class="dash-btn cfg-games-jump" title="跳转到下方的「游戏开关」"><svg class="ui-icon btn-icon"><use href="#i-gamepad"/></svg><span class="btn-label">跳转到游戏开关</span></button>
+    <p id="pcfg-note" class="pcfg-note"></p>
+    <div class="pcfg-stack">
+      <div id="pcfg-visual">
+        <p id="pcfg-extra" class="pcfg-note"></p>
+        <div id="pcfg-form" class="pcfg-form"></div>
+      </div>
+      <textarea id="cfg-yaml-editor" class="dash-editor pcfg-off" spellcheck="false"
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
     </div>
-    <textarea id="cfg-yaml-editor" class="dash-editor" spellcheck="false"
-              autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
     <div class="dash-editor-actions">
       <button id="cfg-yaml-save" class="dash-btn dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存配置</span></button>
       <button id="cfg-yaml-revert" class="dash-btn"><svg class="ui-icon btn-icon"><use href="#i-undo"/></svg><span class="btn-label">恢复</span></button>

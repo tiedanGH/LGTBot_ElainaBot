@@ -19,6 +19,7 @@ import os
 import re
 
 import pytest
+import yaml
 
 # conftest.py 已 inject 假 boot,这里安全 import
 from plugins.LGTBot_ElainaBot.mod import (
@@ -335,8 +336,8 @@ def test_load_plugin_config_survives_ctx_failures(monkeypatch):
 
 
 def test_default_config_and_comments_cover_same_fields():
-    """每个字段都得有注释 —— ensure_config 生成的模板是用户唯一的字段说明。"""
-    assert set(config.DEFAULT_CONFIG) == set(config.CONFIG_COMMENTS)
+    """每个字段都得有注释与面板字段名 —— 模板里的注释是字段说明,可视化编辑也拿它当说明文字。"""
+    assert set(config.DEFAULT_CONFIG) == set(config.CONFIG_COMMENTS) == set(config.CONFIG_LABELS)
 
 
 def test_image_hosting_defaults_to_any():
@@ -406,15 +407,13 @@ def test_persist_bind_replaces_line_and_keeps_comments(_cfg_file):
 
 
 def test_persist_bind_appends_with_comment_when_key_absent(_cfg_file):
-    """老配置文件没有这个 key → 带注释追加到末尾(而不是静默丢弃)。"""
+    """老配置文件没有这个 key → 带注释补进来(而不是静默丢弃),并按代码顺序排到 admin_uids 前面。"""
     with open(_cfg_file, 'w', encoding='utf-8') as f:
         f.write('admin_uids: []')                      # 末尾无换行
     ok, _msg = config.persist_bind_bot_appid('A1')
     assert ok is True
     text = open(_cfg_file, encoding='utf-8').read()
-    assert text.startswith('admin_uids: []\n')         # 补了换行
-    assert config.CONFIG_COMMENTS['bind_bot_appid'] in text
-    assert "bind_bot_appid: 'A1'" in text
+    assert text == f"# {config.CONFIG_COMMENTS['bind_bot_appid']}\nbind_bot_appid: 'A1'\nadmin_uids: []\n"
 
 
 def test_rebind_invalidates_push_permission_cache(_cfg_file, monkeypatch):
@@ -562,3 +561,193 @@ async def test_save_creates_missing_parent_dir(tmp_path, monkeypatch):
 
     assert _resp_body(resp)['success'] is True
     assert target_file.read_text(encoding='utf-8') == '感谢名单'
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# config.yaml 的渲染与字段顺序:字段永远按 DEFAULT_CONFIG 的顺序排
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_render_follows_code_order_and_round_trips():
+    """★ 渲染按 DEFAULT_CONFIG 顺序、带注释,解析回来与原值一致;本插件不读取的字段排在最后。"""
+    cfg = dict(reversed(list(config.DEFAULT_CONFIG.items())))
+    cfg.update(bind_bot_appid='1905305499', blocked_commands=['/帮助', "it's", 'a: b', '多\n行'],
+               legacy_field={'x': [1, 2]})
+    text = config.render_config_yaml(cfg)
+    data = yaml.safe_load(text)
+    assert list(data) == [*config.DEFAULT_CONFIG, 'legacy_field']
+    assert data == cfg
+    assert f"bind_bot_appid: '1905305499'  # {config.CONFIG_COMMENTS['bind_bot_appid']}\n" in text
+    assert f"# {config.CONFIG_COMMENTS['blocked_commands']}\nblocked_commands:\n  - /帮助\n" in text
+    assert f"# {config.CONFIG_COMMENTS['notify_groups']}\nnotify_groups: []\n" in text
+
+
+def test_order_moves_whole_blocks_and_keeps_comments():
+    """★ 乱序文本按代码顺序整块挪动:手写注释跟着字段走,行内注释与原写法不变,不读取的字段排最后;已有序的原样返回。"""
+    src = ("bind_bot_appid: '1'  # 绑定\n"
+           "sponsor_enabled: false  # 赞助\n"
+           "legacy: 1\n"
+           "# 我的管理员\n"
+           "admin_uids:\n  - U1\n"
+           "button_cooldown: 3.0  # 冷却")
+    out = config.order_config_yaml(src)
+    assert out == ("bind_bot_appid: '1'  # 绑定\n"
+                   "button_cooldown: 3.0  # 冷却\n"
+                   "# 我的管理员\n"
+                   "admin_uids:\n  - U1\n"
+                   "sponsor_enabled: false  # 赞助\n"
+                   "legacy: 1\n")
+    assert config.order_config_yaml(out) == out
+
+
+def test_order_falls_back_to_rendering_when_blocks_cannot_be_cut():
+    """带引号的字段名切不准块,整块挪动后顺序仍不对 → 按代码顺序重新渲染,值不变。"""
+    src = '"button_cooldown": 1\nbind_bot_appid: a\nsponsor_enabled: true\n'
+    out = config.order_config_yaml(src)
+    assert list(yaml.safe_load(out)) == ['bind_bot_appid', 'button_cooldown', 'sponsor_enabled']
+    assert yaml.safe_load(out) == yaml.safe_load(src)
+
+
+@pytest.mark.parametrize('text', ['a: [1,\n', '- just\n- a list\n', '', 'plain'])
+def test_order_leaves_unparsable_or_non_mapping_text_alone(text):
+    assert config.order_config_yaml(text) == text
+
+
+def test_load_puts_appended_fields_back_in_code_order(_cfg_file, monkeypatch):
+    """★ ensure_config 把新增字段补在文件末尾 → 加载时按代码顺序整理落盘,原有注释不丢;已有序就不动文件。"""
+    src = ("bind_bot_appid: ''  # 绑定\n"
+           "# 手写说明\n"
+           "sponsor_enabled: false\n"
+           "button_cooldown: 3.0  # 新补的字段\n")
+    with open(_cfg_file, 'w', encoding='utf-8') as f:
+        f.write(src)
+    monkeypatch.setattr(config, '_get_ctx', lambda: _FakeCtx(_base_cfg()))
+    config.load_plugin_config()
+    text = open(_cfg_file, encoding='utf-8').read()
+    assert text == ("bind_bot_appid: ''  # 绑定\n"
+                    "button_cooldown: 3.0  # 新补的字段\n"
+                    "# 手写说明\n"
+                    "sponsor_enabled: false\n")
+    writes = []
+    monkeypatch.setattr(config, '_write_atomic', lambda *a: writes.append(a))
+    config.load_plugin_config()
+    assert writes == []
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 插件配置的可视化编辑:字段表、表单值与 config.yaml 保存的三种形态
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_form_fields_follow_code_order_with_kinds(monkeypatch):
+    """字段表就是 DEFAULT_CONFIG 的顺序,带面板字段名与说明;拿得到图床名单时图床给下拉选项。"""
+    pc = _pc()
+    monkeypatch.setattr(pc, '_valid_backends', lambda: {'nature', 'cos'})
+    fields = pc._config_form('')['fields']
+    assert [f['key'] for f in fields] == list(config.DEFAULT_CONFIG)
+    kinds = {f['key']: f['kind'] for f in fields}
+    assert kinds['text_at_as_mention'] == 'bool' and kinds['menu_game_buttons'] == 'list'
+    assert kinds['active_push_daily_limit'] == 'int' and kinds['button_cooldown'] == 'float'
+    assert kinds['bind_bot_appid'] == 'str'
+    hosting = next(f for f in fields if f['key'] == 'image_hosting')
+    assert hosting['kind'] == 'select' and hosting['options'] == ['any', 'cos', 'nature', '']
+    assert all(f['label'] == config.CONFIG_LABELS[f['key']] and f['hint'] for f in fields)
+    monkeypatch.setattr(pc, '_valid_backends', lambda: set())
+    assert next(f for f in pc._config_form('')['fields'] if f['key'] == 'image_hosting')['kind'] == 'str'
+
+
+def test_form_values_fill_defaults_and_list_extra_fields():
+    pc = _pc()
+    form = pc._config_form('button_cooldown: 5\nimage_hosting:\nold_field: 1\n')
+    assert form['errors'] == [] and form['extra'] == ['old_field']
+    assert form['values']['button_cooldown'] == 5
+    assert form['values']['image_hosting'] == config.DEFAULT_CONFIG['image_hosting']   # 裸 key = 未配置
+    assert form['values']['menu_game_buttons'] == config.DEFAULT_CONFIG['menu_game_buttons']
+
+
+def test_form_unavailable_when_source_is_broken_or_unreadable():
+    """源文件校验不过 / 读不到时不给表单值,前端停在源文件模式 —— 免得按默认值把整份配置覆盖掉。"""
+    pc = _pc()
+    for text, err in (('a: [1,\n', ''), ('sponsor_enabled: 1\n', ''), ('', 'Permission denied')):
+        form = pc._config_form(text, err)
+        assert form['values'] is None and form['errors'] and form['fields']
+
+
+def test_validator_checks_integer_fields_too():
+    pc = _pc()
+    assert any('active_push_daily_limit' in e for e in pc._validate_config_yaml('active_push_daily_limit: x\n')[0])
+    assert pc._validate_config_yaml('active_push_daily_limit: 0\n')[0] == []
+
+
+@pytest.fixture
+def yaml_target(tmp_path, monkeypatch):
+    """config.yaml 的保存路径指到 tmp,审计记下来;返回 (page_config, 文件路径, 审计记录)。"""
+    pc = _pc()
+    path = tmp_path / 'config.yaml'
+    monkeypatch.setattr(pc, '_CONFIG_YAML_PATH', str(path))
+    recorded = []
+    monkeypatch.setattr(pc.audit, 'record', lambda *a, **k: recorded.append((a, k)))
+    return pc, path, recorded
+
+
+_OUT_OF_ORDER = ("# 手写注释\n"
+                 "sponsor_enabled: false\n"
+                 "crash_notify_group: G0\n"
+                 "bind_bot_appid: 'B1'\n")
+
+
+async def test_visual_save_renders_code_order_and_keeps_extra_fields(yaml_target):
+    """★ 可视化保存:按代码顺序渲染整份文件,不读取的字段留在末尾;数值按字段类型写回(20 → 20.0)。"""
+    pc, path, recorded = yaml_target
+    path.write_text(_OUT_OF_ORDER, encoding='utf-8')
+    values = dict(pc._config_form(_OUT_OF_ORDER)['values'],
+                  refresh_wait_timeout=20, active_push_daily_limit=50.0, sponsor_enabled=True)
+    body = _resp_body(await pc.save_config_handler(_FakeSaveReq({'target': 'config_yaml', 'values': values})))
+    text = path.read_text(encoding='utf-8')
+    data = yaml.safe_load(text)
+    assert body['success'] is True and body['content'] == text and body['reordered'] is False
+    assert list(data) == [*config.DEFAULT_CONFIG, 'crash_notify_group']
+    assert data['crash_notify_group'] == 'G0' and data['sponsor_enabled'] is True and data['bind_bot_appid'] == 'B1'
+    assert 'refresh_wait_timeout: 20.0  #' in text and 'active_push_daily_limit: 50  #' in text
+    assert body['form']['values']['sponsor_enabled'] is True
+    assert recorded[-1][0][1] == '保存 config.yaml' and recorded[-1][0][2].startswith('可视化')
+
+
+@pytest.mark.parametrize('change, error', [
+    ({'text_at_as_mention': 'yes'}, 'text_at_as_mention'),
+    ({'menu_game_buttons': 'LIE'}, 'menu_game_buttons'),
+    ({'button_cooldown': True}, 'button_cooldown'),
+    ({'refresh_wait_timeout': 0}, 'refresh_wait_timeout'),
+])
+async def test_visual_save_rejects_bad_values_without_writing(yaml_target, change, error):
+    pc, path, _ = yaml_target
+    path.write_text(_OUT_OF_ORDER, encoding='utf-8')
+    values = dict(pc._config_form(_OUT_OF_ORDER)['values'], **change)
+    body = _resp_body(await pc.save_config_handler(_FakeSaveReq({'target': 'config_yaml', 'values': values})))
+    assert body['success'] is False and any(error in e for e in body['errors'])
+    assert path.read_text(encoding='utf-8') == _OUT_OF_ORDER
+
+
+async def test_source_save_puts_fields_in_code_order(yaml_target):
+    """★ 源文件保存:校验通过后按代码顺序整块挪动再落盘,注释跟着字段走,回带整理后的文本与 reordered 标记。"""
+    pc, path, recorded = yaml_target
+    body = _resp_body(await pc.save_config_handler(_FakeSaveReq({'target': 'config_yaml', 'content': _OUT_OF_ORDER})))
+    text = path.read_text(encoding='utf-8')
+    assert body['success'] is True and body['reordered'] is True and body['content'] == text
+    assert text == "bind_bot_appid: 'B1'\n# 手写注释\nsponsor_enabled: false\ncrash_notify_group: G0\n"
+    assert '已整理字段顺序' in recorded[-1][0][2]
+
+
+async def test_dry_run_converts_between_modes_without_writing(yaml_target):
+    """★ dry_run 只换算不落盘:表单值 → 文本(切到源文件),文本 → 表单值(切回可视化),坏文本不给表单值。"""
+    pc, path, recorded = yaml_target
+    path.write_text(_OUT_OF_ORDER, encoding='utf-8')
+    values = dict(pc._config_form(_OUT_OF_ORDER)['values'], button_cooldown=7)
+    to_text = _resp_body(await pc.save_config_handler(
+        _FakeSaveReq({'target': 'config_yaml', 'values': values, 'dry_run': True})))
+    assert yaml.safe_load(to_text['content'])['button_cooldown'] == 7.0
+    to_form = _resp_body(await pc.save_config_handler(
+        _FakeSaveReq({'target': 'config_yaml', 'content': 'button_cooldown: 9\n', 'dry_run': True})))
+    assert to_form['success'] is True and to_form['form']['values']['button_cooldown'] == 9
+    broken = _resp_body(await pc.save_config_handler(
+        _FakeSaveReq({'target': 'config_yaml', 'content': 'a: [1,\n', 'dry_run': True})))
+    assert broken['success'] is False and broken['form'] is None
+    assert path.read_text(encoding='utf-8') == _OUT_OF_ORDER and recorded == []

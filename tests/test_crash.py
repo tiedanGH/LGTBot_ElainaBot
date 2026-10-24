@@ -330,7 +330,7 @@ async def test_core_delete_pairs_name_with_dir(tmp_path, monkeypatch):
         assert os.path.exists(os.path.join(pc.CORE_DIRS[0], same))
         assert not os.path.exists(os.path.join(pc.CORE_DIRS[1], same))
         assert len(audit_calls) == 1 and audit_calls[0][0][0] == 'cache'
-        assert audit_calls[0][0][2] == '删除 1 个、释放 1.50 MB'
+        assert audit_calls[0][0][2] == '删除 1 个，释放 1.50 MB'
 
         # name / d 数量不匹配 → 400,不动文件
         resp2 = await pc.core_delete_handler(

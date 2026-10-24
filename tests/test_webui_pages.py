@@ -976,7 +976,8 @@ def test_review_call_card_shows_the_cumulative_total():
     wm = _main()
     html = wm._render_html()
     assert "'累计调用 ' + (scan.calls_total || 0)" in html
-    assert 'daily_limit' not in html
+    pr = _page_review()
+    assert 'daily_limit' not in pr.TAB_HTML + pr.TAB_JS
 
 
 def test_review_payload_carries_provider_options(monkeypatch):

@@ -343,7 +343,7 @@ def test_cache_clear_audit_reports_freed_mb(tmp_path, monkeypatch):
     _sized(tmp_path / 'avatar' / 'a.png', 1048576)
     _sized(tmp_path / 'avatar' / 'sub' / 'b.png', 524288)
     pd.render_clear_avatar()
-    assert seen[-1] == ('清理头像缓存 (全部)', '删除 2 项、释放 1.50 MB', True)
+    assert seen[-1] == ('清理头像缓存 (全部)', '删除 2 项，释放 1.50 MB', True)
     assert os.listdir(tmp_path / 'avatar') == []
 
     _sized(tmp_path / 'match' / 'old.png', 1048576, days_ago=10)
@@ -351,8 +351,8 @@ def test_cache_clear_audit_reports_freed_mb(tmp_path, monkeypatch):
     _age(tmp_path / 'match' / 'old_dir', 10)          # 目录 mtime 在里面建文件时被刷新,建完再改旧
     _sized(tmp_path / 'match' / 'new.png', 2097152)
     pd.render_clear_match_7d()
-    assert seen[-1] == ('清理赛况缓存 (保留7天)', '删除 2 项、释放 1.25 MB', True)
+    assert seen[-1] == ('清理赛况缓存 (保留7天)', '删除 2 项，释放 1.25 MB', True)
     assert os.listdir(tmp_path / 'match') == ['new.png']
 
     pd.render_clear_gen()                             # 目录不存在也照记
-    assert seen[-1] == ('清理图片缓存 (全部)', '删除 0 项、释放 0.00 MB', True)
+    assert seen[-1] == ('清理图片缓存 (全部)', '删除 0 项，释放 0.00 MB', True)

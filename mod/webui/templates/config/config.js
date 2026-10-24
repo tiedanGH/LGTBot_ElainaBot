@@ -2,6 +2,7 @@
  * 编辑器共享同一套读 / dirty 跟踪 / 保存 / revert 逻辑,通过 cfgEditors 表驱动。
  * 保存一律走本插件端点 /api/ext/lgtbot/config/save:config.yaml / lgtbot.json 要过服务端
  * 语法 + schema 校验,失败返回 errors 列表、文件保持原样;纯文本编辑器没有可校验的语法。
+ * config.yaml 另有可视化编辑(见下方 pcfg 一节),保存由 pcfgSave 接管。
  * 热重载按钮调 __lgtbot_dash_reload_config。
  */
 
@@ -114,6 +115,7 @@ function cfgApplyData(data) {
       cfgShowMsg(k, '读取失败：' + info.read_error, 'err');
     }
   });
+  if (data.config_yaml) pcfgApplyForm(data.config_yaml.form);
 }
 
 function cfgLoadInline() {
@@ -133,6 +135,7 @@ function cfgShowMsg(key, msg, kind) {
 }
 
 async function cfgSave(key) {
+  if (key === 'yaml') return pcfgSave();
   const state = cfgEditors[key];
   const editor = document.getElementById(state.editorId);
   if (!editor) return;
@@ -177,7 +180,263 @@ function cfgRevert(key) {
   if (!editor) return;
   editor.value = state.original;
   delete editor.dataset.dirty;
+  if (key === 'yaml') {
+    pcfg.lastEdited = null;
+    pcfgRender(pcfg.saved);
+    pcfg.dirtyShown = false;
+  }
   cfgShowMsg(key, '已恢复至上次加载内容', 'info');
+}
+
+/* ──── 插件配置:可视化 / 源文件 ────
+ * 字段表 fields 与表单值由服务端从 config.DEFAULT_CONFIG 推导,表单按 config.yaml 的字段顺序。
+ * 两种视图是同一份配置:哪边改过(lastEdited)就以哪边为准,切换模式时经保存端点的 dry_run 让服务端互转(yaml 的解析与渲染只在服务端做)。 */
+const PCFG_MODE_KEY = 'lgtbot-cfg-yaml-mode';
+/* 列表框默认至少几行(最多 6 行,再多出滚动条) */
+const PCFG_LIST_MIN_ROWS = {admin_uids: 4, notify_groups: 4};
+const pcfg = {mode: 'visual', fields: [], saved: null, extra: [], errors: [], lastEdited: null, dirtyShown: false};
+
+function pcfgSplitList(text) {
+  return String(text || '').split('\n').map(s => s.trim()).filter(Boolean);
+}
+
+function pcfgOptionLabel(o, known) {
+  if (o === '') return '不启用';
+  if (o === 'any') return '自动选择';
+  return known ? o : o + '（未知）';
+}
+
+function pcfgFieldHtml(f, v) {
+  const id = 'pcfg-in-' + f.key;
+  let head = '<label class="pcfg-label" for="' + id + '"><span class="pcfg-label-text">' + escapeHtml(f.label) +
+             '</span><code class="pcfg-key">' + escapeHtml(f.key) + '</code></label>';
+  let control = '';
+  if (f.kind === 'bool') {
+    head += '<input type="checkbox" id="' + id + '" class="pcfg-switch"' + (v ? ' checked' : '') + '>';
+  } else if (f.kind === 'list') {
+    const items = (Array.isArray(v) ? v : []).map(x => String(x));
+    head += '<span class="pcfg-count" data-count-for="' + escapeHtml(f.key) + '"></span>';
+    control = '<textarea id="' + id + '" class="pcfg-input" spellcheck="false" placeholder="每行一项" rows="' +
+              Math.min(Math.max(items.length, PCFG_LIST_MIN_ROWS[f.key] || 2), 6) + '">' +
+              escapeHtml(items.join('\n')) + '</textarea>';
+  } else if (f.kind === 'select') {
+    const cur = v == null ? '' : String(v);
+    const opts = f.options.includes(cur) ? f.options : [...f.options, cur];
+    control = '<select id="' + id + '" class="pcfg-input">' + opts.map(o =>
+      '<option value="' + escapeHtml(o) + '"' + (o === cur ? ' selected' : '') + '>' +
+      escapeHtml(pcfgOptionLabel(o, f.options.includes(o))) + '</option>').join('') + '</select>';
+  } else {
+    const num = f.kind === 'int' || f.kind === 'float';
+    control = '<input id="' + id + '" class="pcfg-input" spellcheck="false" ' +
+              (num ? 'type="number" min="0" step="' + (f.kind === 'int' ? '1' : 'any') + '"' : 'type="text"') +
+              ' value="' + escapeHtml(v == null ? '' : String(v)) + '">';
+  }
+  return '<div class="pcfg-field" data-key="' + escapeHtml(f.key) + '"><div class="pcfg-head">' + head + '</div>' +
+         control + (f.hint ? '<p class="pcfg-hint">' + escapeHtml(f.hint) + '</p>' : '') + '</div>';
+}
+
+function pcfgRender(values) {
+  const box = document.getElementById('pcfg-form');
+  if (!box) return;
+  box.innerHTML = values ? pcfg.fields.map(f => pcfgFieldHtml(f, values[f.key])).join('') : '';
+  pcfgRefresh();
+}
+
+/* 表单里某个字段当前的值;数字没填 / 填不成数字时为 NaN(按「改过」算,保存时报错) */
+function pcfgRead(f) {
+  const el = document.getElementById('pcfg-in-' + f.key);
+  if (!el) return undefined;
+  if (f.kind === 'bool') return el.checked;
+  if (f.kind === 'list') return pcfgSplitList(el.value);
+  if (f.kind === 'int' || f.kind === 'float') return el.value.trim() === '' ? NaN : Number(el.value);
+  return el.value.trim();
+}
+
+/* 已保存的值换成与 pcfgRead 同一口径再比 */
+function pcfgNorm(f, v) {
+  if (f.kind === 'bool') return !!v;
+  if (f.kind === 'list') return (Array.isArray(v) ? v : []).map(x => String(x).trim()).filter(Boolean);
+  if (f.kind === 'int' || f.kind === 'float') return Number(v);
+  return v == null ? '' : String(v).trim();
+}
+
+function pcfgDirtyKeys() {
+  const dirty = new Set();
+  if (!pcfg.saved) return dirty;
+  pcfg.fields.forEach(f => {
+    const cur = pcfgRead(f);
+    if (cur !== undefined && JSON.stringify(cur) !== JSON.stringify(pcfgNorm(f, pcfg.saved[f.key]))) dirty.add(f.key);
+  });
+  return dirty;
+}
+
+function pcfgDirty() {
+  const editor = document.getElementById('cfg-yaml-editor');
+  return pcfgDirtyKeys().size > 0 || !!(editor && editor.dataset.dirty);
+}
+
+/* 收集表单值;数字字段不合法时返回 {error} */
+function pcfgCollect() {
+  const values = {};
+  for (const f of pcfg.fields) {
+    const v = pcfgRead(f);
+    if (v === undefined) continue;
+    if (f.kind === 'int' || f.kind === 'float') {
+      if (!Number.isFinite(v)) return {error: f.label + '需要填写数字'};
+      if (f.kind === 'int' && !Number.isInteger(v)) return {error: f.label + '需要填写整数'};
+      if (v < 0) return {error: f.label + '不能为负数'};
+    }
+    values[f.key] = v;
+  }
+  return {values};
+}
+
+/* 「有未保存的修改」只由这里写也只由这里擦,不覆盖保存 / 恢复的结果提示 */
+function pcfgStatus() {
+  if (pcfgDirty()) {
+    cfgShowMsg('yaml', '有未保存的修改', 'warn');
+    pcfg.dirtyShown = true;
+  } else if (pcfg.dirtyShown) {
+    cfgShowMsg('yaml', '', 'info');
+    pcfg.dirtyShown = false;
+  }
+}
+
+function pcfgRefresh() {
+  const dirty = pcfgDirtyKeys();
+  document.querySelectorAll('#pcfg-form .pcfg-field').forEach(el =>
+    el.classList.toggle('dirty', dirty.has(el.dataset.key)));
+  pcfg.fields.filter(f => f.kind === 'list').forEach(f => {
+    const badge = document.querySelector('#pcfg-form [data-count-for="' + f.key + '"]');
+    const items = pcfgRead(f);
+    if (badge && items) badge.textContent = items.length + ' 项';
+  });
+  pcfgStatus();
+}
+
+function pcfgShowMode() {
+  const visual = pcfg.mode === 'visual';
+  const box = document.getElementById('pcfg-visual');
+  const editor = document.getElementById('cfg-yaml-editor');
+  /* 收起的一方只隐身不移出布局,见 config.css 的 .pcfg-stack;拖拽改过的编辑框高度随切换清掉,两边重新对齐 */
+  if (box) box.classList.toggle('pcfg-off', !visual);
+  if (editor) {
+    editor.classList.toggle('pcfg-off', visual);
+    editor.style.height = '';
+  }
+  document.querySelectorAll('#pcfg-mode .pcfg-mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === pcfg.mode));
+  const note = document.getElementById('pcfg-note');
+  if (note) note.textContent = !visual && !pcfg.saved ? '源文件有误，修正并保存后才能可视化编辑' : '';
+  /* 这条随表单一起叠在格子里,源文件模式下照样占位 */
+  const extra = document.getElementById('pcfg-extra');
+  if (extra) {
+    extra.textContent = pcfg.extra.length
+      ? '源文件中另有字段 ' + pcfg.extra.join('、') + '，可视化编辑不涉及，保存时原样留在文件末尾' : '';
+  }
+}
+
+/* 服务端回带的表单数据(首屏 / 保存后):已保存的值即表单初值 */
+function pcfgApplyForm(form) {
+  if (!form) return;
+  pcfg.fields = form.fields || [];
+  pcfg.saved = form.values || null;
+  pcfg.extra = form.extra || [];
+  pcfg.errors = form.errors || [];
+  pcfg.lastEdited = null;
+  if (!pcfg.saved) pcfg.mode = 'source';
+  pcfgRender(pcfg.saved);
+  pcfgShowMode();
+}
+
+async function pcfgPost(body) {
+  const r = await fetch(CFG_VALIDATED_SAVE_ROUTE + TOKEN_QS, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.assign({target: cfgEditors.yaml.target}, body)),
+  });
+  return r.json();
+}
+
+function pcfgShowErr(text) {
+  cfgShowMsg('yaml', '❌ ' + text, 'err');
+  pcfg.dirtyShown = false;
+}
+
+async function pcfgSetMode(mode) {
+  if (mode === pcfg.mode) return;
+  const editor = document.getElementById('cfg-yaml-editor');
+  const modeBox = document.getElementById('pcfg-mode');
+  if (mode === 'visual' && !pcfg.saved && pcfg.lastEdited !== 'text') {
+    pcfgShowErr('源文件有误，修正并保存后才能切到可视化：' + pcfg.errors.join('；'));
+    return;
+  }
+  modeBox.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  try {
+    if (mode === 'source' && pcfg.lastEdited === 'form') {
+      const c = pcfgCollect();
+      if (c.error) { pcfgShowErr(c.error); return; }
+      const data = await pcfgPost({values: c.values, dry_run: true});
+      editor.value = data.content;
+      if (editor.value !== cfgEditors.yaml.original) editor.dataset.dirty = '1';
+      else delete editor.dataset.dirty;
+    } else if (mode === 'visual' && pcfg.lastEdited === 'text') {
+      const data = await pcfgPost({content: editor.value, dry_run: true});
+      if (!data.form || !data.form.values) {
+        pcfgShowErr('源文件有误，修正后才能切到可视化：' + (data.errors || []).join('；'));
+        return;
+      }
+      /* 只换表单内容,已保存的值不动 —— 改过的字段照样标出来 */
+      pcfg.extra = data.form.extra || [];
+      pcfgRender(data.form.values);
+    }
+    pcfg.lastEdited = null;
+    pcfg.mode = mode;
+    try { localStorage.setItem(PCFG_MODE_KEY, mode); } catch (e) { /* 存不了就只在本次生效 */ }
+    pcfgShowMode();
+    pcfgStatus();
+  } catch (e) {
+    pcfgShowErr('请求失败：' + e.message);
+  } finally {
+    modeBox.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+async function pcfgSave() {
+  const state = cfgEditors.yaml;
+  const editor = document.getElementById(state.editorId);
+  let body;
+  /* 可视化模式下表单没改、只有源文件里改了注释这类不进表单的内容时,按源文件保存,免得被重新渲染掉 */
+  if (pcfg.mode === 'visual' && (pcfgDirtyKeys().size || !editor.dataset.dirty)) {
+    const c = pcfgCollect();
+    if (c.error) { pcfgShowErr('未保存 —— ' + c.error); return; }
+    body = {values: c.values};
+  } else {
+    body = {content: editor.value};
+  }
+  const btn = document.getElementById(state.saveBtnId);
+  if (btn) btn.disabled = true;
+  try {
+    const data = await pcfgPost(body);
+    if (data.success) {
+      state.original = data.content;
+      editor.value = data.content;
+      delete editor.dataset.dirty;
+      pcfgApplyForm(data.form);
+      const notes = [];
+      if (data.reordered) notes.push('已按代码中的字段顺序整理');
+      if (data.warnings && data.warnings.length) notes.push('提醒：' + data.warnings.join('；'));
+      cfgShowMsg('yaml', '✅ 校验通过并已保存' + state.saveHint + (notes.length ? '（' + notes.join('；') + '）' : ''),
+                 data.warnings && data.warnings.length ? 'info' : 'ok');
+      pcfg.dirtyShown = false;
+    } else {
+      pcfgShowErr('未保存 —— ' + ((data.errors && data.errors.length) ? data.errors.join('；') : '保存失败'));
+    }
+  } catch (e) {
+    pcfgShowErr('请求失败：' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 /* ──── 紧急公告:启用 / 关闭 + 重置已通知群 ────
@@ -453,7 +712,9 @@ function cfgGamesEdit(fn) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  try { if (localStorage.getItem(PCFG_MODE_KEY) === 'source') pcfg.mode = 'source'; } catch (e) { /* 读不到按默认可视化 */ }
   cfgLoadInline();
+  pcfgShowMode();
 
   /* 给每个编辑器绑 dirty 跟踪 + 保存 / 恢复按钮 */
   Object.keys(cfgEditors).forEach(k => {
@@ -470,6 +731,22 @@ window.addEventListener('DOMContentLoaded', () => {
     const revBtn = document.getElementById(state.revertBtnId);
     if (revBtn) revBtn.addEventListener('click', () => cfgRevert(k));
   });
+
+  /* 插件配置:表单 / 源文件各自记下「最后改的是哪边」,模式切换据此决定要不要互转 */
+  const pcfgForm = document.getElementById('pcfg-form');
+  if (pcfgForm) {
+    const onForm = () => { pcfg.lastEdited = 'form'; pcfgRefresh(); };
+    pcfgForm.addEventListener('input', onForm);
+    pcfgForm.addEventListener('change', onForm);
+    document.getElementById('cfg-yaml-editor').addEventListener('input', () => {
+      pcfg.lastEdited = 'text';
+      pcfgStatus();
+    });
+    document.getElementById('pcfg-mode').addEventListener('click', e => {
+      const b = e.target.closest('.pcfg-mode-btn');
+      if (b && !b.disabled) pcfgSetMode(b.dataset.mode);
+    });
+  }
 
   /* 热重载按钮(只在 yaml editor 旁) */
   const reloadBtn = document.getElementById('cfg-yaml-reload');
