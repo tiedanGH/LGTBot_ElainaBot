@@ -105,6 +105,8 @@ _P_STATS    = r'^/?数据统计\s*(\S[^\n]*?)?\s*$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 _P_SPONSOR  = r'^/?赞助支持$'
+_P_ADMIN_INTERRUPT_AT = r'^(?:@.+?\s*)?%中断(?:\s+\S+)?$'
+_ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 
 # 「赞助支持」也列入专属指令:赞助功能**关闭**时 handler 会自己转发给引擎。
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
@@ -398,6 +400,26 @@ def _strip_text_at_prefix(content: str, appid: str) -> str | None:
         return None
     # QQ 客户端复制出来的 @ 后面跟的可能是普通空格,也可能是不间断空格
     return content[len(name) + 1:].strip(' \t\u00a0')
+
+
+def _addressed_content(event) -> str | None:
+    """这条消息是不是在叫机器人:是则返回去掉文字 @ 前缀后的正文,不是返回 ``None``。
+
+    只有全量群的 GROUP_MESSAGE_CREATE 要判:认真实 @(is_at_self),开启 TEXT_AT_AS_MENTION 时也认开头的「@机器人名称」。
+    GROUP_AT_MESSAGE_CREATE 的 @ 信号来自事件类型(payload 不一定带 mentions,is_at_self 可能为假),私信与按钮回调本就冲着机器人来。
+    """
+    content = (event.content or '').strip()
+    if event.event_type != GROUP_MESSAGE_CREATE or getattr(event, 'is_at_self', False):
+        return content
+    return _strip_text_at_prefix(content, event.appid or '') if TEXT_AT_AS_MENTION else None
+
+
+def _note_chat_ref(event) -> None:
+    """全量群里没叫机器人的消息不进引擎,但它的 msg_id 同样能被动回复 5 次:登记进引用池,
+    对局刷屏时先用这些额度,少发受 20 条/分钟频控的主动消息。别的 bot 的消息不登记。"""
+    if event.message_id and event.group_id and getattr(event, 'is_bot', False) is not True:
+        quota.refresh_ref(helpers.target_key(event.group_id, False), 'msg_id',
+                          event.message_id, event.appid or '')
 
 
 def _is_blocked_command(text: str) -> bool:
@@ -1375,21 +1397,11 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     if event.event_type == GROUP_MESSAGE_CREATE and event.group_id:
         helpers.note_group_message(event.group_id)
 
-    # 全量群里的日常对话必须挡掉(避免 r'.*' + ignore_at_check 把所有群消息都派给引擎),但这道闸**只对 GROUP_MESSAGE_CREATE 应用**:
-    # GROUP_AT_MESSAGE_CREATE 的 AT 信号来自事件类型,payload 不一定带 mentions(is_at_self 可能为假),硬卡会把正常的 @ 消息误挡。
-    # 文本形式的 @(复制粘贴)同样不带 mentions,由 TEXT_AT_AS_MENTION 决定是放行(剥掉前缀)还是照旧挡掉。
-    content = (event.content or '').strip()
-    if event.event_type == GROUP_MESSAGE_CREATE and not getattr(event, 'is_at_self', False):
-        text_at = (_strip_text_at_prefix(content, event.appid or '')
-                   if TEXT_AT_AS_MENTION else None)
-        if text_at is None:
-            # 非@全量消息不进引擎,但它的 msg_id 同样能被动回复 5 次:登记进引用池,
-            # 对局刷屏时先用这些额度,少发受 20 条/分钟频控的主动消息。别的 bot 的消息不登记。
-            if event.message_id and event.group_id and getattr(event, 'is_bot', False) is not True:
-                quota.refresh_ref(helpers.target_key(event.group_id, False), 'msg_id',
-                                  event.message_id, event.appid or '')
-            return
-        content = text_at
+    # 全量群里的日常对话必须挡掉(避免 r'.*' + ignore_at_check 把所有群消息都派给引擎),判定见 _addressed_content
+    content = _addressed_content(event)
+    if content is None:
+        _note_chat_ref(event)
+        return
 
     uid = event.user_id or ''
     gid = event.group_id or event.channel_id or ''
@@ -1907,12 +1919,13 @@ async def lgtbot_match_list(event, match):
         log.warning(f'派发赛事列表失败: {e}')
 
 
-@handler(_P_ADMIN_INTERRUPT,
+@handler(_P_ADMIN_INTERRUPT_AT,
          name='LGTBot 管理中断',
          desc='群管理员可强制中断本群卡死的对局 (仅中断，不含其他管理权限)',
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE},
          priority=100,
-         block=True)
+         block=True,
+         ignore_at_check=True)
 async def lgtbot_admin_interrupt(event, match):
     """抢占引擎管理指令「%中断」,给**群管理员**开放且仅开放这一条管理能力。
 
@@ -1926,8 +1939,17 @@ async def lgtbot_admin_interrupt(event, match):
       · 其他情况(普通群员 / 私信)→ **原样用请求者自己的 uid** 派发,由引擎
         自行裁决:本身在 admins 里(主人)照常执行,否则引擎回「未持有管理员权限」。
         插件不自造拒绝文案,语义与引擎保持一致。
+
+    全量群里与派进引擎的普通指令一样,只认 @ 机器人(含开启文字 @ 时的「@机器人名称」);
+    ``ignore_at_check=True`` 让框架把非 @ 消息也交过来,由这里统一判定,没叫机器人就不转发。
     """
     if helpers.is_foreign_event(event):
+        return
+    content = _addressed_content(event)
+    if content is None:
+        _note_chat_ref(event)
+        return
+    if not _ADMIN_INTERRUPT_RE.match(content):
         return
     if event.is_interaction and not _answer_button(event):
         return
@@ -1935,7 +1957,7 @@ async def lgtbot_admin_interrupt(event, match):
         await event.reply('⏳ LGTBot 引擎尚未就绪，请稍后再试')
         return
     # 身份为空时 member_role 同样不可信,不能借引擎管理员身份代为中断
-    if await _reject_anonymous(event, (event.content or '').strip()):
+    if await _reject_anonymous(event, content):
         return
 
     uid = event.user_id or ''
@@ -1969,7 +1991,7 @@ async def lgtbot_admin_interrupt(event, match):
         elif event.is_direct and uid:
             quota.refresh_ref(helpers.target_key(uid, True), ref_type, ref_value, appid_str)
 
-    cmd = (event.content or '').strip() or '%中断'
+    cmd = content
     page_logs.log_incoming(uid, gid if event.is_group else '', cmd)
     if proxied:
         # 事后追溯要能分辨这次代理中断作用在哪局:有对局但名字未知(单机局兜底失效)与群里根本没有对局分开记

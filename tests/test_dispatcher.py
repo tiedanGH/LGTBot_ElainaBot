@@ -2001,6 +2001,51 @@ async def test_real_at_is_untouched_by_the_switch(patched_downstream,
     assert patched_downstream['log_incoming'].call_args[0][2] == '/新游戏 决胜五子'
 
 
+def _full_group_interrupt(content, *, is_at_self=False, message_id='M_INT'):
+    ev = _text_at_event(content)
+    ev.is_at_self, ev.message_id, ev.member_role = is_at_self, message_id, 'member'
+    ev.reply = AsyncMock()
+    return ev
+
+
+async def test_admin_interrupt_in_full_volume_group_needs_a_mention(patched_downstream, engine_calls,
+                                                                     _bot_named, monkeypatch):
+    """★ 全量群里的 %中断 与普通指令一样只认 @ 机器人:没 @ 不转发引擎(msg_id 照常登记进引用池)。"""
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
+    _state.started = True
+
+    await dispatcher.lgtbot_admin_interrupt(_full_group_interrupt('%中断'), None)
+    assert engine_calls == []
+    assert [r['ref_value'] for r in quota._active_ref['g:FULL_GROUP']] == ['M_INT']
+
+    await dispatcher.lgtbot_admin_interrupt(_full_group_interrupt('%中断', is_at_self=True), None)
+    await dispatcher.lgtbot_admin_interrupt(_full_group_interrupt('@LGTBot %中断 42'), None)
+    assert engine_calls == [('%中断', 'U1', 'FULL_GROUP'), ('%中断 42', 'U1', 'FULL_GROUP')]
+
+
+@pytest.mark.parametrize('content, text_at_on', [
+    ('@LGTBot %中断', False),            # 文字 @ 开关关闭:只认真实 @
+    ('@隔壁机器人 %中断', True),          # @ 的是别人
+])
+async def test_admin_interrupt_ignores_text_at_that_is_not_for_this_bot(
+        patched_downstream, engine_calls, _bot_named, monkeypatch, content, text_at_on):
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', text_at_on)
+    _state.started = True
+    ev = _full_group_interrupt(content)
+    await dispatcher.lgtbot_admin_interrupt(ev, None)
+    assert engine_calls == []
+    ev.reply.assert_not_awaited()
+
+
+def test_admin_interrupt_handler_sees_non_at_and_text_at_messages():
+    """★ 注册时要 ignore_at_check,正则也得认「@机器人名称 %中断」—— 否则文字 @ 的 %中断 落进 catch-all。"""
+    from core.plugin.decorators import _pending_handlers
+    h = next(h for h in _pending_handlers if h['func'] is dispatcher.lgtbot_admin_interrupt)
+    assert h['ignore_at_check'] is True
+    assert h['compiled'].search('@LGTBot %中断') and h['compiled'].search('%中断 42')
+    assert not h['compiled'].search('%清除战绩 1 理由')
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 开局前预热主动消息权限
 # ─────────────────────────────────────────────────────────────────────────
