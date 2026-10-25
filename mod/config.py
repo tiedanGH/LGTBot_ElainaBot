@@ -185,6 +185,55 @@ def order_config_yaml(text: str) -> str:
     return render_config_yaml(data)
 
 
+def _migrate_legacy(data: dict) -> tuple:
+    """旧字段 crash_notify_group(单个群)迁到 notify_groups:新字段没配群时填进去,配了就只删旧字段(运行时本来就不用它)。
+
+    返回 ``(迁移后的新 dict, 迁移说明)``;没有旧字段时原样返回。
+    """
+    if 'crash_notify_group' not in data:
+        return data, []
+    out = {k: v for k, v in data.items() if k != 'crash_notify_group'}
+    raw = data['crash_notify_group']
+    legacy = '' if raw is None or isinstance(raw, bool) else str(raw).strip()
+    groups = out.get('notify_groups')
+    if legacy and not (isinstance(groups, list) and any(str(g).strip() for g in groups)):
+        out['notify_groups'] = [legacy]
+        return out, ['crash_notify_group → notify_groups']
+    return out, ['crash_notify_group 已删除' + ('（notify_groups 已有配置，旧值未生效）' if legacy else '')]
+
+
+def normalize_config_yaml(text: str) -> tuple:
+    """迁移旧字段并按代码顺序整理 config.yaml 文本,返回 ``(整理后的文本, 迁移说明)``。
+
+    迁移只删旧字段那一块、按需重写 notify_groups 那一块,其余字段原样保留;改完解析结果对不上时按 render_config_yaml 重新渲染。
+    """
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return text, []
+    if not isinstance(data, dict):
+        return text, []
+    migrated, notes = _migrate_legacy(data)
+    if notes:
+        head, blocks, tail = _config_blocks(text)
+        kept = [(k, b) for k, b in blocks if k != 'crash_notify_group']
+        if migrated.get('notify_groups') != data.get('notify_groups'):
+            block = render_config_yaml({'notify_groups': migrated['notify_groups']})
+            at = next((i for i, (k, _) in enumerate(kept) if k == 'notify_groups'), None)
+            if at is None:
+                kept.append(('notify_groups', block))
+            else:
+                kept[at] = ('notify_groups', block)
+        text = head + ''.join(b for _, b in kept) + tail
+        try:
+            again = yaml.safe_load(text)
+        except yaml.YAMLError:
+            again = None
+        if again != migrated:
+            text = render_config_yaml(migrated)
+    return order_config_yaml(text), notes
+
+
 def _write_atomic(path: str, text: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + '.tmp'
@@ -193,20 +242,23 @@ def _write_atomic(path: str, text: str) -> None:
     os.replace(tmp, path)
 
 
-def _normalize_config_order() -> None:
-    """config.yaml 的字段顺序与 DEFAULT_CONFIG 不一致时按代码顺序整理落盘(ensure_config 把新增字段补在文件末尾)。"""
+def _normalize_config_file() -> None:
+    """加载时整理 config.yaml:迁移旧字段,字段顺序与 DEFAULT_CONFIG 不一致时按代码顺序排(ensure_config 把新增字段补在文件末尾)。"""
     path = _config_path()
     try:
         with open(path, 'r', encoding='utf-8') as f:
             text = f.read()
-        ordered = order_config_yaml(text)
-        if ordered != text:
-            _write_atomic(path, ordered)
-            log.info('config.yaml 字段顺序已按代码顺序整理')
+        new, notes = normalize_config_yaml(text)
+        if new != text:
+            _write_atomic(path, new)
+            if notes:
+                log.info(f'config.yaml 已迁移旧字段：{"；".join(notes)}')
+            if order_config_yaml(text) != text:
+                log.info('config.yaml 字段顺序已按代码顺序整理')
     except FileNotFoundError:
         pass
     except OSError as e:
-        log.warning(f'整理 config.yaml 字段顺序失败: {e}')
+        log.warning(f'整理 config.yaml 失败: {e}')
 
 
 def _get_ctx():
@@ -256,7 +308,7 @@ def load_plugin_config() -> str:
         if ctx is not None:
             cfg = ctx.ensure_config(DEFAULT_CONFIG, filename='config.yaml',
                                      comments=CONFIG_COMMENTS)
-            _normalize_config_order()
+            _normalize_config_file()
         else:
             log.warning('PluginContext 完全不可用，使用默认配置（Web UI 将看不到配置文件）')
             cfg = dict(DEFAULT_CONFIG)
@@ -289,6 +341,8 @@ def _apply_runtime_tunables(cfg: dict):
     """
     from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
     from . import dispatcher as _dispatcher
+
+    cfg = _migrate_legacy(cfg)[0]
 
     # ── bind_bot_appid ────────────────────────────────────────────────────
     # 这里只落配置原值到 state,真正解析(在线校验 / 回退第一个)由 helpers.get_bound_appid() 每次调用惰性完成。
@@ -409,14 +463,6 @@ def _apply_runtime_tunables(cfg: dict):
                 groups.append(gid)
     elif raw_groups not in (None, ''):
         log.warning(f'notify_groups 应为列表，已忽略 (got {type(raw_groups).__name__})')
-    # 兼容旧字段名 crash_notify_group(单个群):否则老部署升级后这几条最不能漏的通知会**静默消失**。
-    if not groups:
-        legacy = cfg.get('crash_notify_group', '')
-        legacy = '' if isinstance(legacy, bool) else str(legacy).strip()
-        if legacy:
-            groups = [legacy]
-            log.warning(f'crash_notify_group 已更名为 notify_groups（可填多个群），'
-                        f'本次沿用旧值；建议改写成 notify_groups: ["{legacy}"]')
     new_groups = tuple(groups)
     if _callbacks.NOTIFY_GROUPS != new_groups:
         old = ', '.join(_callbacks.NOTIFY_GROUPS) or '(未配置)'

@@ -424,6 +424,7 @@ async function pcfgSave() {
       delete editor.dataset.dirty;
       pcfgApplyForm(data.form);
       const notes = [];
+      if (data.migrated && data.migrated.length) notes.push('已迁移旧字段：' + data.migrated.join('；'));
       if (data.reordered) notes.push('已按代码中的字段顺序整理');
       if (data.warnings && data.warnings.length) notes.push('提醒：' + data.warnings.join('；'));
       cfgShowMsg('yaml', '✅ 校验通过并已保存' + state.saveHint + (notes.length ? '（' + notes.join('；') + '）' : ''),

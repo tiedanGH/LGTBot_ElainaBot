@@ -430,9 +430,9 @@ def _valid_backends() -> set:
 # notify_groups 这类**列表**字段不用登记:列表项的 int 由下面的元素检查放行。
 _INT_OK_STR_FIELDS = {'bind_bot_appid'}
 
-# 改过名的字段:仍被 config.py 读作兼容值,提示改名即可。
+# 改过名的字段:config.normalize_config_yaml 会迁到新字段,校验只提示去向、不当未知字段。
 _LEGACY_FIELDS = {
-    'crash_notify_group': 'notify_groups（现支持多个群；旧字段仍会被读取，建议迁移）',
+    'crash_notify_group': 'notify_groups，加载与保存时自动迁移',
 }
 
 
@@ -552,14 +552,14 @@ def _form_fields() -> list:
 def _config_form(text: str, read_error: str = '') -> dict:
     """可视化编辑所需数据。读不到或校验不过时只带错误(values 为 None),前端停在源文件模式。
 
-    缺失或为空的字段按默认值显示;``extra`` 是本插件不读取的字段,可视化保存时原样留在文件末尾。
+    缺失或为空的字段按默认值显示,旧字段按迁移后的值显示;``extra`` 是本插件不读取的字段,可视化保存时原样留在文件末尾。
     """
     form = {'fields': _form_fields(), 'values': None, 'extra': [], 'errors': []}
     errors = [f'读取失败: {read_error}'] if read_error else _validate_config_yaml(text)[0]
     if errors:
         form['errors'] = errors
         return form
-    data = yaml.safe_load(text) or {}
+    data = _plugin_config._migrate_legacy(yaml.safe_load(text) or {})[0]
     form['values'] = {k: (d if data.get(k) is None else data[k])
                       for k, d in _plugin_config.DEFAULT_CONFIG.items()}
     form['extra'] = [str(k) for k in data if k not in _plugin_config.DEFAULT_CONFIG]
@@ -567,13 +567,15 @@ def _config_form(text: str, read_error: str = '') -> dict:
 
 
 def _yaml_from_values(values: dict, current: str) -> tuple:
-    """可视化保存:按字段类型检查表单值,并入源文件里本插件不读取的字段,按代码顺序渲染。返回 ``(yaml 文本, 类型错误)``。"""
+    """可视化保存:按字段类型检查表单值,并入源文件里本插件不读取的字段,按代码顺序渲染。返回 ``(yaml 文本, 类型错误)``。
+
+    表单显示的是迁移后的值,底稿也先迁移,旧字段不再写回文件。
+    """
     try:
         merged = yaml.safe_load(current) if current.strip() else {}
     except yaml.YAMLError:
         merged = {}
-    if not isinstance(merged, dict):
-        merged = {}
+    merged = _plugin_config._migrate_legacy(merged)[0] if isinstance(merged, dict) else {}
     errors = []
     for key, default in _plugin_config.DEFAULT_CONFIG.items():
         if key not in values:
@@ -642,7 +644,7 @@ def _atomic_write(path: str, content: str) -> None:
 def _save_config_yaml(content, values, dry_run: bool) -> 'web.Response':
     """config.yaml 的保存:源文件文本(``content``)或可视化表单值(``values``)。
 
-    落盘前一律按 DEFAULT_CONFIG 整理字段顺序,回带最终文本与表单数据,前端两种视图据此同步。
+    落盘前一律迁移旧字段并按 DEFAULT_CONFIG 整理字段顺序,回带最终文本与表单数据,前端两种视图据此同步。
     ``dry_run`` 只换算不落盘,供两种模式切换时互转:表单值换成文本(有校验错误也照给,让用户在源文件里改),
     文本换成表单值(校验不过就不给)。
     """
@@ -665,8 +667,9 @@ def _save_config_yaml(content, values, dry_run: bool) -> 'web.Response':
                      '校验拒绝: ' + '; '.join(str(e) for e in errors)[:150], ok=False)
         return web.json_response({'success': False, 'errors': errors, 'warnings': warnings})
 
-    ordered = _plugin_config.order_config_yaml(text)
-    reordered = ordered != text
+    ordered, migrated = _plugin_config.normalize_config_yaml(text)
+    reordered = _plugin_config.order_config_yaml(text) != text
+    warnings = _validate_config_yaml(ordered)[1]
     try:
         _atomic_write(_CONFIG_YAML_PATH, ordered)
     except Exception as e:
@@ -674,14 +677,16 @@ def _save_config_yaml(content, values, dry_run: bool) -> 'web.Response':
         audit.record('config', '保存 config.yaml', f'写盘失败: {e}', ok=False)
         return web.json_response({'success': False, 'errors': [f'写盘失败: {e}']})
     log.info(f'💾 [配置校验] config_yaml 校验通过并已保存({mode})'
+             + (f'，已迁移旧字段：{"；".join(migrated)}' if migrated else '')
              + ('，已按代码顺序整理字段' if reordered else '')
              + (f'(警告 {len(warnings)} 条)' if warnings else ''))
     audit.record('config', '保存 config.yaml',
                  f'{mode}，{len(ordered)} 字符'
+                 + ('，已迁移旧字段' if migrated else '')
                  + ('，已整理字段顺序' if reordered else '')
                  + (f'，{len(warnings)} 条警告' if warnings else ''))
     return web.json_response({'success': True, 'errors': [], 'warnings': warnings, 'content': ordered,
-                              'form': _config_form(ordered), 'reordered': reordered})
+                              'form': _config_form(ordered), 'reordered': reordered, 'migrated': migrated})
 
 
 async def save_config_handler(request: 'web.Request') -> 'web.Response':

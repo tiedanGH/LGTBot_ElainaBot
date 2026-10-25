@@ -137,7 +137,7 @@ def test_notify_groups_non_list_ignored():
 
 
 def test_legacy_crash_notify_group_still_honored():
-    """★ 旧字段名兼容:notify_groups 留空而旧的 crash_notify_group 有值时沿用旧值。
+    """★ 旧字段名先迁移再下发:notify_groups 留空而旧的 crash_notify_group 有值时用旧值。
 
     老部署的 yaml 里只有旧字段,无视它的话崩溃 / 重启通知会**静默消失**。新字段一旦填了就完全接管(不合并旧值)。
     """
@@ -451,7 +451,7 @@ def test_persist_bind_reports_failure_without_touching_state(monkeypatch, _cfg_f
 
 
 def test_validator_flags_renamed_field_as_migration_not_unknown():
-    """★ 改过名的字段仍被运行时读作兼容值 —— 校验器不能说它"不会读取",要提示改名去向。
+    """★ 改过名的字段会自动迁移到新字段 —— 校验器不能说它"不会读取",要提示改名去向。
 
     提示成未知字段会让人误删掉唯一生效的通知群配置。
     """
@@ -690,7 +690,7 @@ def yaml_target(tmp_path, monkeypatch):
 
 _OUT_OF_ORDER = ("# 手写注释\n"
                  "sponsor_enabled: false\n"
-                 "crash_notify_group: G0\n"
+                 "old_field: G0\n"
                  "bind_bot_appid: 'B1'\n")
 
 
@@ -704,8 +704,8 @@ async def test_visual_save_renders_code_order_and_keeps_extra_fields(yaml_target
     text = path.read_text(encoding='utf-8')
     data = yaml.safe_load(text)
     assert body['success'] is True and body['content'] == text and body['reordered'] is False
-    assert list(data) == [*config.DEFAULT_CONFIG, 'crash_notify_group']
-    assert data['crash_notify_group'] == 'G0' and data['sponsor_enabled'] is True and data['bind_bot_appid'] == 'B1'
+    assert list(data) == [*config.DEFAULT_CONFIG, 'old_field']
+    assert data['old_field'] == 'G0' and data['sponsor_enabled'] is True and data['bind_bot_appid'] == 'B1'
     assert 'refresh_wait_timeout: 20.0  #' in text and 'active_push_daily_limit: 50  #' in text
     assert body['form']['values']['sponsor_enabled'] is True
     assert recorded[-1][0][1] == '保存 config.yaml' and recorded[-1][0][2].startswith('可视化')
@@ -732,7 +732,7 @@ async def test_source_save_puts_fields_in_code_order(yaml_target):
     body = _resp_body(await pc.save_config_handler(_FakeSaveReq({'target': 'config_yaml', 'content': _OUT_OF_ORDER})))
     text = path.read_text(encoding='utf-8')
     assert body['success'] is True and body['reordered'] is True and body['content'] == text
-    assert text == "bind_bot_appid: 'B1'\n# 手写注释\nsponsor_enabled: false\ncrash_notify_group: G0\n"
+    assert text == "bind_bot_appid: 'B1'\n# 手写注释\nsponsor_enabled: false\nold_field: G0\n"
     assert '已整理字段顺序' in recorded[-1][0][2]
 
 
@@ -751,3 +751,71 @@ async def test_dry_run_converts_between_modes_without_writing(yaml_target):
         _FakeSaveReq({'target': 'config_yaml', 'content': 'a: [1,\n', 'dry_run': True})))
     assert broken['success'] is False and broken['form'] is None
     assert path.read_text(encoding='utf-8') == _OUT_OF_ORDER and recorded == []
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 旧字段 crash_notify_group 自动迁移到 notify_groups
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_migration_moves_legacy_group_into_empty_notify_groups():
+    """★ notify_groups 没配群时把旧值迁进去并删掉旧字段;其余字段的写法与注释不动,顺序按代码整理。"""
+    src = ("sponsor_enabled: false\n"
+           "crash_notify_group: G0\n"
+           "# 我的通知群\n"
+           "notify_groups: []\n"
+           "bind_bot_appid: 'B1'  # 我的绑定\n")
+    out, notes = config.normalize_config_yaml(src)
+    assert notes == ['crash_notify_group → notify_groups']
+    assert out == ("bind_bot_appid: 'B1'  # 我的绑定\n"
+                   f"# {config.CONFIG_COMMENTS['notify_groups']}\n"
+                   "notify_groups:\n  - G0\n"
+                   "sponsor_enabled: false\n")
+    # 缺 notify_groups 时同样补出来
+    out2, _ = config.normalize_config_yaml('crash_notify_group: 123\n')
+    assert yaml.safe_load(out2) == {'notify_groups': ['123']}
+
+
+@pytest.mark.parametrize('src, kept', [
+    ("notify_groups:\n  - GNEW\ncrash_notify_group: GOLD\n", ['GNEW']),    # 新字段已配:旧值本来就没生效
+    ("notify_groups: []\ncrash_notify_group: ''\n", []),                    # 旧字段是空值
+])
+def test_migration_only_drops_legacy_when_it_has_nothing_to_add(src, kept):
+    out, notes = config.normalize_config_yaml(src)
+    assert yaml.safe_load(out) == {'notify_groups': kept}
+    assert len(notes) == 1 and notes[0].startswith('crash_notify_group 已删除')
+    assert config.normalize_config_yaml('notify_groups: []\n') == ('notify_groups: []\n', [])
+
+
+def test_load_migrates_legacy_field_on_disk_and_at_runtime(_cfg_file, monkeypatch):
+    """★ 加载时把文件里的旧字段迁到 notify_groups 并按代码顺序落盘,运行时立即按迁移后的值推送通知。"""
+    with open(_cfg_file, 'w', encoding='utf-8') as f:
+        f.write("crash_notify_group: GOLD  # 旧版写法\nbind_bot_appid: ''\n")
+    cfg = dict(_base_cfg(notify_groups=[]), crash_notify_group='GOLD')
+    monkeypatch.setattr(config, '_get_ctx', lambda: _FakeCtx(cfg))
+    config.load_plugin_config()
+    assert yaml.safe_load(open(_cfg_file, encoding='utf-8')) == {'bind_bot_appid': '', 'notify_groups': ['GOLD']}
+    assert callbacks.NOTIFY_GROUPS == ('GOLD',)
+
+
+async def test_source_save_migrates_legacy_field(yaml_target):
+    """源文件里写了旧字段:保存时迁移并回带迁移说明,不再提示改名。"""
+    pc, path, recorded = yaml_target
+    body = _resp_body(await pc.save_config_handler(
+        _FakeSaveReq({'target': 'config_yaml', 'content': "crash_notify_group: G0\nbind_bot_appid: 'B1'\n"})))
+    assert body['success'] is True and body['migrated'] == ['crash_notify_group → notify_groups']
+    assert yaml.safe_load(path.read_text(encoding='utf-8')) == {'bind_bot_appid': 'B1', 'notify_groups': ['G0']}
+    assert not any('crash_notify_group' in w for w in body['warnings'])
+    assert '已迁移旧字段' in recorded[-1][0][2]
+
+
+async def test_visual_form_and_save_use_migrated_values(yaml_target):
+    """可视化表单按迁移后的值显示,旧字段不算「另有字段」;保存后文件里只剩新字段。"""
+    pc, path, _ = yaml_target
+    src = "crash_notify_group: G0\nnotify_groups: []\n"
+    path.write_text(src, encoding='utf-8')
+    form = pc._config_form(src)
+    assert form['values']['notify_groups'] == ['G0'] and form['extra'] == []
+    body = _resp_body(await pc.save_config_handler(_FakeSaveReq({'target': 'config_yaml', 'values': form['values']})))
+    data = yaml.safe_load(path.read_text(encoding='utf-8'))
+    assert body['success'] is True and data['notify_groups'] == ['G0'] and 'crash_notify_group' not in data
+    assert body['migrated'] == []      # 表单里已是迁移后的值,不再报「旧值未生效」这类说明

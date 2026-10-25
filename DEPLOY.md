@@ -224,7 +224,7 @@ menu_game_buttons:
 | `image_upload_dedup_ttl`  | `float`     | `60.0`  | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用                          |
 | `active_push_daily_limit` | `int`       | `1000`  | **单个群 / 单个用户**每日主动消息条数上限（QQ 官方接口限制，官方调整后改这里即可）。用满后该群 / 用户当日失去主动直推资格，退回「刷新按钮」被动机制；**次日 0 点自动重置**。`0` = 不限制。                            |
 | `admin_uids`              | `list[str]` | `[]`    | LGTBot 超级管理员的 QQ openid 列表                                                                                                            |
-| `notify_groups`           | `list[str]` | `[]`    | 通知群 openid 列表，**可填多个，通知会同时推给全部群**：引擎崩溃 / 引擎告警 / 自动重启说明。留空 = 不推送。这些群需给 bot 开全量推送权限。（旧字段名 `crash_notify_group` 仍会被读取并提示迁移）              |
+| `notify_groups`           | `list[str]` | `[]`    | 通知群 openid 列表，**可填多个，通知会同时推给全部群**：引擎崩溃 / 引擎告警 / 自动重启说明。留空 = 不推送。通知群需给 bot 开全量推送权限。                                                    |
 | `sandbox_dm_users`        | `list[str]` | `[]`    | 私信主动直推名单。填 `["all"]`（仅此一项）= 全员直推模式：官方现已默认允许 bot 向好友推送主动私信，配额耗尽后对任意用户直推、不再丢弃。                                                          |
 | `blocked_commands`        | `list[str]` | `[]`    | 屏蔽指令列表：命中的消息（文本 / 按钮回调）不再转发给 LGTBot 引擎，化解其他插件的指令冲突。带 / 不带 `/` **严格按配置匹配**，`指令 参数` 形式也命中。                                              |
 | `text_at_as_mention`      | `bool`      | `true`  | 把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @。                                                                                          |
