@@ -763,7 +763,7 @@ async def test_planned_restart_command_accepts_reason(monkeypatch):
     st.active_matches.clear()
     st.set_planned_restart(False)
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
-    monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher', lambda: None)
+    monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher', lambda immediate=False: False)
     try:
         ev = _mock_event(is_group=True, group_id='G1', user_id='U1',
                          content='计划重启 例行维护')
@@ -2108,7 +2108,7 @@ def test_auto_restart_skips_already_notified_groups():
     跳过的行为级断言在 test_restart_api 的 watcher 用例里;这里只钉住调用顺序:通知群那条**先发**,
     反过来通知群会先收到房间通知再收到重启说明。"""
     import inspect
-    src = inspect.getsource(dispatcher._auto_restart_watcher)
+    src = inspect.getsource(dispatcher._auto_restart_now)
     assert src.index('_notify_auto_restart') < src.index('_notify_restart_rooms')
 
 

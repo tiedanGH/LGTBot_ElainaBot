@@ -16,7 +16,7 @@
          "reason": "文本"}      # 维护原因,展示在玩家的维护提示里(≤200 字)
     手动模式(auto=false)禁止创建新游戏,进行中对局不受影响;auto=true
     **不限制新游戏创建**,watcher 每 20s 轮询,对局清空并静默 30s 后自动
-    重启(计审计 SRC_AUTO;静默期内新局出现则顺延)。
+    重启(计审计 SRC_AUTO;静默期内新局出现则顺延);开启时已没有进行中的对局则响应送达后立即重启。
 
 状态码:200 成功 / 400 参数缺失或类型错 / 401 token 错 / 409 有对局拒绝重启。
 审计:两个端点的操作都以 ``SRC_API`` 落审计;自动重启触发时由 watcher 以 ``SRC_AUTO`` 另记一条。
@@ -80,7 +80,7 @@ async def planned_restart_handler(request: 'web.Request') -> 'web.Response':
     """``POST /api/ext/lgtbot/planned-restart`` —— 开 / 关计划重启维护模式。
 
     body ``enable`` 必填(显式语义,不做翻转 —— API 调用方要的是确定状态);``auto`` / ``reason`` 仅开启时生效。
-    响应带当前剩余对局数,auto 开启且对局已清空时 watcher 会在数秒内自动触发重启。
+    响应带当前剩余对局数;auto 开启且已没有进行中的对局时,watcher 在响应送达后立即触发重启。
     """
     if not _check_auth(request):
         return _err(401, 'token 缺失或错误')

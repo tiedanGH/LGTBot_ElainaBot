@@ -1761,8 +1761,9 @@ def set_planned_mode(enable: bool, reason: str = '', auto: bool = False) -> tupl
     """显式开 / 关「计划重启」维护模式,返回 (新状态, 提示文案)。
 
     ``reason`` 为维护原因,仅在开启时记录并展示给玩家(见 ``_planned_restart_notice``);
-    ``auto=True`` 同时启用**自动重启**:watcher 轮询进行中对局,全部结束并静默 30s 后自动执行重启
-    (默认手动 —— 管理员自己点重启)。两种模式对玩家的差别:手动模式拦下新建房间回维护提示;
+    ``auto=True`` 同时启用**自动重启**:watcher 轮询进行中对局,全部结束并静默 30s 后自动执行重启;
+    开启时就已经没有进行中的对局则不等静默期,立即重启(见 _auto_restart_watcher 的 ``immediate``)。
+    默认手动 —— 管理员自己点重启。两种模式对玩家的差别:手动模式拦下新建房间回维护提示;
     **自动模式不限制新游戏创建**。关闭时 reason / auto 一并清掉。回执带剩余进行中对局数。
     """
     reason = (reason or '').strip()
@@ -1770,20 +1771,26 @@ def set_planned_mode(enable: bool, reason: str = '', auto: bool = False) -> tupl
     state.set_planned_restart(enable, reason, auto)
     if enable:
         remaining = len(state.active_matches)
+        # 已有 watcher 在跑时沿用它的节奏,不另起
+        restart_now = auto and _ensure_auto_restart_watcher(immediate=not remaining) and not remaining
         log.warning(f'🚧 [计划重启] 维护模式已启用'
                     f'（剩余对局 {remaining}，自动重启 {"开" if auto else "关"}，'
                     f'{"不限制" if auto else "禁用"}新游戏创建）'
-                    + (f'，原因：{reason}' if reason else ''))
-        if auto:
+                    + (f'，原因：{reason}' if reason else '')
+                    + ('，当前没有进行中的对局，立即重启' if restart_now else ''))
+        if restart_now:
+            msg = '🚧 计划重启已启用（自动模式）：当前没有进行中的对局。'
+        elif auto:
             msg = (f'🚧 计划重启已启用（自动模式）：不限制新游戏创建'
                    f'（剩余进行中对局 {remaining} 局）。')
         else:
             msg = f'🚧 计划重启已启用：已禁用新游戏创建（剩余进行中对局 {remaining} 局）。'
         if reason:
             msg += f'\n📌 维护原因：{reason}'
-        if auto:
+        if restart_now:
+            msg += '\n🤖 自动重启：立即执行重启。'
+        elif auto:
             msg += '\n🤖 自动重启：在无人进行对局时自动执行重启。'
-            _ensure_auto_restart_watcher()
         return True, msg
     log.warning('✅ [计划重启] 维护模式已取消：恢复新游戏创建')
     return False, '✅ 计划重启已取消：已恢复新游戏创建。'
@@ -1797,6 +1804,8 @@ _AUTO_WATCH_INTERVAL = 20.0
 # 对局清空后的静默期:终局结算消息 fire-and-forget 投递,还要排发送队列 + 图床上传,对局移出 active_matches 时
 # 往往尚未送达 QQ,立即 execv 会把它们丢掉。持续空满该秒数才真正重启;期间开出新局则计时清零。
 _AUTO_RESTART_GRACE = 30.0
+# 开启时就已经没有进行中的对局:不进静默期,只让开启回执(指令回复 / 面板 / API 响应)先送达
+_AUTO_RESTART_NOW_DELAY = 3.0
 
 
 def ensure_auto_restart_watcher_on_load() -> None:
@@ -1809,26 +1818,33 @@ def ensure_auto_restart_watcher_on_load() -> None:
         _ensure_auto_restart_watcher()
 
 
-def _ensure_auto_restart_watcher() -> None:
-    """幂等启动自动重启 watcher(无运行中 loop 时静默跳过,由下次开启补起)。"""
+def _ensure_auto_restart_watcher(immediate: bool = False) -> bool:
+    """幂等启动自动重启 watcher,返回是否新起了一个;已在运行 / 无运行中 loop(由下次开启补起)时返回 False。"""
     p = boot._get_persistent()
     t = p.get(_AUTO_WATCH_KEY)
     if t is not None and not t.done():
-        return
+        return False
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         log.warning('[计划重启] 无运行中 asyncio loop,自动重启 watcher 未启动')
-        return
-    p[_AUTO_WATCH_KEY] = loop.create_task(_auto_restart_watcher())
+        return False
+    p[_AUTO_WATCH_KEY] = loop.create_task(_auto_restart_watcher(immediate))
+    return True
 
 
-async def _auto_restart_watcher() -> None:
+async def _auto_restart_watcher(immediate: bool = False) -> None:
     """「自动重启」轮询:planned + auto 开启期间每 20s 检查进行中对局。
 
     对局清空后**不立即**重启,先进入 ``_AUTO_RESTART_GRACE`` 秒静默期(见常量注释),期间出现新对局则计时清零。
-    触发时走与手动重启完全相同的 ``check_and_prepare_restart`` 原子预检,被拒(race)回到等待重来。
+    ``immediate`` 为真(开启时就已经没有进行中的对局)时不进静默期,等 ``_AUTO_RESTART_NOW_DELAY`` 秒即重启;
+    这期间开出新局则照常轮询。
     """
+    if immediate:
+        await asyncio.sleep(_AUTO_RESTART_NOW_DELAY)
+        if (state.is_planned_restart() and state.is_planned_restart_auto() and not state.active_matches
+                and await _auto_restart_now('开启时已没有进行中的对局，立即执行计划重启')):
+            return
     empty_since = None
     while state.is_planned_restart() and state.is_planned_restart_auto():
         if state.active_matches:
@@ -1840,28 +1856,36 @@ async def _auto_restart_watcher() -> None:
                 log.info(f'🤖 [自动重启] 对局已全部结束,进入 '
                          f'{_AUTO_RESTART_GRACE:.0f}s 静默期(等待结算消息送达)')
             elif now - empty_since >= _AUTO_RESTART_GRACE:
-                rooms = snapshot_waiting_rooms()      # 必须在释放引擎之前
-                ok, _msg = check_and_prepare_restart()
-                if ok:
-                    reason = state.planned_restart_reason()
-                    audit.record('restart', '自动重启',
-                                 f'对局已全部结束，静默 {_AUTO_RESTART_GRACE:.0f}s 后自动执行计划重启'
-                                 + (f'（原因：{reason}）' if reason else ''),
-                                 src=audit.SRC_AUTO)
-                    metrics.record_restart()
-                    log.warning('🤖 [自动重启] 静默期结束，执行计划重启')
-                    # 先把通知推到严重问题通知群(带维护原因;仅自动重启),await 保证 HTTP 往返在换进程之前完成。
-                    await _notify_auto_restart(reason)
-                    # 再通知还有等待中房间的群;通知群刚收过一条,不重复打扰
-                    from . import callbacks as _cb
-                    await _notify_restart_rooms(
-                        reason, rooms=rooms,
-                        skip_keys={helpers.target_key(g, False)
-                                   for g in _cb.NOTIFY_GROUPS})
-                    schedule_exec_after(0.5)
+                if await _auto_restart_now(
+                        f'对局已全部结束，静默 {_AUTO_RESTART_GRACE:.0f}s 后自动执行计划重启'):
                     return
                 empty_since = None          # 预检被拒(race 新开局)→ 重新计时
         await asyncio.sleep(_AUTO_WATCH_INTERVAL)
+
+
+async def _auto_restart_now(detail: str) -> bool:
+    """执行一次自动重启,``detail`` 写进审计与日志。返回 False = 原子预检被拒(race 新开局),引擎保持运行。
+
+    预检与手动重启完全相同(``check_and_prepare_restart``),通过后审计 + 指标 + 通知,再调度 execv。
+    """
+    rooms = snapshot_waiting_rooms()      # 必须在释放引擎之前
+    ok, _msg = check_and_prepare_restart()
+    if not ok:
+        return False
+    reason = state.planned_restart_reason()
+    audit.record('restart', '自动重启', detail + (f'（原因：{reason}）' if reason else ''),
+                 src=audit.SRC_AUTO)
+    metrics.record_restart()
+    log.warning(f'🤖 [自动重启] {detail}')
+    # 先把通知推到严重问题通知群(带维护原因;仅自动重启),await 保证 HTTP 往返在换进程之前完成。
+    await _notify_auto_restart(reason)
+    # 再通知还有等待中房间的群;通知群刚收过一条,不重复打扰
+    from . import callbacks as _cb
+    await _notify_restart_rooms(
+        reason, rooms=rooms,
+        skip_keys={helpers.target_key(g, False) for g in _cb.NOTIFY_GROUPS})
+    schedule_exec_after(0.5)
+    return True
 
 
 # 重启更新内容的长度上限(指令 / 面板 / API 共用);超长截断
@@ -2089,7 +2113,7 @@ async def lgtbot_admin_interrupt(event, match):
 async def lgtbot_planned_restart(event, match):
     """主人切换「计划重启」维护模式 —— 重启前逐渐清空对局用(重启后本模式自动恢复关闭)。
 
-    默认**自动重启**:不限制新游戏创建,全部对局结束并静默 30s 后自动执行重启。
+    默认**自动重启**:不限制新游戏创建,全部对局结束并静默 30s 后自动执行重启;开启时已经没有进行中的对局则立即重启。
     首词恰为「手动」才进入手动模式 —— 拦下新建房间,等对局自然结束后由管理员自己发「重启」。
     """
     if helpers.is_foreign_event(event):

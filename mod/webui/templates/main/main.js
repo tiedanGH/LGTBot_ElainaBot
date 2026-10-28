@@ -166,7 +166,7 @@ document.getElementById('planned-restart-btn').addEventListener('click', async (
     /* 开启时用 prompt 收集维护原因(可留空)+「自动重启」勾选;默认勾上:不拦新游戏,对局全部结束后自己重启。 */
     const input = await dashPrompt(
       '启用计划重启？\n\n' +
-      '自动重启（推荐）：不限制新游戏创建，等全部对局结束自动重启。\n\n' +
+      '自动重启（推荐）：不限制新游戏创建，等待全部对局结束自动重启。\n\n' +
       '填写维护原因重启时展示给玩家：',
       {defaultValue: '', okText: '启用', level: 'warn',
        checkbox: '自动重启（对局全部结束后自动执行）', checkboxChecked: true}

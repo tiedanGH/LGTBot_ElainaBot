@@ -156,7 +156,7 @@ async def test_planned_enable_with_auto_and_reason(tmp_path, monkeypatch):
     token = _token(monkeypatch, build_api, tmp_path)
     ensured = []
     monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher',
-                        lambda: ensured.append(1))
+                        lambda immediate=False: ensured.append(immediate))
     audits = []
     monkeypatch.setattr(restart_api.audit, 'record',
                         lambda *a, **k: audits.append((a, k)))
@@ -169,7 +169,7 @@ async def test_planned_enable_with_auto_and_reason(tmp_path, monkeypatch):
     assert data['reason'] == '升级引擎'
     assert state.is_planned_restart() and state.is_planned_restart_auto()
     assert state.planned_restart_reason() == '升级引擎'
-    assert ensured == [1]                                  # watcher 已拉起
+    assert ensured == [True]                               # watcher 已拉起(没有对局:立即重启)
     assert '自动重启' in audits[0][0][2] and audits[0][1].get('src') == 'API'
 
     # 关闭:reason / auto 一并清掉
@@ -186,7 +186,7 @@ async def test_planned_manual_mode_does_not_start_watcher(tmp_path, monkeypatch)
     token = _token(monkeypatch, build_api, tmp_path)
     ensured = []
     monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher',
-                        lambda: ensured.append(1))
+                        lambda immediate=False: ensured.append(immediate))
     monkeypatch.setattr(restart_api.audit, 'record', lambda *a, **k: None)
     resp = await restart_api.planned_restart_handler(_FakeReq(
         token=token, body={'enable': True, 'reason': 'x'}))
@@ -276,6 +276,143 @@ async def test_auto_watcher_snapshots_rooms_before_releasing_engine(monkeypatch)
     assert seen['skip'] == {helpers.target_key('GNOTIFY', False)}
 
 
+def _patch_restart_path(monkeypatch, calls: list, audits: list, notified: list) -> None:
+    """自动重启路径上会动引擎 / 换进程 / 发消息的环节全部替身,依次记进 calls。"""
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
+                        lambda: calls.append('check') or (True, 'ok'))
+    monkeypatch.setattr(dispatcher, 'schedule_exec_after', lambda d=0.5: calls.append('exec'))
+    monkeypatch.setattr(dispatcher.metrics, 'record_restart', lambda: None)
+    monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: audits.append((a, k)))
+
+    async def fake_notify(reason):
+        notified.append(reason)
+    monkeypatch.setattr(dispatcher, '_notify_auto_restart', fake_notify)
+
+    async def fake_rooms(reason='', *, skip_keys=frozenset(), rooms=None):
+        return 0
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_rooms)
+
+
+def _watcher_task():
+    from plugins.LGTBot_ElainaBot.mod import boot
+    return boot._get_persistent().get(dispatcher._AUTO_WATCH_KEY)
+
+
+async def test_enabling_without_matches_restarts_without_the_grace(monkeypatch):
+    """★ 开启自动模式时已经没有进行中的对局:不进静默期,回执先发出去再重启,照样推自动重启通知。"""
+    calls, audits, notified = [], [], []
+    _patch_restart_path(monkeypatch, calls, audits, notified)
+    # 静默期与轮询间隔都拉长:走的若是原来的轮询路径,超时前等不到重启
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_GRACE', 60.0)
+    monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 60.0)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_NOW_DELAY', 0.01)
+
+    on, msg = dispatcher.set_planned_mode(True, '夜间升级', auto=True)
+    assert on and '立即执行重启' in msg and '夜间升级' in msg
+    assert calls == []                              # 回执返回时引擎还没动
+    await asyncio.wait_for(_watcher_task(), timeout=2.0)
+    assert calls == ['check', 'exec']
+    a, kw = audits[0]
+    assert a[1] == '自动重启' and '立即' in a[2] and '夜间升级' in a[2] and '静默' not in a[2]
+    assert kw.get('src') == '自动'
+    assert notified == ['夜间升级']                 # 通知群照常收到自动重启说明
+
+
+async def test_immediate_restart_waits_for_the_reply_first(monkeypatch):
+    """★ 指令开启时立即重启:回执发完才动引擎 —— 回执要走网络,先释放引擎再换进程,管理员可能收不到这条回执。"""
+    from unittest.mock import MagicMock
+    calls, audits, notified = [], [], []
+    _patch_restart_path(monkeypatch, calls, audits, notified)
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_NOW_DELAY', 0.05)
+
+    async def slow_reply(msg):
+        await asyncio.sleep(0.01)                   # 发送回执的网络往返
+        calls.append('reply')
+    ev = MagicMock()
+    ev.reply = slow_reply
+    await dispatcher.lgtbot_planned_restart(ev, _planned_match('计划重启 升级引擎'))
+    await asyncio.wait_for(_watcher_task(), timeout=2.0)
+    assert calls == ['reply', 'check', 'exec']
+
+
+async def test_enabling_with_matches_still_waits_for_them(monkeypatch):
+    """还有对局在进行:不立即重启,照旧轮询等对局结束。"""
+    calls, audits, notified = [], [], []
+    _patch_restart_path(monkeypatch, calls, audits, notified)
+    monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_NOW_DELAY', 0.01)
+    state.active_matches['m1'] = {'target_id': 'g1', 'is_uid': False}
+
+    _on, msg = dispatcher.set_planned_mode(True, '', auto=True)
+    assert '在无人进行对局时自动执行重启' in msg and '立即' not in msg
+    await asyncio.sleep(0.05)
+    assert calls == []
+    state.set_planned_restart(False)
+    await asyncio.wait_for(_watcher_task(), timeout=2.0)
+
+
+async def test_immediate_restart_backs_off_when_a_match_starts_first(monkeypatch):
+    """开启时没有对局,但立即重启之前有人开了局:不重启,退回正常轮询。"""
+    calls, audits, notified = [], [], []
+    _patch_restart_path(monkeypatch, calls, audits, notified)
+    monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_NOW_DELAY', 0.03)
+
+    dispatcher.set_planned_mode(True, '', auto=True)
+    state.active_matches['m1'] = {'target_id': 'g1', 'is_uid': False}
+    await asyncio.sleep(0.08)
+    assert calls == []
+    state.set_planned_restart(False)
+    await asyncio.wait_for(_watcher_task(), timeout=2.0)
+
+
+async def test_immediate_restart_is_dropped_when_cancelled_first(monkeypatch):
+    """开启后、立即重启之前管理员又取消了:不重启,watcher 随模式关闭退出。"""
+    calls, audits, notified = [], [], []
+    _patch_restart_path(monkeypatch, calls, audits, notified)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_NOW_DELAY', 0.03)
+
+    dispatcher.set_planned_mode(True, '', auto=True)
+    dispatcher.set_planned_mode(False)
+    await asyncio.wait_for(_watcher_task(), timeout=2.0)
+    assert calls == [] and audits == [] and notified == []
+
+
+async def test_refused_precheck_leaves_the_engine_running(monkeypatch):
+    """原子预检被拒(引擎里其实还有对局):不审计、不推通知、不换进程,回到轮询等下一次机会。"""
+    calls, audits, notified = [], [], []
+    _patch_restart_path(monkeypatch, calls, audits, notified)
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart',
+                        lambda: calls.append('check') or (False, '⚠️ 当前存在进行中的游戏'))
+    monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
+    monkeypatch.setattr(dispatcher, '_AUTO_RESTART_NOW_DELAY', 0.01)
+
+    dispatcher.set_planned_mode(True, '', auto=True)
+    await asyncio.sleep(0.05)
+    assert calls == ['check'] and audits == [] and notified == []
+    state.set_planned_restart(False)
+    await asyncio.wait_for(_watcher_task(), timeout=2.0)
+
+
+async def test_enabling_again_keeps_the_running_watcher(monkeypatch):
+    """已经有 watcher 在跑(自动模式下再开一次):沿用它的节奏,不另起,回执也不说立即重启。"""
+    calls, audits, notified = [], [], []
+    _patch_restart_path(monkeypatch, calls, audits, notified)
+    monkeypatch.setattr(dispatcher, '_AUTO_WATCH_INTERVAL', 0.01)
+    state.active_matches['m1'] = {'target_id': 'g1', 'is_uid': False}
+    dispatcher.set_planned_mode(True, '', auto=True)
+    first = _watcher_task()
+
+    state.active_matches.clear()
+    _on, msg = dispatcher.set_planned_mode(True, '', auto=True)
+    assert _watcher_task() is first
+    assert '立即' not in msg
+    state.set_planned_restart(False)
+    await asyncio.wait_for(first, timeout=2.0)
+    assert calls == []
+
+
 async def test_auto_watcher_exits_when_mode_disabled(monkeypatch):
     """维护模式被手动关闭 → watcher 自然退出,不触发重启。"""
     state.set_planned_restart(True, '', auto=True)
@@ -298,15 +435,36 @@ def _planned_match(text):
     return re.match(dispatcher._P_PLANNED, text)
 
 
-async def _run_planned_cmd(monkeypatch, text):
+async def _run_planned_cmd(monkeypatch, text, ensure=lambda immediate=False: False):
+    """跑一条「计划重启 …」指令,返回回执。``ensure`` 顶替真正拉起 watcher 的 _ensure_auto_restart_watcher。"""
     from unittest.mock import AsyncMock, MagicMock
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: None)
-    monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher', lambda: None)
+    monkeypatch.setattr(dispatcher, '_ensure_auto_restart_watcher', ensure)
     ev = MagicMock()
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_planned_restart(ev, _planned_match(text))
     return ev.reply.await_args.args[0]
+
+
+async def test_planned_command_says_it_restarts_now_without_matches(monkeypatch):
+    """★ 开启时已经没有进行中的对局:watcher 按「立即」拉起,回执写明立即重启;有对局时照旧等对局结束。"""
+    started = []
+
+    def ensure(immediate=False):
+        started.append(immediate)
+        return True
+    msg = await _run_planned_cmd(monkeypatch, '计划重启 升级引擎', ensure)
+    assert started == [True]
+    assert '立即执行重启' in msg and '升级引擎' in msg
+    await _run_planned_cmd(monkeypatch, '计划重启')          # 关闭
+
+    started.clear()
+    state.active_matches['m1'] = {'target_id': 'g1', 'is_uid': False}
+    msg = await _run_planned_cmd(monkeypatch, '计划重启', ensure)
+    assert started == [False]
+    assert '自动执行重启' in msg and '立即' not in msg and '剩余进行中对局 1 局' in msg
+    await _run_planned_cmd(monkeypatch, '计划重启')
 
 
 async def test_planned_command_auto_keyword(monkeypatch):
