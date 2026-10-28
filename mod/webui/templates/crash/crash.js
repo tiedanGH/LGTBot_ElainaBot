@@ -369,7 +369,7 @@ async function crashDeleteSelected() {
   const ok = await dashConfirm(
     '确认删除选中的 ' + names.length + ' 个崩溃转储？\n\n' +
     (names.length <= 8 ? names.join('\n') + '\n\n' : '') +
-    '删除后无法恢复。建议先「⬇ 下载」需要留存的 dump 再删。',
+    '删除后无法恢复。建议先「下载」需要留存的 dump 再删。',
     { level: 'danger' }
   );
   if (!ok) return;

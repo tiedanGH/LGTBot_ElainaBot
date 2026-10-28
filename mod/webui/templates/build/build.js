@@ -224,7 +224,7 @@ function buildFull() {
     '🚀 开始完整编译？\n\n将依次执行：\n  · 子模块 / 依赖自检\n  · CMake 配置 (Release 模式)\n' +
     '  · 编译 C++ 桥接层 + 全部游戏插件\n\n' +
     '⏱️ 预计耗时：2 核 CPU 约 20-30 分钟。\n' +
-    '编译在子进程中运行，可关闭网页；过程中可点「🛑 终止编译」中止。',
+    '编译在子进程中运行，可关闭网页；过程中可点「终止编译」中止。',
     null, 'warn'
   );
 }
@@ -258,7 +258,7 @@ function buildList() {
     BUILD_KEYS.list,
     'bash build.sh --list-targets',
     '📋 列出全部可编译目标？\n\n不执行任何编译，仅列出 CMake 已知 target，\n' +
-    '用于「🎯 编译指定目标」按钮里填写。结果输出在下方日志框中。',
+    '用于「编译指定目标」按钮里填写。结果输出在下方日志框中。',
     null, 'info'
   );
 }
@@ -269,7 +269,7 @@ function buildList() {
 async function buildTargetFlow(key, cmdOf, makeConfirm) {
   /* 1. prompt 拿 target —— defaultValue 用上次编译的 target 名 */
   const raw = await dashPrompt(
-    '请输入要编译的目标名称 (参考「📋 列出可编译目标」结果)：\n\n' +
+    '请输入要编译的目标名称 (参考「列出可编译目标」结果)：\n\n' +
     '允许字符：字母 / 数字 / 下划线 / 连字符\n' +
     '长度：1-63，首字符必须是字母或下划线',
     {level: 'info', defaultValue: buildLastCustomTarget}
@@ -423,7 +423,7 @@ function buildClean() {
     'bash build.sh --clean',
     '🧹 清理重编 (--clean)？\n\n' +
     '⚠️ 会先 rm -rf build/ (删除所有 CMake 缓存和编译产物)，然后从头完整编译。\n' +
-    '等同于「🚀 完整编译」的总耗时，2 核 CPU 约 20-30 分钟。',
+    '等同于「完整编译」的总耗时，2 核 CPU 约 20-30 分钟。',
     '再次确认：删除 build 后重新完整编译？\n此操作不可撤销，所有现有 .so 都会被覆盖。',
     'warn'
   );
@@ -434,7 +434,7 @@ async function buildRemove() {
   const ok1 = await dashConfirm(
     '🗑️ 删除 build 目录？\n\n命令：rm -rf <plugin_dir>/build\n\n' +
     '⚠️ 仅删除目录，不重新编译。删除后引擎将无法启动，\n' +
-    '直到下次「🚀 完整编译」。',
+    '直到下次「完整编译」。',
     {level: 'warn'}
   );
   if (!ok1) return;

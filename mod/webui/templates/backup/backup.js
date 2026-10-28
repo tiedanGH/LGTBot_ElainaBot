@@ -241,7 +241,7 @@ async function backupRestore(name) {
   const ok2 = await dashConfirm(
     '再次确认：这是不可逆操作！\n\n' +
     '现有的对局战绩、成就、配置将被备份时的快照覆盖。\n' +
-    '如有疑虑，请先点「💾 立即备份」抓取当前数据状态后再恢复。',
+    '如有疑虑，请先点「立即备份」抓取当前数据状态后再恢复。',
     {level: 'danger'}
   );
   if (!ok2) return;
@@ -253,7 +253,7 @@ async function backupRestore(name) {
       backupShowMsg('✅ ' + (data.message || '已恢复'), 'ok');
       dashAlert
         ? await dashAlert('恢复完成！ —— 战绩、成就、公告等数据已立即生效。\n'
-              + '若本次恢复涉及引擎配置 lgtbot.json，请点击「🔁 重启 LGTBot」让引擎重新加载。')
+              + '若本次恢复涉及引擎配置 lgtbot.json，请点击「重启 LGTBot」让引擎重新加载。')
         : alert('恢复完成！战绩、成就、公告等数据已立即生效，如涉及引擎配置请重启 LGTBot');
     } else {
       backupShowMsg('❌ ' + (data.message || '恢复失败'), 'err');

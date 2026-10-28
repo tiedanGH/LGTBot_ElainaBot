@@ -28,7 +28,7 @@ const cfgEditors = {
     absPath: '', original: '', format: 'yaml', target: 'config_yaml',
     editorId: 'cfg-yaml-editor', pathId: 'cfg-yaml-path',
     msgId: 'cfg-yaml-msg', saveBtnId: 'cfg-yaml-save', revertBtnId: 'cfg-yaml-revert',
-    saveHint: '，请点「🔁 热重载配置」即时下发到运行时',
+    saveHint: '，请点「热重载配置」即时下发到运行时',
   },
   important: {
     dataKey: 'important_update',

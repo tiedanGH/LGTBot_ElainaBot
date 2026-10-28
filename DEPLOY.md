@@ -1,13 +1,13 @@
 # LGTBot × ElainaBot 部署指南
 
-> 把 [LGTBot](https://github.com/slontia/lgtbot) 游戏引擎接入 ElainaBot QQ 主框架，
-> 一键编译 → 启动主框架即可使用，**无需任何额外配置**。
+> 把 [LGTBot](https://github.com/slontia/lgtbot) 游戏引擎接入 [ElainaBot_v2](https://github.com/ElainaCore/ElainaBot_v2) 主框架，
+> 一键编译 → 启动主框架即可使用，无需额外配置。
 
 ---
 
 ## 1. 系统依赖（仅编译时）
 
-目前只支持 **Linux**（lgtbot 引擎依赖 POSIX/Boost.Python，Windows 上编译复杂度极高）。
+目前只支持 **Linux**（lgtbot 引擎依赖 POSIX/Boost.Python）。
 
 > 💡 **不想装工具链？** 若你的发行版 / Python 版本在预编译覆盖范围内（Ubuntu 22.04 / 24.04、Debian 12），可直接下载预编译包运行，**跳过本节所有编译依赖**，见 [§3.1 预编译包部署](#31-预编译包部署免本地工具链)。
 
@@ -43,18 +43,16 @@ sudo yum install -y \
 
 ### 2.1 从插件市场安装 (推荐路径)
 
-主框架插件市场下载到的 zip **不包含 `.git/`**(`web/tools/_market/install.py` 解压时显式过滤)，所以 `git` 命令都无法运行。但插件自带一键修复入口:
+主框架插件市场下载到的 zip **不包含 `.git/`**，git 命令无法直接使用，插件自带一键修复入口:
 
-1. 确保系统已装 git 客户端 (`git --version` 能跑就行，无需 SSH key)
+1. 确保系统已装 git 客户端 (`git --version` 能跑，无需 SSH key)
 2. 启动主框架，访问 Web 面板 →「LGTBot 机器人 → 仪表盘」
-3. 「📦 版本与更新」→ 桥接层行点 **「📥 初始化为 git 仓库」**
-   - 后端执行 `git init -b main` → `remote add origin` → `fetch --tags --depth 50` → `reset --mixed v<当前版本>`
-   - `reset --mixed` 只动 index 不动工作区， `data/`、`build/`、`lgtbot/` 全保留
-4. 同一面板 → 子模块行点 **「⬇ 初始化子模块」**
-   - 后端用 `git -c url.https://...insteadOf=git@github.com:` **临时改写 SSH→HTTPS**，递归生效到 lgtbot 嵌套的 7 个子模块，**不需要 SSH key**
-5. 切到「引擎编译」tab → 「🛠 完整编译」
+3. 「版本与更新」→ 桥接层行点 **「初始化为 git 仓库」**
+4. 同一面板 → 子模块行点 **「初始化子模块」**
+   - 后端**临时改写 SSH→HTTPS**，递归生效到 lgtbot 嵌套的 7 个子模块，**不需要 SSH key**
+5. 切到「引擎编译」tab → 「完整编译」
 
-> 💡 **没装 git 也能检查与更新版本**：「版本与更新」的检查不依赖本地 git；检测到新版本时会出现 **「下载更新」** 按钮，直接下载最新 release 源码包覆盖更新。初始化 git 仓库仅在需要 `git pull` / 开发时才必须。
+> 💡 **没装 git 也能检查与更新版本**：「版本与更新」的检查不依赖本地 git；检测到新版本时可用 **「下载更新」** 按钮，直接下载最新 release 源码包覆盖更新。
 
 ### 2.2 从源仓库 clone (开发者路径)
 
@@ -70,7 +68,7 @@ git clone --recursive https://github.com/slontia/lgtbot.git lgtbot
 git submodule update --init --recursive plugins/LGTBot_ElainaBot/lgtbot
 ```
 
-注:lgtbot 上游的 `.gitmodules` 把嵌套子模块全部登记为 SSH url。如果你没 SSH key,改用 dashboard 的「⬇ 初始化子模块」按钮(已内置 SSH→HTTPS 改写),或者手动加 `-c url."https://github.com/".insteadOf="git@github.com:"` 给上面的 `git submodule update`。
+注:lgtbot 上游的 `.gitmodules` 把嵌套子模块全部登记为 SSH url。如果你没 SSH key,改用 dashboard 的「初始化子模块」按钮(已内置 SSH→HTTPS 改写),或者手动加 `-c url."https://github.com/".insteadOf="git@github.com:"` 给上面的 `git submodule update`。
 
 ---
 
@@ -116,17 +114,16 @@ bash build.sh --help                   # 查看所有参数
 
 CI 已为 **Ubuntu 22.04 / 24.04、Debian 12** 各预编译一份引擎核心 + 全部游戏，发布到本仓库滚动的预发布 release。若本机在此范围，无需 §1 的编译依赖，直接在 Web 面板下载：
 
-1. 启动主框架后打开 Web 面板 → 侧边栏「LGTBot 机器人」→「📦 预编译部署」tab
-2. 在**仪表盘「🧪 运行环境」**看依赖：运行时依赖齐全即可；编译依赖标灰「预编译无需」可忽略
-3. 点「📶 测速」选择延迟低的下载镜像，刷新**预编译包**列表
-4. 在**预编译包**列表选**与本机匹配**（发行版 + Python 版本一致）的包，点「⬇ 下载」，等进度条完成
-5. 到**构建来源**分区点「用预编译包」，再点右上角「🔁 重启 LGTBot」生效
+1. 启动主框架后打开 Web 面板 → 侧边栏「LGTBot 机器人」→「预编译部署」tab
+2. 在**仪表盘「运行环境」**看依赖：运行时依赖齐全即可；编译依赖标灰「预编译无需」可忽略
+3. 点「测速」选择延迟低的下载镜像，刷新**预编译包**列表
+4. 在**预编译包**列表选**与本机匹配**（发行版 + Python 版本一致）的包，点「下载」，等进度条完成
+5. 到**构建来源**分区点「用预编译包」，再点右上角「重启 LGTBot」生效
 
 - 预编译包解压到 `plugins/LGTBot_ElainaBot/build_prebuilt/`，与本地 `build/` **并存**，可随时切换（每次切换都需要重启）。
 - 走预编译时**不需要初始化 `lgtbot` 子模块**（它只参与本地编译）。
-- **引擎运行中更新包**：若预编译目录被运行中引擎占用导致换入失败，会自动暂存，**重启 LGTBot 后自动完成安装**（面板会提示，无需人工干预）。
-- 匹配以**发行版 + Python 小版本**为准：桥接层 `.so` 锁定 Boost.Python ABI，不匹配的包无法加载。列表对**系统与 Python 分别标注**（系统不匹配红、Python 不匹配橙，系统权重更高），下载时按「完全不匹配 / 系统不匹配 / 部分匹配」分级提示。
-- 列表按时间倒序，与已安装 `build_prebuilt/manifest.json` 对比提示。
+- **引擎运行中更新包**：若预编译目录被运行中引擎占用导致换入失败，会自动暂存，**重启 LGTBot 后自动完成安装**。
+- 匹配以**发行版 + Python 小版本**为准：桥接层 `.so` 锁定 Boost.Python ABI，不匹配的包无法加载。列表按时间倒序，与已安装版本对比提示。
 
 > 需要改桥接层源码或用未覆盖的发行版 / Python 时，仍走 §3 本地编译。
 
@@ -170,7 +167,7 @@ python3 main.py         # 启动主框架，自动加载插件
 [插件:LGTBot_ElainaBot] 大型插件加载完成 (1 个处理器, 0.12s)
 ```
 
-完成。在 QQ 群里 @ 机器人发送 `#帮助` 即可看到游戏列表。
+完成。在 QQ 群里 @ 机器人发送 `/帮助` 即可看到游戏列表。
 
 ---
 
@@ -220,7 +217,7 @@ menu_game_buttons:
 | `bind_bot_appid`          | `str`       | `''`    | 绑定机器人 appid（仪表盘可视化选择）。留空自动使用第一个 bot。绑定后所有功能均走该 bot，**其他 bot 的事件被静默忽略**。appid 为纯数字，手工填写可不加引号                                           |
 | `image_hosting`           | `str`       | `'any'` | Markdown 图片内嵌使用的图床。`any`（默认）按主框架优先级自动依次尝试；也可指定单个（`cos` / `nature` / `bilibili` / `chatglm` / `ukaka` / `xingye`）省去逐个重试；失败走 msg_type=7 |
 | `refresh_wait_timeout`    | `float`     | `15.0`  | 配额耗尽时阻塞等待用户点击刷新按钮的秒数；超时改走主动消息（不再用过期 msg_id 强发）                                                                                        |
-| `button_cooldown`         | `float`     | `3.0`   | 回调按钮的用户级冷却秒数，从上一次放行的点击算起：期间再点同一按钮回官方状态「重复操作」、点其他按钮回「操作频繁」，机器人不回复也不转发引擎；「🔄 刷新会话」不受限。`0` 关闭，负数自动归 0                                    |
+| `button_cooldown`         | `float`     | `3.0`   | 回调按钮的用户级冷却秒数，从上一次放行的点击算起：期间再点同一按钮回官方状态「重复操作」、点其他按钮回「操作频繁」，机器人不回复也不转发引擎；「刷新会话」不受限。`0` 关闭，负数自动归 0                                       |
 | `image_upload_dedup_ttl`  | `float`     | `60.0`  | 同份图片上传去重 TTL（秒）。`>0` 启用 content-hash URL 缓存 + in-flight Future 共享（多并发上传只打图床一次）；`0` 关闭去重每次重传；filename 唯一化始终启用                          |
 | `active_push_daily_limit` | `int`       | `1000`  | **单个群 / 单个用户**每日主动消息条数上限（QQ 官方接口限制，官方调整后改这里即可）。用满后该群 / 用户当日失去主动直推资格，退回「刷新按钮」被动机制；**次日 0 点自动重置**。`0` = 不限制。                            |
 | `admin_uids`              | `list[str]` | `[]`    | LGTBot 超级管理员的 QQ openid 列表                                                                                                            |
@@ -281,11 +278,11 @@ rm -rf plugins/LGTBot_ElainaBot
 |--------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `LGTBot_ElainaBot C++ 扩展未编译或导入失败`                                                    | 重跑 `bash build.sh`；查看 `plugins/LGTBot_ElainaBot/LGTBot_ElainaBot.so` 是否存在                                                                                                                                                                                                                                                                          |
 | `CMake 报错「找不到 Boost.Python」` + 日志 `Python3: 3.13.x` 远超系统默认                           | 发行版 `libboost-python-dev` 只为系统默认 Python 编译(22.04→3.10 / 24.04→3.12 / Debian 12→3.11);装了 deadsnakes python3.13 后 CMake 默认选最高版本,跟 `libboost_python310.so` 等 ABI 不匹配。`build.sh` 已自动按系统已装的 boost-python ABI 反推选用匹配的 Python(看 build 日志「Python 选择」段);若仍误判可手动 `PYTHON3=python3.10 bash build.sh` 强制指定,或装匹配版本 `sudo apt install python3.10 python3.10-dev` |
-| `git pull` / `git submodule update` 报错 / build.sh 提示「.git/ 不存在」                      | 从插件市场安装的目录里没有 `.git/`(市场显式过滤)。打开仪表盘 → 桥接层行点「📥 初始化为 git 仓库」一键修复;再点「⬇ 初始化子模块」拉 lgtbot(已内置 SSH→HTTPS 改写,无需 SSH key)。详见 §2.1                                                                                                                                                                                                                          |
+| `git pull` / `git submodule update` 报错 / build.sh 提示「.git/ 不存在」                      | 从插件市场安装的目录里没有 `.git/`(市场显式过滤)。打开仪表盘 → 桥接层行点「初始化为 git 仓库」一键修复;再点「初始化子模块」拉 lgtbot(已内置 SSH→HTTPS 改写,无需 SSH key)。详见 §2.1                                                                                                                                                                                                                               |
 | `libbot_core.so: cannot open shared object file`                                     | `LGTBot_ElainaBot.so` 链接 `libbot_core.so` 但 ld.so 默认不搜 `build/`。本插件已用 `ctypes.CDLL` 在 import 阶段预加载 `build/lib*.so`；若仍报错，确认 `build/libbot_core.so` 存在，或手动 `LD_LIBRARY_PATH=plugins/LGTBot_ElainaBot/build python3 main.py`                                                                                                                          |
 | `ImportError: undefined symbol: ...boost::python...`                                 | Boost.Python 与编译时的 Python 版本不匹配 — `bash build.sh --clean` 重编译                                                                                                                                                                                                                                                                                      |
-| 切到预编译后引擎起不来 / 桥接 `undefined symbol` / 游戏 spawn 失败                                    | 多半是下载的预编译包**与本机发行版 / Python 小版本不匹配**(桥接 `.so` 锁 Boost.Python ABI)。在「📦 预编译部署」列表按标注选**本机匹配**的包重下;`config_runner` / `match_game_runner` 的路径由 `boot.py` 自动重定位,若仍失败切回「🧱 用本地编译」并重启,或用 §3 本地编译                                                                                                                                                          |
-| 预编译模式下桥接导入报 `libbot_core.so: cannot open shared object file`,自检列出缺 `libreproc.so.14` | 包里漏带了引擎自己编译的 `libreproc`(lgtbot 进程通信依赖),它不是系统库,无需 apt 安装。在「📦 预编译部署」重新下载最新的预编译包并重启 LGTBot                                                                                                                                                                                                                                                          |
+| 切到预编译后引擎起不来 / 桥接 `undefined symbol` / 游戏 spawn 失败                                    | 多半是下载的预编译包**与本机发行版 / Python 小版本不匹配**(桥接 `.so` 锁 Boost.Python ABI)。在「预编译部署」列表按标注选**本机匹配**的包重下;`config_runner` / `match_game_runner` 的路径由 `boot.py` 自动重定位,若仍失败切回「用本地编译」并重启,或用 §3 本地编译                                                                                                                                                                |
+| 预编译模式下桥接导入报 `libbot_core.so: cannot open shared object file`,自检列出缺 `libreproc.so.14` | 包里漏带了引擎自己编译的 `libreproc`(lgtbot 进程通信依赖),它不是系统库,无需 apt 安装。在「预编译部署」重新下载最新的预编译包并重启 LGTBot                                                                                                                                                                                                                                                             |
 | `Load mod failed: ... undefined symbol: _ZN6google10LogMessage...`                   | 仅在 `--glog` 编译时可能出现（glog 默认关闭，一般不会遇到）。glog 符号不可见，本插件已在 `main.py` 用 `RTLD_GLOBAL` 解决；若仍出现，试 `LD_PRELOAD=$(ldconfig -p \| grep libglog \| awk '{print $4}' \| head -1) python3 main.py`，或干脆不加 `--glog` 重编                                                                                                                                            |
 | `图片渲染失败 (markdown2image 调用未生成文件)` 或 `markdown2image 二进制缺失`                           | 本插件在 `import` 时会切到 `build/` 目录让 LGTBot 找到 `markdown2image`。若仍报错：① 检查 `plugins/LGTBot_ElainaBot/build/markdown2image` 是否存在并可执行（`chmod +x`）；② 手动测试 `cd build && echo '# hi' \| ./markdown2image --output /tmp/x.png --width 400 --nowith_css --noprint_info`；③ 部分游戏依赖字体，需 `apt install fonts-noto-cjk`。不影响游戏核心运行，仅影响图片输出                             |
 | 面板停用的游戏还出现在「游戏列表」里，「随机游戏」也还能抽到                                                       | 开局指令保存后立即拦截，但游戏列表、随机游戏由引擎决定：重启 LGTBot（或没有对局时热重载）让引擎重新加载，才会跳过停用的游戏                                                                                                                                                                                                                                                                                  |
@@ -293,5 +290,5 @@ rm -rf plugins/LGTBot_ElainaBot
 | `LGTBot 引擎启动失败`                                                                      | 查 `build/plugins/` 下是否有各 `libgame.so`；首次编译需要等待所有 game 子项编译完成                                                                                                                                                                                                                                                                                       |
 | 消息发不出去 / 无响应                                                                         | 检查主框架日志中 sender 是否成功初始化；QQ Bot `appid/secret` 是否正确                                                                                                                                                                                                                                                                                                 |
 | 对局消息晚几十秒才出现，日志有 `🐢 [频控退避]` / `🚫 [频控丢弃]`                                            | QQ 主动消息频控（单群 20 条/分钟，bot 群消息总量 60 条/分钟）。插件会退避重发，最多等约 65 秒，期间群里有人发言就立即改走被动回复；仍被拒才丢弃并计入指标面板「异常发送失败」。多个群同时开局时最容易撞上总量上限                                                                                                                                                                                                                                |
-| 段错误 / `Segmentation fault (core dumped)`                                             | 通常是 ASAN 编译产物未通过 LD_PRELOAD 启动 —— `bash build.sh --clean` 重编（默认 ASAN OFF）。引擎崩溃的 backtrace 会落盘到 `LGTBot_CRASH_DUMPS/`，可在 Web 面板「💥 崩溃转储」标签查看 / 下载后用于排障                                                                                                                                                                                              |
+| 段错误 / `Segmentation fault (core dumped)`                                             | 通常是 ASAN 编译产物未通过 LD_PRELOAD 启动 —— `bash build.sh --clean` 重编（默认 ASAN OFF）。引擎崩溃的 backtrace 会落盘到 `LGTBot_CRASH_DUMPS/`，可在 Web 面板「崩溃转储」标签查看 / 下载后用于排障                                                                                                                                                                                                 |
 | 排行榜 / 战绩里离线用户显示成 `<XXXX…YYYY>` 这种截断 openid                                           | 昵称读取自主框架数据库 `data/log/<appid>/data.db` 的 `users` 表 —— 该用户还没有任何带昵称的事件被框架记录到。等其下次发言即自动补齐。旧版遗留的 `data/user_cache.db` 已完全停用（不连接 / 不读写 / 不备份），删除与否均无影响                                                                                                                                                                                                  |

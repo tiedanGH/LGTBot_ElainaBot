@@ -130,7 +130,7 @@ function pbRenderMirrorUI() {
 function pbRenderMirrorList() {
   const list = document.getElementById('pb-mirror-list');
   if (!_pbMirrors.length) {
-    list.innerHTML = '<div class="pb-mirror-empty">点「📶 测速」按延迟排序后进行选择，或「➕ 自定义镜像」添加自己的代理。</div>';
+    list.innerHTML = '<div class="pb-mirror-empty">点「测速」按延迟排序后逐个选择，或「自定义镜像」添加自己的代理。</div>';
     return;
   }
   list.innerHTML = _pbMirrors.map(m => {
@@ -299,12 +299,12 @@ async function pbPollOnce() {
         pbRefreshList();
         if (typeof dashAlert === 'function')
           dashAlert('预编译包已下载并校验完成。\n' + st.note + '。\n' +
-                    '确认「🔀 构建来源」已选「用预编译包」，再点右上角「🔁 重启 LGTBot」即可。');
+                    '确认「构建来源」已选「用预编译包」，再点右上角「重启 LGTBot」即可。');
       } else {
         pbShowMsg('✅ 已下载安装。到「构建来源」点「用预编译包」并重启 LGTBot 生效。', 'ok');
         pbRefreshList();
         if (typeof dashAlert === 'function')
-          dashAlert('预编译包已下载安装完成。\n到本页「🔀 构建来源」点「用预编译包」切换，再点右上角「🔁 重启 LGTBot」生效。');
+          dashAlert('预编译包已下载安装完成。\n到本页「构建来源」点「用预编译包」切换，再点右上角「重启 LGTBot」生效。');
       }
     } else if (st.stage === 'error') {
       pbShowMsg('❌ 下载失败：' + (st.error || ''), 'err');
@@ -370,7 +370,7 @@ async function pbUpload(file) {
   const ok = await dashConfirm(
     '确认上传并安装「' + file.name + '」？\n\n' +
     '请确保它是与本机发行版 / Python 匹配的预编译包 zip（含 manifest.json）。\n' +
-    '安装后需到「🔀 构建来源」切换「用预编译包」并重启 LGTBot 生效。',
+    '安装后需到「构建来源」切换「用预编译包」并重启 LGTBot 生效。',
     { level: 'warn' }
   );
   if (!ok) return;
@@ -390,7 +390,7 @@ async function pbUpload(file) {
       pbShowMsg('✅ ' + (data.message || '上传包已安装'), 'ok');
       pbRefreshList();
       if (typeof dashAlert === 'function')
-        dashAlert('上传包已安装。\n到「🔀 构建来源」点「用预编译包」，再点右上角「🔁 重启 LGTBot」生效。');
+        dashAlert('上传包已安装。\n到「构建来源」点「用预编译包」，再点右上角「重启 LGTBot」生效。');
     } else {
       pbRenderProgress({ stage: 'error', error: data.message || '安装失败' });
       pbShowMsg('❌ ' + (data.message || '上传失败'), 'err');
