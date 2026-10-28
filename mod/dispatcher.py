@@ -13,7 +13,7 @@ import sys
 import time
 import asyncio
 import threading
-from datetime import date as _date
+from datetime import date as _date, datetime
 
 from core.plugin.decorators import handler
 from core.base.logger import get_logger, PLUGIN
@@ -293,7 +293,7 @@ def _is_disabled_game(content: str) -> bool:
 _DISABLED_GAME_NOTICE = (
     '## 🚫 游戏已停用\n'
     '\n'
-    '此游戏已被管理员停用，暂时无法开局，看看其他游戏吧。'
+    '此游戏已被管理员停用，暂时不可用，看看其他游戏吧。'
 )
 
 
@@ -778,20 +778,24 @@ async def _reply_notice_range(event, details: list, important: list, a: str, b: 
     await event.reply(md, buttons=buttons.build_notice_buttons(older=True, sponsor=False))
 
 
-# ──────── 「数据统计」的四个窗口视图(按日 / 按月 / 按年 / 累计总计) ─────────
-# 它们与今日视图的差异完全一致:无涨跌标识、无主动消息行、无趋势图,第 4 卡为该期**对局人次**,双榜 TOP10(今日视图 5)。
-# 四者之间只差下面几项,所以实现只有 _reply_period_stats 一份:
-#   period  卡片 / 榜单文案里的期间词(当日 / 当月 / 当年 / 累计)
+# ──── 「数据统计」的窗口视图(按日 / 按月 / 本月 / 按年 / 今年 / 累计总计) ────
+# 它们与今日视图的差异完全一致:无主动消息行、无趋势图,第 4 卡为该期**对局人次**,双榜 TOP10(今日视图 5);
+# 涨跌标识只有本月 / 今年两个视图有(对比上月 / 去年同期)。各视图之间只差下面几项,所以实现只有 _reply_period_stats 一份:
+#   period  卡片 / 榜单文案里的期间词(当日 / 当月 / 本月 / 当年 / 今年 / 累计)
 #   who     前两卡的前缀(总计视图是"累计玩家 / 累计群聊",其余是"活跃…")
-#   empty   该期没有已完成对局时的提示措辞
+#   empty   该期没有已完成对局时的提示措辞;None = 这一期还没过完,没有对局也照常出统计
 #   flags   叠给 stats_image 的子模式开关(date_mode 恒真,是这批视图的总闸)
 
 # 「数据统计YYYY」可查的最早年份
 _MIN_STATS_YEAR = 2026
 
+# 参数不是日期时按游戏名查;更长消息整条不响应
+_STATS_GAME_MAX_LEN = 10
+
 # 参数既不是日期、也对不上游戏名时附在报错下方（可能是想查日期但写错了格式）
 _STATS_DATE_USAGE = (
     '📅 按日期查询：\n'
+    '· 周期 数据统计日/月/年\n'
     '· 某日 数据统计MMDD（或 YYYYMMDD）\n'
     '· 某月 数据统计MM（或 YYYYMM）\n'
     '· 某年 数据统计YYYY\n'
@@ -801,7 +805,9 @@ _STATS_DATE_USAGE = (
 _SPAN_VIEWS = {
     'date':  {'period': '当日', 'who': '活跃', 'flags': {}, 'empty': '该日期没有已完成的对局'},
     'month': {'period': '当月', 'who': '活跃', 'flags': {'month_mode': True}, 'empty': '该月份没有已完成的对局'},
+    'this_month': {'period': '本月', 'who': '活跃', 'flags': {'month_mode': True, 'to_date': True}, 'empty': None},
     'year':  {'period': '当年', 'who': '活跃', 'flags': {'year_mode': True}, 'empty': '该年份没有已完成的对局'},
+    'this_year': {'period': '今年', 'who': '活跃', 'flags': {'year_mode': True, 'to_date': True}, 'empty': None},
     'total': {'period': '累计', 'who': '累计', 'flags': {'total_mode': True}, 'empty': '数据库中还没有已完成的对局'},
 }
 
@@ -827,31 +833,49 @@ def _parse_stats_date(year: int, mm: str, dd: str, today, hint: str) -> tuple:
     return ('today', None, '') if target == today else ('date', target, '')
 
 
+def _stats_month(year: int, month: int, today) -> tuple:
+    """按月查询的落点:查的就是本月 → 同「数据统计月」,否则是那个自然月。"""
+    if (year, month) == (today.year, today.month):
+        return 'this_month', None, ''
+    return 'month', (year, month), ''
+
+
 def _parse_stats_arg(arg: str, today) -> tuple:
     """解析「数据统计」的参数,返回 ``(kind, payload, error)``。
 
-    ``kind`` ∈ ``today`` / ``total`` / ``year`` / ``month`` / ``date`` / ``game`` / ``error``;
-    payload 依次为 None / None / 年 / (年, 月) / ``date`` 对象 / 游戏名原文 / None。
+    ``kind`` ∈ ``today`` / ``this_month`` / ``this_year`` / ``total`` / ``year`` / ``month`` / ``date`` /
+    ``game`` / ``ignore`` / ``error``;payload 只有 ``year``(年)/ ``month``((年, 月))/ ``date``(``date`` 对象)/
+    ``game``(游戏名原文)非 None。
 
-        (无)        今日
+        (无) / 日   今日
+        月          本月截至此刻        对比上月同期
+        年          今年截至此刻        对比去年同期
         总          全部历史累计
         MM          当年某月            如 08
         MMDD        当年某日            如 0803
         YYYY        某年                如 2026
         YYYYMM      某年某月            如 202608
         YYYYMMDD    某年某日            如 20260803
-        其他        单个游戏            如 天赋云巢(纯数字只按日期解析)
+        其他        单个游戏            如 天赋云巢(纯数字只按日期解析;超过 _STATS_GAME_MAX_LEN 字 → ignore)
+
+    查的就是今天 / 本月 / 今年时,落到 ``today`` / ``this_month`` / ``this_year``(带年份与否都一样)。
 
     **4 位参数的年份与 MMDD 不会撞车**:MMDD 的前两位必须是合法月份 01-12,而 2000-2099 的年份前两位恒为 20,
     所以前两位是合法月份 → 按 MMDD,否则按年份。6 / 8 位只可能带年份。
 
     纯函数(时间从 ``today`` 传入),错误文案在这里一处产出 —— handler 只负责回。
     """
-    if not arg:
+    if not arg or arg == '日':
         return 'today', None, ''
+    if arg == '月':
+        return 'this_month', None, ''
+    if arg == '年':
+        return 'this_year', None, ''
     if arg == '总':
         return 'total', None, ''
     if not arg.isdecimal():
+        if len(arg) > _STATS_GAME_MAX_LEN:
+            return 'ignore', None, ''
         return 'game', arg, ''
     n, this_year = len(arg), today.year
     if n not in (2, 4, 6, 8):
@@ -861,7 +885,7 @@ def _parse_stats_arg(arg: str, today) -> tuple:
         month = int(arg)
         if not 1 <= month <= 12:
             return 'error', None, '月份无效（格式 MM，如 数据统计08 查看 8月）'
-        return 'month', (this_year, month), ''
+        return _stats_month(this_year, month, today)
     if n == 4 and 1 <= int(arg[:2]) <= 12:                # MMDD —— 当年某日
         return _parse_stats_date(this_year, arg[:2], arg[2:], today,
                                  'MMDD，如 数据统计0802 查看 8月2日')
@@ -871,7 +895,7 @@ def _parse_stats_arg(arg: str, today) -> tuple:
             return ('error', None,
                     f'参数无效（按年 YYYY 如 数据统计{this_year}，'
                     f'可查 {_MIN_STATS_YEAR}-{this_year}；按日 MMDD 如 数据统计0802）')
-        return 'year', year, ''
+        return ('this_year', None, '') if year == this_year else ('year', year, '')
 
     # 6 / 8 位:前 4 位一定是年份
     year = int(arg[:4])
@@ -883,7 +907,7 @@ def _parse_stats_arg(arg: str, today) -> tuple:
         if not 1 <= month <= 12:
             return ('error', None,
                     f'月份无效（格式 YYYYMM，如 数据统计{this_year}08）')
-        return 'month', (year, month), ''
+        return _stats_month(year, month, today)
     return _parse_stats_date(year, arg[4:6], arg[6:], today,   # YYYYMMDD
                             f'YYYYMMDD，如 数据统计{this_year}0802')
 
@@ -900,16 +924,17 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
     ``label`` 进文本首行与报错提示(如 ``2026-08-02`` / ``2026`` / ``全部历史``),
     ``sub_title`` 是图片顶栏标题右侧的小标签。图片优先(线程池渲染 → 图床 →
     markdown 内嵌),渲染 / 上传失败回退纯文本(榜单文本仍 TOP3 控制消息长度)。
-    查询交给本函数调用,查询耗时才能和今日视图一样从查库算起。
+    查询交给本函数在线程池里调用(不卡事件循环),查询耗时才能和今日视图一样从查库算起。
+    结果里带 ``prev_<prefix>_*`` 的(本月 / 今年)四张卡都加涨跌标识。
     """
     t0 = time.perf_counter()
-    stats = query()
+    stats = await asyncio.get_running_loop().run_in_executor(None, query)
     if not stats.get('available'):
         await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
         return
     cfg = _SPAN_VIEWS[view]
     matches = stats.get(f'{prefix}_matches')
-    if not matches:
+    if not matches and cfg['empty']:
         await event.reply(f'<@{event.user_id}>\n❌ {label} 无统计数据（{cfg["empty"]}）')
         return
     players = stats.get(f'{prefix}_players')
@@ -917,8 +942,9 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
     attendances = stats.get(f'{prefix}_attendances')
     top_games = stats.get(f'top_games_{prefix}') or []
     top_players = stats.get(f'top_players_{prefix}') or []
+    prev = {k: stats.get(f'prev_{prefix}_{k}') for k in ('matches', 'players', 'groups', 'attendances')}
 
-    # 映射成 stats_image 的通用形状:date_mode 下不含 push_quota / trend / yesterday_*
+    # 映射成 stats_image 的通用形状:date_mode 下不含 push_quota / trend / yesterday_*;prev_* 为 None 的卡不画涨跌
     g = {
         'available': True,
         'date_mode': True,
@@ -930,6 +956,7 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
         'top_games_today': top_games,
         'top_players_today': top_players,
         'trend_10d': [],
+        **{f'prev_{k}': v for k, v in prev.items()},
     }
     g.update(cfg['flags'])
     # 总计视图带 bot 规模行:好友 / 群聊总数本身就是累计值,与这一屏口径一致。
@@ -963,10 +990,10 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
     lines = [
         f'<@{uid}>',
         f'📈 LGT-Bot 数据统计 ({label})',
-        f'🎮 {period}对局: {_n(matches)} 局',
-        f'👤 {who}玩家: {_n(players)} 人',
-        f'👥 {who}群聊: {_n(groups)} 个',
-        f'🎫 {period}对局人次: {_n(attendances)} 人次',
+        f'🎮 {period}对局: {_n(matches)} 局{_delta_suffix(matches, prev["matches"])}',
+        f'👤 {who}玩家: {_n(players)} 人{_delta_suffix(players, prev["players"])}',
+        f'👥 {who}群聊: {_n(groups)} 个{_delta_suffix(groups, prev["groups"])}',
+        f'🎫 {period}对局人次: {_n(attendances)} 人次{_delta_suffix(attendances, prev["attendances"])}',
     ]
     if view == 'total':
         # 与图片的 bot 规模行对齐
@@ -1000,10 +1027,24 @@ async def _reply_month_stats(event, year: int, month: int) -> None:
                               'month', ym, f'{ym} 月度统计')
 
 
+async def _reply_this_month_stats(event, now) -> None:
+    """「数据统计月」本月截至此刻,四张卡对比上月同期。"""
+    until = now.strftime('%m-%d %H:%M')
+    await _reply_period_stats(event, 'this_month', lambda: metrics.query_game_stats_month_to_date(now),
+                              'month', f'本月 截至{until}', f'本月统计 · 截至 {until}')
+
+
 async def _reply_year_stats(event, year: int) -> None:
     """「数据统计YYYY」按年视图。"""
     await _reply_period_stats(event, 'year', lambda: metrics.query_game_stats_for_year(year),
                               'year', f'{year:04d}', f'{year:04d} 年度统计')
+
+
+async def _reply_this_year_stats(event, now) -> None:
+    """「数据统计年」今年截至此刻,四张卡对比去年同期。"""
+    until = now.strftime('%m-%d %H:%M')
+    await _reply_period_stats(event, 'this_year', lambda: metrics.query_game_stats_year_to_date(now),
+                              'year', f'今年 截至{until}', f'今年统计 · 截至 {until}')
 
 
 async def _reply_total_stats(event) -> None:
@@ -1121,22 +1162,27 @@ async def _reply_game_stats(event, query: str) -> None:
 
 @handler(_P_STATS,
          name='数据统计',
-         desc='数据统计/游戏榜/玩家参与榜/近期趋势，可按日(MMDD/YYYYMMDD)、按月(MM/YYYYMM)、按年(YYYY)、累计(总)查询，或使用游戏名查询游戏统计',
+         desc='游戏榜/玩家参与榜/近期趋势，可查周期数据(日/月/年)，'
+              '或按日(MMDD/YYYYMMDD)、月(MM/YYYYMM)、年(YYYY)、累计(总)查询，或使用游戏名查询游戏统计',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_data_stats(event, match):
-    """收到「数据统计」(文本或按钮)→ 输出 lgtbot.db 游戏数据摘要。
+    """收到「数据统计」→ 输出 lgtbot.db 游戏数据摘要。
 
     窗口视图:
       · 「数据统计MMDD」 / 「数据统计YYYYMMDD」  某个历史日期(不带年 = 今年)
       · 「数据统计MM」   / 「数据统计YYYYMM」    某个自然月(不带年 = 今年)
+      · 「数据统计月」                          本月截至此刻,对比上月同期
       · 「数据统计YYYY」                        某个自然年
+      · 「数据统计年」                          今年截至此刻,对比去年同期
       · 「数据统计总」                          全部历史累计
-    共同口径:无涨跌标识、无主动消息、无趋势图,第 4 卡为该期对局人次,双榜 TOP10;无对局直接报错。
-    「总」额外带好友 / 群聊总数一行(无增减角标)。输入今天的日期等价于无参数(仍带涨跌)。
+    共同口径:无主动消息、无趋势图,第 4 卡为该期对局人次,双榜 TOP10;历史日 / 月 / 年无对局直接报错。
+    涨跌标识只有本月 / 今年有;查的月份 / 年份就是本月 / 今年时自动换成这两个视图。
+    「总」额外带好友 / 群聊总数一行(无增减角标)。「数据统计日」与输入今天的日期都等价于无参数(仍带涨跌)。
 
-    单游戏视图:「数据统计<游戏名>」(不是纯数字、也不是「总」的参数),见 _reply_game_stats。
+    单游戏视图:「数据统计<游戏名>」(不是纯数字、也不是上面几个字的参数),见 _reply_game_stats;
+    参数超过 _STATS_GAME_MAX_LEN 字时整条消息不响应。
 
     配置了图床时优先走**图片通道**: stats_image 渲染统计卡片(线程池,不阻塞事件循环)→
     uploader 上传 → markdown 内嵌图回复;渲染失败(无 PIL / 无中文字体)或上传失败时回退下方纯文本。
@@ -1156,7 +1202,10 @@ async def lgtbot_data_stats(event, match):
         arg = (match.group(1) or '') if match else ''
     except (AttributeError, IndexError):
         arg = ''
-    kind, payload, err = _parse_stats_arg(arg, _date.today())
+    now = datetime.now()
+    kind, payload, err = _parse_stats_arg(arg, now.date())
+    if kind == 'ignore':
+        return
     if err:
         await event.reply(f'<@{event.user_id}>\n❌ {err}')
         return
@@ -1166,8 +1215,14 @@ async def lgtbot_data_stats(event, match):
     if kind == 'total':
         await _reply_total_stats(event)
         return
+    if kind == 'this_year':
+        await _reply_this_year_stats(event, now)
+        return
     if kind == 'year':
         await _reply_year_stats(event, payload)
+        return
+    if kind == 'this_month':
+        await _reply_this_month_stats(event, now)
         return
     if kind == 'month':
         await _reply_month_stats(event, *payload)
@@ -1175,10 +1230,11 @@ async def lgtbot_data_stats(event, match):
     if kind == 'date':
         await _reply_date_stats(event, payload)
         return
-    # kind == 'today' —— 无参数,或输入的就是今天(等价于无参数,仍带涨跌 / 额度 / 趋势)
+    # kind == 'today' —— 无参数 / 「日」,或输入的就是今天(仍带涨跌 / 额度 / 趋势)
 
     t0 = time.perf_counter()
-    g = metrics.query_game_stats()
+    loop = asyncio.get_running_loop()
+    g = await loop.run_in_executor(None, metrics.query_game_stats)
     if not g.get('available'):
         await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
         return
@@ -1200,7 +1256,6 @@ async def lgtbot_data_stats(event, match):
     # ── 图片通道 ──────────────────────────────────────────────────────────
     if uploader.SELECTED_BACKEND:
         sub = f'截至 {time.strftime("%H:%M")}'
-        loop = asyncio.get_running_loop()
         img = await loop.run_in_executor(
             None, stats_image.render_stats_image, g, sub, elapsed)
         if img:

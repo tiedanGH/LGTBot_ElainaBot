@@ -987,17 +987,18 @@ async def test_stats_month_command_views_month(monkeypatch):
                 'top_games_month': [{'game_name': '决胜五子', 'count': 11}],
                 'top_players_month': [{'display': '铁蛋', 'count': 8}]}
 
-    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
-                        fake_for_month)
-    m = _re.match(dispatcher._P_STATS, '数据统计08')
-    assert m and m.group(1) == '08'
-    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计08')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month', fake_for_month)
+    today = __import__('datetime').date.today()
+    mon, empty_mon = [f'{n:02d}' for n in (8, 7, 6) if n != today.month][:2]
+    m = _re.match(dispatcher._P_STATS, f'数据统计{mon}')
+    assert m and m.group(1) == mon
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=f'数据统计{mon}')
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev, m)
     txt = ev.reply.await_args.args[0]
-    year = __import__('datetime').date.today().year
-    assert seen['ym'] == (year, 8)
-    assert f'({year}-08)' in txt and '当月对局: 42 局' in txt
+    year = today.year
+    assert seen['ym'] == (year, int(mon))
+    assert f'({year}-{mon})' in txt and '当月对局: 42 局' in txt
     assert '当月对局人次: 130 人次' in txt
     assert '↑' not in txt and '↓' not in txt          # 无涨跌
     assert '主动消息' not in txt                        # 无额度行
@@ -1005,9 +1006,9 @@ async def test_stats_month_command_views_month(monkeypatch):
     # 当月无对局 → 报错
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
                         lambda y, m: {'available': True, 'month_matches': 0})
-    ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计07')
+    ev2 = _mock_event(is_group=True, group_id='G1', user_id='U1', content=f'数据统计{empty_mon}')
     ev2.reply = AsyncMock()
-    await dispatcher.lgtbot_data_stats(ev2, _re.match(dispatcher._P_STATS, '数据统计07'))
+    await dispatcher.lgtbot_data_stats(ev2, _re.match(dispatcher._P_STATS, f'数据统计{empty_mon}'))
     txt2 = ev2.reply.await_args.args[0]
     assert txt2.startswith('<@U1>\n') and '无统计数据' in txt2
 
@@ -1028,12 +1029,18 @@ _D = __import__('datetime').date
 
 @pytest.mark.parametrize('arg,expected', [
     ('',                       ('today', None)),
+    ('日',                      ('today', None)),
+    ('月',                      ('this_month', None)),
+    ('年',                      ('this_year', None)),
     ('总',                      ('total', None)),
-    ('08',                     ('month', (_MIN_Y + 1, 8))),        # MM → 今年
+    ('07',                     ('month', (_MIN_Y + 1, 7))),        # MM → 今年
+    ('08',                     ('this_month', None)),              # 查的就是本月 → 同「数据统计月」
     ('0803',                   ('date', _D(_MIN_Y + 1, 8, 3))),    # MMDD → 今年
-    (f'{_MIN_Y + 1}',          ('year', _MIN_Y + 1)),              # YYYY
+    (f'{_MIN_Y + 1}',          ('this_year', None)),               # YYYY 就是今年 → 同「数据统计年」
     (f'{_MIN_Y}',              ('year', _MIN_Y)),                  # YYYY 下界
     (f'{_MIN_Y}05',            ('month', (_MIN_Y, 5))),            # YYYYMM
+    (f'{_MIN_Y}08',            ('month', (_MIN_Y, 8))),            # 去年的同一个月不算本月
+    (f'{_MIN_Y + 1}08',        ('this_month', None)),
     (f'{_MIN_Y}0803',          ('date', _D(_MIN_Y, 8, 3))),        # YYYYMMDD
     (f'{_MIN_Y + 1}0803',      ('date', _D(_MIN_Y + 1, 8, 3))),
     ('0820',                   ('today', None)),   # 就是今天 → 等价无参数(仍带涨跌)
@@ -1041,9 +1048,12 @@ _D = __import__('datetime').date
     ('天赋云巢',                ('game', '天赋云巢')),   # 不是纯数字 → 游戏名(原文交给查询去匹配)
     ('总计',                    ('game', '总计')),
     (f'{_MIN_Y}-08-03',        ('game', f'{_MIN_Y}-08-03')),   # 带分隔符的日期也落到这里,由报错附上日期用法
+    ('一二三四五六七八九十',      ('game', '一二三四五六七八九十')),   # 10 个字还按游戏名查
+    ('一二三四五六七八九十一',    ('ignore', None)),                  # 再长就整条不响应
+    ('天赋 云巢 这个游戏好玩吗',   ('ignore', None)),                  # 中间的空格也算字数
 ])
 def test_parse_stats_arg_table(arg, expected):
-    """★ 参数解析表(纯函数,不碰事件 / 不碰库):七种形态各自落到哪个视图。
+    """★ 参数解析表(纯函数,不碰事件 / 不碰库):每种形态各自落到哪个视图。
 
     「不带年份默认今年」与「带年份按给的年查」是同一张表里的相邻两行,最容易被改歪成"8 位也用今年"。
     """
@@ -1170,8 +1180,9 @@ async def test_stats_with_year_queries_that_year(monkeypatch):
     await _run('数据统计0803')
     assert seen == [('date', f'{this_year}-08-03')]
     seen.clear()
-    await _run('数据统计05')
-    assert seen == [('month', this_year, 5)]
+    mon = 5 if __import__('datetime').date.today().month != 5 else 6
+    await _run(f'数据统计{mon:02d}')
+    assert seen == [('month', this_year, mon)]
 
 
 async def test_stats_year_command_views_year(monkeypatch):
@@ -1191,7 +1202,8 @@ async def test_stats_year_command_views_year(monkeypatch):
                 'top_players_year': [{'display': '铁蛋', 'count': 88}]}
 
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year', fake_for_year)
-    year = __import__('datetime').date.today().year
+    year = __import__('datetime').date.today().year - 1
+    monkeypatch.setattr(dispatcher, '_MIN_STATS_YEAR', year)
     cmd = f'数据统计{year}'
     m = _re.match(dispatcher._P_STATS, cmd)
     assert m and m.group(1) == str(year)
@@ -1218,6 +1230,8 @@ async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
                         lambda ds: routed.append(('date', ds)) or {'available': True, 'day_matches': 0})
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year',
                         lambda y: routed.append(('year', y)) or {'available': True, 'year_matches': 0})
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_year_to_date',
+                        lambda now: routed.append(('this_year', now.year)) or {'available': True, 'year_matches': 0})
     year = __import__('datetime').date.today().year
 
     async def _run(cmd):
@@ -1230,7 +1244,7 @@ async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
     assert routed == [('date', f'{year}-08-18')]
     routed.clear()
     await _run(f'数据统计{year}')
-    assert routed == [('year', year)]
+    assert routed == [('this_year', year)]
 
     # 既不是合法 MMDD 前缀、也不是可查年份 → 参数无效,一次库都不查
     routed.clear()
@@ -1315,11 +1329,13 @@ _THIS_YEAR = __import__('datetime').date.today().year
 @pytest.mark.parametrize('cmd,flag', [
     ('数据统计0818', None),
     ('数据统计08', 'month_mode'),
+    ('数据统计月', 'month_mode'),
     (f'数据统计{_THIS_YEAR}', 'year_mode'),
+    ('数据统计年', 'year_mode'),
 ])
 async def test_period_views_other_than_total_have_no_scale_row(monkeypatch, cmd, flag):
     """★ 顶部好友 / 群聊总数只给**今日**与**累计**两个视图(用户要求):
-    按日 / 按月 / 按年都不注入 bot_groups —— 「当前总数」不是那一期的事实。"""
+    按日 / 按月 / 按年(含本月 / 今年)都不注入 bot_groups —— 「当前总数」不是那一期的事实。"""
     import re as _re
     from plugins.LGTBot_ElainaBot.mod import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
@@ -1329,16 +1345,14 @@ async def test_period_views_other_than_total_have_no_scale_row(monkeypatch, cmd,
                                     'day_players': 1, 'day_groups': 1,
                                     'day_attendances': 3,
                                     'top_games_day': [], 'top_players_day': []})
-    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
-                        lambda y, m: {'available': True, 'month_matches': 2,
-                                      'month_players': 1, 'month_groups': 1,
-                                      'month_attendances': 3,
-                                      'top_games_month': [], 'top_players_month': []})
-    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year',
-                        lambda y: {'available': True, 'year_matches': 2,
-                                   'year_players': 1, 'year_groups': 1,
-                                   'year_attendances': 3,
-                                   'top_games_year': [], 'top_players_year': []})
+    month = {'available': True, 'month_matches': 2, 'month_players': 1, 'month_groups': 1,
+             'month_attendances': 3, 'top_games_month': [], 'top_players_month': []}
+    year = {'available': True, 'year_matches': 2, 'year_players': 1, 'year_groups': 1,
+            'year_attendances': 3, 'top_games_year': [], 'top_players_year': []}
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month', lambda y, m: month)
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_month_to_date', lambda now: month)
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year', lambda y: year)
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_year_to_date', lambda now: year)
     seen = {}
     monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
                         lambda g, sub, elapsed_ms=None: seen.update(g=g) or None)
@@ -1378,6 +1392,171 @@ async def test_stats_date_command_today_falls_back_to_normal(monkeypatch):
     await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, f'数据统计{mmdd}'))
     assert called == []                                # 未走历史分支
     assert '今日对局' in ev.reply.await_args.args[0]
+
+
+def _to_date_stats(prefix: str, **over) -> dict:
+    """metrics.query_game_stats_month_to_date / year_to_date 的一份结果(本期 + 上期同期)。"""
+    d = {'available': True, f'{prefix}_matches': 42, f'{prefix}_players': 9, f'{prefix}_groups': 4,
+         f'{prefix}_attendances': 130, f'prev_{prefix}_matches': 37, f'prev_{prefix}_players': 11,
+         f'prev_{prefix}_groups': 4, f'prev_{prefix}_attendances': 100,
+         f'top_games_{prefix}': [{'game_name': '决胜五子', 'count': 11}],
+         f'top_players_{prefix}': [{'display': '铁蛋', 'count': 8}]}
+    d.update(over)
+    return d
+
+
+async def _run_stats(monkeypatch, cmd: str):
+    """以文本通道跑一条「数据统计…」,返回回复文本(没有回复时为 None)。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, _re.search(dispatcher._P_STATS, cmd, _re.DOTALL))
+    return ev.reply.await_args.args[0] if ev.reply.await_args else None
+
+
+@pytest.mark.parametrize('cmd, func, prefix, period', [
+    ('数据统计月', 'query_game_stats_month_to_date', 'month', '本月'),
+    ('数据统计年', 'query_game_stats_year_to_date', 'year', '今年'),
+])
+async def test_stats_to_date_text_compares_with_the_same_span(monkeypatch, cmd, func, prefix, period):
+    """★ 本月 / 今年:四项都带对比上期同期的增减后缀;上期一局都没有(0)照样比,查失败(None)才不带。"""
+    seen = []
+    monkeypatch.setattr(dispatcher.metrics, func, lambda now: seen.append(now) or _to_date_stats(prefix))
+    txt = await _run_stats(monkeypatch, cmd)
+    assert len(seen) == 1
+    until = seen[0].strftime('%m-%d %H:%M')
+    assert f'({period} 截至{until})' in txt
+    for frag in (f'{period}对局: 42 局（↑5）', '活跃玩家: 9 人（↓2）', '活跃群聊: 4 个（持平）',
+                 f'{period}对局人次: 130 人次（↑30）'):
+        assert frag in txt, frag
+    assert '主动消息' not in txt and '群聊总数' not in txt
+
+    zero = {f'prev_{prefix}_{k}': 0 for k in ('matches', 'players', 'groups', 'attendances')}
+    monkeypatch.setattr(dispatcher.metrics, func, lambda now: _to_date_stats(prefix, **zero))
+    txt = await _run_stats(monkeypatch, cmd)
+    assert f'{period}对局: 42 局（↑42）' in txt and f'{period}对局人次: 130 人次（↑130）' in txt
+
+    failed = {f'prev_{prefix}_players': None}
+    monkeypatch.setattr(dispatcher.metrics, func, lambda now: _to_date_stats(prefix, **failed))
+    txt = await _run_stats(monkeypatch, cmd)
+    assert '活跃玩家: 9 人\n' in txt and f'{period}对局: 42 局（↑5）' in txt
+
+
+@pytest.mark.parametrize('cmd, func, prefix', [
+    ('数据统计月', 'query_game_stats_month_to_date', 'month'),
+    ('数据统计年', 'query_game_stats_year_to_date', 'year'),
+])
+async def test_stats_to_date_views_still_reply_without_matches(monkeypatch, cmd, func, prefix):
+    """★ 本月 / 今年还没过完:一局都没有也照常出统计(全 0 + 对比),不像历史月份那样报「无统计数据」。"""
+    empty = {f'{prefix}_{k}': 0 for k in ('matches', 'players', 'groups', 'attendances')}
+    monkeypatch.setattr(dispatcher.metrics, func,
+                        lambda now: _to_date_stats(prefix, **empty, **{f'top_games_{prefix}': [],
+                                                                       f'top_players_{prefix}': []}))
+    txt = await _run_stats(monkeypatch, cmd)
+    assert '无统计数据' not in txt
+    assert '对局: 0 局（↓37）' in txt
+
+
+async def test_stats_current_month_and_year_switch_to_the_to_date_views(monkeypatch):
+    """★ 「数据统计MM / YYYYMM / YYYY」查的就是本月 / 今年时换成「数据统计月 / 年」:带对比,标题也跟着换。"""
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    routed = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
+                        lambda y, m: routed.append('month') or _to_date_stats('month'))
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_month_to_date',
+                        lambda now: routed.append('this_month') or _to_date_stats('month'))
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_year',
+                        lambda y: routed.append('year') or _to_date_stats('year'))
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_year_to_date',
+                        lambda now: routed.append('this_year') or _to_date_stats('year'))
+    today = __import__('datetime').date.today()
+    for cmd, want in ((f'数据统计{today:%m}', 'this_month'), (f'数据统计{today:%Y%m}', 'this_month'),
+                      (f'数据统计{today:%Y}', 'this_year')):
+        routed.clear()
+        txt = await _run_stats(monkeypatch, cmd)
+        assert routed == [want], cmd
+        assert ('本月 截至' if want == 'this_month' else '今年 截至') in txt
+        assert '（↑5）' in txt
+
+    # 图片通道:顶栏标题换成本月 / 今年,对比基准交给渲染
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    seen = {}
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
+                        lambda g, sub, elapsed_ms=None: seen.update(g=g, sub=sub) or None)
+    import re as _re
+    for cmd, title, flag in ((f'数据统计{today:%m}', '本月统计 · 截至 ', 'month_mode'),
+                             ('数据统计年', '今年统计 · 截至 ', 'year_mode')):
+        ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+        ev.reply = AsyncMock()
+        await dispatcher.lgtbot_data_stats(ev, _re.search(dispatcher._P_STATS, cmd, _re.DOTALL))
+        g = seen['g']
+        assert seen['sub'].startswith(title), seen['sub']
+        assert g[flag] is True and g['to_date'] is True and g['date_mode'] is True
+        assert (g['prev_matches'], g['prev_players'], g['prev_groups'], g['prev_attendances']) == \
+            (37, 11, 4, 100)
+
+
+async def test_stats_plain_window_views_draw_no_delta(monkeypatch):
+    """★ 历史日 / 月 / 年只给本期:交给渲染的对比基准全是 None,图片上一个涨跌胶囊都不画。"""
+    import re as _re
+    from plugins.LGTBot_ElainaBot.mod import uploader
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
+                        lambda ds: {'available': True, 'day_matches': 2, 'day_players': 1,
+                                    'day_groups': 1, 'day_attendances': 3,
+                                    'top_games_day': [], 'top_players_day': []})
+    seen = {}
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image',
+                        lambda g, sub, elapsed_ms=None: seen.update(g=g) or None)
+    mmdd = '0101' if __import__('datetime').date.today().strftime('%m%d') != '0101' else '0102'
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=f'数据统计{mmdd}')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, f'数据统计{mmdd}'))
+    g = seen['g']
+    assert all(g[f'prev_{k}'] is None for k in ('matches', 'players', 'groups', 'attendances'))
+    assert g.get('to_date') is None
+
+
+async def test_stats_day_is_the_today_view(monkeypatch):
+    """「数据统计日」同不带参数:今日视图(带涨跌 / 额度 / 趋势)。"""
+    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics
+    monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
+    monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
+    called = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
+                        lambda: called.append(1) or {'available': True, 'today_matches': 3,
+                                                     'today_players': 2, 'today_groups': 1,
+                                                     'yesterday_matches_same_span': 1,
+                                                     'top_games_today': [], 'top_players_today': [],
+                                                     'trend_10d': []})
+    txt = await _run_stats(monkeypatch, '数据统计日')
+    assert called == [1]
+    assert '今日对局: 3 局（↑2）' in txt
+
+
+@pytest.mark.parametrize('cmd, func', [
+    ('数据统计', 'query_game_stats'),
+    ('数据统计月', 'query_game_stats_month_to_date'),
+    ('数据统计年', 'query_game_stats_year_to_date'),
+    ('数据统计总', 'query_game_stats_total'),
+])
+async def test_stats_queries_run_off_the_event_loop(monkeypatch, cmd, func):
+    """★ 查库放进线程池:要扫整张 user_with_match,在事件循环里同步跑会卡住整个机器人。"""
+    import threading
+    loop_thread = threading.current_thread()
+    ran_on = []
+    result = {'available': True, 'today_matches': 1, 'today_players': 1, 'today_groups': 1,
+              'top_games_today': [], 'top_players_today': [], 'trend_10d': [],
+              **_to_date_stats('month'), **_to_date_stats('year'),
+              'total_matches': 1, 'total_players': 1, 'total_groups': 1, 'total_attendances': 1}
+    monkeypatch.setattr(dispatcher.metrics, func,
+                        lambda *a: ran_on.append(threading.current_thread()) or result)
+    await _run_stats(monkeypatch, cmd)
+    assert len(ran_on) == 1 and ran_on[0] is not loop_thread
 
 
 async def test_stats_command_text_shows_same_span_delta(monkeypatch):
@@ -1608,16 +1787,40 @@ async def test_game_stats_not_found_shows_suggestions_and_date_usage(monkeypatch
     assert call.kwargs['buttons'][-1] == [dispatcher.buttons.BTN_GAME_LIST]
 
 
-async def test_game_stats_not_found_never_echoes_the_input(monkeypatch):
+@pytest.mark.parametrize('arg, frags', [
+    ('天赋云朝[x](a)', ('天赋云朝', '[x]', '(a)')),
+    ('云朝<@all>', ('云朝', '@all')),
+])
+async def test_game_stats_not_found_never_echoes_the_input(monkeypatch, arg, frags):
     """★ 官方 bot 不能以任何形式回显用户消息:报错里一个字都不复述,候选只来自库里的游戏名。"""
     call, _seen = await _run_game_stats(
-        monkeypatch, '数据统计 天赋云朝<@everyone>[x](http://a)',
+        monkeypatch, f'数据统计 {arg}',
         {'available': True, 'found': False, 'suggestions': []})
     txt = call.args[0]
-    for frag in ('天赋云朝', 'everyone', 'http', '[x]'):
+    for frag in frags:
         assert frag not in txt, frag
     assert '💡' not in txt
     assert call.kwargs['buttons'] == [[dispatcher.buttons.BTN_GAME_LIST]]
+
+
+@pytest.mark.parametrize('cmd', [
+    '数据统计一二三四五六七八九十一',
+    '数据统计 天赋云巢到底是怎么玩的啊',
+    '/数据统计 天赋云朝<@everyone>[x](http://a)',
+])
+async def test_game_stats_over_ten_chars_gets_no_response(monkeypatch, cmd):
+    """★ 参数超过 10 个字不会是游戏名:不查库、不回复,也不转发引擎(仍算本插件专属指令,派发器跳过)。"""
+    import re as _re
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    seen = []
+    monkeypatch.setattr(dispatcher.metrics, 'query_game_detail',
+                        lambda *a, **k: seen.append(a) or {'available': True, 'found': False})
+    ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_data_stats(ev, _re.search(dispatcher._P_STATS, cmd, _re.DOTALL))
+    assert seen == []
+    ev.reply.assert_not_awaited()
+    assert dispatcher._is_exclusive_command(cmd)
 
 
 @pytest.mark.parametrize('n, sizes', [

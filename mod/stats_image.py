@@ -17,14 +17,17 @@ light 变量:浅灰页底 + 白色细边框圆角卡 + #5b6ee8 强调色 + 左�
   · 今日游戏榜 / 玩家参与榜:TOP5,金银铜奖牌 + 比例条。榜单条目带 ``unranked``
     时(当天的对局全是不计分的)在名称后跟一个灰色「不计分」胶囊
 
-窗口模式(``g['date_mode']`` 真):无涨跌胶囊、无主动消息行、无趋势图;第 4 卡换成「对局人次」
+窗口模式(``g['date_mode']`` 真):无主动消息行、无趋势图;第 4 卡换成「对局人次」
 (``g['attendances']``,user_with_match 计次不去重,票根图标);双榜 TOP10(``g['rank_limit']``);卡片文案去「今日」。
-在此之上叠一个子模式开关决定期间词(见 ``_period_word``,与 dispatcher._SPAN_VIEWS 同措辞):
+涨跌胶囊只在给了对比基准 ``g['prev_players' / 'prev_groups' / 'prev_matches' / 'prev_attendances']`` 时画(本月 / 今年视图)。
+在此之上叠子模式开关决定期间词(见 ``_period_word``,与 dispatcher._SPAN_VIEWS 同措辞):
 
-    (无)                 当日  「数据统计MMDD」
-    ``month_mode``       当月  「数据统计MM」
-    ``year_mode``        当年  「数据统计YYYY」
-    ``total_mode``       累计  「数据统计总」(前两卡也改「累计玩家 / 累计群聊」)
+    (无)                         当日  「数据统计MMDD」
+    ``month_mode``               当月  「数据统计MM」
+    ``month_mode`` + ``to_date``  本月  「数据统计月」
+    ``year_mode``                当年  「数据统计YYYY」
+    ``year_mode`` + ``to_date``   今年  「数据统计年」
+    ``total_mode``               累计  「数据统计总」(前两卡也改「累计玩家 / 累计群聊」)
 
 第一行的好友 / 群聊总数只在调用方注入 ``bot_friends`` / ``bot_groups`` 时出现 ——
 即今日视图(带今日净变化角标)与累计总计视图(**无角标**,``*_delta`` 留空)。
@@ -413,9 +416,9 @@ def _period_word(g: dict) -> str:
     if g.get('total_mode'):
         return '累计'
     if g.get('year_mode'):
-        return '当年'
+        return '今年' if g.get('to_date') else '当年'
     if g.get('month_mode'):
-        return '当月'
+        return '本月' if g.get('to_date') else '当月'
     return '当日'
 
 
@@ -484,10 +487,10 @@ def _render(g: dict, sub_title: str, elapsed_ms: int | None = None) -> bytes | N
         period = _period_word(g)
         who = '累计' if g.get('total_mode') else '活跃'
         cards = [
-            (f'{who}玩家', g.get('today_players'), None, 'person', _GREEN),
-            (f'{who}群聊', g.get('today_groups'), None, 'group', _ORANGE),
-            (f'{period}对局', g.get('today_matches'), None, 'die', _ACCENT),
-            (f'{period}对局人次', g.get('attendances'), None, 'ticket', (232, 121, 249)),
+            (f'{who}玩家', g.get('today_players'), g.get('prev_players'), 'person', _GREEN),
+            (f'{who}群聊', g.get('today_groups'), g.get('prev_groups'), 'group', _ORANGE),
+            (f'{period}对局', g.get('today_matches'), g.get('prev_matches'), 'die', _ACCENT),
+            (f'{period}对局人次', g.get('attendances'), g.get('prev_attendances'), 'ticket', (232, 121, 249)),
         ]
     else:
         # 涨跌胶囊:前三卡对比「昨日同时段」(窗口与今日等长,见 metrics._YDAY_*);

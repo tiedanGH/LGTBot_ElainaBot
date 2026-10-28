@@ -582,6 +582,119 @@ def test_query_game_stats_for_month_december_wraps_year():
     ])
     mon = metrics.query_game_stats_for_month(2025, 12)
     assert mon['month_matches'] == 1 and mon['month_players'] == 1
+    # 历史月份不带对比基准
+    assert all(mon[f'prev_month_{k}'] is None for k in metrics._SPAN_KEYS)
+
+
+def test_month_to_date_compares_with_the_same_span_last_month():
+    """★ 本月截至此刻:本期是整个本月,上期是上月 1 日 00:00 → 上月同一天的同一时刻(不含)。"""
+    _make_db([
+        ('五子棋', '2026-03-01 00:00:00', 'G1', ['U2']),           # 本月
+        ('大富翁', '2026-03-15 11:00:00', 'G2', ['U1', 'U2']),     # 本月
+        ('五子棋', '2026-02-01 00:00:00', 'G1', ['U1']),           # 上月同期首刻
+        ('五子棋', '2026-02-15 11:59:59', 'G3', ['U1', 'U3', 'U4']),   # 上月同期末刻
+        ('五子棋', '2026-02-15 12:00:00', 'G4', ['U5']),           # 恰好是「上月此刻」→ 不计
+        ('五子棋', '2026-02-20 09:00:00', 'G4', ['U6']),           # 上月更晚 → 不计
+        ('五子棋', '2026-01-31 23:59:59', 'G5', ['U7']),           # 上上月 → 不计
+    ])
+    mon = metrics.query_game_stats_month_to_date(datetime(2026, 3, 15, 12, 0, 0))
+    assert mon['available'] is True and mon['month'] == '2026-03'
+    assert (mon['month_matches'], mon['month_players'], mon['month_groups'],
+            mon['month_attendances']) == (2, 2, 2, 3)
+    assert (mon['prev_month_matches'], mon['prev_month_players'], mon['prev_month_groups'],
+            mon['prev_month_attendances']) == (2, 3, 2, 4)       # 人次不去重:U1 两局
+    assert {t['game_name'] for t in mon['top_games_month']} == {'五子棋', '大富翁'}
+    # 参与榜按局数排,不是按 user_id:U2 两局在 U1 前面
+    assert mon['top_players_month'] == [{'display': 'U2', 'count': 2}, {'display': 'U1', 'count': 1}]
+
+
+def test_month_to_date_against_a_shorter_last_month_uses_all_of_it():
+    """★ 上月没有今天这一天(3 月 30 日对 2 月):上月已整月过完,对比整个 2 月,而不是停在 2 月最后一天的同一时刻。"""
+    _make_db([
+        ('五子棋', '2026-03-01 00:00:00', 'G1', ['U1']),
+        ('五子棋', '2026-02-28 23:00:00', 'G1', ['U2']),           # 2 月最后一天深夜 → 计入
+        ('五子棋', '2026-02-01 00:00:00', 'G1', ['U3']),
+    ])
+    mon = metrics.query_game_stats_month_to_date(datetime(2026, 3, 30, 10, 0, 0))
+    assert mon['month_matches'] == 1
+    assert (mon['prev_month_matches'], mon['prev_month_players']) == (2, 2)
+
+
+def test_month_to_date_in_january_compares_with_last_december():
+    _make_db([
+        ('五子棋', '2026-01-05 10:00:00', 'G1', ['U1']),
+        ('五子棋', '2025-12-10 07:59:59', 'G1', ['U2']),           # 去年 12 月同期 → 计入
+        ('五子棋', '2025-12-10 08:00:00', 'G1', ['U3']),           # 晚于同一时刻 → 不计
+    ])
+    mon = metrics.query_game_stats_month_to_date(datetime(2026, 1, 10, 8, 0, 0))
+    assert mon['month'] == '2026-01' and mon['month_matches'] == 1
+    assert (mon['prev_month_matches'], mon['prev_month_players']) == (1, 1)
+
+
+def test_year_to_date_compares_with_the_same_span_last_year():
+    """★ 今年截至此刻:上期是去年 1 月 1 日 00:00 → 去年同一天的同一时刻(不含)。"""
+    _make_db([
+        ('五子棋', '2026-02-01 10:00:00', 'G1', ['U1', 'U2']),     # 今年
+        ('五子棋', '2025-01-01 00:00:00', 'G1', ['U1']),           # 去年同期首刻
+        ('大富翁', '2025-06-01 11:59:59', None, ['U3']),           # 去年同期末刻(私聊局)
+        ('五子棋', '2025-06-01 12:00:00', 'G2', ['U4']),           # 恰好是「去年此刻」→ 不计
+        ('五子棋', '2025-12-31 23:59:59', 'G2', ['U4']),           # 去年更晚 → 不计
+        ('五子棋', '2024-12-31 23:59:59', 'G3', ['U5']),           # 前年 → 不计
+    ])
+    yr = metrics.query_game_stats_year_to_date(datetime(2026, 6, 1, 12, 0, 0))
+    assert yr['available'] is True and yr['year'] == '2026'
+    assert (yr['year_matches'], yr['year_players'], yr['year_groups'], yr['year_attendances']) == (1, 2, 1, 2)
+    assert (yr['prev_year_matches'], yr['prev_year_players'], yr['prev_year_groups'],
+            yr['prev_year_attendances']) == (2, 2, 1, 2)
+
+
+def test_year_to_date_on_leap_day_compares_with_all_of_last_february():
+    _make_db([
+        ('五子棋', '2028-02-29 09:00:00', 'G1', ['U1']),
+        ('五子棋', '2027-02-28 23:59:59', 'G1', ['U2']),           # 去年 2 月最后一刻 → 计入
+        ('五子棋', '2027-03-01 00:00:00', 'G1', ['U3']),           # 去年 3 月 → 不计
+    ])
+    yr = metrics.query_game_stats_year_to_date(datetime(2028, 2, 29, 12, 0, 0))
+    assert (yr['prev_year_matches'], yr['prev_year_players']) == (1, 1)
+
+
+@pytest.mark.parametrize('func, prefix', [
+    (metrics.query_game_stats_month_to_date, 'month'),
+    (metrics.query_game_stats_year_to_date, 'year'),
+])
+def test_to_date_previous_span_without_data_counts_as_zero(func, prefix):
+    """★ 上一期一局都没有(尤其是去年还没上线的时候):对比基准是 0,不是 None —— None 会让涨跌标识整个消失。"""
+    _make_db([('五子棋', '2026-03-10 10:00:00', 'G1', ['U1'])])
+    out = func(datetime(2026, 3, 15, 12, 0, 0))
+    assert out['available'] is True and out['errors'] == []
+    assert out[f'{prefix}_matches'] == 1
+    assert [out[f'prev_{prefix}_{k}'] for k in metrics._SPAN_KEYS] == [0, 0, 0, 0]
+
+
+def test_to_date_previous_span_failure_leaves_none():
+    """user_with_match 缺表:上期玩家 / 人次留 None(不画涨跌),match 那边照常出数。"""
+    conn = sqlite3.connect(boot.DB_PATH)
+    conn.execute(_SCHEMA[0])                             # 只有 match 表
+    conn.execute("INSERT INTO match VALUES (1, '五子棋', '2026-02-10 10:00:00', 'G1', 'U1', 1, 1)")
+    conn.commit()
+    conn.close()
+    mon = metrics.query_game_stats_month_to_date(datetime(2026, 3, 15, 12, 0, 0))
+    assert (mon['prev_month_matches'], mon['prev_month_groups']) == (1, 1)
+    assert mon['prev_month_players'] is None and mon['prev_month_attendances'] is None
+    assert any(e.startswith('prev_players:') for e in mon['errors'])
+
+
+@pytest.mark.parametrize('now, year, month, want', [
+    (datetime(2026, 3, 28, 14, 30, 5), 2026, 2, '2026-02-28 14:30:05'),   # 上月有这一天
+    (datetime(2026, 3, 29, 14, 30, 5), 2026, 2, '2026-03-01 00:00:00'),   # 没有 → 上月月末
+    (datetime(2026, 3, 31, 0, 0, 0), 2026, 2, '2026-03-01 00:00:00'),
+    (datetime(2026, 5, 31, 8, 0, 0), 2026, 4, '2026-05-01 00:00:00'),
+    (datetime(2026, 1, 31, 8, 0, 0), 2025, 12, '2025-12-31 08:00:00'),
+    (datetime(2028, 2, 29, 12, 0, 0), 2027, 2, '2027-03-01 00:00:00'),    # 闰日对平年
+    (datetime(2028, 2, 28, 12, 0, 0), 2027, 2, '2027-02-28 12:00:00'),
+])
+def test_same_moment(now, year, month, want):
+    assert metrics._same_moment(now, year, month) == want
 
 
 def test_top_players_nickname_and_mask(monkeypatch):

@@ -104,6 +104,31 @@ def test_render_month_mode_layout():
     assert png and png[:8] == b'\x89PNG\r\n\x1a\n'
 
 
+def test_to_date_mode_draws_delta_pills_only_with_a_base():
+    """★ 本月 / 今年视图给了 prev_* 才画涨跌胶囊;同一份数据去掉 prev_*(历史月份)就一个都不画,版面不变。"""
+    pytest.importorskip('PIL')
+    if not stats_image._find_font():
+        pytest.skip('无中文字体')
+    from io import BytesIO
+    from PIL import Image, ImageChops
+    g = {
+        'available': True, 'date_mode': True, 'month_mode': True, 'to_date': True, 'rank_limit': 10,
+        'today_matches': 42, 'today_players': 9, 'today_groups': 4, 'attendances': 130,
+        'top_games_today': [], 'top_players_today': [], 'trend_10d': [],
+    }
+    plain = Image.open(BytesIO(stats_image.render_stats_image(g, '本月统计'))).convert('RGB')
+    # 四张卡各自吃自己的基准:只给一项,也只有那一张卡多出胶囊
+    boxes = {}
+    for key in ('prev_players', 'prev_groups', 'prev_matches', 'prev_attendances'):
+        based = Image.open(BytesIO(stats_image.render_stats_image(
+            dict(g, **{key: 1}), '本月统计'))).convert('RGB')
+        assert plain.size == based.size
+        boxes[key] = ImageChops.difference(plain, based).getbbox()
+        assert boxes[key], key
+        assert boxes[key][1] > 118, key             # 差异都在顶栏之下的指标卡里
+    assert len({b[:2] for b in boxes.values()}) == 4    # 四个胶囊各在一张卡上
+
+
 def _delta_only_stats(diff) -> dict:
     """只让「今日对局」一张卡带涨跌胶囊,其余卡不给对比数据(不画胶囊)。
 

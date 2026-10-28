@@ -33,6 +33,7 @@ lgtbot.db 统计严格只读(``file:...?mode=ro`` URI,不产生 -wal/-shm 旁路
 
 from __future__ import annotations
 
+import calendar
 import difflib
 import json
 import os
@@ -511,6 +512,16 @@ _TODAY = "datetime('now','localtime','start of day')"
 _YDAY_START = "datetime('now','localtime','start of day','-1 day')"
 _YDAY_SAME = "datetime('now','localtime','-1 day')"
 
+
+def _uwm_in(cond: str, col: str = 'match_id') -> str:
+    """user_with_match 按对局条件筛行:``col IN (满足 cond 的 match_id)``。
+
+    uwm 没有 match_id 索引,按对局条件筛只能扫整表;IN 子查询先把符合条件的对局建成临时索引,
+    扫表时逐行比对即可,不必每行都回表查 match。要用 match 的列时照样 JOIN,先用它筛掉条件外的行,回表只剩条件内的那些。
+    """
+    return f'{col} IN (SELECT match_id FROM match WHERE {cond})'
+
+
 # 标量查询:key → SQL(同一只读连接一次查完)
 _SCALAR_SQL = {
     'lgtbot_users':             'SELECT COUNT(*) FROM user',
@@ -530,16 +541,14 @@ _SCALAR_SQL = {
 
 # 取去重集合而不是 COUNT:要和不计分账本取并集才能去重;窗口是一天,行数与日活同量级。
 _SET_SQL = {
-    'today_players':                ('SELECT DISTINCT uwm.user_id FROM user_with_match uwm '
-                                     'JOIN match m ON m.match_id = uwm.match_id '
-                                     f'WHERE m.finish_time >= {_TODAY}'),
+    'today_players':                ('SELECT DISTINCT user_id FROM user_with_match '
+                                     f'WHERE {_uwm_in(f"finish_time >= {_TODAY}")}'),
     'today_groups':                 ('SELECT DISTINCT group_id FROM match '
                                      f"WHERE finish_time >= {_TODAY} "
                                      "AND group_id IS NOT NULL AND group_id != ''"),
-    'yesterday_players_same_span':  ('SELECT DISTINCT uwm.user_id FROM user_with_match uwm '
-                                     'JOIN match m ON m.match_id = uwm.match_id '
-                                     f'WHERE m.finish_time >= {_YDAY_START} '
-                                     f'AND m.finish_time < {_YDAY_SAME}'),
+    'yesterday_players_same_span':  ('SELECT DISTINCT user_id FROM user_with_match WHERE '
+                                     + _uwm_in(f'finish_time >= {_YDAY_START} '
+                                               f'AND finish_time < {_YDAY_SAME}')),
     'yesterday_groups_same_span':   ('SELECT DISTINCT group_id FROM match '
                                      f'WHERE finish_time >= {_YDAY_START} '
                                      f'AND finish_time < {_YDAY_SAME} '
@@ -561,14 +570,12 @@ _TOP_GAMES_TODAY_SQL = ('SELECT game_name, COUNT(*) c FROM match '
                         f'WHERE finish_time >= {_TODAY} '
                         'GROUP BY game_name')
 # 本周玩家参与榜(面板)/ 今日玩家参与榜(/数据统计 指令)
-_TOP_PLAYERS_WEEK_SQL = ('SELECT uwm.user_id, COUNT(*) c FROM user_with_match uwm '
-                         'JOIN match m ON m.match_id = uwm.match_id '
-                         f'WHERE m.finish_time >= {_WEEK} '
-                         'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10')
-_TOP_PLAYERS_TODAY_SQL = ('SELECT uwm.user_id, COUNT(*) c FROM user_with_match uwm '
-                          'JOIN match m ON m.match_id = uwm.match_id '
-                          f'WHERE m.finish_time >= {_TODAY} '
-                          'GROUP BY uwm.user_id')
+_TOP_PLAYERS_WEEK_SQL = ('SELECT user_id, COUNT(*) c FROM user_with_match '
+                         f'WHERE {_uwm_in(f"finish_time >= {_WEEK}")} '
+                         'GROUP BY user_id ORDER BY c DESC LIMIT 10')
+_TOP_PLAYERS_TODAY_SQL = ('SELECT user_id, COUNT(*) c FROM user_with_match '
+                          f'WHERE {_uwm_in(f"finish_time >= {_TODAY}")} '
+                          'GROUP BY user_id')
 
 # 对局趋势窗口:10 天(含今天,对齐排行榜 TOP10);每日对局数与每日活跃玩家同窗口,前端并排成一张表。
 _TREND_WINDOW_DAYS = 10
@@ -579,11 +586,11 @@ _TREND_MATCHES_SQL = ('SELECT date(finish_time) d, COUNT(*) c FROM match '
 _TREND_PLAYERS_SQL = ('SELECT date(m.finish_time) d, COUNT(DISTINCT uwm.user_id) c '
                       'FROM user_with_match uwm '
                       'JOIN match m ON m.match_id = uwm.match_id '
-                      f'WHERE m.finish_time >= {_TREND_SINCE} '
+                      f'WHERE {_uwm_in(f"finish_time >= {_TREND_SINCE}", "uwm.match_id")} '
                       'GROUP BY d ORDER BY d')
 
-# 面板「游戏数据」的近 10 日小字行 + 对局人次卡,只有 ``ten_day=True`` 才查:/数据统计 指令在事件循环里同步查库,用不上的不跑。
-# 窗口同趋势图 / prev10_matches,口径同 _span_stats。user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表,所以合成一条一次扫完。
+# 面板「游戏数据」的近 10 日小字行 + 对局人次卡,只有 ``ten_day=True`` 才查:/数据统计 指令用不上,不跑。
+# 窗口同趋势图 / prev10_matches,口径同 _span_stats。每条 uwm 查询都要扫一遍整表,所以合成一条一次扫完。
 _PREV10_SINCE = "datetime('now','localtime','start of day','-19 days')"
 _TEN_DAY_SQL = {
     ('recent10_matches', 'recent10_groups', 'prev10_groups'): (
@@ -599,7 +606,7 @@ _TEN_DAY_SQL = {
         f'SUM(m.finish_time >= {_TODAY}), '
         f'SUM(m.finish_time >= {_YDAY_START} AND m.finish_time < {_YDAY_SAME}) '
         'FROM user_with_match uwm JOIN match m ON m.match_id = uwm.match_id '
-        f'WHERE m.finish_time >= {_PREV10_SINCE}'),
+        f'WHERE {_uwm_in(f"finish_time >= {_PREV10_SINCE}", "uwm.match_id")}'),
 }
 
 
@@ -740,15 +747,18 @@ def query_game_stats(ten_day: bool = False) -> dict:
 
 
 # ── 窗口统计:按日 / 按月 / 按年 / 累计总计共用一份 SQL ────────────────────
-# 四个视图的**口径完全一致**,只有时间窗口不同(总计连窗口都没有):
+# 各视图的**口径完全一致**,只有时间窗口不同(总计连窗口都没有):
 #   · matches      窗口内已完成对局数
 #   · players      窗口内去重玩家
 #   · groups       窗口内活跃群聊(私聊局 group_id 为 NULL / 空,不计)
-#   · attendances  窗口内**对局人次**(user_with_match 行数,不去重;这四个视图的第 4 张卡用它替代「近10日对局」)
+#   · attendances  窗口内**对局人次**(user_with_match 行数,不去重;窗口视图的第 4 张卡用它替代「近10日对局」)
 #   · top_games / top_players  窗口内双榜,LIMIT 10
-# SQL 只写一遍,复制四份必然漂移;各视图的公开函数只做键名改写(见 _prefixed)。
+#   · prev_*       只有本月 / 今年视图有:上一期从头到同一时刻的前四项,作涨跌基准
+# SQL 只写一遍,复制几份必然漂移;各视图的公开函数只做键名改写(见 _prefixed)。
 
 _SPAN_KEYS = ('matches', 'players', 'groups', 'attendances')
+_FMT = '%Y-%m-%d %H:%M:%S'
+_WINDOW = 'finish_time >= ? AND finish_time < ?'
 
 
 def _blank_span(*errors: str) -> dict:
@@ -756,59 +766,68 @@ def _blank_span(*errors: str) -> dict:
     out: dict = {'available': False, 'errors': list(errors),
                  'top_games': [], 'top_players': []}
     out.update({k: None for k in _SPAN_KEYS})
+    out.update({f'prev_{k}': None for k in _SPAN_KEYS})
     return out
 
 
-def _span_stats(start: str | None, end: str | None) -> dict:
+def _span_stats(start: str | None, end: str | None, prev: tuple | None = None) -> dict:
     """统计 ``[start, end)`` 窗口内的游戏数据;``start``/``end`` 为 None = 全量总计。
 
+    ``prev`` 给了 ``(起, 止)`` 时用同一套 SQL 再算这个窗口的前四项,记作 ``prev_*``;那段时间一局都没有就是 0。
     失败语义同 ``query_game_stats``:available=False,或单项 None + errors 累加。
     """
     if not os.path.isfile(boot.DB_PATH):
         return _blank_span(f'lgtbot.db 不存在:{boot.DB_PATH}')
     out = _blank_span()
+    win_m, win_u = f' WHERE {_WINDOW}', f' WHERE {_uwm_in(_WINDOW)}'
     if start is None or end is None:
-        w_m = w_j = ''
+        w_m = w_u = ''
         args: tuple = ()
     else:
-        w_m = ' WHERE finish_time >= ? AND finish_time < ?'
-        w_j = ' WHERE m.finish_time >= ? AND m.finish_time < ?'
-        args = (start, end)
-    join = 'FROM user_with_match uwm JOIN match m ON m.match_id = uwm.match_id'
-    _gc = "group_id IS NOT NULL AND group_id != ''"
-    w_g = f'{w_m} AND {_gc}' if w_m else f' WHERE {_gc}'
+        w_m, w_u, args = win_m, win_u, (start, end)
 
     conn = None
     try:
         conn = sqlite3.connect(f'file:{boot.DB_PATH}?mode=ro', uri=True, timeout=2.0)
         out['available'] = True
 
-        def _rows(sql: str, tag: str) -> list:
+        def _rows(sql: str, tag: str, a: tuple):
+            """失败返回 None(区别于没有行的 [])。"""
             try:
-                return conn.execute(sql, args).fetchall()
+                return conn.execute(sql, a).fetchall()
             except sqlite3.OperationalError as e:
                 out['errors'].append(f'{tag}:{e}')
-                return []
+                return None
 
-        def _scalar(sql: str, tag: str):
-            rows = _rows(sql, tag)
-            return int(rows[0][0]) if rows else None
+        def _counts(w_m: str, w_u: str, a: tuple, tag: str = '') -> tuple:
+            """一个窗口的 (对局数, 群聊数, 每人局数行);查失败的项为 None。
 
-        out['matches'] = _scalar(f'SELECT COUNT(*) FROM match{w_m}', 'matches')
-        out['players'] = _scalar(
-            f'SELECT COUNT(DISTINCT uwm.user_id) {join}{w_j}', 'players')
-        out['groups'] = _scalar(
-            f'SELECT COUNT(DISTINCT group_id) FROM match{w_g}', 'groups')
-        out['attendances'] = _scalar(f'SELECT COUNT(*) {join}{w_j}', 'attendances')
+            玩家侧只扫一次 user_with_match:按人计局数,人数 / 人次 / 参与榜都从这一份出。
+            """
+            gc = "group_id IS NOT NULL AND group_id != ''"
+            w_g = f'{w_m} AND {gc}' if w_m else f' WHERE {gc}'
+            m = _rows(f'SELECT COUNT(*) FROM match{w_m}', f'{tag}matches', a)
+            g = _rows(f'SELECT COUNT(DISTINCT group_id) FROM match{w_g}', f'{tag}groups', a)
+            per_user = _rows(f'SELECT user_id, COUNT(*) FROM user_with_match{w_u} GROUP BY user_id',
+                             f'{tag}players', a)
+            return (int(m[0][0]) if m else None, int(g[0][0]) if g else None, per_user)
+
+        out['matches'], out['groups'], per_user = _counts(w_m, w_u, args)
+        if per_user is not None:
+            out['players'] = len(per_user)
+            out['attendances'] = sum(int(c) for _u, c in per_user)
+            out['top_players'] = [
+                {'display': userinfo.display_name(str(uid)) or mask_id(str(uid)), 'count': int(c)}
+                for uid, c in sorted(per_user, key=lambda r: (-r[1], str(r[0])))[:10]]
         out['top_games'] = [
             {'game_name': str(gname), 'count': int(c)} for gname, c in _rows(
                 f'SELECT game_name, COUNT(*) c FROM match{w_m} '
-                'GROUP BY game_name ORDER BY c DESC LIMIT 10', 'top_games')]
-        out['top_players'] = [
-            {'display': userinfo.display_name(str(uid)) or mask_id(str(uid)),
-             'count': int(c)} for uid, c in _rows(
-                f'SELECT uwm.user_id, COUNT(*) c {join}{w_j} '
-                'GROUP BY uwm.user_id ORDER BY c DESC LIMIT 10', 'top_players')]
+                'GROUP BY game_name ORDER BY c DESC LIMIT 10', 'top_games', args) or []]
+        if prev is not None:
+            out['prev_matches'], out['prev_groups'], per_user = _counts(win_m, win_u, tuple(prev), 'prev_')
+            if per_user is not None:
+                out['prev_players'] = len(per_user)
+                out['prev_attendances'] = sum(int(c) for _u, c in per_user)
     except Exception as e:
         out['errors'].append(f'打开 lgtbot.db 失败:{e}')
         out['available'] = False
@@ -822,13 +841,30 @@ def _span_stats(start: str | None, end: str | None) -> dict:
 
 
 def _prefixed(span: dict, prefix: str) -> dict:
-    """通用键 → ``<prefix>_matches`` / ``top_games_<prefix>`` 等各视图命名。"""
+    """通用键 → ``<prefix>_matches`` / ``prev_<prefix>_matches`` / ``top_games_<prefix>`` 等各视图命名。"""
     out = {'available': span['available'], 'errors': span['errors']}
     for k in _SPAN_KEYS:
         out[f'{prefix}_{k}'] = span[k]
+        out[f'prev_{prefix}_{k}'] = span[f'prev_{k}']
     out[f'top_games_{prefix}'] = span['top_games']
     out[f'top_players_{prefix}'] = span['top_players']
     return out
+
+
+def _month_bounds(year: int, month: int) -> tuple:
+    """自然月窗口 ``(当月 1 日 00:00, 次月 1 日 00:00)``。"""
+    ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
+    return f'{year:04d}-{month:02d}-01 00:00:00', f'{ny:04d}-{nm:02d}-01 00:00:00'
+
+
+def _same_moment(now: datetime, year: int, month: int) -> str:
+    """``now`` 落到 year 年 month 月的同一天同一时刻;那个月没有这一天时取它的月末(次月 1 日 00:00)。
+
+    过了那个月的最后一天,那个月就已经整月过完,比整月才对等;停在它最后一天的同一时刻会让本期白多出一两天。
+    """
+    if now.day <= calendar.monthrange(year, month)[1]:
+        return now.replace(year=year, month=month).strftime(_FMT)
+    return _month_bounds(year, month)[1]
 
 
 def query_game_stats_for_month(year: int, month: int) -> dict:
@@ -836,11 +872,22 @@ def query_game_stats_for_month(year: int, month: int) -> dict:
 
     窗口 [当月 1 日 00:00, 次月 1 日 00:00) 全整天,键前缀 ``month_``。不含涨跌对比。
     """
-    start = f'{year:04d}-{month:02d}-01 00:00:00'
-    ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
-    end = f'{ny:04d}-{nm:02d}-01 00:00:00'
-    out = _prefixed(_span_stats(start, end), 'month')
+    out = _prefixed(_span_stats(*_month_bounds(year, month)), 'month')
     out['month'] = f'{year:04d}-{month:02d}'
+    return out
+
+
+def query_game_stats_month_to_date(now: datetime | None = None) -> dict:
+    """**本月**截至此刻的游戏统计(只读,供「数据统计月」),窗口与键同 query_game_stats_for_month。
+
+    另带 ``prev_month_*`` 四项作涨跌基准:上月 1 日 00:00 起,到上月的同一天同一时刻止(见 _same_moment)。
+    """
+    now = now or datetime.now()
+    y, m = now.year, now.month
+    py, pm = (y - 1, 12) if m == 1 else (y, m - 1)
+    out = _prefixed(_span_stats(*_month_bounds(y, m),
+                                prev=(_month_bounds(py, pm)[0], _same_moment(now, py, pm))), 'month')
+    out['month'] = f'{y:04d}-{m:02d}'
     return out
 
 
@@ -852,6 +899,20 @@ def query_game_stats_for_year(year: int) -> dict:
     out = _prefixed(_span_stats(f'{year:04d}-01-01 00:00:00',
                                 f'{year + 1:04d}-01-01 00:00:00'), 'year')
     out['year'] = f'{year:04d}'
+    return out
+
+
+def query_game_stats_year_to_date(now: datetime | None = None) -> dict:
+    """**今年**截至此刻的游戏统计(只读,供「数据统计年」),窗口与键同 query_game_stats_for_year。
+
+    另带 ``prev_year_*`` 四项作涨跌基准:去年 1 月 1 日 00:00 起,到去年的同一天同一时刻止(2 月 29 日时比到去年 2 月底)。
+    """
+    now = now or datetime.now()
+    y = now.year
+    out = _prefixed(_span_stats(f'{y:04d}-01-01 00:00:00', f'{y + 1:04d}-01-01 00:00:00',
+                                prev=(f'{y - 1:04d}-01-01 00:00:00', _same_moment(now, y - 1, now.month))),
+                    'year')
+    out['year'] = f'{y:04d}'
     return out
 
 
@@ -876,9 +937,8 @@ def query_game_stats_for_date(date_str: str) -> dict:
         out = _prefixed(_blank_span(f'日期格式非法:{date_str!r}'), 'day')
         out['date'] = date_str
         return out
-    fmt = '%Y-%m-%d %H:%M:%S'
-    out = _prefixed(_span_stats(day.strftime(fmt),
-                                (day + timedelta(days=1)).strftime(fmt)), 'day')
+    out = _prefixed(_span_stats(day.strftime(_FMT),
+                                (day + timedelta(days=1)).strftime(_FMT)), 'day')
     out['date'] = date_str
     return out
 
@@ -911,7 +971,7 @@ _WEEK_IDX = 'CAST((julianday(?) - julianday(date({col}))) / 7 AS INTEGER)'
 _GAME_WEEKS_SQL = (f'SELECT {_WEEK_IDX.format(col="finish_time")} wk, COUNT(*) FROM match '
                    'WHERE game_name = ? AND finish_time >= ? GROUP BY wk')
 # 玩家侧各项(人数 / 本群人数 / 每周活跃 / 两张榜 / 我的名次)都从这一条出:
-# user_with_match 没有 match_id 索引,每条 JOIN 都要扫整表。趋势窗口外的对局归到 -1 桶,只计入累计。
+# 每条 uwm 查询都要扫一遍整表(见 _uwm_in)。趋势窗口外的对局归到 -1 桶,只计入累计。
 # 第 4 列是各局「击败对手比例」之和:引擎的 rank_score 按得分升序给每组同分玩家记「之前的人数 × 2 + 本组人数」,
 # n 人局从末名 1 到头名 2n-1,(rank_score - 1) / (2n - 2) 正好是击败的对手占比,同分的对手各算一半(score_calculation.cc::CalLevelScoreRank)。
 _GAME_PLAYERS_SQL = (
@@ -919,7 +979,7 @@ _GAME_PLAYERS_SQL = (
     f'THEN {_WEEK_IDX.format(col="m.finish_time")} ELSE -1 END wk, '
     'COUNT(*), SUM((uwm.rank_score - 1) * 1.0 / MAX(1, 2 * m.user_count - 2)), MAX(m.group_id = ?) '
     'FROM user_with_match uwm JOIN match m ON m.match_id = uwm.match_id '
-    'WHERE m.game_name = ? GROUP BY uwm.user_id, wk')
+    f'WHERE {_uwm_in("game_name = ?", "uwm.match_id")} GROUP BY uwm.user_id, wk')
 
 
 def _norm_game_name(s: str) -> str:
