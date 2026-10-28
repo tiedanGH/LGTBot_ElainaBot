@@ -74,6 +74,10 @@ def _make_fake_boot() -> types.ModuleType:
     os.makedirs(m.IMG_PATH, exist_ok=True)
     # C++ 扩展 stub —— 测试不会真调,但代码引用要存在
     m.LGTBot_ElainaBot = MagicMock()
+    # 桥接入口逐个显式赋值:MagicMock 自动生成的子属性不在实例 __dict__ 里
+    for name in ('on_public_message', 'on_private_message', 'start',
+                 'release_bot_if_not_processing_games', 'set_restart_args'):
+        setattr(m.LGTBot_ElainaBot, name, MagicMock())
     m.LGTBOT_AVAILABLE = False
     m.IMPORT_ERROR = '(pytest stub)'
     m._get_persistent = lambda: _persistent
