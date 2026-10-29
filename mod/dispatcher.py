@@ -335,8 +335,8 @@ _SUPER_ADMIN_DENIED = ('[错误] 您未持有超级管理员权限\n'
 
 
 def _super_admin_denied_text(uid: str) -> str:
-    """拒绝文案(群聊里带 ``<@uid>`` 前缀,同引擎回执排版)。"""
-    return f'<@{uid}>\n{_SUPER_ADMIN_DENIED}' if uid else _SUPER_ADMIN_DENIED
+    """拒绝文案(群聊带 @ 前缀,同引擎回执排版)。"""
+    return f'{helpers.at_user(uid)}\n{_SUPER_ADMIN_DENIED}' if uid else _SUPER_ADMIN_DENIED
 # 已授权给群管的唯一管理指令,拒绝闸需放行(与 lgtbot_admin_interrupt 同一 pattern)
 _P_ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 # 视为「拥有群管理权限」的 QQ member_role 取值(框架 parsers/base.py 从 author 解析)。
@@ -812,12 +812,18 @@ _SPAN_VIEWS = {
 }
 
 
-def _stats_image_md(uid: str, w: int, h: int, url: str) -> str:
-    """「数据统计」图片回执的 markdown —— @ 与图片之间**空一行**。
+def _at(event) -> str:
+    """回复开头 @ 发送者的写法:群聊用官方 @ 标签,私信沿用 ``<@openid>``(见 helpers.outbound_text)。"""
+    gid = event.group_id or event.channel_id or ''
+    return helpers.outbound_text(f'<@{event.user_id or ""}>', bool(event.is_group and gid))
+
+
+def _stats_image_md(at: str, w: int, h: int, url: str) -> str:
+    """「数据统计」图片回执的 markdown —— ``at`` 是 ``_at`` 给的 @ 前缀,与图片之间**空一行**。
 
     不换行时 QQ 客户端会把 @ 和图片挤在同一行的上下沿,视觉上黏成一块。
     """
-    return f'<@{uid}>\n![数据统计 #{w}px #{h}px]({url})'
+    return f'{at}\n![数据统计 #{w}px #{h}px]({url})'
 
 
 def _parse_stats_date(year: int, mm: str, dd: str, today, hint: str) -> tuple:
@@ -930,12 +936,12 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
     t0 = time.perf_counter()
     stats = await asyncio.get_running_loop().run_in_executor(None, query)
     if not stats.get('available'):
-        await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(f'{_at(event)}\n❌ 数据统计暂不可用，请稍后再试')
         return
     cfg = _SPAN_VIEWS[view]
     matches = stats.get(f'{prefix}_matches')
     if not matches and cfg['empty']:
-        await event.reply(f'<@{event.user_id}>\n❌ {label} 无统计数据（{cfg["empty"]}）')
+        await event.reply(f'{_at(event)}\n❌ {label} 无统计数据（{cfg["empty"]}）')
         return
     players = stats.get(f'{prefix}_players')
     groups = stats.get(f'{prefix}_groups')
@@ -980,7 +986,7 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
                 target_is_uid=not is_group)
             if url:
                 w, h = uploader.get_image_size(img)
-                await event.reply(_stats_image_md(uid, w, h, url))
+                await event.reply(_stats_image_md(_at(event), w, h, url))
                 return
 
     def _n(v):
@@ -988,7 +994,7 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
 
     period, who = cfg['period'], cfg['who']
     lines = [
-        f'<@{uid}>',
+        _at(event),
         f'📈 LGT-Bot 数据统计 ({label})',
         f'🎮 {period}对局: {_n(matches)} 局{_delta_suffix(matches, prev["matches"])}',
         f'👤 {who}玩家: {_n(players)} 人{_delta_suffix(players, prev["players"])}',
@@ -1066,17 +1072,17 @@ def _delta_suffix(cur, base) -> str:
     return '（持平）'
 
 
-def _game_not_found_md(uid: str, suggestions: list) -> str:
-    """游戏名对不上:报错 + 候选 + 日期查询用法。候选取自库里的游戏名(可控白名单),可以列出来。"""
-    lines = [f'<@{uid}>', '❌ 游戏不存在或暂无计分对局']
+def _game_not_found_md(at: str, suggestions: list) -> str:
+    """游戏名对不上:报错 + 候选 + 日期查询用法(``at`` 是 ``_at`` 给的 @ 前缀)。候选取自库里的游戏名(可控白名单),可以列出来。"""
+    lines = [at, '❌ 游戏不存在或暂无计分对局']
     if suggestions:
         lines.append('💡 你要找的可能是：' + '、'.join(helpers.sanitize_md_name(s) for s in suggestions))
     lines += ['', _STATS_DATE_USAGE]
     return '\n'.join(lines)
 
 
-def _game_stats_text(uid: str, gs: dict, elapsed_ms: int) -> str:
-    """单游戏统计的文本保底;榜单 TOP3 控制消息长度,换算文案与图片同源(stats_image.game_labels)。"""
+def _game_stats_text(at: str, gs: dict, elapsed_ms: int) -> str:
+    """单游戏统计的文本保底(``at`` 是 ``_at`` 给的 @ 前缀);榜单 TOP3 控制消息长度,换算文案与图片同源(stats_image.game_labels)。"""
     lab = stats_image.game_labels(gs)
     md = helpers.sanitize_md_name
 
@@ -1089,7 +1095,7 @@ def _game_stats_text(uid: str, gs: dict, elapsed_ms: int) -> str:
     att, gm, wr = gs.get('attendances'), gs.get('group_matches'), gs.get('week_rank')
     gp, wn = gs.get('group_players'), gs.get('week_game_count')
     lines = [
-        f'<@{uid}>',
+        at,
         f'🎮 《{md(gs.get("game_name") or "")}》游戏统计 (截至{time.strftime("%H:%M")})',
         f'🎲 累计对局: {_n(gs.get("matches"))} 局{_paren("" if att is None else f"{att} 人次")}',
         f'👤 累计玩家: {_n(gs.get("players"))} 人{_paren("" if gp is None else f"本群 {gp} 人")}',
@@ -1137,11 +1143,11 @@ async def _reply_game_stats(event, query: str) -> None:
         None, metrics.query_game_detail, query, uid, gid if is_group else '')
     elapsed = _elapsed_ms(t0)
     if not gs.get('available'):
-        await event.reply(f'<@{uid}>\n❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(f'{_at(event)}\n❌ 数据统计暂不可用，请稍后再试')
         return
     if not gs.get('found'):
         sugg = gs.get('suggestions') or []
-        await event.reply(_game_not_found_md(uid, sugg),
+        await event.reply(_game_not_found_md(_at(event), sugg),
                           buttons=buttons.build_game_suggest_buttons(sugg))
         return
     if uploader.SELECTED_BACKEND:
@@ -1155,9 +1161,9 @@ async def _reply_game_stats(event, query: str) -> None:
                 target_is_uid=not is_group)
             if url:
                 w, h = uploader.get_image_size(img)
-                await event.reply(_stats_image_md(uid, w, h, url))
+                await event.reply(_stats_image_md(_at(event), w, h, url))
                 return
-    await event.reply(_game_stats_text(uid, gs, elapsed))
+    await event.reply(_game_stats_text(_at(event), gs, elapsed))
 
 
 @handler(_P_STATS,
@@ -1207,7 +1213,7 @@ async def lgtbot_data_stats(event, match):
     if kind == 'ignore':
         return
     if err:
-        await event.reply(f'<@{event.user_id}>\n❌ {err}')
+        await event.reply(f'{_at(event)}\n❌ {err}')
         return
     if kind == 'game':
         await _reply_game_stats(event, payload)
@@ -1236,7 +1242,7 @@ async def lgtbot_data_stats(event, match):
     loop = asyncio.get_running_loop()
     g = await loop.run_in_executor(None, metrics.query_game_stats)
     if not g.get('available'):
-        await event.reply(f'<@{event.user_id}>\n❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(f'{_at(event)}\n❌ 数据统计暂不可用，请稍后再试')
         return
 
     # bot 规模:绑定 bot 当前所在群数 + 好友数,带今日净变化角标。只在今日视图注入。
@@ -1268,7 +1274,7 @@ async def lgtbot_data_stats(event, match):
                 target_is_uid=not is_group)
             if url:
                 w, h = uploader.get_image_size(img)
-                await event.reply(_stats_image_md(uid, w, h, url))
+                await event.reply(_stats_image_md(_at(event), w, h, url))
                 return
         # 渲染 / 上传失败 → 落到下方文本保底
 
@@ -1277,7 +1283,7 @@ async def lgtbot_data_stats(event, match):
 
     # 涨跌对比昨日同时段
     lines = [
-        f'<@{event.user_id}>',
+        _at(event),
         f'📈 LGT-Bot 数据统计 (截至{time.strftime("%H:%M")})',
         f'🎮 今日对局: {_n(g.get("today_matches"))} 局'
         f'{_delta_suffix(g.get("today_matches"), g.get("yesterday_matches_same_span"))}',

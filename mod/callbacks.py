@@ -1321,6 +1321,7 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
     它们次数用完直接走主动消息,不被被动回复条数限制,这个教学按钮没有意义。
     """
     key = helpers.target_key(target_id, is_uid)
+    out = helpers.outbound_text(msg, not is_uid)
 
     async def _send(sender, kwargs, used, is_active_push):
         # 倒数第 2 条起追加刷新按钮(群 4/5 条,私信 3/4 条);最后一条用「⚠️ 最终刷新」。
@@ -1333,9 +1334,9 @@ async def _send_text_quota_managed(target_id, is_uid, msg, extra_buttons):
         try:
             with log_attribution.mark_outbound():
                 if is_uid:
-                    ret = await sender.send_to_user(target_id, msg, buttons=btns or None, **kwargs)
+                    ret = await sender.send_to_user(target_id, out, buttons=btns or None, **kwargs)
                 else:
-                    ret = await sender.send_to_group(target_id, msg, buttons=btns or None, **kwargs)
+                    ret = await sender.send_to_group(target_id, out, buttons=btns or None, **kwargs)
         except Exception as e:
             log.warning(f'发送文本失败 ({target_id}): {e}')
             return False, None
@@ -1525,7 +1526,7 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
 
     发送通道二选一：
       A. 图床 markdown：通过 image_hosting 上传图片得到 URL，用 markdown
-         `![](url)` 内嵌；保留 `<@openid>` 原生 mention，可挂刷新按钮
+         `![](url)` 内嵌；保留原生 mention(官方 @ 标签)，可挂刷新按钮
       B. 媒体兜底：图床未启用 / 上传失败时走 msg_type=7 路径（content
          字段需 humanize mentions，无法挂按钮）
 
@@ -1564,7 +1565,7 @@ async def _send_markdown_image(sender, target_id, is_uid, kwargs, raw_content,
     if raw_content:
         parts.append(raw_content)
     parts.append(f'![image #{width}px #{height}px]({image_url})')
-    md = '\n\n'.join(parts)
+    md = helpers.outbound_text('\n\n'.join(parts), not is_uid)
 
     # markdown 通道支持挂按钮（不像 msg_type=7);全量群从不挂刷新按钮。
     # 阈值按场景取(群 4/5 条,私信 3/4 条),同 _send_text_quota_managed。
@@ -1609,8 +1610,9 @@ async def _send_media_fallback(sender, target_id, is_uid, kwargs, raw_content, d
         up['media'] = (sender, file_info)
 
     # msg_type=7 的 content 是纯文本(QQ 不按 markdown 解析):humanize 提及后
-    # 再把源头(cb_get_user_name)给昵称加的 md 转义还原,避免露出反斜杠
-    rendered_content = helpers.strip_md_escapes(helpers.humanize_mentions(raw_content))
+    # 再把源头(cb_get_user_name)给昵称加的 md 转义还原,避免露出反斜杠;还原之后才拆 <qqbot-…> 标签
+    rendered_content = helpers.outbound_text(
+        helpers.strip_md_escapes(helpers.humanize_mentions(raw_content)), not is_uid)
     media_dict = {'file_info': up['media'][1]}
     try:
         with log_attribution.mark_outbound():

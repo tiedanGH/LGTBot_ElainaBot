@@ -19,6 +19,7 @@
     (无 msg_id/event_id 的推送:全量直推 / 沙箱直推 / 超时强发)。
   · 主动消息频控(40034100):退避后补发成功 / 等满上限仍被拒而丢弃的条数(挂 callbacks._deliver)。
   · 近 30 天:刷新等待超时与非预期发送失败另按日分桶(``daily``),只留最近 30 天,供面板大数字;累计值照旧。
+  · @全体成员:累计次数 + 上次时间,外加各群今日次数(官方每群每天 1 次,挂点 at_all.send 发送成功之后)。
 
 持久化照 mod/audit.py 模式:threading.Lock + 整文件原子重写(tmp + os.replace)
 + 损坏改名 ``.corrupt_<ts>`` 留证 + **record 永不抛异常**(指标失败绝不影响
@@ -70,6 +71,8 @@ _DEFAULTS = {
     'rate_limit_dropped': 0,
     'quota_wait_timeout_30d': 0,
     'send_fail_total_30d': 0,
+    'at_all_total': 0,
+    'last_at_all_ts': 0,
 }
 
 # 面板大数字只看近 WINDOW_DAYS 天(含今天)的计数;超出窗口的日桶在写入时删掉
@@ -192,6 +195,45 @@ def record_restart() -> None:
         d['restart_total'] = int(d.get('restart_total') or 0) + 1
         d['last_restart_ts'] = int(time.time())
     _bump(_m)
+
+
+def record_at_all(gid: str, ts: float | None = None) -> None:
+    """一次发出去的 @全体成员:累计次数 + 上次时间,外加该群今日次数(按日分桶,跨天整桶重建)。
+
+    官方限制每群每个自然日 1 次,at_all 发送前用 ``at_all_used`` 判断;发送失败的不记,不占当日次数。
+    """
+    now = time.time() if ts is None else ts
+    today = datetime.fromtimestamp(now).strftime('%Y-%m-%d')
+
+    def _m(d: dict) -> None:
+        d['at_all_total'] = int(d.get('at_all_total') or 0) + 1
+        d['last_at_all_ts'] = int(now)
+        day = d.get('at_all_today')
+        if not isinstance(day, dict) or day.get('date') != today:
+            day = {'date': today, 'groups': {}}
+        groups = day.get('groups')
+        if not isinstance(groups, dict):
+            groups = {}
+        key = str(gid)
+        groups[key] = int(groups.get(key) or 0) + 1
+        day['groups'] = groups
+        d['at_all_today'] = day
+    _bump(_m)
+
+
+def at_all_used(gid: str) -> int:
+    """某个群**今日**已用的 @全体成员 次数(桶过期 / 缺失 / 异常一律 0)。"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    try:
+        with _lock:
+            day = _load_raw().get('at_all_today')
+        if not isinstance(day, dict) or day.get('date') != today:
+            return 0
+        groups = day.get('groups')
+        return int(groups.get(str(gid)) or 0) if isinstance(groups, dict) else 0
+    except Exception as e:
+        log.warning(f'[metrics] @全体成员次数读取失败: {e}')
+        return 0
 
 
 def record_quota_exhausted() -> None:

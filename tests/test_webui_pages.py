@@ -416,7 +416,7 @@ def test_hidden_action_entry_shape(_clean_registry):
 
 
 def test_build_and_restart_apis_registered_without_panel_auth(_clean_registry):
-    """编译 / 重启 API 必须 auth=False(面板登录态不适用,handler 内验 token);
+    """编译 / 重启 / @全体成员 API 必须 auth=False(面板登录态不适用,handler 内验 token);
     面板自身的路由必须 auth=True —— 两者搞反等于把面板操作暴露给未认证请求。"""
     wm = _main()
     wm.register()
@@ -428,6 +428,7 @@ def test_build_and_restart_apis_registered_without_panel_auth(_clean_registry):
         '/api/ext/lgtbot/build/status',
         '/api/ext/lgtbot/restart',
         '/api/ext/lgtbot/planned-restart',
+        '/api/ext/lgtbot/at-all',
     }
     # 面板侧带参路由一律要登录态
     assert routes[('GET', '/api/ext/lgtbot/backup/restore')]['auth'] is True

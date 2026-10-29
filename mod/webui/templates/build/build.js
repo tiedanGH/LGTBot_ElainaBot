@@ -408,6 +408,7 @@ async function buildCopyApiToken() {
       '\n中断编译：POST ' + (ep.terminate || '') +
       '\n立即重启：POST ' + (ep.restart || '') +
       '\n计划重启：POST ' + (ep.planned || '') + '（{"enable", "auto", "reason"}）' +
+      '\n群@全体：POST ' + (ep.at_all || '') + '（{"group_openid", "content", "send_at"}）' +
       '\n认证方式：Authorization: Bearer <token>',
       {level: 'info'}
     );

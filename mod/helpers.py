@@ -17,6 +17,35 @@ log = get_logger(PLUGIN, 'LGTBot')
 # 图文同条场景下把 mention 退化为 "@昵称"（损失：无 ping 通知）
 _MENTION_RE = re.compile(r'<@([^>\s]+)>')
 
+# ──── 官方 @ 标签 ────────────────────────────────────────────────────────
+# 官方 @ 写法是 <qqbot-at-user id="…" /> 与 <qqbot-at-everyone />,旧的 <@openid> / @everyone 即将弃用。
+# 插件内部(C++ 桥接层、引擎回执、各处文案)仍统一用 <@openid> 表示提及,发往群聊前由 outbound_text 换标签。
+AT_EVERYONE = '<qqbot-at-everyone />'
+# 只认插件拼出来的 <@openid>;前面带反斜杠的是 sanitize_md_name 转义过的昵称文字
+_INTERNAL_MENTION_RE = re.compile(r'(?<!\\)<@([0-9A-Za-z_-]+)>')
+# 现成的 <qqbot-…> 标签只可能来自不可信内容
+_QQ_TAG_RE = re.compile(r'<(?=\s*qqbot-)', re.IGNORECASE)
+
+
+def at_user(uid: str) -> str:
+    """群聊里 @ 一个成员的官方标签。"""
+    return f'<qqbot-at-user id="{uid}" />'
+
+
+def neutralize_qq_tags(text: str) -> str:
+    """拆掉文本里现成的 ``<qqbot-…>`` 标签:``<`` 换成全角 ``＜``,文字照常可读。"""
+    if not text or 'qqbot-' not in text.lower():
+        return text
+    return _QQ_TAG_RE.sub('＜', text)
+
+
+def outbound_text(text: str, group: bool) -> str:
+    """消息发出前的最后一步:拆掉不可信的 ``<qqbot-…>`` 标签;发往群聊时再把内部的 ``<@openid>`` 换成官方标签。"""
+    text = neutralize_qq_tags(text)
+    if group and text and '<@' in text:
+        text = _INTERNAL_MENTION_RE.sub(lambda m: at_user(m.group(1)), text)
+    return text
+
 # ──── markdown 危险字符转义(用户昵称等不可信内容 → 原生 md 消息) ──────────
 # 本插件消息默认按原生 markdown 发送,昵称里的 # / * / [ 等会被当作语法解析,统一加反斜杠转义(QQ markdown 支持 \ 转义)。
 # ( ) ! . - + 只在特定组合 / 行首才构成语法且昵称里太常见,不转义;[ ] 转义后 ``](`` 链接组合已不可能成立。
@@ -26,13 +55,13 @@ _MD_ESCAPE_TABLE = str.maketrans({c: '\\' + c for c in '#*_`~[]<>|\\'})
 
 
 def sanitize_md_name(text: str) -> str:
-    """给用户昵称等不可信文本中的 markdown 语法字符加反斜杠转义。
+    """给用户昵称等不可信文本中的 markdown 语法字符加反斜杠转义,并拆掉现成的 ``<qqbot-…>`` 标签。
 
     **只在 markdown 语境使用**;纯文本语境拿到已转义的引擎文本时用 ``strip_md_escapes`` 还原。
     """
     if not text:
         return text
-    return text.translate(_MD_ESCAPE_TABLE)
+    return neutralize_qq_tags(text).translate(_MD_ESCAPE_TABLE)
 
 
 # strip_md_escapes 的反向匹配:sanitize_md_name 加的 \X 序列(X 为转义集内字符)

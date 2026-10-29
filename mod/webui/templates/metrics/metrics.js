@@ -90,13 +90,11 @@ function metricsRenderRuntime(rt) {
   document.getElementById('metrics-restart-sub').textContent =
     r.last_restart_ts ? ('上次重启 ' + metricsFmtTime(r.last_restart_ts)) : '暂无重启记录';
 
-  /* 崩溃重启:小字只给上次崩溃时间(与「重启次数」卡同格式)  */
-  const crashTotal = r.crash_total || 0;
-  document.getElementById('metrics-crash-total').textContent = crashTotal + ' 次';
-  document.getElementById('metrics-crash-sub').textContent =
-    (crashTotal > 0 && r.last_crash_ts)
-      ? ('上次崩溃 ' + metricsFmtTime(r.last_crash_ts))
-      : '暂无崩溃记录';
+  /* @全体成员:累计发出的次数,小字上次发送时间(与「重启次数」卡同格式) */
+  document.getElementById('metrics-at-all-total').textContent =
+    (r.at_all_total || 0) + ' 次';
+  document.getElementById('metrics-at-all-sub').textContent =
+    r.last_at_all_ts ? ('上次发送 ' + metricsFmtTime(r.last_at_all_ts)) : '暂无发送记录';
 }
 
 /* ──── ③ 游戏数据区 ──── */

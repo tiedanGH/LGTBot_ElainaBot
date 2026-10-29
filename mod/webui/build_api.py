@@ -282,7 +282,7 @@ async def terminate_handler(request: 'web.Request') -> 'web.Response':
 def render_api_token() -> str:
     """fragment: token + 端点说明,供「🔑 复制 API Token」按钮取值。
 
-    端点列表涵盖同一枚 token 认证的全部 API(编译 + 重启 / 计划重启,后两者见 restart_api)。
+    端点列表涵盖同一枚 token 认证的全部 API(编译 + 重启 / 计划重启 + @全体成员,后两类见 restart_api / at_all_api)。
     """
     import html as _html
     payload = {
@@ -294,6 +294,7 @@ def render_api_token() -> str:
             'status': _ROUTE_STATUS,
             'restart': '/api/ext/lgtbot/restart',
             'planned': '/api/ext/lgtbot/planned-restart',
+            'at_all': '/api/ext/lgtbot/at-all',
         },
     }
     body = json.dumps(payload, ensure_ascii=False)

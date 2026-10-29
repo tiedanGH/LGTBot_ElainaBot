@@ -44,7 +44,7 @@ from aiohttp import web
 from core.plugin import web_pages
 from .. import audit, metrics
 from .. import state as _plugin_state
-from . import build_api, page_crash, restart_api
+from . import at_all_api, build_api, page_crash, restart_api
 from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
                page_review,
                page_logs, page_metrics, page_prebuilt, page_users)
@@ -173,6 +173,8 @@ _BUILD_API_STATUS_ROUTE     = '/api/ext/lgtbot/build/status'
 # 重启 / 计划重启 API(同一枚 token;POST 与面板 GET /planned-restart 同路径不同方法)
 _RESTART_API_ROUTE          = '/api/ext/lgtbot/restart'
 _PLANNED_API_ROUTE          = '/api/ext/lgtbot/planned-restart'
+# @全体成员 API(同一枚 token)
+_AT_ALL_API_ROUTE           = '/api/ext/lgtbot/at-all'
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
@@ -559,6 +561,7 @@ def register():
     # 重启 / 计划重启 API(同 token 体系;计划重启支持 enable/auto/reason 请求体)
     web_pages.register_route('POST', _RESTART_API_ROUTE, restart_api.restart_handler, auth=False)
     web_pages.register_route('POST', _PLANNED_API_ROUTE, restart_api.planned_restart_handler, auth=False)
+    web_pages.register_route('POST', _AT_ALL_API_ROUTE, at_all_api.at_all_handler, auth=False)
 
     _ensure_get_pages_filters_hidden()
 
@@ -594,3 +597,4 @@ def unregister():
     web_pages.unregister_route('GET', _BUILD_API_STATUS_ROUTE)
     web_pages.unregister_route('POST', _RESTART_API_ROUTE)
     web_pages.unregister_route('POST', _PLANNED_API_ROUTE)
+    web_pages.unregister_route('POST', _AT_ALL_API_ROUTE)

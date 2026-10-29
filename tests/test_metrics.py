@@ -158,7 +158,8 @@ def test_snapshot_without_file_returns_all_zero():
                     'send_fail_total': 0, 'send_fail_all': 0,
                     'send_fail_by_code': {},
                     'rate_limit_recovered': 0, 'rate_limit_dropped': 0,
-                    'quota_wait_timeout_30d': 0, 'send_fail_total_30d': 0}
+                    'quota_wait_timeout_30d': 0, 'send_fail_total_30d': 0,
+                    'at_all_total': 0, 'last_at_all_ts': 0}
 
 
 def _day_ago(n: int) -> str:
