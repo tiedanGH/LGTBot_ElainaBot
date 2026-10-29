@@ -223,7 +223,7 @@ def _snapshot_runtime_tunables() -> dict:
     前后两次快照的 diff 即得到本次热重载的实际变化。
     """
     from .. import quota as _quota, uploader as _uploader, buttons as _buttons, callbacks as _callbacks
-    from .. import dispatcher as _dispatcher, state as _state
+    from .. import dispatcher as _dispatcher, helpers as _helpers, state as _state
     return {
         'bind_bot_appid': _state.bind_bot_appid or '',
         'image_hosting': _uploader.SELECTED_BACKEND or '',
@@ -234,6 +234,7 @@ def _snapshot_runtime_tunables() -> dict:
         'sandbox_dm_users': ['all'] if _callbacks.DM_PUSH_ALL else sorted(_callbacks.SANDBOX_DM_USERS),
         'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
         'sponsor_enabled': bool(_buttons.SPONSOR_ENABLED),
+        'new_at_format': bool(_helpers.NEW_AT_FORMAT),
         'menu_game_buttons': list(_buttons.MENU_GAMES),
     }
 

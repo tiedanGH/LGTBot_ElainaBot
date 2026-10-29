@@ -165,6 +165,43 @@ def test_humanize_mentions_does_not_md_escape(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 出站 @ 改写:群聊跟 new_at_format 开关,私信换成玩家昵称
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_group_mentions_follow_the_new_at_format_switch(monkeypatch):
+    """★ 开关默认关:群聊保留 <@openid>(主框架还没适配新版 @ 接口);开了才换成官方标签。"""
+    assert helpers.NEW_AT_FORMAT is False
+    assert helpers.outbound_text('<@U1> 出牌了', True) == '<@U1> 出牌了'
+    assert helpers.at_user('U1') == '<@U1>'
+    monkeypatch.setattr(helpers, 'NEW_AT_FORMAT', True)
+    assert helpers.outbound_text('<@U1> 对 <@U2>', True) == \
+        '<qqbot-at-user id="U1" /> 对 <qqbot-at-user id="U2" />'
+    assert helpers.at_user('U1') == '<qqbot-at-user id="U1" />'
+
+
+@pytest.mark.parametrize('new_at', [False, True])
+def test_dm_mentions_become_engine_style_player_names(monkeypatch, new_at):
+    """★ 私信不支持 @:不管开关,提及都换成引擎同款 <昵称(前4…后4)>;openid 不超过 8 位时不截。"""
+    monkeypatch.setattr(helpers, 'NEW_AT_FORMAT', new_at)
+    monkeypatch.setattr(helpers.userinfo, 'get_name',
+                        lambda uid: {'ABCDEFGH1234': '铁蛋', 'U1': '甲'}.get(uid, ''))
+    assert helpers.outbound_text('<@ABCDEFGH1234> 轮到你了', False) == '<铁蛋(ABCD…1234)> 轮到你了'
+    assert helpers.outbound_text('<@U1> 对 <@ABCDEFGH1234>', False) == '<甲(U1)> 对 <铁蛋(ABCD…1234)>'
+
+
+def test_dm_mention_name_falls_back_to_openid_and_is_md_escaped(monkeypatch):
+    """查不到昵称用 openid 顶上(同 cb_get_user_name);昵称按 markdown 语境转义,昵称里现成的 <qqbot-…> 标签拆掉。"""
+    monkeypatch.setattr(helpers.userinfo, 'get_name',
+                        lambda uid: {'U1': '**铁蛋**', 'U2': '<qqbot-at-everyone />'}.get(uid, ''))
+    assert helpers.dm_mentions('<@ABCDEFGH1234>') == '<ABCDEFGH1234(ABCD…1234)>'
+    assert helpers.dm_mentions('<@ABCDEFGH>') == '<ABCDEFGH(ABCDEFGH)>'        # 恰好 8 位不截
+    assert helpers.dm_mentions('<@U1>') == '<\\*\\*铁蛋\\*\\*(U1)>'
+    assert '<qqbot' not in helpers.dm_mentions('<@U2>')
+    assert helpers.outbound_text('<qqbot-at-everyone /> <@U1>', False) == '＜qqbot-at-everyone /> <\\*\\*铁蛋\\*\\*(U1)>'
+    assert helpers.dm_mentions('没有提及') == '没有提及'
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # bot 绑定解析
 # ─────────────────────────────────────────────────────────────────────────
 

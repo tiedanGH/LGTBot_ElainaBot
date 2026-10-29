@@ -647,11 +647,24 @@ async def test_dispatch_denies_group_admin_super_cmd(patched_downstream, monkeyp
     await dispatcher.lgtbot_dispatch(ev, None)
 
     reply = ev.reply.await_args.args[0]
-    # 排版对齐引擎群聊回执:@ + 换行 + [错误] 开头(bot_core.cc PublicReplyMsgSender);群聊 @ 用官方标签
-    assert reply.startswith('<qqbot-at-user id="ADMIN_USER" />\n[错误] ')
+    # 排版对齐引擎群聊回执:<@uid> + 换行 + [错误] 开头(bot_core.cc PublicReplyMsgSender)
+    assert reply.startswith('<@ADMIN_USER>\n[错误] ')
     assert '超级管理员' in reply
     assert '%中断' in reply          # 明确告知群管唯一可用的管理指令
     patched_downstream['thread_start'].assert_not_called()   # 未派发给引擎
+
+
+def test_reply_prefix_follows_the_scene(monkeypatch):
+    """插件自己回复开头的 @ 与引擎回执同样改写:群聊跟 new_at_format 开关,私信换成玩家昵称。"""
+    monkeypatch.setattr(dispatcher.helpers.userinfo, 'get_name', lambda uid: '铁蛋')
+    group = _mock_event(is_group=True, group_id='G1', user_id='U1')
+    dm = _mock_event(is_group=False, user_id='ABCDEFGH1234')
+    assert dispatcher._at(group) == '<@U1>'
+    assert dispatcher._at(dm) == '<铁蛋(ABCD…1234)>'
+    monkeypatch.setattr(dispatcher.helpers, 'NEW_AT_FORMAT', True)
+    assert dispatcher._at(group) == '<qqbot-at-user id="U1" />'
+    assert dispatcher._super_admin_denied_text('U1').startswith('<qqbot-at-user id="U1" />\n[错误] ')
+    assert dispatcher._at(dm) == '<铁蛋(ABCD…1234)>'
 
 
 async def test_dispatch_plain_user_super_cmd_goes_to_engine(patched_downstream, monkeypatch):
@@ -960,14 +973,14 @@ async def test_stats_date_command_views_history(monkeypatch):
     ev2.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev2, _re.match(dispatcher._P_STATS, '数据统计0103'))
     txt2 = ev2.reply.await_args.args[0]
-    assert txt2.startswith('<qqbot-at-user id="U1" />\n') and '无统计数据' in txt2
+    assert txt2.startswith('<@U1>\n') and '无统计数据' in txt2
 
     # 非法日期 → 报错
     ev3 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计0231')
     ev3.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev3, _re.match(dispatcher._P_STATS, '数据统计0231'))
     txt3 = ev3.reply.await_args.args[0]
-    assert txt3.startswith('<qqbot-at-user id="U1" />\n') and '日期无效' in txt3
+    assert txt3.startswith('<@U1>\n') and '日期无效' in txt3
 
 
 async def test_stats_month_command_views_month(monkeypatch):
@@ -1010,14 +1023,14 @@ async def test_stats_month_command_views_month(monkeypatch):
     ev2.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev2, _re.match(dispatcher._P_STATS, f'数据统计{empty_mon}'))
     txt2 = ev2.reply.await_args.args[0]
-    assert txt2.startswith('<qqbot-at-user id="U1" />\n') and '无统计数据' in txt2
+    assert txt2.startswith('<@U1>\n') and '无统计数据' in txt2
 
     # 非法月份 → 报错
     ev3 = _mock_event(is_group=True, group_id='G1', user_id='U1', content='数据统计13')
     ev3.reply = AsyncMock()
     await dispatcher.lgtbot_data_stats(ev3, _re.match(dispatcher._P_STATS, '数据统计13'))
     txt3 = ev3.reply.await_args.args[0]
-    assert txt3.startswith('<qqbot-at-user id="U1" />\n') and '月份无效' in txt3
+    assert txt3.startswith('<@U1>\n') and '月份无效' in txt3
 
 
 # 年份用例一律相对 _MIN_STATS_YEAR 取:下界是部署方可调的策略,写死年份一调常量就红一片。
@@ -1745,7 +1758,7 @@ async def test_game_stats_text_fallback(monkeypatch):
     call, seen = await _run_game_stats(monkeypatch, '数据统计 天赋云巢', _game_detail())
     assert seen == [('天赋云巢', 'U1', 'G1')]
     txt = call.args[0]
-    assert txt.startswith('<qqbot-at-user id="U1" />\n🎮 《天赋云巢》游戏统计')
+    assert txt.startswith('<@U1>\n🎮 《天赋云巢》游戏统计')
     for frag in ('累计对局: 635 局（2706 人次）', '累计玩家: 105 人（本群 23 人）',
                  '近7日对局: 110 局（↓5）', '近7日玩家: 52 人（↑2）',
                  '平均人数: 4.26 人（2–8 人）', '游戏群聊: 16 个（本群 120 局）',
@@ -1782,7 +1795,7 @@ async def test_game_stats_not_found_shows_suggestions_and_date_usage(monkeypatch
         monkeypatch, '数据统计 天赋云朝',
         {'available': True, 'found': False, 'suggestions': ['天赋云巢']})
     txt = call.args[0]
-    assert txt.startswith('<qqbot-at-user id="U1" />\n❌ 游戏不存在或暂无计分对局\n💡 你要找的可能是：天赋云巢\n')
+    assert txt.startswith('<@U1>\n❌ 游戏不存在或暂无计分对局\n💡 你要找的可能是：天赋云巢\n')
     assert txt.endswith(dispatcher._STATS_DATE_USAGE)
     assert call.kwargs['buttons'][-1] == [dispatcher.buttons.BTN_GAME_LIST]
 

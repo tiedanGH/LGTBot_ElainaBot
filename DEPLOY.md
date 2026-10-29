@@ -200,6 +200,8 @@ blocked_commands: []
 text_at_as_mention: true
 # 赞助功能总开关（默认关闭）：开启后启用「赞助支持」指令，更多功能 / 关于 / 更新公告 下添加「赞助支持」按钮。第三方部署请保持 false
 sponsor_enabled: false
+# 群聊 @ 成员使用官方新版 <qqbot-at-user> 标签；关闭则沿用旧版 <@openid>
+new_at_format: false
 # 每行填写一个游戏名称：欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致
 menu_game_buttons:
   - '数字蜂巢'
@@ -226,6 +228,7 @@ menu_game_buttons:
 | `blocked_commands`        | `list[str]` | `[]`    | 屏蔽指令列表：命中的消息（文本 / 按钮回调）不再转发给 LGTBot 引擎，化解其他插件的指令冲突。带 / 不带 `/` **严格按配置匹配**，`指令 参数` 形式也命中。                                              |
 | `text_at_as_mention`      | `bool`      | `true`  | 把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @。                                                                                          |
 | `sponsor_enabled`         | `bool`      | `false` | 赞助功能总开关。`true` 时「更多功能 / 关于 / 更新公告」下出现「赞助支持」按钮，`赞助支持` 指令按引用块展示鸣谢名单。**第三方部署请保持 `false`**                                                |
+| `new_at_format`           | `bool`      | `false` | **临时开关**：群聊 @ 成员改用官方新版 `<qqbot-at-user id="" />` 标签，主框架适配新版 @ 接口后再开启；关闭沿用旧版 `<@openid>`。@全体成员 API 不受此开关影响；私信不支持 @，提及一律显示为玩家昵称         |
 | `menu_game_buttons`       | `list[str]` | (6 项)   | 欢迎菜单里「游戏快捷开局」按钮列表，每行最多 3 个；游戏名需与 `/游戏列表` 输出一致                                                                                         |
 
 > 💡 **图床（可选）**：启用 ElainaBot 主框架的 `image_hosting` 模块并配置目标图床后，本插件就会用 markdown `![](url)` 内嵌发送游戏图片（保留原生 `<@>` 提及和按钮）

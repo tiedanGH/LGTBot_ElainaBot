@@ -19,8 +19,10 @@ _MENTION_RE = re.compile(r'<@([^>\s]+)>')
 
 # ──── 官方 @ 标签 ────────────────────────────────────────────────────────
 # 官方 @ 写法是 <qqbot-at-user id="…" /> 与 <qqbot-at-everyone />,旧的 <@openid> / @everyone 即将弃用。
-# 插件内部(C++ 桥接层、引擎回执、各处文案)仍统一用 <@openid> 表示提及,发往群聊前由 outbound_text 换标签。
+# 插件内部(C++ 桥接层、引擎回执、各处文案)仍统一用 <@openid> 表示提及,发出前由 outbound_text 按场景改写。
 AT_EVERYONE = '<qqbot-at-everyone />'
+# 临时开关(config.new_at_format 下发,默认关):主框架还没适配新版 @ 接口,关闭时群聊沿用 <@openid>
+NEW_AT_FORMAT = False
 # 只认插件拼出来的 <@openid>;前面带反斜杠的是 sanitize_md_name 转义过的昵称文字
 _INTERNAL_MENTION_RE = re.compile(r'(?<!\\)<@([0-9A-Za-z_-]+)>')
 # 现成的 <qqbot-…> 标签只可能来自不可信内容
@@ -28,8 +30,8 @@ _QQ_TAG_RE = re.compile(r'<(?=\s*qqbot-)', re.IGNORECASE)
 
 
 def at_user(uid: str) -> str:
-    """群聊里 @ 一个成员的官方标签。"""
-    return f'<qqbot-at-user id="{uid}" />'
+    """群聊里 @ 一个成员:开了 NEW_AT_FORMAT 用官方标签,否则用 ``<@openid>``。"""
+    return f'<qqbot-at-user id="{uid}" />' if NEW_AT_FORMAT else f'<@{uid}>'
 
 
 def neutralize_qq_tags(text: str) -> str:
@@ -39,10 +41,28 @@ def neutralize_qq_tags(text: str) -> str:
     return _QQ_TAG_RE.sub('＜', text)
 
 
+def dm_mentions(text: str) -> str:
+    """私信不支持 @:把内部的 ``<@openid>`` 换成引擎同款玩家昵称 ``<昵称(前4…后4)>``(见 C++ GetUserName)。
+
+    昵称同 cb_get_user_name 按 markdown 语境转义,纯文本出口照常用 ``strip_md_escapes`` 还原。
+    """
+    if not text or '<@' not in text:
+        return text
+
+    def _repl(m):
+        uid = m.group(1)
+        short = f'{uid[:4]}…{uid[-4:]}' if len(uid) > 8 else uid
+        return f'<{sanitize_md_name(userinfo.display_name(uid) or uid)}({short})>'
+
+    return _INTERNAL_MENTION_RE.sub(_repl, text)
+
+
 def outbound_text(text: str, group: bool) -> str:
-    """消息发出前的最后一步:拆掉不可信的 ``<qqbot-…>`` 标签;发往群聊时再把内部的 ``<@openid>`` 换成官方标签。"""
+    """消息发出前的最后一步:拆掉不可信的 ``<qqbot-…>`` 标签,再改写内部的 ``<@openid>``(群聊见 at_user,私信见 dm_mentions)。"""
     text = neutralize_qq_tags(text)
-    if group and text and '<@' in text:
+    if not group:
+        return dm_mentions(text)
+    if NEW_AT_FORMAT and text and '<@' in text:
         text = _INTERNAL_MENTION_RE.sub(lambda m: at_user(m.group(1)), text)
     return text
 

@@ -1526,9 +1526,9 @@ async def _send_image_quota_managed(target_id, is_uid, data, raw_content, filena
 
     发送通道二选一：
       A. 图床 markdown：通过 image_hosting 上传图片得到 URL，用 markdown
-         `![](url)` 内嵌；保留原生 mention(官方 @ 标签)，可挂刷新按钮
+         `![](url)` 内嵌；保留原生 mention(按场景改写，见 helpers.outbound_text)，可挂刷新按钮
       B. 媒体兜底：图床未启用 / 上传失败时走 msg_type=7 路径（content
-         字段需 humanize mentions，无法挂按钮）
+         字段的 mention 换成昵称，无法挂按钮）
 
     ``pre_url`` 是上游(``_send_mixed_message`` 的媒体兜底分支)已经拿到的上传结果:
     非空 = 直接用该 URL,``''`` = 已知上传失败、跳过重传直接走媒体,``None``(默认)= 本函数自己上传。
@@ -1590,7 +1590,7 @@ async def _send_markdown_image(sender, target_id, is_uid, kwargs, raw_content,
 
 async def _send_media_fallback(sender, target_id, is_uid, kwargs, raw_content, data, up):
     """msg_type=7 媒体消息兜底：上传 file_info → send_to_* with media,返回 ``(ok, code)``。
-    media 不解析 <@openid>，content 这里要先 humanize 成可读 @昵称。
+    media 不解析 <@openid>，content 里的提及要先换成可读昵称。
 
     ``kwargs`` 为空即主动消息。``up['media']`` 缓存 ``(sender, file_info)``:file_info 归上传它的 bot 所有,
     换了 sender(被动引用的 appid 与主动路径的不同)才重新上传。
@@ -1609,10 +1609,10 @@ async def _send_media_fallback(sender, target_id, is_uid, kwargs, raw_content, d
             return False, None
         up['media'] = (sender, file_info)
 
-    # msg_type=7 的 content 是纯文本(QQ 不按 markdown 解析):humanize 提及后
+    # msg_type=7 的 content 是纯文本(QQ 不按 markdown 解析):提及换成昵称(群聊 @昵称,私信同引擎玩家昵称)后
     # 再把源头(cb_get_user_name)给昵称加的 md 转义还原,避免露出反斜杠;还原之后才拆 <qqbot-…> 标签
-    rendered_content = helpers.outbound_text(
-        helpers.strip_md_escapes(helpers.humanize_mentions(raw_content)), not is_uid)
+    named = helpers.dm_mentions(raw_content) if is_uid else helpers.humanize_mentions(raw_content)
+    rendered_content = helpers.neutralize_qq_tags(helpers.strip_md_escapes(named))
     media_dict = {'file_info': up['media'][1]}
     try:
         with log_attribution.mark_outbound():

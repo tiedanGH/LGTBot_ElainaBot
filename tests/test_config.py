@@ -23,7 +23,7 @@ import yaml
 
 # conftest.py 已 inject 假 boot,这里安全 import
 from plugins.LGTBot_ElainaBot.mod import (
-    buttons, callbacks, config, dispatcher, quota, state,
+    buttons, callbacks, config, dispatcher, helpers, quota, state,
 )
 
 
@@ -50,6 +50,7 @@ def _reset_tunables(monkeypatch):
     monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
     monkeypatch.setattr(buttons, 'MENU_GAMES', list(buttons.DEFAULT_MENU_GAMES))
     monkeypatch.setattr(buttons, 'SPONSOR_ENABLED', False)
+    monkeypatch.setattr(helpers, 'NEW_AT_FORMAT', False)
 
 
 def test_sandbox_whitelist_mode():
@@ -490,6 +491,48 @@ def test_text_at_as_mention_switches_off_and_rejects_non_bool():
     # 'true' / 1 这类近似值按非法忽略,保留现值(不静默翻转)
     config._apply_runtime_tunables(_base_cfg(text_at_as_mention='true'))
     assert dispatcher.TEXT_AT_AS_MENTION is False
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# new_at_format(临时开关)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_new_at_format_defaults_off():
+    """★ 默认关闭:主框架还没适配新版 @ 接口,老配置文件里没有这个 key 也按关闭处理。"""
+    assert config.DEFAULT_CONFIG['new_at_format'] is False
+    config._apply_runtime_tunables(_base_cfg())
+    assert helpers.NEW_AT_FORMAT is False
+    cfg = _base_cfg()
+    del cfg['new_at_format']
+    config._apply_runtime_tunables(cfg)
+    assert helpers.NEW_AT_FORMAT is False
+
+
+def test_new_at_format_switches_on_and_rejects_non_bool():
+    config._apply_runtime_tunables(_base_cfg(new_at_format=True))
+    assert helpers.NEW_AT_FORMAT is True
+    # 0 / 'true' 这类近似值按非法忽略,保留现值
+    config._apply_runtime_tunables(_base_cfg(new_at_format=0))
+    assert helpers.NEW_AT_FORMAT is True
+    config._apply_runtime_tunables(_base_cfg(new_at_format=False))
+    assert helpers.NEW_AT_FORMAT is False
+
+
+def test_reload_config_reports_the_new_at_format_toggle(monkeypatch):
+    """「热重载配置」的变化列表里有这个开关:切换后面板不会提示运行时参数无变化。"""
+    import html
+    import json
+    pc = _pc()
+    monkeypatch.setattr(pc.audit, 'record', lambda *a, **k: None)
+
+    def _load():
+        helpers.NEW_AT_FORMAT = True
+        return ''
+    monkeypatch.setattr(config, 'load_plugin_config', _load)
+    frag = pc.render_reload_config()
+    payload = json.loads(html.unescape(frag[len('<pre id="result">'):-len('</pre>')]))
+    assert {'field': 'new_at_format', 'before': False, 'after': True} in payload['changes']
 
 
 # ─────────────────────────────────────────────────────────────────────────

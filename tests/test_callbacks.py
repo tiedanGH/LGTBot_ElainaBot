@@ -1095,6 +1095,26 @@ async def test_image_retry_reuses_the_upload(monkeypatch, push_env, hosted):
     assert push_env['rate'] == [False]
 
 
+@pytest.mark.parametrize('is_uid, caption', [
+    (False, '@小*明 出牌了'),
+    (True, '<小*明(ABCD…1234)> 出牌了'),
+])
+async def test_media_caption_names_mentions_by_scene(monkeypatch, is_uid, caption):
+    """媒体兜底的 content 是纯文本:群聊提及换成 @昵称,私信换成引擎同款玩家昵称;昵称里不留 md 转义。"""
+    sender = _fake_sender()
+    sender.send_to_user = AsyncMock(return_value=_OK)
+    sender.send_to_group = AsyncMock(return_value=_OK)
+    monkeypatch.setattr(callbacks.helpers.userinfo, 'get_name', lambda uid: '小*明')
+    import core.message.media as _media
+    monkeypatch.setattr(_media, 'upload_media_bytes', AsyncMock(return_value={'file_info': 'FI'}))
+
+    ok, _code = await callbacks._send_media_fallback(
+        sender, 'T1', is_uid, {}, '<@ABCDEFGH1234> 出牌了', _PNG_1x1, {'media': None})
+
+    send = sender.send_to_user if is_uid else sender.send_to_group
+    assert ok and send.await_args.args[1] == caption
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 等待中房间 + 重启通知
 # ─────────────────────────────────────────────────────────────────────────

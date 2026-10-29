@@ -813,7 +813,7 @@ _SPAN_VIEWS = {
 
 
 def _at(event) -> str:
-    """回复开头 @ 发送者的写法:群聊用官方 @ 标签,私信沿用 ``<@openid>``(见 helpers.outbound_text)。"""
+    """回复开头 @ 发送者的写法,与引擎回执同样按场景改写(见 helpers.outbound_text):群聊 @,私信换成玩家昵称。"""
     gid = event.group_id or event.channel_id or ''
     return helpers.outbound_text(f'<@{event.user_id or ""}>', bool(event.is_group and gid))
 

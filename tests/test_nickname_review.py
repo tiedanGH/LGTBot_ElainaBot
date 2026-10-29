@@ -485,6 +485,8 @@ def test_every_display_exit_goes_through_display_name():
     assert 'userinfo.display_name(uid)' in inspect.getsource(callbacks.cb_get_user_name)
     # @提及 humanize(媒体 caption / 日志)
     assert 'userinfo.display_name(uid)' in inspect.getsource(helpers.humanize_mentions)
+    # 私信里代替 @ 的玩家昵称
+    assert 'userinfo.display_name(uid)' in inspect.getsource(helpers.dm_mentions)
     # 排行榜 display(两处窗口查询各一份)
     assert inspect.getsource(metrics).count('userinfo.display_name(str(uid))') == 2
     assert 'userinfo.get_name(str(uid))' not in inspect.getsource(metrics)

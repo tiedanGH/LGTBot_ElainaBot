@@ -460,7 +460,7 @@ async def test_stats_command_replies_markdown_image(monkeypatch, _stats_env):
     await dispatcher.lgtbot_data_stats(ev, None)
     ev.reply.assert_awaited_once()
     md = ev.reply.await_args.args[0]
-    assert '<qqbot-at-user id="USER1" />' in md and 'https://cdn.example/stats.png' in md
+    assert '<@USER1>' in md and 'https://cdn.example/stats.png' in md
     assert '#640px' in md and '#480px' in md
     assert seen == {'filename': 'lgtbot_stats.png',
                     'target_id': 'GROUP1', 'target_is_uid': False}
@@ -493,8 +493,8 @@ async def test_stats_command_text_when_no_backend(monkeypatch, _stats_env):
 
 def test_stats_image_md_separates_mention_from_image():
     """★ @ 与图片之间空一行 —— 紧贴时 QQ 客户端会把两者挤成一块。"""
-    md = dispatcher._stats_image_md('<qqbot-at-user id="U1" />', 640, 480, 'https://cdn/x.png')
-    assert md == '<qqbot-at-user id="U1" />\n![数据统计 #640px #480px](https://cdn/x.png)'
+    md = dispatcher._stats_image_md('<@U1>', 640, 480, 'https://cdn/x.png')
+    assert md == '<@U1>\n![数据统计 #640px #480px](https://cdn/x.png)'
 
 
 def test_stats_image_md_is_the_only_place_building_that_markdown():
@@ -518,7 +518,7 @@ async def test_today_view_image_reply_has_the_newline(monkeypatch, _stats_env):
 
     ev = _fake_event()
     await dispatcher.lgtbot_data_stats(ev, None)
-    assert ev.reply.await_args.args[0].startswith('<qqbot-at-user id="USER1" />\n![数据统计 ')
+    assert ev.reply.await_args.args[0].startswith('<@USER1>\n![数据统计 ')
 
 
 async def test_window_view_image_reply_has_the_newline(monkeypatch, _stats_env):
@@ -541,7 +541,7 @@ async def test_window_view_image_reply_has_the_newline(monkeypatch, _stats_env):
 
     ev = _fake_event()
     await dispatcher.lgtbot_data_stats(ev, _re.match(dispatcher._P_STATS, '数据统计总'))
-    assert ev.reply.await_args.args[0].startswith('<qqbot-at-user id="USER1" />\n![数据统计 ')
+    assert ev.reply.await_args.args[0].startswith('<@USER1>\n![数据统计 ')
 
 
 def test_unranked_tag_is_actually_drawn():
@@ -1221,7 +1221,7 @@ async def test_game_stats_command_replies_markdown_image(monkeypatch):
     await dispatcher.lgtbot_data_stats(
         ev, _re.search(dispatcher._P_STATS, '数据统计 天赋云巢', _re.DOTALL))
     assert ev.reply.await_args.args[0] == \
-        '<qqbot-at-user id="USER1" />\n![数据统计 #640px #480px](https://cdn.example/game.png)'
+        '<@USER1>\n![数据统计 #640px #480px](https://cdn.example/game.png)'
     assert seen == {'filename': 'lgtbot_game_stats.png',
                     'target_id': 'GROUP1', 'target_is_uid': False}
 

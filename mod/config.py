@@ -15,6 +15,7 @@
   · blocked_commands: list[str]      追加屏蔽指令（与 dispatcher 内置屏蔽表共同生效，命中的消息不转发给引擎）
   · text_at_as_mention: bool        全量群里「@机器人名称」文本前缀是否算 @
   · sponsor_enabled: bool            赞助功能总开关（默认 False = 完全隐藏赞助入口与「赞助支持」指令）
+  · new_at_format: bool              群聊 @ 是否使用官方新版标签（临时开关，默认 False = 沿用 <@openid>）
   · menu_game_buttons: list[str]     欢迎菜单的游戏快捷按钮列表（自动按每行 3 个排版）
 """
 
@@ -51,6 +52,7 @@ DEFAULT_CONFIG = {
     'blocked_commands': [],
     'text_at_as_mention': True,
     'sponsor_enabled': False,
+    'new_at_format': False,
     'menu_game_buttons': list(_DEFAULT_MENU_GAMES),
 }
 CONFIG_COMMENTS = {
@@ -66,6 +68,7 @@ CONFIG_COMMENTS = {
     'blocked_commands': '每行填写一个屏蔽指令：命中的消息不再转发给引擎，用于化解与其他插件的指令冲突',
     'text_at_as_mention': '把复制粘贴出来的「@机器人名称」文本前缀也当成 @（仅影响全量群）；关闭则只认真实 @',
     'sponsor_enabled': '赞助功能总开关（默认关闭）：开启后启用「赞助支持」指令，更多功能 / 关于 / 更新公告 下添加「赞助支持」按钮。第三方部署请保持 false',
+    'new_at_format': '群聊 @ 成员使用官方新版 <qqbot-at-user> 标签；关闭则沿用旧版 <@openid>',
     'menu_game_buttons': '每行填写一个游戏名称：欢迎菜单里「游戏快捷开局」按钮列表，游戏名需与 /游戏列表 输出一致',
 }
 # 面板可视化编辑的字段名;说明文字直接用 CONFIG_COMMENTS
@@ -82,6 +85,7 @@ CONFIG_LABELS = {
     'blocked_commands': '屏蔽指令',
     'text_at_as_mention': '文本 @ 视为 @',
     'sponsor_enabled': '赞助功能',
+    'new_at_format': '使用新版 @ 接口',
     'menu_game_buttons': '欢迎菜单快捷开局',
 }
 
@@ -540,6 +544,21 @@ def _apply_runtime_tunables(cfg: dict):
         log.info(f'sponsor_enabled: {"关闭" if not sponsor_on else "开启"}'
                  f'（原 {"开启" if _buttons.SPONSOR_ENABLED else "关闭"}）')
         _buttons.SPONSOR_ENABLED = sponsor_on
+
+    # ── new_at_format ─────────────────────────────────────────────────────
+    # 临时开关,**默认关闭**:主框架还没适配新版 @ 接口。只认真正的布尔值,近似值按非法忽略并保留现值。
+    raw_new_at = cfg.get('new_at_format', None)
+    if raw_new_at is None:
+        new_at_on = False
+    elif isinstance(raw_new_at, bool):
+        new_at_on = raw_new_at
+    else:
+        log.warning(f'new_at_format 应为布尔值 true / false，已忽略 (got {raw_new_at!r})')
+        new_at_on = helpers.NEW_AT_FORMAT
+    if helpers.NEW_AT_FORMAT != new_at_on:
+        log.info(f'new_at_format: {"开启" if new_at_on else "关闭"}'
+                 f'（原 {"开启" if helpers.NEW_AT_FORMAT else "关闭"}）')
+        helpers.NEW_AT_FORMAT = new_at_on
 
     # ── menu_game_buttons ─────────────────────────────────────────────────
     # buttons.build_menu_buttons() 每次调用都读这个列表,所以下发后下一次回欢迎菜单即生效。
