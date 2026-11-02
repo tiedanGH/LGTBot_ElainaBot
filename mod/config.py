@@ -343,7 +343,8 @@ def _apply_runtime_tunables(cfg: dict):
     下发顺序与 ``DEFAULT_CONFIG`` / yaml 中字段顺序一致(admin_uids 由
     ``load_plugin_config`` 处理,不在此函数内)。
     """
-    from . import helpers, quota, uploader, buttons as _buttons, callbacks as _callbacks
+    from . import helpers, callbacks as _callbacks
+    from .messaging import quota, uploader, buttons as _buttons
     from . import dispatcher as _dispatcher
 
     cfg = _migrate_legacy(cfg)[0]

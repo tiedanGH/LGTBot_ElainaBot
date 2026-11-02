@@ -119,7 +119,7 @@ def _clean_runtime_state():
         _dispatcher._button_last.clear()
 
     try:
-        from plugins.LGTBot_ElainaBot.mod import uploader
+        from plugins.LGTBot_ElainaBot.mod.messaging import uploader
         uploader._inflight.clear()
         uploader._url_cache_v2.clear()
         if hasattr(uploader, '_url_cache'):

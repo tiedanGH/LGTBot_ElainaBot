@@ -39,14 +39,14 @@ _state.plugin_ctx = _ctx_mod.ctx
 from plugins.LGTBot_ElainaBot.mod import boot              # noqa: F401  C++ 引擎与路径
 from plugins.LGTBot_ElainaBot.mod.webui import main as webui  # noqa: F401  Web 面板侧边栏页面入口
 # page_logs 兼做日志缓冲(callbacks / dispatcher 调 log_incoming / log_outgoing),显式早 import 确保数据层先就位
-from plugins.LGTBot_ElainaBot.mod.webui import page_logs  # noqa: F401
-from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard as _page_dashboard  # 启动更新自检入口
+from plugins.LGTBot_ElainaBot.mod.webui.pages import logs as page_logs  # noqa: F401
+from plugins.LGTBot_ElainaBot.mod.webui.pages import dashboard as _page_dashboard  # 启动更新自检入口
 from plugins.LGTBot_ElainaBot.mod import dispatcher        # noqa: F401  @handler 注册（消息派发 + INTERACTION）
 from plugins.LGTBot_ElainaBot.mod import callbacks         # C++ 回调（被 LGTBot_ElainaBot.start 注入）
 from plugins.LGTBot_ElainaBot.mod import config as _config
-from plugins.LGTBot_ElainaBot.mod import backup as _backup            # noqa: F401  数据库备份(自动 + 手动 + 恢复)
+from plugins.LGTBot_ElainaBot.mod.ops import backup as _backup  # noqa: F401  数据库备份(自动 + 手动 + 恢复)
 from plugins.LGTBot_ElainaBot.mod import game_switch as _game_switch  # 游戏开关:启动前跳过停用的游戏
-from plugins.LGTBot_ElainaBot.mod import log_attribution as _log_attribution  # noqa: F401
+from plugins.LGTBot_ElainaBot.mod.messaging import log_attribution as _log_attribution  # noqa: F401
 
 log = get_logger(PLUGIN, 'LGTBot')
 

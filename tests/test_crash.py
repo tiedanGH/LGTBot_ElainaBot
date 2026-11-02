@@ -16,7 +16,7 @@ import pytest
 
 def _crash():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_crash
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import crash as page_crash
     return page_crash
 
 
@@ -94,7 +94,7 @@ async def test_delete_handler_removes_selected_and_rejects_bad(tmp_path, monkeyp
     _write_dump(pc, 'crash_1000_1_1.log', 11, 1000)
     _write_dump(pc, 'crash_2000_1_2.log', 6, 2000)
     audit_calls = []
-    from plugins.LGTBot_ElainaBot.mod import audit
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
     monkeypatch.setattr(audit, 'record', lambda *a, **k: audit_calls.append((a, k)))
     try:
         # 删一个合法 + 一个穿越 + 一个不存在 —— 只合法的应被删,非法项不误删
@@ -316,7 +316,7 @@ async def test_core_delete_pairs_name_with_dir(tmp_path, monkeypatch):
         pytest.skip('只有一个 core 目录,配对语义无从验证')
     _clear_cores(pc)
     audit_calls = []
-    from plugins.LGTBot_ElainaBot.mod import audit
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
     monkeypatch.setattr(audit, 'record', lambda *a, **k: audit_calls.append((a, k)))
     try:
         same = 'core-match_game_runn-1-100'
@@ -345,7 +345,7 @@ async def test_core_delete_empty_and_bad_names(tmp_path, monkeypatch):
     """未指定 → 400;非法名进 failed 且不误删合法文件。"""
     pc = _crash()
     _clear_cores(pc)
-    from plugins.LGTBot_ElainaBot.mod import audit
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
     monkeypatch.setattr(audit, 'record', lambda *a, **k: None)
     try:
         resp = await pc.core_delete_handler(_FakeCoreReq([]))

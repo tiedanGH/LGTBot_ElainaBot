@@ -18,7 +18,8 @@ import tempfile
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import boot, buttons, game_switch
+from plugins.LGTBot_ElainaBot.mod import boot, game_switch
+from plugins.LGTBot_ElainaBot.mod.messaging import buttons
 
 
 def _can_symlink() -> bool:
@@ -314,7 +315,7 @@ def test_panel_state_lists_only_current_games(layout, monkeypatch):
 
 def _pc():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
     return page_config
 
 

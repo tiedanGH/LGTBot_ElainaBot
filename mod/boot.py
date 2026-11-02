@@ -63,7 +63,7 @@ def _resolve_active_build() -> tuple[str, str]:
 
 # 完成上次暂存的预编译安装:此刻尚未加载任何 .so,是换入的唯一安全窗口,必须在 _resolve_active_build() 选定 ENGINE_ROOT / RTLD_GLOBAL 预加载之前。
 # _prebuilt_swap 零依赖,不会引入循环 import。
-from . import _prebuilt_swap
+from .ops import _prebuilt_swap
 _pending_ok, _pending_msg = _prebuilt_swap.finalize_pending(PREBUILT_DIR)
 if _pending_msg:
     (log.info if _pending_ok else log.warning)(f'[prebuilt] {_pending_msg}')

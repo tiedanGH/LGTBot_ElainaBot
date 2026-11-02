@@ -24,7 +24,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-from plugins.LGTBot_ElainaBot.mod import dispatcher, quota, state as _state
+from plugins.LGTBot_ElainaBot.mod import dispatcher, state as _state
+from plugins.LGTBot_ElainaBot.mod.messaging import quota
 
 
 def mark_push_group(gid: str, ok: bool = True) -> None:
@@ -497,7 +498,8 @@ def test_data_stats_command_is_exclusive():
 async def test_admin_interrupt_proxies_for_group_admin(patched_downstream, monkeypatch):
     """群管理发 %中断 → 用**已配置的引擎管理员 uid** 派发(引擎据此放行),
     并记一条对局干预审计;普通群员 / 私信 → 原样用本人 uid(交引擎裁决)。"""
-    from plugins.LGTBot_ElainaBot.mod import audit, boot, config as _config
+    from plugins.LGTBot_ElainaBot.mod import boot, config as _config
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
     _state.started = True
     monkeypatch.setattr(_config, 'ADMIN_UIDS', ('OWNER_UID',))
     sent = []
@@ -552,7 +554,8 @@ async def test_admin_interrupt_proxies_for_group_admin(patched_downstream, monke
 async def test_admin_interrupt_super_admin_not_proxied_no_audit(patched_downstream, monkeypatch):
     """超级管理员自己发 %中断 —— 即便他同时是群主 / 群管理,也**不算代为中断**:
     用本人 uid 派发、不写审计(审计只为"权限下放给群管"留追责线索)。"""
-    from plugins.LGTBot_ElainaBot.mod import audit, boot, config as _config
+    from plugins.LGTBot_ElainaBot.mod import boot, config as _config
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
     _state.started = True
     monkeypatch.setattr(_config, 'ADMIN_UIDS', ('SUPER_UID', 'OTHER_ADMIN'))
     sent, audits = [], []
@@ -576,7 +579,8 @@ async def test_admin_interrupt_super_admin_not_proxied_no_audit(patched_downstre
 
 async def test_admin_interrupt_audit_distinguishes_no_game(patched_downstream, monkeypatch):
     """代理中断的审计详情区分三态:有名字 / 未知游戏(有对局无名) / 无游戏。"""
-    from plugins.LGTBot_ElainaBot.mod import audit, boot, config as _config
+    from plugins.LGTBot_ElainaBot.mod import boot, config as _config
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
     _state.started = True
     monkeypatch.setattr(_config, 'ADMIN_UIDS', ('SUPER_UID',))
     audits = []
@@ -695,7 +699,7 @@ def test_admin_interrupt_pattern_scope():
 
 async def test_planned_restart_notice_carries_support_buttons(patched_downstream, monkeypatch):
     """计划重启维护提示底部挂「官方群聊 / 问题反馈」link 按钮(execv 前安全可点)。"""
-    from plugins.LGTBot_ElainaBot.mod import buttons
+    from plugins.LGTBot_ElainaBot.mod.messaging import buttons
     _state.started = True
     monkeypatch.setattr(dispatcher.state, 'is_planned_restart', lambda: True)
 
@@ -721,7 +725,8 @@ def test_disabled_game_check_matches_the_game_token(monkeypatch):
 
 async def test_disabled_game_never_reaches_the_engine(patched_downstream, engine_calls, monkeypatch):
     """面板停用的游戏:消息与按钮回调两条路径都回停用提示 + 游戏列表按钮,不派发;别的游戏照常进引擎。"""
-    from plugins.LGTBot_ElainaBot.mod import buttons, game_switch
+    from plugins.LGTBot_ElainaBot.mod import game_switch
+    from plugins.LGTBot_ElainaBot.mod.messaging import buttons
     _state.started = True
     monkeypatch.setattr(game_switch, 'disabled_names', lambda: frozenset({'LIE'}))
 
@@ -796,7 +801,8 @@ async def test_planned_restart_command_accepts_reason(monkeypatch):
 
 def test_push_quota_view_group_and_dm():
     """额度视图:群里看本群、私信看本人;上限 0 = 未设上限;达到上限标 exhausted。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
     real_used = metrics.active_push_used
     orig_limit = callbacks.ACTIVE_PUSH_DAILY_LIMIT
     metrics.active_push_used = lambda t, u: {('G1', False): 999,
@@ -822,7 +828,7 @@ def test_push_quota_view_group_and_dm():
 
 def test_push_quota_view_carries_the_scene_total(monkeypatch):
     """★ 群里带全部群的今日主动总数、私信里带全部私信的。"""
-    from plugins.LGTBot_ElainaBot.mod import metrics
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
     monkeypatch.setattr(metrics, 'active_push_today',
                         lambda: {'group_total': 3456, 'group_targets_n': 9,
                                  'dm_total': 211, 'dm_targets_n': 4})
@@ -832,7 +838,9 @@ def test_push_quota_view_carries_the_scene_total(monkeypatch):
 
 async def test_stats_command_text_appends_the_scene_total(monkeypatch):
     """文本保底与图片同口径:额度行末尾跟上今日群 / 私信总计,有没有上限都带。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
@@ -861,7 +869,9 @@ async def test_stats_command_text_appends_the_scene_total(monkeypatch):
 
 async def test_stats_command_text_shows_push_quota(monkeypatch):
     """「数据统计」文本输出带本会话额度行:群里显示「本群」、私信显示「本私信」。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
@@ -890,7 +900,10 @@ async def test_stats_command_text_shows_push_quota(monkeypatch):
 async def test_stats_shows_bot_scale_with_net_change(monkeypatch):
     """★ bot 规模(好友 / 群聊总数)只注入**今日视图**,历史日 / 月视图不带
     ——「当前总数」不是那天的事实。括号里是今日净变化本身,不是与昨日对比。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader, userinfo
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
@@ -941,7 +954,8 @@ async def test_stats_date_command_views_history(monkeypatch):
     """数据统计MMDD:历史日走 query_game_stats_for_date,无涨跌 / 无主动消息,
     文本含「当日对局人次」;该日无对局与非法日期分别报错。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import metrics, uploader
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     seen = {}
@@ -987,7 +1001,7 @@ async def test_stats_month_command_views_month(monkeypatch):
     """数据统计MM:两位数字按月(默认今年)走 query_game_stats_for_month,
     文本含「当月对局人次」;当月无对局与非法月份分别报错。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     seen = {}
@@ -1158,7 +1172,7 @@ async def test_stats_with_year_queries_that_year(monkeypatch):
     "给的年"与"今年"就是同一个数,这条断言会退化成恒真。
     """
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     monkeypatch.setattr(dispatcher, '_MIN_STATS_YEAR',
@@ -1201,7 +1215,7 @@ async def test_stats_with_year_queries_that_year(monkeypatch):
 async def test_stats_year_command_views_year(monkeypatch):
     """数据统计YYYY:走 query_game_stats_for_year,文案「当年」,无涨跌 / 无额度。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     seen = {}
@@ -1235,7 +1249,7 @@ async def test_stats_year_command_views_year(monkeypatch):
 async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
     """★ 4 位参数的路由:前两位是合法月份 → MMDD,否则按年份(年份 20xx 的前两位恒为 20,两个取值域天然不相交)。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     routed = []
@@ -1270,7 +1284,8 @@ async def test_stats_year_does_not_collide_with_mmdd(monkeypatch):
 async def test_stats_total_command_views_all_history(monkeypatch):
     """数据统计总:累计口径 + **带**好友 / 群聊总数(无增减角标)。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader, userinfo
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     called = []
@@ -1308,7 +1323,8 @@ async def test_stats_total_image_carries_scale_row_without_delta(monkeypatch):
     """★ 图片侧同一口径:累计视图注入 bot_groups / bot_friends,但 delta 留空 ——
     有 delta 就会画出角标,而"今日净变化"在累计视图里没有意义(用户要求)。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader, userinfo
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_total',
@@ -1350,7 +1366,7 @@ async def test_period_views_other_than_total_have_no_scale_row(monkeypatch, cmd,
     """★ 顶部好友 / 群聊总数只给**今日**与**累计**两个视图(用户要求):
     按日 / 按月 / 按年(含本月 / 今年)都不注入 bot_groups —— 「当前总数」不是那一期的事实。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
@@ -1384,7 +1400,9 @@ async def test_period_views_other_than_total_have_no_scale_row(monkeypatch, cmd,
 async def test_stats_date_command_today_falls_back_to_normal(monkeypatch):
     """输入今天的 MMDD → 等价无参数:走今日视图(带涨跌),不调历史查询。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
@@ -1421,7 +1439,7 @@ def _to_date_stats(prefix: str, **over) -> dict:
 async def _run_stats(monkeypatch, cmd: str):
     """以文本通道跑一条「数据统计…」,返回回复文本(没有回复时为 None)。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     ev = _mock_event(is_group=True, group_id='G1', user_id='U1', content=cmd)
@@ -1475,7 +1493,7 @@ async def test_stats_to_date_views_still_reply_without_matches(monkeypatch, cmd,
 
 async def test_stats_current_month_and_year_switch_to_the_to_date_views(monkeypatch):
     """★ 「数据统计MM / YYYYMM / YYYY」查的就是本月 / 今年时换成「数据统计月 / 年」:带对比,标题也跟着换。"""
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     routed = []
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_month',
                         lambda y, m: routed.append('month') or _to_date_stats('month'))
@@ -1515,7 +1533,7 @@ async def test_stats_current_month_and_year_switch_to_the_to_date_views(monkeypa
 async def test_stats_plain_window_views_draw_no_delta(monkeypatch):
     """★ 历史日 / 月 / 年只给本期:交给渲染的对比基准全是 None,图片上一个涨跌胶囊都不画。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats_for_date',
@@ -1536,7 +1554,8 @@ async def test_stats_plain_window_views_draw_no_delta(monkeypatch):
 
 async def test_stats_day_is_the_today_view(monkeypatch):
     """「数据统计日」同不带参数:今日视图(带涨跌 / 额度 / 趋势)。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
     monkeypatch.setattr(metrics, 'active_push_used', lambda t, u: 0)
     called = []
@@ -1574,7 +1593,9 @@ async def test_stats_queries_run_off_the_event_loop(monkeypatch, cmd, func):
 
 async def test_stats_command_text_shows_same_span_delta(monkeypatch):
     """今日对局 / 活跃玩家带「较昨日同时段」增减后缀;缺对比数据不显示。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
@@ -1609,7 +1630,9 @@ async def test_stats_command_text_shows_same_span_delta(monkeypatch):
 
 async def test_stats_text_fallback_has_no_unranked_tag(monkeypatch):
     """★ 「不计分」标签只画在图片里。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')      # 走文本通道
     monkeypatch.setattr(callbacks, 'ACTIVE_PUSH_DAILY_LIMIT', 1000)
@@ -1635,7 +1658,8 @@ async def test_stats_text_fallback_has_no_unranked_tag(monkeypatch):
 def test_push_quota_view_near_limit_threshold():
     """额度用量达 85% 阈值 → near_limit(黄色警告);未到不告警;用满只标
     exhausted(红)不再标 near_limit,避免两种状态同时成立。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
     real_used = metrics.active_push_used
     orig_limit = callbacks.ACTIVE_PUSH_DAILY_LIMIT
     used_val = {'n': 0}
@@ -1664,7 +1688,9 @@ def test_push_quota_view_near_limit_threshold():
 
 async def test_stats_command_text_warns_near_limit(monkeypatch):
     """接近上限时文本行转 ⚠️ 并给出剩余条数。"""
-    from plugins.LGTBot_ElainaBot.mod import callbacks, metrics, uploader
+    from plugins.LGTBot_ElainaBot.mod import callbacks
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
@@ -1696,7 +1722,7 @@ def test_push_quota_view_no_permission_for_non_full_group():
 
 async def test_stats_command_warns_when_group_lacks_full_volume(monkeypatch):
     """非全量群执行「数据统计」→ 黄色警告 + 「全量申请」授权指引,不显示额度数字。"""
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     monkeypatch.setattr(dispatcher.metrics, 'query_game_stats',
@@ -1738,7 +1764,7 @@ def _game_detail(**over) -> dict:
 async def _run_game_stats(monkeypatch, cmd, result, *, is_group=True):
     """以文本通道跑一条「数据统计<游戏名>」,返回 (回复参数, 查询收到的参数)。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     seen = []
@@ -1871,7 +1897,7 @@ async def test_game_stats_unavailable(monkeypatch):
 async def test_stats_text_fallbacks_escape_nicknames(monkeypatch):
     """★ 今日视图与窗口视图的文本保底按 markdown 发送,玩家参与榜里的昵称同样要转义。"""
     import re as _re
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
     monkeypatch.setattr(uploader, 'SELECTED_BACKEND', '')
     nick = [{'display': '<@U9>**粗**', 'count': 3}]
@@ -1935,7 +1961,7 @@ async def test_match_list_replies_when_engine_not_ready(patched_downstream):
 
 async def test_welcome_menu_full_volume_cmd_line(monkeypatch):
     """欢迎菜单:非全量群追加「全量申请」内联指令行;全量群 / 私信不追加。"""
-    from plugins.LGTBot_ElainaBot.mod import buttons
+    from plugins.LGTBot_ElainaBot.mod.messaging import buttons
     monkeypatch.setattr(dispatcher, '_resolve_menu_logo', AsyncMock(return_value=None))
 
     async def _menu_md(ev):

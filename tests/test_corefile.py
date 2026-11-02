@@ -14,7 +14,7 @@ import struct
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import corefile
+from plugins.LGTBot_ElainaBot.mod.ops import corefile
 
 
 # ─────────────────────────────────────────────────────────────────────────

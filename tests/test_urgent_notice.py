@@ -24,7 +24,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import backup, boot, buttons, dispatcher, urgent
+from plugins.LGTBot_ElainaBot.mod import boot, dispatcher
+from plugins.LGTBot_ElainaBot.mod.ops import backup
+from plugins.LGTBot_ElainaBot.mod.messaging import buttons
+from plugins.LGTBot_ElainaBot.mod.announce import urgent
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -466,7 +469,7 @@ async def test_send_failure_does_not_mark_group(enabled_notice):
 async def test_notify_burns_one_passive_ref(enabled_notice):
     """直接 reply 会真实吃掉一条被动引用额度,必须同步烧掉计数(否则引擎超发被吞)。
     记在被回复的那条消息上:引用池里可能还有别的引用,try_consume_ref 会挑最快过期的那条。"""
-    from plugins.LGTBot_ElainaBot.mod import quota
+    from plugins.LGTBot_ElainaBot.mod.messaging import quota
     quota.refresh_ref('g:G1', 'msg_id', 'M_OLD')
     quota.refresh_ref('g:G1', 'msg_id', 'M_NEW')
     with patch.object(dispatcher.page_logs, 'log_outgoing', MagicMock()):
@@ -492,7 +495,7 @@ def test_both_dispatch_paths_notify():
 
 def _page_config():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
     return page_config
 
 

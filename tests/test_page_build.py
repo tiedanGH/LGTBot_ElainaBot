@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod.webui import page_build
+from plugins.LGTBot_ElainaBot.mod.webui.pages import build as page_build
 
 _posix_only = pytest.mark.skipif(os.name != 'posix', reason='僵尸/收尸语义仅 POSIX')
 
@@ -77,7 +77,7 @@ class _FakeProc:
 def build_env(tmp_path, monkeypatch):
     """状态 / 日志 / 退出码文件指到 tmp,Popen 换成假进程;返回 (设存活, 设退出码) 两个开关。"""
     import shutil
-    from plugins.LGTBot_ElainaBot.mod import audit
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
     shutil.rmtree(audit.AUDIT_DIR, ignore_errors=True)
     for name in ('STATE_PATH', 'LOG_PATH', 'STATUS_PATH'):
         monkeypatch.setattr(page_build, name, str(tmp_path / name.lower()))

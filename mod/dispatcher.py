@@ -23,9 +23,13 @@ from core.message.event import (
     INTERACTION_CREATE,
 )
 
-from . import (state, quota, helpers, boot, buttons, uploader, userinfo, audit,
-               metrics, stats_image, urgent, nickname_review, notice, game_switch)
-from .webui import page_logs
+from . import state, helpers, boot, game_switch
+from .messaging import quota, buttons, uploader
+from .users import userinfo, nickname_review
+from .ops import audit
+from .stats import metrics, stats_image
+from .announce import urgent, notice
+from .webui.pages import logs as page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
 

@@ -15,7 +15,9 @@ import time
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import at_all, callbacks, helpers, metrics
+from plugins.LGTBot_ElainaBot.mod import callbacks, helpers
+from plugins.LGTBot_ElainaBot.mod.messaging import at_all
+from plugins.LGTBot_ElainaBot.mod.stats import metrics
 
 GID = 'G_AT_ALL'
 
@@ -221,7 +223,7 @@ def test_untrusted_text_cannot_carry_an_at_everyone():
 
 def _api():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import at_all_api, build_api
+    from plugins.LGTBot_ElainaBot.mod.webui.api import at_all as at_all_api, build as build_api
     return at_all_api, build_api
 
 

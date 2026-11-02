@@ -22,7 +22,8 @@ import pytest
 
 
 # conftest.py 已 inject 假 boot,这里安全 import
-from plugins.LGTBot_ElainaBot.mod import callbacks, quota, state
+from plugins.LGTBot_ElainaBot.mod import callbacks, state
+from plugins.LGTBot_ElainaBot.mod.messaging import quota
 
 
 def mark_push_group(gid: str, ok: bool = True) -> None:
@@ -381,7 +382,7 @@ def test_game_started_attaches_game_help_button():
     assert b['data'] == '帮助' and b['type'] == 1 and b['style'] == 4
     assert 'enter' not in b                                  # 本插件按钮约定
     # 与「未知游戏指令」里的游戏帮助按钮完全一致(同款视觉 / 行为)
-    from plugins.LGTBot_ElainaBot.mod import buttons
+    from plugins.LGTBot_ElainaBot.mod.messaging import buttons
     same = buttons.build_unknown_game_buttons()[0][0]
     assert (b['text'], b['data'], b['type'], b['style']) == \
            (same['text'], same['data'], same['type'], same['style'])
@@ -1319,7 +1320,7 @@ def test_unranked_without_known_game_still_counts_the_match(_recorded):
 def test_engine_crash_restart_is_audited(tmp_path, monkeypatch):
     """★ 崩溃自启必须在 execv 之前落审计 —— 工作线程 return 时可能在
     tcache_thread_shutdown 撞出 SIGABRT,C++ 侧当场 execv,晚一步就永远写不进去。"""
-    from plugins.LGTBot_ElainaBot.mod import audit
+    from plugins.LGTBot_ElainaBot.mod.ops import audit
 
     monkeypatch.setattr(audit, 'AUDIT_DIR', str(tmp_path))
     monkeypatch.setattr(audit, 'AUDIT_PATH', str(tmp_path / 'audit.json'))

@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import buttons, dispatcher, notice
+from plugins.LGTBot_ElainaBot.mod import dispatcher
+from plugins.LGTBot_ElainaBot.mod.messaging import buttons
+from plugins.LGTBot_ElainaBot.mod.announce import notice
 
 
 def _doc(*days_and_bodies) -> str:

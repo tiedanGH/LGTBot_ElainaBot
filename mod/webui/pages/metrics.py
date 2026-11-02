@@ -1,0 +1,92 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""「📈 指标面板」标签 —— 数据统计 + 运行指标 + 游戏数据。
+
+顶部独立标题栏放统一刷新按钮与查询时间;三个区共用一个刷新端点
+(``render_refresh``,一次返回完整 payload):
+  1. 📊 数据统计 —— 用户总数(主框架 data.db users 表)+ lgtbot.db 基础 COUNT + 玩家转化
+  2. 📈 运行指标 —— stats/metrics.py 的持久计数器
+     (图床成功率 / 配额压力与异常发送失败 / 发送失败总计 / 主动重启次数 / @全体成员次数;引擎崩溃在「崩溃转储」标签)
+  3. 🎮 游戏数据 —— lgtbot.db 只读统计(今日对局 / 活跃玩家 / 活跃群聊 / 对局人次,各带
+     近 10 日总量与涨跌;游戏局数总榜、本周游戏榜、本周玩家参与榜、近 10 日趋势)+ 今日主动消息
+     (群聊 / 私信,metrics 按日分桶计数)
+
+纯只读展示:唯一 action 是刷新;运行指标为运维数据,不进全员指令(/数据统计 只输出游戏数据区内容)。
+"""
+
+from __future__ import annotations
+
+import html as _html
+import json
+import os
+import time
+
+from ...stats import metrics
+from ...messaging import uploader
+from ...users import userinfo
+
+_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')
+
+
+def _load(name: str) -> str:
+    with open(os.path.join(_TEMPLATE_DIR, name), 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+TAB_HTML = _load('metrics/metrics.html')
+TAB_CSS = _load('metrics/metrics.css')
+TAB_JS = _load('metrics/metrics.js')
+
+
+def _fragment(payload: dict) -> str:
+    """把 ``payload`` 包成 ``<pre id="result">…</pre>`` —— 同 pages/audit。"""
+    body = json.dumps(payload, ensure_ascii=False, default=str)
+    return f'<pre id="result">{_html.escape(body)}</pre>'
+
+
+def _payload() -> dict:
+    """首屏与统一刷新共用的完整 payload(三个区一次取齐)。"""
+    game = metrics.query_game_stats(ten_day=True)
+    snap = metrics.snapshot()
+    total = snap.get('upload_total') or 0
+    fail = snap.get('upload_fail') or 0
+    users_total = userinfo.count_users()
+    lgtbot_users = game.get('lgtbot_users')
+    # 玩家转化率:lgtbot 注册用户 ÷ 框架 users 总数(任一缺失 → None,前端显 —)。
+    # 引擎 AddHonor(授予头衔)也会把没打过对局的用户插进 user 表,差异极少,分子不扣除。
+    conversion = (round(lgtbot_users / users_total * 100, 2)
+                  if users_total and lgtbot_users is not None else None)
+    return {
+        # ① 数据统计:框架 users 总数 + lgtbot 基础 COUNT + 跨库转化
+        'stats': {
+            'users_total': users_total,
+            'lgtbot_users': lgtbot_users,
+            'lgtbot_matches': game.get('lgtbot_matches'),
+            'lgtbot_match_attendances': game.get('lgtbot_match_attendances'),
+            'lgtbot_achievements': game.get('lgtbot_achievements'),
+            'player_conversion': conversion,
+        },
+        # ② 运行指标:计数器 + 服务端算好的成功率(4 位小数才能区分极高成功率;总数 0 时 None → 前端显 —)
+        'runtime': {
+            **snap,
+            'upload_rate': None if total == 0 else round((total - fail) / total * 100, 4),
+            # 图床可用性:仅查配置 + 主框架 status(),不做真实上传探测
+            'hosting': uploader.hosting_availability(),
+            'metrics_path': metrics.METRICS_PATH,
+        },
+        # ③ 游戏数据(含 errors / available)+ 今日主动消息概况
+        'game': game,
+        'active_push': metrics.active_push_today(),
+        'query_time': int(time.time()),
+    }
+
+
+def get_data() -> str:
+    """返回可嵌入 ``<script id="metrics-data">`` 的 JSON。"""
+    data_json = json.dumps(_payload(), ensure_ascii=False, default=str)
+    return data_json.replace('</script>', '<\\/script>')
+
+
+def render_refresh() -> str:
+    """统一刷新端点(「🔄 刷新」按钮用)—— 三个区的数据一次全量返回。"""
+    return _fragment({'success': True, **_payload()})

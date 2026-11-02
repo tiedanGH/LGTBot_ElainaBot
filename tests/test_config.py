@@ -22,9 +22,8 @@ import pytest
 import yaml
 
 # conftest.py 已 inject 假 boot,这里安全 import
-from plugins.LGTBot_ElainaBot.mod import (
-    buttons, callbacks, config, dispatcher, helpers, quota, state,
-)
+from plugins.LGTBot_ElainaBot.mod import callbacks, config, dispatcher, helpers, state
+from plugins.LGTBot_ElainaBot.mod.messaging import buttons, quota
 
 
 def _base_cfg(**overrides) -> dict:
@@ -157,7 +156,7 @@ def test_validator_warns_not_errors_on_numeric_id_fields():
     """webui 校验器与运行时同语义:ID 字段的裸数字放行(警告),
     其余 str 字段(image_hosting)填数字仍是错误。"""
     pytest.importorskip('aiohttp')   # page_config 顶层 import;CI 装框架依赖必有
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
 
     errors, warnings = page_config._validate_config_yaml('bind_bot_appid: 102003762')
     assert errors == []
@@ -199,7 +198,7 @@ def test_active_push_daily_limit_zero_means_unlimited_and_negative_ignored(monke
 
 def test_image_upload_dedup_ttl_negative_clamped_to_zero():
     """负数归 0(关闭去重)而不是忽略 —— 与 timeout / limit 的语义特意不同。"""
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     config._apply_runtime_tunables(_base_cfg(image_upload_dedup_ttl=-3))
     assert uploader.URL_CACHE_TTL == 0.0
     config._apply_runtime_tunables(_base_cfg(image_upload_dedup_ttl=30))
@@ -221,7 +220,7 @@ def test_button_cooldown_zero_turns_off_and_negative_clamped():
 
 def test_image_hosting_unknown_backend_disabled_when_list_known(monkeypatch):
     """图床名单能取到时,未知值禁用(空串);取不到名单则保留原值让运行时兜底。"""
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
 
     class _H:
         @staticmethod
@@ -345,7 +344,7 @@ def test_image_hosting_defaults_to_any():
     """新装 / 老配置缺字段时默认 ``any``:自动依次尝试全部可用图床,开箱即走
     markdown 内嵌通道。'any' 不在任何图床名单里,必须被校验器与运行时都当作
     合法值放行(而不是当未知图床禁用)。"""
-    from plugins.LGTBot_ElainaBot.mod import uploader
+    from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     assert config.DEFAULT_CONFIG['image_hosting'] == 'any'
 
     class _H:
@@ -362,7 +361,7 @@ def test_image_hosting_defaults_to_any():
         monkeypatch.undo()
 
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
     errors, _w = page_config._validate_config_yaml("image_hosting: 'any'")
     assert not any('image_hosting' in e for e in errors)
 
@@ -457,7 +456,7 @@ def test_validator_flags_renamed_field_as_migration_not_unknown():
     提示成未知字段会让人误删掉唯一生效的通知群配置。
     """
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config as pc
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as pc
     errs, warns = pc._validate_config_yaml('crash_notify_group: GOLD\n')
     assert errs == []
     hit = [w for w in warns if 'crash_notify_group' in w]
@@ -542,7 +541,7 @@ def test_reload_config_reports_the_new_at_format_toggle(monkeypatch):
 
 def _pc():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
     return page_config
 
 

@@ -9,7 +9,8 @@ import time
 import asyncio
 
 from core.base.logger import get_logger, PLUGIN
-from . import boot, state, userinfo
+from . import boot, state
+from .users import userinfo
 
 log = get_logger(PLUGIN, 'LGTBot')
 

@@ -20,12 +20,13 @@ import re
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import audit
+from plugins.LGTBot_ElainaBot.mod.ops import audit
 
 
 def _pages():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_audit, page_logs, page_metrics
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import (audit as page_audit, logs as page_logs,
+                                                          metrics as page_metrics)
     return page_audit, page_metrics, page_logs
 
 
@@ -65,7 +66,7 @@ def test_audit_payload_mirrors_module_state(tmp_path, monkeypatch):
 def test_audit_payload_settles_a_finished_build_first(tmp_path, monkeypatch):
     """★ 编译结果在读编译状态时才落定 —— 审计页刷新先读一次,刚跑完的编译不会一直停在「等待中」。"""
     page_audit, _m, _l = _pages()
-    from plugins.LGTBot_ElainaBot.mod.webui import page_build
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import build as page_build
     monkeypatch.setattr(audit, 'AUDIT_DIR', str(tmp_path))
     monkeypatch.setattr(audit, 'AUDIT_PATH', str(tmp_path / 'audit.json'))
     rid = audit.record('build', '完整编译', '已启动 (PID 7)', pending=True)
@@ -276,7 +277,7 @@ def test_log_clear_empties_buffer(_logs):
 
 def _page_config():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
     return page_config
 
 
@@ -319,7 +320,7 @@ def test_config_html_div_balance_survives_section_strip(monkeypatch, sponsor_on)
     若 SPONSOR 标记一头在分栏内、一头在分栏外,服务端整段切除会顺手吃掉 grid 的收尾 ``</div>``,版式无声乱掉。
     """
     pc = _page_config()
-    from plugins.LGTBot_ElainaBot.mod import buttons
+    from plugins.LGTBot_ElainaBot.mod.messaging import buttons
     monkeypatch.setattr(buttons, 'SPONSOR_ENABLED', sponsor_on)
     html = pc.render_tab_html()
     assert html.count('<div') == html.count('</div>'), (
@@ -801,7 +802,7 @@ async def test_panel_restart_handler_truncates_long_reason(monkeypatch):
 
 def _page_review():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_review
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import review as page_review
     return page_review
 
 
@@ -847,7 +848,7 @@ def test_review_toggle_refuses_to_enable_without_the_llm(monkeypatch):
     """★ 中央 LLM 不可用时不许开启 —— 开一个只会报错的功能没有意义。
     关闭方向永远放行:关掉一个坏掉的功能不该被任何前置条件挡住。"""
     pr = _page_review()
-    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    from plugins.LGTBot_ElainaBot.mod.users import nickname_review as nr
     monkeypatch.setattr(nr, 'ENABLED', False)
     monkeypatch.setattr(nr, 'llm_status',
                         lambda: {'available': False, 'message': '没有可用接口'})
@@ -869,7 +870,7 @@ def test_review_toggle_refuses_to_enable_without_the_llm(monkeypatch):
 def test_review_payload_reports_the_three_states(monkeypatch):
     """未启用 / 已启用 / 已启用但 LLM 掉线 —— 前端据 enabled + llm_available 两个字段区分,payload 必须两个都给。"""
     pr = _page_review()
-    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    from plugins.LGTBot_ElainaBot.mod.users import nickname_review as nr
     monkeypatch.setattr(nr, 'llm_status', lambda: {'available': False, 'message': 'x'})
     monkeypatch.setattr(nr, 'ENABLED', True)
     p = pr._payload()
@@ -880,7 +881,7 @@ def test_review_payload_reports_the_three_states(monkeypatch):
 async def test_review_verdict_handler_validates_and_dispatches(monkeypatch):
     """带参端点:非法 op / 缺 key → 400,记录不存在 → 404。"""
     pr = _page_review()
-    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    from plugins.LGTBot_ElainaBot.mod.users import nickname_review as nr
     monkeypatch.setattr(pr.audit, 'record', lambda *a, **k: None)
 
     class _Req:
@@ -952,7 +953,7 @@ def test_review_sections_use_the_shared_section_gap():
 async def test_review_settings_handler_saves_only_selections(monkeypatch):
     """★ 面板只保存「选了哪个接口 / 哪个模型」;接口地址与 API Key 归中央模块。"""
     pr = _page_review()
-    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    from plugins.LGTBot_ElainaBot.mod.users import nickname_review as nr
     monkeypatch.setattr(pr.audit, 'record', lambda *a, **k: None)
     saved = []
     monkeypatch.setattr(nr, 'save_settings',
@@ -984,7 +985,7 @@ def test_review_call_card_shows_the_cumulative_total():
 def test_review_payload_carries_provider_options(monkeypatch):
     """两个下拉的选项来自中央的公开配置,payload 得把它带下去。"""
     pr = _page_review()
-    from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+    from plugins.LGTBot_ElainaBot.mod.users import nickname_review as nr
     monkeypatch.setattr(nr, 'public_config', lambda: {'providers': [
         {'id': 'p1', 'name': 'P1', 'enabled': True, 'models': ['m1', 'm2'],
          'model_priority': [], 'disabled_models': ['m2']},

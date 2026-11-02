@@ -80,7 +80,7 @@ Co-Authored-By: <协作模型> <noreply@anthropic.com>
 ### 功能域前缀规则
 
 **前缀 = 本次改动的主要功能域,与动了哪些文件无关。** 一个功能横跨多少文件都用
-同一个前缀(如配置校验特性同时改了 page_config.py / webui/main.py / config.js /
+同一个前缀(如配置校验特性同时改了 pages/config.py / webui/main.py / config.js /
 README,前缀仍是 `config`)。功能域名字常与 `mod/` 模块名重合(quota / backup /
 uploader…),但判定依据始终是"这次改的是什么功能",不是"动了哪个文件"。
 
@@ -177,22 +177,23 @@ mod/quota: fix race                            # 不要带路径
 
 入口文件超过 ~150 行就该考虑把逻辑下沉到 `mod/`。
 
-| 模块                | 职责                                                                               |
-|-------------------|----------------------------------------------------------------------------------|
-| `state`           | 共享可变全局状态容器（`pending_buttons` / `event_loop` / `started` 等）                       |
-| `boot`            | C++ 扩展加载（顺序敏感：`chdir` + `RTLD_GLOBAL` + `ctypes.CDLL` 预加载）                       |
-| `buttons`         | 按钮模板 + 组装函数                                                                      |
-| `helpers`         | 通用工具（sender / mention / target_key / 主动推送权限）                                     |
-| `quota`           | 被动消息引用配额管理                                                                       |
-| `callbacks`       | C++ 引擎回调实现（`cb_*` 入口 + 异步发送）                                                     |
-| `dispatcher`      | `@handler` 注册（消息派发 + INTERACTION）                                                |
-| `config`          | `data/config.yaml` 读写                                                            |
-| `userinfo`        | 主框架用户数据只读门面（data.db/wakeup.db/statistics.db；昵称缓存 + 变化时写回）                        |
-| `uploader`        | 图床上传调度 + 图片尺寸解析                                                                  |
-| `log_attribution` | 类级 monkey-patch `MessageSender._log_push`,让本插件的 push 在主框架 Web 面板归类为「LGTBot 消息派发」 |
-| `webui/`          | Web 面板侧边栏页面                                                                      |
+| 模块 / 子包       | 职责                                                                                                                                                           |
+|---------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `state`       | 共享可变全局状态容器（`pending_buttons` / `event_loop` / `started` 等）                                                                                                   |
+| `boot`        | C++ 扩展加载（顺序敏感：`chdir` + `RTLD_GLOBAL` + `ctypes.CDLL` 预加载）                                                                                                   |
+| `config`      | `data/config.yaml` 读写                                                                                                                                        |
+| `helpers`     | 通用工具（sender / mention / target_key / 主动推送权限）                                                                                                                 |
+| `callbacks`   | C++ 引擎回调实现（`cb_*` 入口 + 异步发送）；模块路径被 `.cc` 崩溃恢复按名 import，不能挪                                                                                                   |
+| `dispatcher`  | `@handler` 注册（消息派发 + INTERACTION）                                                                                                                            |
+| `game_switch` | 游戏开关（启动前拼出只含启用游戏的视图目录 + 开局拦截）                                                                                                                                |
+| `messaging/`  | 发送链路：`quota`（被动消息引用配额）/ `buttons`（按钮模板）/ `uploader`（图床上传）/ `log_attribution`（类级 monkey-patch `MessageSender`，push 归类为「LGTBot 消息派发」+ 发送失败计数）/ `at_all`（@全体成员） |
+| `users/`      | `userinfo`（主框架用户数据只读门面；昵称缓存 + 变化时写回）/ `nickname_review`（昵称审核）                                                                                                |
+| `stats/`      | `metrics`（运行指标 + lgtbot.db 统计查询）/ `stats_image`（统计卡片渲染）                                                                                                      |
+| `announce/`   | `notice`（更新公告分段）/ `urgent`（紧急公告）                                                                                                                             |
+| `ops/`        | `audit`（操作审计）/ `backup`（数据备份）/ `prebuilt` + `_prebuilt_swap`（预编译包）/ `corefile`（游戏 core 文件解析）                                                                 |
+| `webui/`      | Web 面板：`main`（页面注册 + 路由）/ `api/`（对外 HTTP API）/ `pages/`（各标签页）/ `templates/`                                                                                  |
 
-新增功能时优先选最契合的现有模块，**只有职责明显独立时才新建文件**。
+新增功能时优先选最契合的现有模块，**只有职责明显独立时才新建文件**；新文件放进最契合的子包，`mod/` 根目录只放引擎桥接与共享基础模块。
 
 ### 引擎回调（`cb_*`）
 

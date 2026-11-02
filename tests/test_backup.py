@@ -25,7 +25,8 @@ from unittest.mock import patch
 import pytest
 
 # conftest.py 已 inject 假 boot,这里安全 import
-from plugins.LGTBot_ElainaBot.mod import backup, boot
+from plugins.LGTBot_ElainaBot.mod import boot
+from plugins.LGTBot_ElainaBot.mod.ops import backup
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -406,7 +407,7 @@ class _FakeReq:
 
 def _page_backup():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_backup
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import backup as page_backup
     return page_backup
 
 
@@ -485,7 +486,7 @@ async def test_restore_route_runs_off_the_event_loop():
     """面板「恢复」解压替换整个 data/,同样放进工作线程。"""
     pytest.importorskip('aiohttp')
     import threading
-    from plugins.LGTBot_ElainaBot.mod.webui import page_backup
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import backup as page_backup
     seen = {}
 
     def fake_restore(name):

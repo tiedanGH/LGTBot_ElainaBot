@@ -5,29 +5,36 @@ Python 模块(仅做逻辑 + 模板加载):
                    并填充各标签的 HTML/JS/CSS 片段与数据 JSON)。`@on_load` 时
                    通过 ``webui.register()`` 把 PAGE_KEY 挂进框架的
                    ``web_pages._registry``,卸载时 ``webui.unregister()`` 摘除。
-    page_dashboard 「仪表盘」标签(默认最左):版本/统计/缓存清理,提供检查更新、
-                   git pull、子模块 update、缓存清理等 action
-    page_config    「配置管理」标签:7 块编辑器(config.yaml / important_update.txt
-                   / update_notice.txt / urgent_notice.txt / troubleshooting.txt
-                   / sponsors.txt / lgtbot.json)+ 热重载 action
-                   + 紧急公告的「启用 / 关闭」与「重置已通知群」两个 action
-                   + 「游戏开关」卡片的列表 / 保存端点
-    page_build     「引擎编译」标签:子进程跑 bash build.sh,跨 WebUI 进程
-                   重启仍能续看(state.json + build.log),支持中途终止;
-                   ANSI 颜色解析为结构化段交前端渲染
-    page_logs      「消息日志」标签 + 日志缓冲数据层。除了渲染消息日志页面,还
-                   暴露 log_incoming / log_outgoing / get_logs / clear_logs,被
-                   callbacks 与 dispatcher 在收发消息路径直接调用 —— deque 与
-                   锁挂在 ``boot._get_persistent`` 上跨重载共享。
-    page_users     「用户数据」标签:加载 ``templates/users/`` + 数据查询
+    api/           对外 HTTP API,共用同一枚 token(导入处起别名 <名>_api):
+                       build      编译 / 中断 / 状态 + token 认证与「复制 API Token」
+                       restart    立即重启 / 计划重启
+                       at_all     @全体成员
+    pages/         各标签页(导入处起别名 page_<名>):
+                       dashboard  「仪表盘」(默认最左):版本/统计/缓存清理,提供检查更新、
+                                  git pull、子模块 update、缓存清理等 action
+                       metrics    「指标面板」
+                       config     「配置管理」:7 块编辑器(config.yaml / important_update.txt
+                                  / update_notice.txt / urgent_notice.txt / troubleshooting.txt
+                                  / sponsors.txt / lgtbot.json)+ 热重载 action
+                                  + 紧急公告的「启用 / 关闭」与「重置已通知群」两个 action
+                                  + 「游戏开关」卡片的列表 / 保存端点
+                       build      「引擎编译」:子进程跑 bash build.sh,跨 WebUI 进程
+                                  重启仍能续看(state.json + build.log),支持中途终止;
+                                  ANSI 颜色解析为结构化段交前端渲染
+                       prebuilt   「预编译部署」
+                       backup     「数据备份」
+                       logs       「消息日志」+ 日志缓冲数据层。除了渲染消息日志页面,还
+                                  暴露 log_incoming / log_outgoing / get_logs / clear_logs,被
+                                  callbacks 与 dispatcher 在收发消息路径直接调用 —— deque 与
+                                  锁挂在 ``boot._get_persistent`` 上跨重载共享。
+                       audit      「操作审计」
+                       review     「昵称审核」
+                       crash      「崩溃转储」
+                       users      「用户数据」
 
-前端静态模板(纯 HTML / CSS / JS,按功能分子目录):
-    templates/main/        主骨架 / 全局 + 通用 CSS / 公共 JS
-    templates/dashboard/   「仪表盘」标签 HTML / CSS / JS
-    templates/config/      「配置管理」标签 HTML / CSS / JS
-    templates/build/       「引擎编译」标签 HTML / CSS / JS
-    templates/logs/        「消息日志」标签 HTML / CSS / JS
-    templates/users/       「用户数据」标签 HTML / CSS / JS
+前端静态模板(纯 HTML / CSS / JS,按标签分子目录,目录名与 pages/ 下的模块同名):
+    templates/main/        主骨架 / 全局 + 通用 CSS / 公共 JS / 图标 SVG
+    templates/<标签>/      各标签的 HTML / CSS / JS
 
 action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不出现在侧边栏列表,仅供 JS fetch 触发):
     __lgtbot_dash_clear_avatar / _7d    Dashboard 头像缓存「清理全部 / 保留 7 天」
@@ -49,13 +56,13 @@ action 端点(隐藏的 web_pages._registry key,被 get_pages wrap 过滤掉,不
 
 「重启」端点返回 ``<div id="msg">…</div>`` 片段太小,直接在 ``main.py::
 _render_restart`` 里 inline 字符串;Dashboard 端点返回的 ``<pre id="result">
-JSON</pre>`` 也在 ``page_dashboard._fragment`` inline,无模板文件。
+JSON</pre>`` 也在 ``pages/dashboard`` 的 ``_fragment`` inline,无模板文件。
 
 模板由 Python 在 import 时一次性读入并缓存(模块常量);插件热重载会重
 新执行 import → 重新读盘,所以改完模板存盘后下次热重载就能看到新版本,无须重启进程。
 
 如新增标签(房间监控、排行榜等):
-  1. 新建 ``page_xxx.py`` + ``templates/xxx/{html,css,js}``
+  1. 新建 ``pages/xxx.py`` + ``templates/xxx/{html,css,js}``
   2. 在 ``templates/main/main.html`` 加 tab nav 与 tab-pane 容器,并在
      ``_render_html`` 里把新模块的 HTML/CSS/JS/data 拼进去
 """

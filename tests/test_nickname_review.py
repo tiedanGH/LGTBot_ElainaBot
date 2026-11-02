@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import nickname_review as nr
+from plugins.LGTBot_ElainaBot.mod.users import nickname_review as nr
 
 # 模块加载那一刻的「从没取过」哨兵。scan_total 就地改写这个 list,必须在任何用例跑之前抓一份。
 _TOTAL_CACHE_DEFAULT = list(nr._total_cache)
@@ -427,7 +427,7 @@ def test_scan_scope_is_the_engine_player_table():
 
 def test_display_name_masks_but_get_name_stays_truthful(monkeypatch):
     """★ 遮蔽只发生在展示层:``note_username`` 拿 ``get_name`` 比对昵称有没有变,它若返回匿名名,每条消息都会触发一次写回。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     monkeypatch.setattr(userinfo, 'get_name', lambda uid: '坏名字')
     nr.put_verdict(nr.normalize('坏名字'), '坏名字', True, nr.SRC_LLM)
     assert userinfo.display_name('E1A5C77F') == '玩家E1A5'
@@ -436,7 +436,7 @@ def test_display_name_masks_but_get_name_stays_truthful(monkeypatch):
 
 def test_real_get_name_is_never_masked(monkeypatch):
     """★ 用**真实**的 get_name 验一遍(上面那条把它 monkeypatch 掉了,遮蔽真被塞进 get_name 里也测不出来)。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     uid = 'E1A5C77F9B2D40E1B7A9CE0341D2F8A6'
     nr.put_verdict(nr.normalize('坏名字'), '坏名字', True, nr.SRC_LLM)
 
@@ -459,7 +459,7 @@ def test_real_get_name_is_never_masked(monkeypatch):
 
 
 def test_display_name_passes_through_when_disabled(monkeypatch):
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     monkeypatch.setattr(userinfo, 'get_name', lambda uid: '坏名字')
     nr.put_verdict(nr.normalize('坏名字'), '坏名字', True, nr.SRC_LLM)
     monkeypatch.setattr(nr, 'ENABLED', False)
@@ -468,7 +468,7 @@ def test_display_name_passes_through_when_disabled(monkeypatch):
 
 def test_display_name_survives_review_failure(monkeypatch):
     """审核出任何问题都退回真名 —— 绝不能因为审核挂了就发不出消息。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     monkeypatch.setattr(userinfo, 'get_name', lambda uid: '某个名字')
     monkeypatch.setattr(nr, 'should_mask',
                         lambda name: (_ for _ in ()).throw(RuntimeError('boom')))
@@ -478,8 +478,9 @@ def test_display_name_survives_review_failure(monkeypatch):
 def test_every_display_exit_goes_through_display_name():
     """★ 源码级契约:所有把昵称送去展示的出口都必须过 display_name —— 漏接一个,违规昵称就会无声无息地出现在排行榜或面板上。"""
     import inspect
-    from plugins.LGTBot_ElainaBot.mod import callbacks, helpers, metrics
-    from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard
+    from plugins.LGTBot_ElainaBot.mod import callbacks, helpers
+    from plugins.LGTBot_ElainaBot.mod.stats import metrics
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import dashboard as page_dashboard
 
     # 引擎(对局图片 + 文字播报)—— 唯一的咽喉
     assert 'userinfo.display_name(uid)' in inspect.getsource(callbacks.cb_get_user_name)
@@ -497,7 +498,7 @@ def test_every_display_exit_goes_through_display_name():
 def test_user_list_keeps_the_real_nickname():
     """★ 「用户数据」列表不遮蔽:面板只有管理员能登录,而处理违规昵称正需要看见原文。遮蔽只针对会流向玩家的出口。"""
     import inspect
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     src = inspect.getsource(userinfo.list_users)
     assert 'nickname_review' not in src and 'display_name' not in src
 
@@ -506,7 +507,7 @@ def test_note_username_enqueues_only_on_real_change(monkeypatch):
     """★ 送审挂在「昵称真变化」那一层闸上 —— 那是新昵称第一次出现的唯一时刻,
     也是整套降频设计的支点(每用户每 10 分钟最多一次,全局 ≈ 改名频率)。"""
     import inspect
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     src = inspect.getsource(userinfo.note_username)
     # 入队必须在「与缓存相同 → return」之后,否则每条消息都要走一次
     assert src.index("if _NAME_CACHE.get(openid) == username:") < src.index('enqueue')
@@ -539,7 +540,7 @@ async def test_scan_does_all_its_sync_io_off_the_event_loop(monkeypatch):
 
 async def test_collect_page_filters_out_names_with_verdicts(monkeypatch):
     """整页收集:空名 / 已判违规 / 已有结论 / 页内重名 都不进批次。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     nr.put_verdict(nr.normalize('审过的'), '审过的', False, nr.SRC_LLM)
     nr.put_verdict(nr.normalize('违规的'), '违规的', True, nr.SRC_LLM)
     names = {'u1': '新名字', 'u2': '审过的', 'u3': '违规的', 'u4': '',
@@ -632,7 +633,7 @@ def test_plugin_config_carries_no_review_keys():
 
 async def test_scan_reports_resolved_and_queued_separately(tmp_path, monkeypatch):
     """★ 「扫了多少人」和「其中取到多少昵称、送审多少」要分开报。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     pages = {0: [(1, 'u1'), (2, 'u2'), (3, 'u3')]}
     monkeypatch.setattr(nr, '_scan_page',
                         lambda after, limit=500: pages.get(after, []))
@@ -649,7 +650,7 @@ async def test_scan_reports_resolved_and_queued_separately(tmp_path, monkeypatch
 
 async def test_scan_records_zero_queued_when_no_name_resolves(monkeypatch):
     """一个昵称都取不到时,送审数必须是 0 而不是跟着扫描数走。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     pages = {0: [(1, 'u1'), (2, 'u2')]}
     monkeypatch.setattr(nr, '_scan_page',
                         lambda after, limit=500: pages.get(after, []))
@@ -699,7 +700,7 @@ def test_completed_scan_stays_completed_after_new_players_and_reset(monkeypatch)
 
 async def test_scan_loop_marks_completed_when_it_reaches_the_end(monkeypatch):
     """★ 扫到表尾那一刻就记跑满,不等面板来看 —— 面板打开之前,新玩家可能已经把进度条拉回去了。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     pages = {0: [(1, 'u1'), (2, 'u2')]}
     monkeypatch.setattr(nr, '_scan_page', lambda after, limit=500: pages.get(after, []))
     monkeypatch.setattr(userinfo, 'get_name', lambda uid: '')
@@ -711,7 +712,7 @@ async def test_scan_loop_marks_completed_when_it_reaches_the_end(monkeypatch):
 
 async def test_scan_loop_does_not_mark_completed_on_a_failed_read(monkeypatch):
     """读引擎玩家表失败同样拿到空页 —— 没扫满就不能记跑满。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     pages = {0: [(1, 'u1'), (2, 'u2')]}                    # 第二页读失败,也是空列表
     monkeypatch.setattr(nr, '_scan_page', lambda after, limit=500: pages.get(after, []))
     monkeypatch.setattr(userinfo, 'get_name', lambda uid: '')
@@ -723,7 +724,7 @@ async def test_scan_loop_does_not_mark_completed_on_a_failed_read(monkeypatch):
 
 async def test_queued_counts_only_batches_that_were_actually_reviewed(monkeypatch):
     """★ 「新送审」只算真的审过的那些 —— 中途中央挂了,那一批退回队列,不能计进去。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     monkeypatch.setattr(nr, 'BATCH_SIZE', 2)
     pages = {0: [(i, f'u{i}') for i in range(1, 5)]}
     monkeypatch.setattr(nr, '_scan_page',
@@ -745,7 +746,7 @@ async def test_queued_counts_only_batches_that_were_actually_reviewed(monkeypatc
 
 async def test_progress_is_written_as_it_goes_not_only_at_the_end(monkeypatch):
     """★ 计数要随扫随落盘。只在整页跑完写一次的话,玩家数少于一页的部署会看到进度条全程不动、结束才跳满。"""
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     snapshots = []
     pages = {0: [(i, f'u{i}') for i in range(1, 5)]}
     monkeypatch.setattr(nr, '_scan_page',

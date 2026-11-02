@@ -1,0 +1,183 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""破坏性 / 状态变更操作审计 —— 持久化最近一个月到 ``data/audit/audit.json``。
+
+谁在写:各状态变更端点的**入口层**(webui pages 的按钮端点、dispatcher 的 /重启 与 /计划重启 指令、backup 的自动备份),
+每个入口一行 ``audit.record(cat, action, detail, ok, src)`` 并标注来源;共享 helper 不挂钩。
+谁在读:``webui/pages/audit``(只读展示)。
+
+设计:
+  · **文件即真相源**,不走 boot._get_persistent();record() 同步写盘,返回即已持久化,os.execv 也不丢。
+  · **整文件原子重写**(tmp + os.replace):任意时刻(包括 execv 瞬间)读到的都是完整 JSON,过期清理顺手完成。
+  · **record() 永不抛异常** —— 审计失败绝不影响业务动作本身。
+  · 损坏容错:audit.json 解析失败时尽力改名 ``.corrupt_<ts>`` 留证,从空续记。
+  · 放 ``data/audit/`` 子目录:框架配置入口看不到;backup 的打包白名单不含此目录,恢复旧备份不会把审计历史一起回滚。
+  · **不提供任何清空 API / 端点**(防自毁审计);容量靠保留期到点清理,不限条数。
+  · 结果要过一阵才知道的操作(引擎编译)先记 ``pending``,结果出来后 ``finish()`` 按 id 改写同一条。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+import uuid
+
+from core.base.logger import get_logger, PLUGIN
+
+from .. import boot
+
+log = get_logger(PLUGIN, 'LGTBot')
+
+# 保留期(固定常量)。不限条数,到点清理
+RETENTION_DAYS = 30
+RETENTION_S = RETENTION_DAYS * 86400
+
+AUDIT_DIR = os.path.join(boot.DATA_DIR, 'audit')
+AUDIT_PATH = os.path.join(AUDIT_DIR, 'audit.json')
+
+# 触发来源 —— 双入口操作(重启 / 计划重启)靠它区分从哪里发起
+SRC_PANEL = '面板'
+SRC_CMD = '指令'
+SRC_AUTO = '自动'
+SRC_API = 'API'      # 编译 API 等对其他插件开放的 HTTP 接口触发
+
+# cat 短码 → (图标 id, 中文标签)。后端只存短码,webui/pages/audit 把此映射随 payload 下发,前端据此渲染类别徽标与筛选按钮。
+CATEGORIES = {
+    'build':   ('#i-build', '引擎编译'),
+    'restart': ('#i-restart', '重启'),
+    'config':  ('#i-config', '配置变更'),
+    'update':  ('#i-upgrade', '更新维护'),
+    'cache':   ('#i-broom', '缓存清理'),
+    'backup':  ('#i-backup', '数据备份'),
+    'match':   ('#i-gamepad', '对局干预'),
+    'bind':    ('#i-bot', '机器人绑定'),
+}
+
+# 单 asyncio loop 下各入口天然串行;锁防从引擎工作线程记录。
+_lock = threading.Lock()
+
+
+def fmt_mb(n: int) -> str:
+    """审计文案里的文件大小:MB 保留 2 位小数(同崩溃转储面板)。"""
+    return f'{n / 1048576:.2f} MB'
+
+
+def _load_raw() -> list:
+    """读 audit.json 为 list(文件内按时间正序)。必须在持有 _lock 时调用。
+
+    不存在 → [];损坏(JSON 解析失败 / 根不是 list)→ 改名留证 + 返回 []。
+    """
+    try:
+        with open(AUDIT_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+        log.warning('[audit] audit.json 根节点不是 list,按损坏处理')
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        log.warning(f'[audit] audit.json 解析失败,按损坏处理: {e}')
+    # 损坏:尽力改名保留现场,失败也吞掉(从空续记不受影响)
+    try:
+        os.replace(AUDIT_PATH, f'{AUDIT_PATH}.corrupt_{int(time.time())}')
+    except OSError:
+        pass
+    return []
+
+
+def _prune(entries: list, now: int) -> list:
+    """丢掉超出保留期的记录。"""
+    cutoff = now - RETENTION_S
+    return [e for e in entries
+            if not isinstance(e.get('ts'), (int, float)) or e['ts'] >= cutoff]
+
+
+def _atomic_write(entries: list) -> None:
+    """临时文件 + os.replace 原子落盘(同 webui/pages/config 的 _atomic_write)。"""
+    os.makedirs(AUDIT_DIR, exist_ok=True)
+    tmp = AUDIT_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(entries, f, ensure_ascii=False)
+    os.replace(tmp, AUDIT_PATH)
+
+
+def record(cat: str, action: str, detail: str = '',
+           ok: bool = True, src: str = SRC_PANEL, pending: bool = False) -> str:
+    """追加一条审计记录并同步落盘,返回记录 id(失败返回 ``''``)。
+
+    永不抛异常 —— 任何失败仅 log.warning,业务动作不受影响。
+    返回即已持久化(重启入口靠这一点保证 os.execv 前落盘)。
+    ``pending`` 的记录面板显示「等待中」,之后用 ``finish(id, …)`` 写入结果。
+    """
+    try:
+        now = int(time.time())
+        entry = {
+            'id': uuid.uuid4().hex,
+            'ts': now,
+            'cat': str(cat),
+            'action': str(action),
+            'detail': str(detail)[:500],
+            'ok': bool(ok),
+            'src': str(src),
+        }
+        if pending:
+            entry['pending'] = True
+        with _lock:
+            entries = _load_raw()
+            entries.append(entry)
+            _atomic_write(_prune(entries, now))
+        return entry['id']
+    except Exception as e:
+        log.warning(f'[audit] 记录失败: {e}')
+        return ''
+
+
+def finish(entry_id: str, ok: bool, detail: str) -> bool:
+    """把 ``record(pending=True)`` 那条记录改成最终结果(时间仍是发起时刻)。
+
+    id 为空 / 记录已过保留期 → False,不新增记录。永不抛异常。
+    """
+    if not entry_id:
+        return False
+    try:
+        with _lock:
+            entries = _load_raw()
+            for e in entries:
+                if e.get('id') == entry_id:
+                    e['ok'] = bool(ok)
+                    e['detail'] = str(detail)[:500]
+                    e.pop('pending', None)
+                    _atomic_write(entries)
+                    return True
+        return False
+    except Exception as e:
+        log.warning(f'[audit] 写入结果失败: {e}')
+        return False
+
+
+def get_entries() -> list:
+    """全部审计记录,新 → 旧。异常时返回 [](展示层按空态渲染)。"""
+    try:
+        with _lock:
+            return list(reversed(_load_raw()))
+    except Exception as e:
+        log.warning(f'[audit] 读取失败: {e}')
+        return []
+
+
+def file_status() -> dict:
+    """审计文件概况 {count, oldest_ts, size_bytes},供状态卡展示。异常返零值。"""
+    try:
+        with _lock:
+            entries = _load_raw()
+            size = os.path.getsize(AUDIT_PATH) if os.path.isfile(AUDIT_PATH) else 0
+        return {
+            'count': len(entries),
+            'oldest_ts': entries[0].get('ts') if entries else None,
+            'size_bytes': size,
+        }
+    except Exception as e:
+        log.warning(f'[audit] 状态读取失败: {e}')
+        return {'count': 0, 'oldest_ts': None, 'size_bytes': 0}

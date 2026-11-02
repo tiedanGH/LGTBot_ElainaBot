@@ -24,7 +24,7 @@ import time
 import pytest
 
 # conftest.py 已 inject 假 boot,这里安全 import
-from plugins.LGTBot_ElainaBot.mod import audit
+from plugins.LGTBot_ElainaBot.mod.ops import audit
 
 
 @pytest.fixture(autouse=True)

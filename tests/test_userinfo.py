@@ -15,7 +15,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import helpers, userinfo
+from plugins.LGTBot_ElainaBot.mod import helpers
+from plugins.LGTBot_ElainaBot.mod.users import userinfo
 
 
 def _day(offset: int = 0) -> str:

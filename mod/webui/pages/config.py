@@ -1,0 +1,742 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+「配置管理」标签 —— 七块编辑器集中管理本插件的所有用户可编辑文本/配置:
+
+  1. 🔧 插件配置 (data/config.yaml)         可视化 / 源文件两种编辑,字段顺序固定为代码顺序 + 热重载按钮
+  2. ⚠️ 重要更新 (data/important_update.txt) 置顶提示，空则不渲染区块
+  3. 📢 更新公告 (data/update_notice.txt)    保存即时热加载(下次指令触发就生效)
+  4. 🚨 紧急公告 (data/urgent_notice.txt)    欢迎菜单里的引用块；**另有「启用 / 关闭」与「重置已通知群」两个动作**，状态存 data/urgent_notice.json
+  5. ❓ 疑难解答 (data/troubleshooting.txt)  同上
+  6. ❤️ 赞助鸣谢 (data/sponsors.txt)         同上；**仅 sponsor_enabled 开启时渲染**，关闭时整段区块与数据都不进页面
+  7. ⚙️ 引擎配置 (data/engine/lgtbot.json)   保存后需重启 LGTBot 引擎才能生效
+
+另有「游戏开关」卡片(data/games_disabled.json):列表走 _threaded 路由,保存走 ``/api/ext/lgtbot/games/save``,逻辑在 game_switch。
+
+保存全部走本文件的 ``/api/ext/lgtbot/config/save``:七个编辑器写的都是插件自己
+data/ 下的文件,落盘、校验、审计理应由插件自己负责,不依赖框架通用端点
+(它的可编辑类型白名单会变,纯文案的 .txt 就不在其中)。
+
+「热重载配置」按钮调 ``__lgtbot_dash_reload_config`` action。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import html as _html
+import json
+import os
+
+import yaml
+from aiohttp import web
+
+from core.base.logger import get_logger, PLUGIN
+from ... import boot, game_switch
+from ...ops import audit
+from ...announce import urgent
+from ... import config as _plugin_config
+
+log = get_logger(PLUGIN, 'LGTBot')
+
+_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')
+
+
+def _load(name: str) -> str:
+    with open(os.path.join(_TEMPLATE_DIR, name), 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+TAB_HTML = _load('config/config.html')
+TAB_CSS = _load('config/config.css')
+TAB_JS = _load('config/config.js')
+
+# 「❤️ 赞助鸣谢」在 html / js 模板里各由一对注释标记包住
+# sponsor_enabled 关闭时按标记把整段切掉。
+_SPONSOR_MARKS = {
+    'config.html': ('<!-- SPONSOR_SECTION_START -->', '<!-- SPONSOR_SECTION_END -->'),
+    'config.js': ('/* SPONSOR_JS_START', '/* SPONSOR_JS_END */'),
+}
+
+
+def _sponsor_on() -> bool:
+    """赞助功能总开关(config.yaml 的 sponsor_enabled,由 config.py 下发)。"""
+    from ...messaging import buttons as _buttons
+    return bool(_buttons.SPONSOR_ENABLED)
+
+
+def _strip_sponsor(text: str, label: str) -> str:
+    """按 ``_SPONSOR_MARKS[label]`` 把赞助相关的整段从模板里切掉。
+
+    标记缺失(模板被改过)时原样返回并告警,不做半截切割 —— 切坏 HTML / JS 比
+    多显示一个区块严重得多。
+    """
+    start, end = _SPONSOR_MARKS[label]
+    i = text.find(start)
+    j = text.find(end)
+    if i < 0 or j <= i:
+        log.warning(f'{label} 缺少 SPONSOR 标记，赞助区块无法隐藏')
+        return text
+    return text[:i] + text[j + len(end):]
+
+
+def render_tab_html() -> str:
+    """返回本标签的 HTML;``sponsor_enabled`` 关闭时**不渲染**赞助鸣谢区块。
+
+    在服务端切掉整段而不是用 CSS ``display:none`` —— 关闭赞助功能的部署方连页面
+    源码里都不该出现赞助字样。前端无需特判:``cfgApplyData`` 遇到缺失的 dataKey
+    会 return,``DOMContentLoaded`` 的绑定循环对 null 元素也都有守卫。
+    """
+    return TAB_HTML if _sponsor_on() else _strip_sponsor(TAB_HTML, 'config.html')
+
+
+def render_tab_js() -> str:
+    """返回本标签的 JS;关闭时连 ``cfgEditors.sponsors`` 表项一起切掉。
+
+    只藏 HTML 是不够的 —— JS 里的 ``saveHint`` 文案同样会出现在页面源码里。
+    """
+    return TAB_JS if _sponsor_on() else _strip_sponsor(TAB_JS, 'config.js')
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 文件路径常量 —— 跟其他模块(config.py / dispatcher.py)对齐
+# ─────────────────────────────────────────────────────────────────────────
+
+_CONFIG_YAML_PATH = os.path.join(boot.DATA_DIR, 'config.yaml')
+_IMPORTANT_UPDATE_PATH = os.path.join(boot.DATA_DIR, 'important_update.txt')
+_UPDATE_NOTICE_PATH = os.path.join(boot.DATA_DIR, 'update_notice.txt')
+_URGENT_NOTICE_PATH = urgent.NOTICE_PATH   # 紧急公告文案的**唯一**路径源在 urgent.py
+_TROUBLESHOOTING_PATH = os.path.join(boot.DATA_DIR, 'troubleshooting.txt')
+_SPONSORS_PATH = os.path.join(boot.DATA_DIR, 'sponsors.txt')
+
+# 跨重载共享:上次热重载时 yaml 里的 admin_uids 逗号串。reload 时与当前值比较,
+# **仅在真的变化时**才给前端返回「需重启引擎」note。
+_PERSISTENT_LAST_ADMINS_KEY = 'cfg_last_loaded_admins'
+
+
+def _read_file(path: str) -> tuple[str, str]:
+    """读任意文本文件，返回 ``(content, error_msg)``。文件不存在 → 空内容、无错误。
+
+    不在这里补写默认内容:那是 dispatcher 的责任，UI 渲染路径不该有写盘副作用。
+    """
+    if not os.path.isfile(path):
+        return '', ''
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read(), ''
+    except Exception as e:
+        return '', str(e)
+
+
+def _read_engine_config() -> tuple[str, str]:
+    """读 lgtbot.json。
+
+    ``boot._ensure_lgtbot_conf`` 保证启动时文件已存在。万一缺失，返回 ``{}\\n``
+    让 textarea 至少展示有效 JSON 而非空白(避免用户保存空文件导致引擎启动出错)。
+    """
+    path = boot.CONF_PATH
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read(), ''
+    except FileNotFoundError:
+        return '{}\n', ''
+    except Exception as e:
+        return '', str(e)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 数据入口 —— 每次页面渲染调用一次
+# ─────────────────────────────────────────────────────────────────────────
+
+def get_data() -> str:
+    """返回可嵌入 ``<script id="config-data">`` 的 JSON 字符串。
+
+    各编辑器的 abs_path / content / read_error 一次性提供，前端 cfgApplyData
+    据此填充 textarea 与路径显示行。``sponsors`` 一项仅在 ``sponsor_enabled``
+    开启时出现 —— 关闭时该区块整段不渲染，见 ``render_tab_html``。
+    """
+    cfg_content, cfg_err = _read_file(_CONFIG_YAML_PATH)
+    important_content, important_err = _read_file(_IMPORTANT_UPDATE_PATH)
+    notice_content, notice_err = _read_file(_UPDATE_NOTICE_PATH)
+    urgent_content, urgent_err = _read_file(_URGENT_NOTICE_PATH)
+    trouble_content, trouble_err = _read_file(_TROUBLESHOOTING_PATH)
+    engine_content, engine_err = _read_engine_config()
+
+    payload = {
+        'config_yaml': {
+            'abs_path': os.path.abspath(_CONFIG_YAML_PATH),
+            'content': cfg_content,
+            'read_error': cfg_err,
+            'form': _config_form(cfg_content, cfg_err),
+        },
+        'important_update': {
+            'abs_path': os.path.abspath(_IMPORTANT_UPDATE_PATH),
+            'content': important_content,
+            'read_error': important_err,
+        },
+        'update_notice': {
+            'abs_path': os.path.abspath(_UPDATE_NOTICE_PATH),
+            'content': notice_content,
+            'read_error': notice_err,
+        },
+        # 紧急公告多带一份运行状态(开关 / 已通知群数)—— 前端据此渲染「启用 / 关闭」按钮的文案与高亮、以及重置按钮上的计数
+        'urgent_notice': dict(
+            abs_path=os.path.abspath(_URGENT_NOTICE_PATH),
+            content=urgent_content,
+            read_error=urgent_err,
+            **urgent.state_view(),
+        ),
+        'troubleshooting': {
+            'abs_path': os.path.abspath(_TROUBLESHOOTING_PATH),
+            'content': trouble_content,
+            'read_error': trouble_err,
+        },
+        'engine_config': {
+            'abs_path': os.path.abspath(boot.CONF_PATH),
+            'content': engine_content,
+            'read_error': engine_err,
+        },
+    }
+    # 赞助功能关闭时连数据都不下发(区块本身也已被 render_tab_html 切掉)。
+    if _sponsor_on():
+        sponsors_content, sponsors_err = _read_file(_SPONSORS_PATH)
+        payload['sponsors'] = {
+            'abs_path': os.path.abspath(_SPONSORS_PATH),
+            'content': sponsors_content,
+            'read_error': sponsors_err,
+        }
+    data_json = json.dumps(payload, ensure_ascii=False, default=str)
+    return data_json.replace('</script>', '<\\/script>')
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Action 端点 —— 热重载 config.yaml
+# ─────────────────────────────────────────────────────────────────────────
+
+def _fragment(payload: dict) -> str:
+    """把 ``payload`` 包成 ``<pre id="result">...</pre>``,与其他 action 端点一致。"""
+    body = json.dumps(payload, ensure_ascii=False, default=str)
+    return f'<pre id="result">{_html.escape(body)}</pre>'
+
+
+def _snapshot_runtime_tunables() -> dict:
+    """快照 config._apply_runtime_tunables 会覆盖的 Python 侧运行时常量。
+
+    字段顺序与 config.DEFAULT_CONFIG / yaml 一致，便于 UI 上直观对照。
+    前后两次快照的 diff 即得到本次热重载的实际变化。
+    """
+    from ... import callbacks as _callbacks
+    from ...messaging import quota as _quota, uploader as _uploader, buttons as _buttons
+    from ... import dispatcher as _dispatcher, helpers as _helpers, state as _state
+    return {
+        'bind_bot_appid': _state.bind_bot_appid or '',
+        'image_hosting': _uploader.SELECTED_BACKEND or '',
+        'refresh_wait_timeout': float(_quota.REFRESH_WAIT_TIMEOUT),
+        'button_cooldown': float(_dispatcher.BUTTON_COOLDOWN),
+        'image_upload_dedup_ttl': float(_uploader.URL_CACHE_TTL),
+        'notify_groups': list(_callbacks.NOTIFY_GROUPS),
+        'sandbox_dm_users': ['all'] if _callbacks.DM_PUSH_ALL else sorted(_callbacks.SANDBOX_DM_USERS),
+        'blocked_commands': list(_dispatcher.BLOCKED_COMMANDS),
+        'sponsor_enabled': bool(_buttons.SPONSOR_ENABLED),
+        'new_at_format': bool(_helpers.NEW_AT_FORMAT),
+        'menu_game_buttons': list(_buttons.MENU_GAMES),
+    }
+
+
+def render_reload_config() -> str:
+    """按当前 ``data/config.yaml`` 热重载所有 Python 侧可调字段，不重启插件/引擎。
+
+    流程:
+      1. 拍前快照 → 调 ``config.load_plugin_config()`` (内部已 log.info 各字段
+         变化) → 拍后快照
+      2. 算 diff,把变化字段以 INFO 日志逐项输出 + 总结一行
+      3. 返回 JSON 含 ``changes`` 数组、当前值、admin_count、警示 note 给前端
+    """
+    from ... import config as _config
+    log.info('=' * 60)
+    log.info('🔁 [reload-config] 开始热重载插件配置')
+
+    _p = boot._get_persistent()
+    # 上次 reload 后落档的 admin 串(首次 reload 时 key 不存在,拿到 None)
+    before_admins = _p.get(_PERSISTENT_LAST_ADMINS_KEY)
+
+    before = _snapshot_runtime_tunables()
+    try:
+        admins_str = _config.load_plugin_config()
+    except Exception as e:
+        log.error(f'🔁 [reload-config] 失败: {e}')
+        log.info('=' * 60)
+        audit.record('config', '热重载插件配置', str(e), ok=False)
+        return _fragment({
+            'success': False,
+            'message': f'热重载失败: {e}',
+        })
+    after = _snapshot_runtime_tunables()
+
+    # 列出变化字段。比较列表 / 集合用 != 即可(已规范化为可哈希 / 可比类型)
+    changes: list = []
+    for field, new_val in after.items():
+        old_val = before[field]
+        if old_val != new_val:
+            changes.append({
+                'field': field,
+                'before': old_val,
+                'after': new_val,
+            })
+
+    admin_count = len([u for u in (admins_str or '').split(',') if u.strip()])
+
+    # 落档当前 admins —— 下次 reload 用作 before 对照
+    _p[_PERSISTENT_LAST_ADMINS_KEY] = admins_str
+    # 仅当**记录过 before** 且**真的变化**时,才视为 admin 改动 —— 首次 reload
+    # 没有 before,保守视作"未变"避免每次都误报
+    admin_changed = (before_admins is not None and before_admins != admins_str)
+
+    # 日志:逐项 + 总结
+    if changes:
+        log.info(f'🔁 [reload-config] 运行时参数变化 {len(changes)} 项:')
+        for c in changes:
+            log.info(f'   · {c["field"]}: {c["before"]!r} → {c["after"]!r}')
+    else:
+        log.info('🔁 [reload-config] 运行时参数无变化 (yaml 与运行时一致)')
+    if admin_changed:
+        log.warning(f'⚠️ [reload-config] admin_uids 已变化 ({before_admins!r} → {admins_str!r})，需重启 LGTBot 引擎才能生效')
+    else:
+        log.info(f'   · admin_uids: 当前 yaml 中 {admin_count} 人 (未变化)')
+    log.info('🔁 [reload-config] 完成')
+    log.info('=' * 60)
+
+    audit.record('config', '热重载插件配置',
+                 f'{len(changes)} 项运行时变化'
+                 + ('; admin 变更需重启生效' if admin_changed else ''))
+
+    payload = {
+        'success': True,
+        'changes': changes,
+        'current': after,
+        'admin_count': admin_count,
+        'admin_changed': admin_changed,
+        'message': '✅ 已按 config.yaml 重新下发到运行时',
+    }
+    # 仅 admin 真变化时附 note —— 前端 ``if (data.note)`` 才显示「⚠️」一行
+    if admin_changed:
+        payload['note'] = 'admin_uids 改动需重启 LGTBot 引擎才能生效 (C++ 侧仅在 start() 时读一次)'
+    return _fragment(payload)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Action 端点 —— 紧急公告的开关 / 重置已通知群
+# ─────────────────────────────────────────────────────────────────────────
+# 两个都是**无参 toggle / 清空**语义,沿用隐藏 action 的 fragment 协议;状态由 urgent.py 落盘,响应里回带最新状态供前端刷新按钮文案与高亮。
+
+def _urgent_payload(message: str, **extra) -> str:
+    st = urgent.state_view()
+    return _fragment(dict(success=True, message=message,
+                          enabled=st['enabled'],
+                          notified_count=st['notified_count'], **extra))
+
+
+def render_urgent_toggle() -> str:
+    """翻转紧急公告总开关。关闭时**不动**已通知群记录(重新启用不重复打扰老群)。"""
+    want = not urgent.is_enabled()
+    if not urgent.set_enabled(want):
+        audit.record('config', '紧急公告开关', '写入 urgent_notice.json 失败', ok=False)
+        return _fragment({'success': False, 'enabled': urgent.is_enabled(),
+                          'notified_count': urgent.notified_count(),
+                          'message': '❌ 状态写盘失败，开关未生效（详见日志）'})
+    n = urgent.notified_count()
+    if want:
+        log.warning(f'🚨 [紧急公告] 已启用（已通知 {n} 群，文案 {len(urgent.notice_text())} 字符）')
+    else:
+        log.info(f'🚨 [紧急公告] 已关闭（保留 {n} 条已通知群记录）')
+    audit.record('config', '紧急公告开关',
+                 ('已启用' if want else '已关闭') + f'；已通知 {n} 群')
+    return _urgent_payload(
+        ('✅ 紧急公告已启用：欢迎菜单展示公告，新群建房时额外通知一次'
+         if want else '✅ 紧急公告已关闭：菜单不再展示（已通知群记录保留）'))
+
+
+def render_urgent_reset() -> str:
+    """清空已通知群记录 —— 这些群下次建房会重新收到一次公告。"""
+    n = urgent.reset_notified()
+    log.warning(f'🚨 [紧急公告] 已重置已通知群记录（清除 {n} 群）')
+    audit.record('config', '重置紧急公告已通知群', f'清除 {n} 群')
+    return _urgent_payload(f'✅ 已清除 {n} 个群的通知记录，这些群下次建房会再次收到公告',
+                           cleared=n)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 游戏开关 —— 列表走 _threaded 路由(读游戏信息要起子进程),保存走 POST
+# ─────────────────────────────────────────────────────────────────────────
+
+def render_games_list() -> str:
+    """「游戏开关」卡片数据:全部游戏 + 已保存的停用名单 + 本次引擎启动时实际停用的名单。"""
+    try:
+        return _fragment(dict(success=True, **game_switch.panel_state()))
+    except Exception as e:
+        log.warning(f'读取游戏开关数据失败: {e}')
+        return _fragment({'success': False, 'message': f'读取游戏列表失败: {e}'})
+
+
+def _game_labels(modules: list, games: list) -> str:
+    names = {g['module']: g['name'] or g['module'] for g in games}
+    return '、'.join(names.get(m, m) for m in modules)
+
+
+async def games_save_handler(request: 'web.Request') -> 'web.Response':
+    """``POST /api/ext/lgtbot/games/save`` —— body ``{"disabled": [模块名, ...]}``,回带最新卡片数据。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({'success': False, 'message': '请求体不是合法 JSON'}, status=400)
+    disabled = body.get('disabled') if isinstance(body, dict) else None
+    if not isinstance(disabled, list) or not all(isinstance(m, str) for m in disabled):
+        return web.json_response({'success': False, 'message': 'disabled 应为模块名列表'}, status=400)
+    try:
+        ok, message, changes = await asyncio.to_thread(game_switch.save_selection, disabled)
+    except OSError as e:
+        log.error(f'写入游戏开关名单失败: {e}')
+        audit.record('config', '游戏开关', f'写盘失败: {e}', ok=False)
+        return web.json_response({'success': False, 'message': f'写盘失败: {e}'})
+    state = await asyncio.to_thread(game_switch.panel_state)
+    if not ok:
+        audit.record('config', '游戏开关', message, ok=False)
+    elif changes.get('disabled') or changes.get('enabled'):
+        parts = [f'{verb} {_game_labels(changes[k], state["games"])}'
+                 for k, verb in (('disabled', '停用'), ('enabled', '恢复')) if changes[k]]
+        log.info(f'🎮 [游戏开关] {"；".join(parts)}')
+        audit.record('config', '游戏开关', '；'.join(parts)[:150])
+    return web.json_response(dict(success=ok, message=message, **state))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 带校验的配置保存 —— POST /api/ext/lgtbot/config/save
+# ─────────────────────────────────────────────────────────────────────────
+# 七个编辑器统一走这里。config.yaml / lgtbot.json 先语法解析 + 字段 schema 校验,
+# 全部通过才原子落盘,免得一个格式错误让插件加载回退默认配置或引擎启动失败;
+# 纯文案文件无可校验,走同一条路是为了落盘 / 审计口径统一。
+# 路径由服务端按 target 解析,不信任客户端传路径。
+
+# 图床合法值**动态**取自主框架 image_hosting 模块 status(),与运行时校验同源,避免两处漂移。
+# 模块未加载 / 查询失败时返回空集 = 无法校验,放行 —— 运行时 _do_upload 会按 status 早退。
+def _valid_backends() -> set:
+    from ...messaging import uploader as _uploader
+    hosting = _uploader._get_hosting()
+    if hosting is None or not hasattr(hosting, 'status'):
+        return set()
+    try:
+        return set((hosting.status() or {}).keys())
+    except Exception:
+        return set()
+
+
+# 纯数字 ID 类字段:不带引号时 yaml 解析成 int,运行时
+# (config._apply_runtime_tunables)按字符串接受 —— 校验器同语义放行(警告级)。
+# notify_groups 这类**列表**字段不用登记:列表项的 int 由下面的元素检查放行。
+_INT_OK_STR_FIELDS = {'bind_bot_appid'}
+
+# 改过名的字段:config.normalize_config_yaml 会迁到新字段,校验只提示去向、不当未知字段。
+_LEGACY_FIELDS = {
+    'crash_notify_group': 'notify_groups，加载与保存时自动迁移',
+}
+
+
+def _validate_config_yaml(text: str) -> tuple[list, list]:
+    """校验 config.yaml 文本,返回 ``(errors, warnings)``;errors 非空则拒绝保存。
+
+    schema 从 ``config.DEFAULT_CONFIG`` 的字段类型动态推导(bool / list / str / 数值),
+    新增配置字段无需改这里。错误级(阻断):语法错误、根不是映射、字段类型不符、
+    image_hosting 填了未知图床、refresh_wait_timeout 非正数。警告级(放行):
+    字段值为空(yaml 裸 key 解析为 None,运行时按缺省处理)、未知字段。
+    """
+    errors: list = []
+    warnings: list = []
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        mark = getattr(e, 'problem_mark', None)
+        pos = f'(第 {mark.line + 1} 行)' if mark else ''
+        return [f'YAML 语法错误{pos}: {getattr(e, "problem", e)}'], []
+    if data is None:
+        return [], ['文件为空 —— 下次插件加载会自动补全默认字段']
+    if not isinstance(data, dict):
+        return [f'根节点必须是键值映射，当前是 {type(data).__name__}'], []
+
+    missing: list = []
+    for key, default in _plugin_config.DEFAULT_CONFIG.items():
+        if key not in data:
+            missing.append(key)
+            continue
+        val = data[key]
+        if val is None:
+            warnings.append(f'{key} 为空，运行时将按未配置处理')
+            continue
+        # bool 分支必须排在数值分支之前 —— Python 里 bool 是 int 的子类,顺序颠倒会让 sponsor_enabled 这类开关被当数值放行
+        if isinstance(default, bool):
+            if not isinstance(val, bool):
+                errors.append(f'{key} 应为布尔值 true / false，当前是 {type(val).__name__}')
+        elif isinstance(default, list):
+            if not isinstance(val, list):
+                errors.append(f'{key} 应为列表，当前是 {type(val).__name__}')
+            else:
+                bad = [i for i, e in enumerate(val) if not isinstance(e, (str, int))]
+                if bad:
+                    errors.append(f'{key} 第 {bad[0] + 1} 项应为字符串')
+        elif isinstance(default, str):
+            if (key in _INT_OK_STR_FIELDS and isinstance(val, int)
+                    and not isinstance(val, bool)):
+                warnings.append(f'{key} 是不带引号的数字，运行时按字符串处理；'
+                                f'建议加引号写成 {str(val)!r}')
+            elif not isinstance(val, str):
+                errors.append(f'{key} 应为字符串，当前是 {type(val).__name__}')
+        elif isinstance(default, (int, float)):
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                errors.append(f'{key} 应为数值，当前是 {type(val).__name__}')
+
+    # 值级规则(类型已过关的字段才检查)。'any' 恒合法(自动依次尝试);
+    # 合法名单为空(模块未加载)时无法校验,放行给运行时兜底。
+    backend = data.get('image_hosting')
+    if isinstance(backend, str) and backend.strip():
+        b = backend.strip().lower()
+        valid = _valid_backends()
+        if b != 'any' and valid and b not in valid:
+            errors.append(f'image_hosting 未知图床 {backend!r}，可选: {sorted(valid)}、any 或留空')
+    timeout = data.get('refresh_wait_timeout')
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout <= 0:
+        errors.append(f'refresh_wait_timeout 应为正数，当前 {timeout}')
+    sandbox = data.get('sandbox_dm_users')
+    if isinstance(sandbox, list):
+        entries = [str(u).strip() for u in sandbox if str(u).strip()]
+        if 'all' in entries and entries != ['all']:
+            warnings.append('sandbox_dm_users 含 "all" 但还有其他项 —— '
+                            '全员直推模式仅在数组只有一项 "all" 时生效，当前按普通白名单处理')
+
+    if missing:
+        warnings.append(f'缺少字段 {"、".join(missing)}(下次加载自动补默认值)')
+    for key in data:
+        if key in _plugin_config.DEFAULT_CONFIG:
+            continue
+        if key in _LEGACY_FIELDS:
+            warnings.append(f'{key} 已更名为 {_LEGACY_FIELDS[key]}')
+        else:
+            warnings.append(f'未知字段 {key}(本插件不会读取)')
+    return errors, warnings
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 插件配置的可视化编辑 —— 字段表从 config.DEFAULT_CONFIG 推导,顺序即 config.yaml 的字段顺序
+# ─────────────────────────────────────────────────────────────────────────
+
+def _field_kind(default) -> str:
+    # bool 必须先判:Python 里 bool 是 int 的子类
+    if isinstance(default, bool):
+        return 'bool'
+    if isinstance(default, list):
+        return 'list'
+    if isinstance(default, int):
+        return 'int'
+    if isinstance(default, float):
+        return 'float'
+    return 'str'
+
+
+def _form_fields() -> list:
+    """可视化编辑的字段表,顺序与 DEFAULT_CONFIG 一致;拿得到图床名单时图床给下拉选项。"""
+    fields = []
+    for key, default in _plugin_config.DEFAULT_CONFIG.items():
+        field = {'key': key, 'label': _plugin_config.CONFIG_LABELS.get(key, key),
+                 'hint': _plugin_config.CONFIG_COMMENTS.get(key, ''), 'kind': _field_kind(default)}
+        if key == 'image_hosting':
+            backends = sorted(_valid_backends())
+            if backends:
+                field.update(kind='select', options=['any', *backends, ''])
+        fields.append(field)
+    return fields
+
+
+def _config_form(text: str, read_error: str = '') -> dict:
+    """可视化编辑所需数据。读不到或校验不过时只带错误(values 为 None),前端停在源文件模式。
+
+    缺失或为空的字段按默认值显示,旧字段按迁移后的值显示;``extra`` 是本插件不读取的字段,可视化保存时原样留在文件末尾。
+    """
+    form = {'fields': _form_fields(), 'values': None, 'extra': [], 'errors': []}
+    errors = [f'读取失败: {read_error}'] if read_error else _validate_config_yaml(text)[0]
+    if errors:
+        form['errors'] = errors
+        return form
+    data = _plugin_config._migrate_legacy(yaml.safe_load(text) or {})[0]
+    form['values'] = {k: (d if data.get(k) is None else data[k])
+                      for k, d in _plugin_config.DEFAULT_CONFIG.items()}
+    form['extra'] = [str(k) for k in data if k not in _plugin_config.DEFAULT_CONFIG]
+    return form
+
+
+def _yaml_from_values(values: dict, current: str) -> tuple:
+    """可视化保存:按字段类型检查表单值,并入源文件里本插件不读取的字段,按代码顺序渲染。返回 ``(yaml 文本, 类型错误)``。
+
+    表单显示的是迁移后的值,底稿也先迁移,旧字段不再写回文件。
+    """
+    try:
+        merged = yaml.safe_load(current) if current.strip() else {}
+    except yaml.YAMLError:
+        merged = {}
+    merged = _plugin_config._migrate_legacy(merged)[0] if isinstance(merged, dict) else {}
+    errors = []
+    for key, default in _plugin_config.DEFAULT_CONFIG.items():
+        if key not in values:
+            continue
+        val, kind = values[key], _field_kind(default)
+        if kind == 'bool':
+            ok = isinstance(val, bool)
+        elif kind == 'list':
+            ok = isinstance(val, list) and all(isinstance(v, str) for v in val)
+        elif kind in ('int', 'float'):
+            ok = isinstance(val, (int, float)) and not isinstance(val, bool)
+            # JSON 分不出 15 与 15.0,按字段类型还原,文件里保持模板的写法
+            if ok and kind == 'float':
+                val = float(val)
+            elif ok and float(val).is_integer():
+                val = int(val)
+        else:
+            ok = isinstance(val, str)
+        if ok:
+            merged[key] = val
+        else:
+            errors.append(f'{_plugin_config.CONFIG_LABELS.get(key, key)}（{key}）的值类型不对')
+    return _plugin_config.render_config_yaml(merged), errors
+
+
+def _validate_plain_text(text: str) -> list:
+    """纯文案文件没有语法可言,恒通过 —— 仍走本端点是为了落盘 / 审计口径统一。"""
+    return []
+
+
+def _validate_engine_json(text: str) -> list:
+    """校验 lgtbot.json:必须是合法 JSON 且根为对象(引擎 nlohmann 解析要求)。
+
+    更深的结构属于上游引擎的领域,这里不越界校验 —— 语法错误 / 根类型错误才是「引擎启动失败」的实际来源。
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        return [f'JSON 语法错误(第 {e.lineno} 行第 {e.colno} 列): {e.msg}']
+    if not isinstance(data, dict):
+        return [f'根节点必须是 JSON 对象 {{}}，当前是 {type(data).__name__}']
+    return []
+
+
+# target → (绝对路径, 校验器)。校验器返回 (errors, warnings) 或仅 errors。
+_SAVE_TARGETS = {
+    'config_yaml': (_CONFIG_YAML_PATH, _validate_config_yaml),
+    'engine_json': (None, _validate_engine_json),   # 路径运行时取 boot.CONF_PATH
+    'important_update': (_IMPORTANT_UPDATE_PATH, _validate_plain_text),
+    'update_notice': (_UPDATE_NOTICE_PATH, _validate_plain_text),
+    'urgent_notice': (_URGENT_NOTICE_PATH, _validate_plain_text),
+    'troubleshooting': (_TROUBLESHOOTING_PATH, _validate_plain_text),
+    'sponsors': (_SPONSORS_PATH, _validate_plain_text),
+}
+
+
+def _atomic_write(path: str, content: str) -> None:
+    """临时文件 + os.replace 原子落盘,避免写一半被读到。"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(content)
+    os.replace(tmp, path)
+
+
+def _save_config_yaml(content, values, dry_run: bool) -> 'web.Response':
+    """config.yaml 的保存:源文件文本(``content``)或可视化表单值(``values``)。
+
+    落盘前一律迁移旧字段并按 DEFAULT_CONFIG 整理字段顺序,回带最终文本与表单数据,前端两种视图据此同步。
+    ``dry_run`` 只换算不落盘,供两种模式切换时互转:表单值换成文本(有校验错误也照给,让用户在源文件里改),
+    文本换成表单值(校验不过就不给)。
+    """
+    if values is not None:
+        current, _err = _read_file(_CONFIG_YAML_PATH)
+        text, errors = _yaml_from_values(values, current)
+        mode = '可视化'
+    else:
+        text, errors, mode = content, [], '源文件'
+    warnings: list = []
+    if not errors:
+        errors, warnings = _validate_config_yaml(text)
+    if dry_run:
+        form = _config_form(text) if values is None and not errors else None
+        return web.json_response({'success': not errors, 'errors': errors, 'warnings': warnings,
+                                  'content': text, 'form': form})
+    if errors:
+        log.info(f'🛡️ [配置校验] config_yaml 保存被拒: {errors}')
+        audit.record('config', '保存 config.yaml',
+                     '校验拒绝: ' + '; '.join(str(e) for e in errors)[:150], ok=False)
+        return web.json_response({'success': False, 'errors': errors, 'warnings': warnings})
+
+    ordered, migrated = _plugin_config.normalize_config_yaml(text)
+    reordered = _plugin_config.order_config_yaml(text) != text
+    warnings = _validate_config_yaml(ordered)[1]
+    try:
+        _atomic_write(_CONFIG_YAML_PATH, ordered)
+    except Exception as e:
+        log.error(f'写入 config_yaml 失败: {e}')
+        audit.record('config', '保存 config.yaml', f'写盘失败: {e}', ok=False)
+        return web.json_response({'success': False, 'errors': [f'写盘失败: {e}']})
+    log.info(f'💾 [配置校验] config_yaml 校验通过并已保存({mode})'
+             + (f'，已迁移旧字段：{"；".join(migrated)}' if migrated else '')
+             + ('，已按代码顺序整理字段' if reordered else '')
+             + (f'(警告 {len(warnings)} 条)' if warnings else ''))
+    audit.record('config', '保存 config.yaml',
+                 f'{mode}，{len(ordered)} 字符'
+                 + ('，已迁移旧字段' if migrated else '')
+                 + ('，已整理字段顺序' if reordered else '')
+                 + (f'，{len(warnings)} 条警告' if warnings else ''))
+    return web.json_response({'success': True, 'errors': [], 'warnings': warnings, 'content': ordered,
+                              'form': _config_form(ordered), 'reordered': reordered, 'migrated': migrated})
+
+
+async def save_config_handler(request: 'web.Request') -> 'web.Response':
+    """``POST /api/ext/lgtbot/config/save`` —— body ``{"target", "content"}``;config.yaml 另收 ``values`` 与 ``dry_run``。
+
+    校验失败返回 ``{'success': False, 'errors': [...]}``,**不落盘**;
+    通过则原子写入并把警告一并带回给前端展示。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({'success': False, 'errors': ['请求体不是合法 JSON']}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({'success': False, 'errors': ['请求体应为 JSON 对象']}, status=400)
+    target = str(body.get('target') or '')
+    content = body.get('content')
+    values = body.get('values')
+    if target == 'config_yaml' and (isinstance(content, str) or isinstance(values, dict)):
+        return _save_config_yaml(None if isinstance(values, dict) else content,
+                                 values if isinstance(values, dict) else None,
+                                 body.get('dry_run') is True)
+    if target not in _SAVE_TARGETS or not isinstance(content, str):
+        return web.json_response({'success': False, 'errors': ['target 无效或缺少 content']}, status=400)
+
+    path, validator = _SAVE_TARGETS[target]
+    if path is None:
+        path = boot.CONF_PATH
+    fname = os.path.basename(path)
+    result = validator(content)
+    errors, warnings = result if isinstance(result, tuple) else (result, [])
+    if errors:
+        log.info(f'🛡️ [配置校验] {target} 保存被拒: {errors}')
+        # 校验拒绝虽未落盘,记 ok=False
+        audit.record('config', f'保存 {fname}',
+                     '校验拒绝: ' + '; '.join(str(e) for e in errors)[:150], ok=False)
+        return web.json_response({'success': False, 'errors': errors, 'warnings': warnings})
+
+    try:
+        _atomic_write(path, content)
+    except Exception as e:
+        log.error(f'写入 {target} 失败: {e}')
+        audit.record('config', f'保存 {fname}', f'写盘失败: {e}', ok=False)
+        return web.json_response({'success': False, 'errors': [f'写盘失败: {e}']})
+    log.info(f'💾 [配置校验] {target} 校验通过并已保存'
+             + (f'(警告 {len(warnings)} 条)' if warnings else ''))
+    audit.record('config', f'保存 {fname}',
+                 f'{len(content)} 字符'
+                 + (f'，{len(warnings)} 条警告' if warnings else ''))
+    return web.json_response({'success': True, 'errors': [], 'warnings': warnings})

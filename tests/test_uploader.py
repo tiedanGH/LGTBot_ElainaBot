@@ -21,7 +21,7 @@ import re
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import uploader
+from plugins.LGTBot_ElainaBot.mod.messaging import uploader
 
 
 # ─────────────────────────────────────────────────────────────────────────

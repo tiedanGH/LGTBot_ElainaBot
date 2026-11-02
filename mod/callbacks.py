@@ -18,6 +18,8 @@
 
 设计要点：cb_send_text/image_message 不阻塞 C++ 调用线程 —— 回调期间引擎持有
 Match.mutex_(见 cb_send_text_message)。
+
+本模块路径被桥接层崩溃恢复(LGTBot_ElainaBot.cc 的 NotifyCrashToPython)按名 import,挪动要同步改 .cc 并重编。
 """
 
 from __future__ import annotations
@@ -30,9 +32,12 @@ import sys
 import time
 
 from core.base.logger import get_logger, PLUGIN
-from . import (state, quota, helpers, boot, uploader, userinfo, buttons,
-               log_attribution, metrics, audit)
-from .webui import page_logs
+from . import state, helpers, boot
+from .messaging import quota, uploader, buttons, log_attribution
+from .users import userinfo
+from .stats import metrics
+from .ops import audit
+from .webui.pages import logs as page_logs
 
 log = get_logger(PLUGIN, 'LGTBot')
 

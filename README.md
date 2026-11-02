@@ -170,48 +170,55 @@ plugins/LGTBot_ElainaBot/
 ├── README.md                本文档
 ├── LICENSE                  LGPLv2 许可证
 │
-├── mod/                     插件功能模块
+├── mod/                     插件功能模块（根目录放引擎桥接与共享基础模块，其余按功能分子包）
 │   ├── __init__.py
-│   ├── state.py             共享运行时状态容器（含跨重载持久化）
 │   ├── boot.py              C++ 扩展加载（chdir + lib*.so 预加载 + RTLD_GLOBAL）
-│   ├── buttons.py           按钮模板 + 命令触发正则
+│   ├── state.py             共享运行时状态容器（含跨重载持久化）
+│   ├── config.py            data/config.yaml 读写
 │   ├── helpers.py           通用工具（sender / mention / target_key / 主动推送权限）
-│   ├── quota.py             被动消息引用池（每条引用按场景：群 5 次/5 分钟，私信 4 次/60 分钟）
 │   ├── callbacks.py         C++ 引擎回调（cb_* 入口 + 异步发送实现）
 │   ├── dispatcher.py        @handler 注册（消息派发 + INTERACTION 处理）
-│   ├── config.py            data/config.yaml 读写
-│   ├── urgent.py            紧急公告：文案 + 总开关 / 已通知群记录（落盘，重启仍生效）
 │   ├── game_switch.py       游戏开关：停用名单 + 引擎启动前拼出只含启用游戏的视图目录 + 开局拦截
-│   ├── notice.py            更新公告分段：按日期行切分，最新一段 + 更早的日期区间列表与查询
-│   ├── nickname_review.py   昵称 AI 审核：结论库（SQLite，按昵称文本永久缓存）+ 送审队列 + 批量扫描
-│   ├── userinfo.py          主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
-│   ├── corefile.py          游戏子进程 core 文件的 ELF note 解析（信号 / 游戏名 / 崩溃模块）
-│   ├── stats_image.py       「数据统计」指令的统计卡片渲染（PIL，缺字体自动回退文本）
-│   ├── uploader.py          图床上传调度 + 图片尺寸解析
-│   ├── backup.py            数据备份（创建 / 恢复 / 删除 / 轮转 + 启动自动检查）
-│   ├── audit.py             状态变更操作审计（持久化最近 30 天）
-│   ├── metrics.py           运行指标计数（上传 / 崩溃 / 配额 / @全体，重启不丢）+ lgtbot.db 统计查询 + 不计分对局账本
-│   ├── at_all.py            @全体成员：当日次数 / 主动消息额度 / 管理员身份校验 + 发送 + 记账
-│   ├── prebuilt.py          预编译包下载 / 校验 / 原子安装 / 本地·预编译切换 + 依赖自检
-│   ├── _prebuilt_swap.py    build_prebuilt 暂存换入：目录被运行中引擎占用时暂存 pending，boot 重启换入
-│   ├── log_attribution.py   类级 monkey-patch ，把本插件 push 的消息在 Web 面板正确归类
+│   ├── messaging/           消息发送链路
+│   │   ├── quota.py         被动消息引用池（每条引用按场景：群 5 次/5 分钟，私信 4 次/60 分钟）
+│   │   ├── buttons.py       按钮模板 + 命令触发正则
+│   │   ├── uploader.py      图床上传调度 + 图片尺寸解析
+│   │   ├── log_attribution.py  类级 monkey-patch，把本插件 push 的消息在 Web 面板正确归类
+│   │   └── at_all.py        @全体成员：当日次数 / 主动消息额度 / 管理员身份校验 + 发送 + 记账
+│   ├── users/               用户数据
+│   │   ├── userinfo.py      主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
+│   │   └── nickname_review.py  昵称 AI 审核：结论库（SQLite，按昵称文本永久缓存）+ 送审队列 + 批量扫描
+│   ├── stats/               统计
+│   │   ├── metrics.py       运行指标计数（上传 / 崩溃 / 配额 / @全体，重启不丢）+ lgtbot.db 统计查询 + 不计分对局账本
+│   │   └── stats_image.py   「数据统计」指令的统计卡片渲染（PIL，缺字体自动回退文本）
+│   ├── announce/            公告
+│   │   ├── notice.py        更新公告分段：按日期行切分，最新一段 + 更早的日期区间列表与查询
+│   │   └── urgent.py        紧急公告：文案 + 总开关 / 已通知群记录（落盘，重启仍生效）
+│   ├── ops/                 运维
+│   │   ├── audit.py         状态变更操作审计（持久化最近 30 天）
+│   │   ├── backup.py        数据备份（创建 / 恢复 / 删除 / 轮转 + 启动自动检查）
+│   │   ├── prebuilt.py      预编译包下载 / 校验 / 原子安装 / 本地·预编译切换 + 依赖自检
+│   │   ├── _prebuilt_swap.py  build_prebuilt 暂存换入：目录被运行中引擎占用时暂存 pending，boot 重启换入
+│   │   └── corefile.py      游戏子进程 core 文件的 ELF note 解析（信号 / 游戏名 / 崩溃模块）
 │   └── webui/               Web 面板拓展页（侧边栏「LGTBot 机器人」/ 多标签）
 │       ├── __init__.py
 │       ├── main.py          入口：页面注册 + 主页面拼装（读 templates/ 并填充占位）+ 隐藏 action 端点路由
-│       ├── page_dashboard.py「仪表盘」标签：版本 / 机器人绑定 / 运行环境自检 / 进行中对局 / 缓存清理 + 检查更新 / git pull / 子模块 update
-│       ├── page_metrics.py  「指标面板」标签：数据统计 + 运行指标 + 游戏数据
-│       ├── page_config.py   「配置管理」标签：插件和引擎全部配置的内置编辑器 + 热重载
-│       ├── page_build.py    「引擎编译」标签：子进程 + state.json + build.log + ANSI 解析成结构化段 + 编译动作
-│       ├── build_api.py     编译 API（供其他插件调用）：token 认证 + 单目标同步编译 / 强制中断 / 状态探测
-│       ├── restart_api.py   重启 / 计划重启 API：立即重启 + enable/auto/reason 维护模式开关
-│       ├── at_all_api.py    @全体成员 API：群 openid + 消息内容（send_at 预留）+ 统一错误码
-│       ├── page_prebuilt.py 「预编译部署」标签：镜像测速·选择 / 包列表 / 下载进度 / 本地·预编译切换
-│       ├── page_backup.py   「数据备份」标签：列出 / 创建 / 恢复 / 下载 / 删除备份 zip
-│       ├── page_logs.py     「消息日志」标签 + 日志缓冲数据层
-│       ├── page_audit.py    「操作审计」标签：只读展示审计记录
-│       ├── page_review.py   「昵称审核」标签：总开关 / 存量批量扫描 / 违规记录与白名单
-│       ├── page_crash.py    「崩溃转储」标签：崩溃重启概况 + dump 列表 + 游戏 core 列表
-│       ├── page_users.py    「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
+│       ├── api/             对外 HTTP API（供其他插件调用，共用一枚 token）
+│       │   ├── build.py     编译 API：token 认证 + 单目标同步编译 / 强制中断 / 状态探测
+│       │   ├── restart.py   重启 / 计划重启 API：立即重启 + enable/auto/reason 维护模式开关
+│       │   └── at_all.py    @全体成员 API：群 openid + 消息内容（send_at 预留）+ 统一错误码
+│       ├── pages/           各标签页
+│       │   ├── dashboard.py 「仪表盘」标签：版本 / 机器人绑定 / 运行环境自检 / 进行中对局 / 缓存清理 + 检查更新 / git pull / 子模块 update
+│       │   ├── metrics.py   「指标面板」标签：数据统计 + 运行指标 + 游戏数据
+│       │   ├── config.py    「配置管理」标签：插件和引擎全部配置的内置编辑器 + 热重载
+│       │   ├── build.py     「引擎编译」标签：子进程 + state.json + build.log + ANSI 解析成结构化段 + 编译动作
+│       │   ├── prebuilt.py  「预编译部署」标签：镜像测速·选择 / 包列表 / 下载进度 / 本地·预编译切换
+│       │   ├── backup.py    「数据备份」标签：列出 / 创建 / 恢复 / 下载 / 删除备份 zip
+│       │   ├── logs.py      「消息日志」标签 + 日志缓冲数据层
+│       │   ├── audit.py     「操作审计」标签：只读展示审计记录
+│       │   ├── review.py    「昵称审核」标签：总开关 / 存量批量扫描 / 违规记录与白名单
+│       │   ├── crash.py     「崩溃转储」标签：崩溃重启概况 + dump 列表 + 游戏 core 列表
+│       │   └── users.py     「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
 │       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
 │           ├── main/        主骨架 / 全局 + 通用 CSS / 公共 JS / 图标 SVG
 │           ├── dashboard/   「仪表盘」标签

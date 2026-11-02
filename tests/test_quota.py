@@ -18,7 +18,7 @@ import time
 import pytest
 
 # 注意:conftest.py 已 inject 假 boot,这里 import 不会触发真 C++ 加载
-from plugins.LGTBot_ElainaBot.mod import quota
+from plugins.LGTBot_ElainaBot.mod.messaging import quota
 from plugins.LGTBot_ElainaBot.mod import state as _state
 
 

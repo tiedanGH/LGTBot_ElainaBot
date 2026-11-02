@@ -20,7 +20,7 @@ from plugins.LGTBot_ElainaBot.mod import boot
 
 def _pd():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import dashboard as page_dashboard
     return page_dashboard
 
 

@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import dispatcher, stats_image, uploader
+from plugins.LGTBot_ElainaBot.mod import dispatcher
+from plugins.LGTBot_ElainaBot.mod.stats import stats_image
+from plugins.LGTBot_ElainaBot.mod.messaging import uploader
 
 
 def _sample_stats(with_trend=True, with_ranks=True) -> dict:

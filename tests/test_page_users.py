@@ -16,7 +16,7 @@ import pytest
 
 def _page_users():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_users
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import users as page_users
     return page_users
 
 
@@ -32,7 +32,7 @@ class _FakeReq:
 def test_get_data_head_only_with_real_total(monkeypatch):
     """首屏:users 只取首段(limit=_HEAD),total 为全量,payload 带 head。"""
     pu = _page_users()
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     calls = {}
 
     def fake_list(limit=None, offset=0):
@@ -55,7 +55,7 @@ def test_get_data_head_only_with_real_total(monkeypatch):
 async def test_page_handler_returns_rest_from_offset(monkeypatch):
     """?offset=1000 → 返回 offset 起的剩余全部(limit=None),payload 带 total。"""
     pu = _page_users()
-    from plugins.LGTBot_ElainaBot.mod import userinfo
+    from plugins.LGTBot_ElainaBot.mod.users import userinfo
     seen = {}
 
     def fake_list(limit=None, offset=0):

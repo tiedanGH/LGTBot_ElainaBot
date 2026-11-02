@@ -22,7 +22,8 @@ from datetime import datetime, timedelta
 import pytest
 
 # conftest.py 已 inject 假 boot,这里安全 import
-from plugins.LGTBot_ElainaBot.mod import boot, metrics
+from plugins.LGTBot_ElainaBot.mod import boot
+from plugins.LGTBot_ElainaBot.mod.stats import metrics
 
 
 @pytest.fixture(autouse=True)

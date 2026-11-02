@@ -13,13 +13,14 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock
 
-from plugins.LGTBot_ElainaBot.mod import log_attribution, metrics
+from plugins.LGTBot_ElainaBot.mod.messaging import log_attribution
+from plugins.LGTBot_ElainaBot.mod.stats import metrics
 
 
 def _capture(monkeypatch):
     seen = []
     monkeypatch.setattr(metrics, 'record_send_failure', lambda code: seen.append(code))
-    assert sys.modules.get('plugins.LGTBot_ElainaBot.mod.metrics') is metrics
+    assert sys.modules.get('plugins.LGTBot_ElainaBot.mod.stats.metrics') is metrics
     return seen
 
 

@@ -24,7 +24,7 @@ import zipfile
 import pytest
 
 # conftest.py 已 inject 假 boot(PREBUILT_DIR/LOCAL_BUILD_DIR 已备),这里安全 import
-from plugins.LGTBot_ElainaBot.mod import prebuilt
+from plugins.LGTBot_ElainaBot.mod.ops import prebuilt
 
 
 @pytest.fixture(autouse=True)
@@ -351,7 +351,7 @@ def test_extract_and_swap_replaces_existing(tmp_path):
 # 目录被占用的暂存换入(_prebuilt_swap + _extract_and_swap 降级)
 # ─────────────────────────────────────────────────────────────────────────
 
-from plugins.LGTBot_ElainaBot.mod import _prebuilt_swap as swp  # noqa: E402  零依赖
+from plugins.LGTBot_ElainaBot.mod.ops import _prebuilt_swap as swp  # noqa: E402  零依赖
 
 
 def test_prebuilt_swap_stage_and_finalize(tmp_path):
@@ -529,7 +529,7 @@ def test_trim_release_incoming_sha(tmp_path):
 # 该模块 import aiohttp,故用 importorskip 守卫。
 def _dash():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_dashboard
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import dashboard as page_dashboard
     return page_dashboard
 
 

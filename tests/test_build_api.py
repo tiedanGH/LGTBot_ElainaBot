@@ -19,7 +19,7 @@ from plugins.LGTBot_ElainaBot.mod import state
 
 def _api():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import build_api
+    from plugins.LGTBot_ElainaBot.mod.webui.api import build as build_api
     return build_api
 
 

@@ -21,7 +21,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.LGTBot_ElainaBot.mod import buttons, config, dispatcher
+from plugins.LGTBot_ElainaBot.mod import config, dispatcher
+from plugins.LGTBot_ElainaBot.mod.messaging import buttons
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -245,7 +246,7 @@ def test_apply_non_bool_keeps_current_value(monkeypatch, bad):
 def test_validator_requires_real_bool():
     """面板校验器与运行时同语义:bool 字段填数字是错误,填 true/false 通过。"""
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
 
     errors, _w = page_config._validate_config_yaml('sponsor_enabled: 1')
     assert any('sponsor_enabled' in e and '布尔' in e for e in errors)
@@ -260,7 +261,7 @@ def test_validator_requires_real_bool():
 
 def _page_config():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import page_config
+    from plugins.LGTBot_ElainaBot.mod.webui.pages import config as page_config
     return page_config
 
 
@@ -345,7 +346,8 @@ def test_panel_markers_missing_falls_back_to_full_template(monkeypatch, attr, la
 
 def test_sponsors_txt_is_backed_up():
     """名单是手工维护的内容,丢了没法从任何地方重建 —— 必须进备份清单。"""
-    from plugins.LGTBot_ElainaBot.mod import backup, boot
+    from plugins.LGTBot_ElainaBot.mod import boot
+    from plugins.LGTBot_ElainaBot.mod.ops import backup
     import os
 
     path = os.path.join(boot.DATA_DIR, 'sponsors.txt')

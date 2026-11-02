@@ -42,12 +42,14 @@ import os
 from aiohttp import web
 
 from core.plugin import web_pages
-from .. import audit, metrics
 from .. import state as _plugin_state
-from . import at_all_api, build_api, page_crash, restart_api
-from . import (page_audit, page_backup, page_build, page_config, page_dashboard,
-               page_review,
-               page_logs, page_metrics, page_prebuilt, page_users)
+from ..ops import audit
+from ..stats import metrics
+from .api import at_all as at_all_api, build as build_api, restart as restart_api
+from .pages import (audit as page_audit, backup as page_backup, build as page_build,
+                    config as page_config, crash as page_crash, dashboard as page_dashboard,
+                    logs as page_logs, metrics as page_metrics, prebuilt as page_prebuilt,
+                    review as page_review, users as page_users)
 
 
 PAGE_KEY = 'lgtbot'

@@ -18,7 +18,7 @@ from plugins.LGTBot_ElainaBot.mod import dispatcher, state
 
 def _apis():
     pytest.importorskip('aiohttp')
-    from plugins.LGTBot_ElainaBot.mod.webui import build_api, restart_api
+    from plugins.LGTBot_ElainaBot.mod.webui.api import build as build_api, restart as restart_api
     return build_api, restart_api
 
 
