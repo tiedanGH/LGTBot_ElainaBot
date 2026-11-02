@@ -6,6 +6,12 @@
 `message.button_enter_to_send` 时，框架 keyboard.py 会把 `type=2 + enter=True`
 转成 `type=1`，而 type=1 只触发 INTERACTION、永远不回填输入框。不带 enter 的
 type=2 点击后文字回填到输入框，由用户手动发送。
+
+回调按钮（type=1）用官方按钮组 ``group_id``：同组有一颗被点后组内按钮置灰不可点，只对 type=1 生效。
+  · 更多功能 / 疑难解答等每颗单独成组，点一次就失效：用户翻到旧消息点按钮，回复出现在最底下看不到，会一直点；要再用就重发菜单
+  · 数据统计的候选游戏共用一组，选一个后其余置灰
+  · 蓝底（style=4）按钮不成组：置灰后和可点时几乎看不出区别，照常可反复点
+  · 「🔄 刷新会话」不分组（见 quota.build_refresh_button）：每次点击都要续一轮被动额度
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ from .. import game_switch
 # ──────── 按钮构造函数 ──────────────────────────────────────────────────────
 
 def btn(text: str, data: str = '', *, type: int = 2, style: int = 0,
-        link: str = '', admin: bool = False) -> dict:
+        link: str = '', admin: bool = False, group: str = '') -> dict:
     """构造单个按钮 dict(本插件唯一按钮入口,统一不带 ``enter``,见模块 docstring)。
 
     Args:
@@ -29,12 +35,17 @@ def btn(text: str, data: str = '', *, type: int = 2, style: int = 0,
         link:   非空则生成链接按钮(仅 ``{'text','link'}``,QQ 侧按 type=0 跳转处理,不带 style)
         admin:  True = **仅群主 / 群管理员可点**(框架 keyboard.py 据此下发
                 ``permission {'type': 1}``;默认所有人可点 ``{'type': 2}``)
+        group:  按钮组 ``group_id``(见模块 docstring);只对 ``type=1`` 生效,其他类型传了直接报错
     """
+    if group and (link or type != 1):
+        raise ValueError(f'按钮组只对回调按钮生效: {text}')
     if link:
         return {'text': text, 'link': link}
     b = {'text': text, 'data': data, 'type': type, 'style': style}
     if admin:
         b['admin'] = True
+    if group:
+        b['group_id'] = group
     return b
 
 
@@ -75,16 +86,16 @@ BTN_FORCE_INTERRUPT = btn('🛑 强制中断游戏', '%中断', style=3, admin=T
 # 欢迎菜单固定区(type=1 callback 版帮助 / 列表 —— 菜单上点击即触发不回填)
 BTN_MENU_HELP       = btn('📖 查看帮助', '/帮助', type=1, style=4)
 BTN_MENU_GAME_LIST  = btn('🎲 游戏列表', '/游戏列表', type=1, style=4)
-BTN_MORE_FEATURES   = btn('🧩 更多功能', '更多功能', type=1, style=1)
+BTN_MORE_FEATURES   = btn('🧩 更多功能', '更多功能', type=1, style=1, group='more')
 # 「更多功能」子菜单
 BTN_ANNOUNCEMENT    = btn('📢 更新公告', '更新公告', type=1, style=4)
 # 「更新公告」底部
 BTN_NOTICE_OLDER    = btn('📜 历史更新公告', '历史更新公告', type=1, style=4)
 BTN_DATA_STATS      = btn('📈 数据统计', '数据统计', type=1, style=4)
-BTN_TROUBLESHOOT    = btn('❓ 疑难解答', '疑难解答', type=1, style=0)
+BTN_TROUBLESHOOT    = btn('❓ 疑难解答', '疑难解答', type=1, style=0, group='faq')
 BTN_ABOUT           = btn('ℹ️ 关于框架', '/关于', style=1)
 # 赞助入口(type=1 callback:点击直接触发「赞助支持」)
-BTN_SPONSOR         = btn('❤️ 赞助支持', '赞助支持', type=1, style=1)
+BTN_SPONSOR         = btn('❤️ 赞助支持', '赞助支持', type=1, style=1, group='sponsor')
 # 链接按钮(点击跳外部 URL,不依赖 bot 进程存活)
 BTN_OFFICIAL_GROUP  = btn('💬 官方群聊', link=_OFFICIAL_GROUP_LINK)
 BTN_FEEDBACK        = btn('🛠️ 问题反馈', link=_QUESTIONNAIRE_LINK)
@@ -196,6 +207,8 @@ def build_game_list_buttons() -> list[list[dict]]:
 # 候选游戏按钮最多 4 排:按钮上限 5 排,末排留给「游戏列表」
 _SUGGEST_ROWS_MAX = 4
 _SUGGEST_BUTTONS_MAX = _SUGGEST_ROWS_MAX * 3
+# 全部候选共用一个按钮组:选一个后其余置灰
+_SUGGEST_GROUP = 'stats_pick'
 
 
 def _suggest_row_sizes(n: int) -> list[int]:
@@ -216,7 +229,7 @@ def build_game_suggest_buttons(names) -> list[list[dict]]:
     rows: list[list[dict]] = []
     i = 0
     for k in _suggest_row_sizes(len(names)):
-        rows.append([btn(f'📈 {n}' if len(names) == 1 else n, f'数据统计 {n}', type=1, style=1)
+        rows.append([btn(f'📈 {n}' if len(names) == 1 else n, f'数据统计 {n}', type=1, style=1, group=_SUGGEST_GROUP)
                      for n in names[i:i + k]])
         i += k
     rows.append([BTN_GAME_LIST])

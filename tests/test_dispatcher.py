@@ -1878,7 +1878,7 @@ def test_game_suggest_buttons_style_emoji_and_cap():
     """回调按钮 + style 1;只有一个候选时带 emoji,多个时省掉;超过 12 个截掉,键盘不超过 5 排。"""
     b = dispatcher.buttons
     one = b.build_game_suggest_buttons(['天赋云巢'])[0][0]
-    assert one == {'text': '📈 天赋云巢', 'data': '数据统计 天赋云巢', 'type': 1, 'style': 1}
+    assert one == {'text': '📈 天赋云巢', 'data': '数据统计 天赋云巢', 'type': 1, 'style': 1, 'group_id': 'stats_pick'}
     many = b.build_game_suggest_buttons(['五子棋', '困兽棋'])[0]
     assert [x['text'] for x in many] == ['五子棋', '困兽棋']
     assert all(x['type'] == 1 and x['style'] == 1 for x in many)
