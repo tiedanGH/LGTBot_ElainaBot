@@ -12,6 +12,7 @@ type=2 点击后文字回填到输入框，由用户手动发送。
   · 数据统计的候选游戏共用一组，选一个后其余置灰
   · 蓝底（style=4）按钮不成组：置灰后和可点时几乎看不出区别，照常可反复点
   · 「🔄 刷新会话」不分组（见 quota.build_refresh_button）：每次点击都要续一轮被动额度
+  · 回调事件不带 group_id，按钮冷却按 data 认出按钮组按钮（见 is_group_data）
 """
 
 from __future__ import annotations
@@ -104,6 +105,14 @@ BTN_REPO_ADAPTER    = btn('适配层 仓库', link=_REPO_ADAPTER_LINK)
 BTN_REPO_LGTBOT     = btn('LGTBot 仓库', link=_REPO_LGTBOT_LINK)
 BTN_SPONSOR_PAGE    = btn('🍚 投喂入口', link=_SPONSOR_PAGE_LINK)
 BTN_AFDIAN          = btn('⚡ 爱发电', link=_AFDIAN_LINK)
+
+# 按钮组按钮的回调 data(数据统计候选另按前缀认,见 is_group_data)
+_GROUP_DATA = frozenset(v['data'] for k, v in list(globals().items()) if k.startswith('BTN_') and v.get('group_id'))
+
+
+def is_group_data(data: str) -> bool:
+    """回调 data 是否来自按钮组按钮:回调事件不带 group_id,只能按 data 认。"""
+    return data in _GROUP_DATA or data.startswith(_SUGGEST_DATA_PREFIX)
 
 
 # ──────── 组装函数(挂载点见各 docstring) ────────────────────────────────────
@@ -209,6 +218,7 @@ _SUGGEST_ROWS_MAX = 4
 _SUGGEST_BUTTONS_MAX = _SUGGEST_ROWS_MAX * 3
 # 全部候选共用一个按钮组:选一个后其余置灰
 _SUGGEST_GROUP = 'stats_pick'
+_SUGGEST_DATA_PREFIX = '数据统计 '
 
 
 def _suggest_row_sizes(n: int) -> list[int]:
@@ -229,7 +239,7 @@ def build_game_suggest_buttons(names) -> list[list[dict]]:
     rows: list[list[dict]] = []
     i = 0
     for k in _suggest_row_sizes(len(names)):
-        rows.append([btn(f'📈 {n}' if len(names) == 1 else n, f'数据统计 {n}', type=1, style=1, group=_SUGGEST_GROUP)
+        rows.append([btn(f'📈 {n}' if len(names) == 1 else n, f'{_SUGGEST_DATA_PREFIX}{n}', type=1, style=1, group=_SUGGEST_GROUP)
                      for n in names[i:i + k]])
         i += k
     rows.append([BTN_GAME_LIST])

@@ -58,6 +58,15 @@ def test_different_buttons_never_share_a_group():
                 assert len(datas) == 1, (name, gid, datas)
 
 
+def test_group_buttons_are_recognized_by_data():
+    """回调事件不带 group_id,按钮冷却按 data 认出按钮组按钮:成组的都认得出,不成组的回调按钮不能被认成按钮组按钮。"""
+    for name, kb in _keyboards().items():
+        for row in kb:
+            for x in row:
+                if x.get('type') == 1:
+                    assert buttons.is_group_data(x['data']) == bool(x.get('group_id')), (name, x['text'])
+
+
 def test_stats_candidates_share_one_group():
     rows = buttons.build_game_suggest_buttons(['五子棋', '困兽棋', '天赋云巢'])
     assert {x['group_id'] for row in rows[:-1] for x in row} == {'stats_pick'}

@@ -552,13 +552,14 @@ def _answer_button(event) -> bool:
     """应答一次非刷新回调按钮。冷却中返回 False,调用方直接 return:不回复、不派发、不登记被动引用。
 
     冷却内再点同一个按钮回「重复操作」,点别的按钮回「操作频繁」。刷新按钮不走这里,每次点击都照常续一轮额度。
+    按钮组按钮(buttons.is_group_data)冷却内点别的按钮也放行:客户端点下去就置灰,拦下就再也点不了;点击时刻照常记下,重复点同一个照样拦,免得旧消息里同文案、不在按钮组的按钮被连点。
     """
     uid = event.user_id or ''
     data = (event.content or '').strip()
     now = time.monotonic()
     if uid and BUTTON_COOLDOWN > 0:
         last = _button_last.get(uid)
-        if last is not None and now - last[0] < BUTTON_COOLDOWN:
+        if last is not None and now - last[0] < BUTTON_COOLDOWN and (data == last[1] or not buttons.is_group_data(data)):
             code = _CB_REPEAT if data == last[1] else _CB_BUSY
             event.set_callback_code(code)
             log.debug(f'⏳ [按钮冷却] {uid} 冷却中点击，回{"重复操作" if code == _CB_REPEAT else "操作频繁"}')

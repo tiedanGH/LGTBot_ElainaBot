@@ -307,6 +307,26 @@ async def test_refresh_clicks_skip_the_cooldown_and_each_adds_a_full_round(patch
     assert 'R3' in [r['ref_value'] for r in quota._active_ref['g:G_CD']]
 
 
+async def test_group_button_clicks_skip_the_cross_button_cooldown(patched_downstream, engine_calls):
+    """★ 冷却内点按钮组按钮(更多功能)照样放行:客户端点下去就置灰,拦下就再也点不了;点击时刻照常记下,紧接着点别的按钮仍回「操作频繁」;冷却内重复点同一个照样回「重复操作」,旧消息里同文案、不在按钮组的按钮不会被连点。"""
+    _state.started = True
+    await dispatcher.lgtbot_interaction_dispatch(_click('/规则 决胜五子', 'E1'), None)
+    more = _click('更多功能', 'E2')
+    await dispatcher.lgtbot_more_features(more, None)
+    more.set_callback_code.assert_called_once_with(0)
+    more.reply.assert_awaited_once()
+
+    other = _click('/加入', 'E3')
+    await dispatcher.lgtbot_interaction_dispatch(other, None)
+    other.set_callback_code.assert_called_once_with(2)
+
+    again = _click('更多功能', 'E4')
+    await dispatcher.lgtbot_more_features(again, None)
+    again.set_callback_code.assert_called_once_with(3)
+    again.reply.assert_not_awaited()
+    assert len(engine_calls) == 1
+
+
 def test_every_button_entry_answers_through_the_cooldown_gate():
     """★ 接 INTERACTION 的 handler 一律经 _answer_button 应答(刷新按钮除外)—— 新入口漏了它,冷却就对这个按钮失效。"""
     import inspect
