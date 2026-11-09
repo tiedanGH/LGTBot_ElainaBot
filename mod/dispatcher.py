@@ -818,9 +818,16 @@ _SPAN_VIEWS = {
 
 
 def _at(event) -> str:
-    """回复开头 @ 发送者的写法,与引擎回执同样按场景改写(见 helpers.outbound_text):群聊 @,私信换成玩家昵称。"""
+    """回复开头 @ 发送者:群聊按场景写法(见 helpers.outbound_text);私信不支持 @、也不必点名,返回空串,由 _with_at 整行省掉。"""
     gid = event.group_id or event.channel_id or ''
-    return helpers.outbound_text(f'<@{event.user_id or ""}>', bool(event.is_group and gid))
+    if not (event.is_group and gid):
+        return ''
+    return helpers.outbound_text(f'<@{event.user_id or ""}>', True)
+
+
+def _with_at(at: str, text: str) -> str:
+    """正文前接 ``_at`` 给的 @ 前缀,单独一行;私信前缀为空时直接返回正文。"""
+    return f'{at}\n{text}' if at else text
 
 
 def _stats_image_md(at: str, w: int, h: int, url: str) -> str:
@@ -828,7 +835,7 @@ def _stats_image_md(at: str, w: int, h: int, url: str) -> str:
 
     不换行时 QQ 客户端会把 @ 和图片挤在同一行的上下沿,视觉上黏成一块。
     """
-    return f'{at}\n![数据统计 #{w}px #{h}px]({url})'
+    return _with_at(at, f'![数据统计 #{w}px #{h}px]({url})')
 
 
 def _parse_stats_date(year: int, mm: str, dd: str, today, hint: str) -> tuple:
@@ -941,12 +948,12 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
     t0 = time.perf_counter()
     stats = await asyncio.get_running_loop().run_in_executor(None, query)
     if not stats.get('available'):
-        await event.reply(f'{_at(event)}\n❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(_with_at(_at(event), '❌ 数据统计暂不可用，请稍后再试'))
         return
     cfg = _SPAN_VIEWS[view]
     matches = stats.get(f'{prefix}_matches')
     if not matches and cfg['empty']:
-        await event.reply(f'{_at(event)}\n❌ {label} 无统计数据（{cfg["empty"]}）')
+        await event.reply(_with_at(_at(event), f'❌ {label} 无统计数据（{cfg["empty"]}）'))
         return
     players = stats.get(f'{prefix}_players')
     groups = stats.get(f'{prefix}_groups')
@@ -999,7 +1006,6 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
 
     period, who = cfg['period'], cfg['who']
     lines = [
-        _at(event),
         f'📈 LGT-Bot 数据统计 ({label})',
         f'🎮 {period}对局: {_n(matches)} 局{_delta_suffix(matches, prev["matches"])}',
         f'👤 {who}玩家: {_n(players)} 人{_delta_suffix(players, prev["players"])}',
@@ -1020,7 +1026,7 @@ async def _reply_period_stats(event, view: str, query, prefix: str,
         lines += [f'  {i}、{helpers.sanitize_md_name(p["display"])} ({p["count"]}局)'
                   for i, p in enumerate(top_players[:3], 1)]
     lines.append(f'🕒 查询耗时: {elapsed}ms')
-    await event.reply('\n'.join(lines))
+    await event.reply(_with_at(_at(event), '\n'.join(lines)))
 
 
 async def _reply_date_stats(event, target_day) -> None:
@@ -1079,11 +1085,11 @@ def _delta_suffix(cur, base) -> str:
 
 def _game_not_found_md(at: str, suggestions: list) -> str:
     """游戏名对不上:报错 + 候选 + 日期查询用法(``at`` 是 ``_at`` 给的 @ 前缀)。候选取自库里的游戏名(可控白名单),可以列出来。"""
-    lines = [at, '❌ 游戏不存在或暂无计分对局']
+    lines = ['❌ 游戏不存在或暂无计分对局']
     if suggestions:
         lines.append('💡 你要找的可能是：' + '、'.join(helpers.sanitize_md_name(s) for s in suggestions))
     lines += ['', _STATS_DATE_USAGE]
-    return '\n'.join(lines)
+    return _with_at(at, '\n'.join(lines))
 
 
 def _game_stats_text(at: str, gs: dict, elapsed_ms: int) -> str:
@@ -1100,7 +1106,6 @@ def _game_stats_text(at: str, gs: dict, elapsed_ms: int) -> str:
     att, gm, wr = gs.get('attendances'), gs.get('group_matches'), gs.get('week_rank')
     gp, wn = gs.get('group_players'), gs.get('week_game_count')
     lines = [
-        at,
         f'🎮 《{md(gs.get("game_name") or "")}》游戏统计 (截至{time.strftime("%H:%M")})',
         f'🎲 累计对局: {_n(gs.get("matches"))} 局{_paren("" if att is None else f"{att} 人次")}',
         f'👤 累计玩家: {_n(gs.get("players"))} 人{_paren("" if gp is None else f"本群 {gp} 人")}',
@@ -1130,7 +1135,7 @@ def _game_stats_text(at: str, gs: dict, elapsed_ms: int) -> str:
         lines.append(f'🙋 我的: {me["matches"]} 局（第 {me["rank"]} 名）'
                      f'· 实力 {stats_image.fmt_rate(me["rate"])}（{power_rank}）')
     lines.append(f'🕒 查询耗时: {elapsed_ms}ms')
-    return '\n'.join(lines)
+    return _with_at(at, '\n'.join(lines))
 
 
 async def _reply_game_stats(event, query: str) -> None:
@@ -1148,7 +1153,7 @@ async def _reply_game_stats(event, query: str) -> None:
         None, metrics.query_game_detail, query, uid, gid if is_group else '')
     elapsed = _elapsed_ms(t0)
     if not gs.get('available'):
-        await event.reply(f'{_at(event)}\n❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(_with_at(_at(event), '❌ 数据统计暂不可用，请稍后再试'))
         return
     if not gs.get('found'):
         sugg = gs.get('suggestions') or []
@@ -1218,7 +1223,7 @@ async def lgtbot_data_stats(event, match):
     if kind == 'ignore':
         return
     if err:
-        await event.reply(f'{_at(event)}\n❌ {err}')
+        await event.reply(_with_at(_at(event), f'❌ {err}'))
         return
     if kind == 'game':
         await _reply_game_stats(event, payload)
@@ -1247,7 +1252,7 @@ async def lgtbot_data_stats(event, match):
     loop = asyncio.get_running_loop()
     g = await loop.run_in_executor(None, metrics.query_game_stats)
     if not g.get('available'):
-        await event.reply(f'{_at(event)}\n❌ 数据统计暂不可用，请稍后再试')
+        await event.reply(_with_at(_at(event), '❌ 数据统计暂不可用，请稍后再试'))
         return
 
     # bot 规模:绑定 bot 当前所在群数 + 好友数,带今日净变化角标。只在今日视图注入。
@@ -1288,7 +1293,6 @@ async def lgtbot_data_stats(event, match):
 
     # 涨跌对比昨日同时段
     lines = [
-        _at(event),
         f'📈 LGT-Bot 数据统计 (截至{time.strftime("%H:%M")})',
         f'🎮 今日对局: {_n(g.get("today_matches"))} 局'
         f'{_delta_suffix(g.get("today_matches"), g.get("yesterday_matches_same_span"))}',
@@ -1348,7 +1352,7 @@ async def lgtbot_data_stats(event, match):
             else:
                 lines.append(f'📮 {scope}今日主动消息: {pq["used"]} 条{total}')
     lines.append(f'🕒 查询耗时: {elapsed}ms')
-    await event.reply('\n'.join(lines))
+    await event.reply(_with_at(_at(event), '\n'.join(lines)))
 
 
 @handler(_P_TROUBLE,

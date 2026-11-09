@@ -679,16 +679,17 @@ async def test_dispatch_denies_group_admin_super_cmd(patched_downstream, monkeyp
 
 
 def test_reply_prefix_follows_the_scene(monkeypatch):
-    """插件自己回复开头的 @ 与引擎回执同样改写:群聊跟 new_at_format 开关,私信换成玩家昵称。"""
-    monkeypatch.setattr(dispatcher.helpers.userinfo, 'get_name', lambda uid: '铁蛋')
+    """★ 插件自己回复开头的 @:群聊跟 new_at_format 开关;私信不支持 @,前缀整行省掉,正文直接顶格(引擎消息里的 @ 才换成玩家昵称)。"""
     group = _mock_event(is_group=True, group_id='G1', user_id='U1')
     dm = _mock_event(is_group=False, user_id='ABCDEFGH1234')
     assert dispatcher._at(group) == '<@U1>'
-    assert dispatcher._at(dm) == '<铁蛋(ABCD…1234)>'
+    assert dispatcher._at(dm) == ''
+    assert dispatcher._with_at(dispatcher._at(group), '❌ x') == '<@U1>\n❌ x'
+    assert dispatcher._with_at(dispatcher._at(dm), '❌ x') == '❌ x'
     monkeypatch.setattr(dispatcher.helpers, 'NEW_AT_FORMAT', True)
     assert dispatcher._at(group) == '<qqbot-at-user id="U1" />'
     assert dispatcher._super_admin_denied_text('U1').startswith('<qqbot-at-user id="U1" />\n[错误] ')
-    assert dispatcher._at(dm) == '<铁蛋(ABCD…1234)>'
+    assert dispatcher._at(dm) == ''
 
 
 async def test_dispatch_plain_user_super_cmd_goes_to_engine(patched_downstream, monkeypatch):
@@ -1797,6 +1798,12 @@ async def _run_game_stats(monkeypatch, cmd, result, *, is_group=True):
     await dispatcher.lgtbot_data_stats(ev, _re.search(dispatcher._P_STATS, cmd, _re.DOTALL))
     ev.reply.assert_awaited_once()
     return ev.reply.await_args, seen
+
+
+def test_dm_game_stats_texts_start_with_the_body():
+    """私信的 @ 前缀为空:游戏统计的报错与文本保底都从正文开始,不留空行。"""
+    assert dispatcher._game_not_found_md('', ['五子棋']).startswith('❌ 游戏不存在或暂无计分对局\n💡 ')
+    assert dispatcher._game_stats_text('', _game_detail(), 12).startswith('🎮 《天赋云巢》游戏统计')
 
 
 async def test_game_stats_text_fallback(monkeypatch):

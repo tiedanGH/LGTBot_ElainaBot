@@ -523,6 +523,21 @@ async def test_today_view_image_reply_has_the_newline(monkeypatch, _stats_env):
     assert ev.reply.await_args.args[0].startswith('<@USER1>\n![数据统计 ')
 
 
+async def test_dm_stats_reply_is_the_image_alone(monkeypatch, _stats_env):
+    """★ 私信的「数据统计」直接发图:私信不支持 @,开头不点名,也不留空行。"""
+    monkeypatch.setattr(uploader, 'SELECTED_BACKEND', 'cos')
+    png = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0DIHDR' + (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
+    monkeypatch.setattr(dispatcher.stats_image, 'render_stats_image', lambda g, sub, elapsed_ms=None: png)
+
+    async def fake_upload(data, filename, user_id='', *, target_id='', target_is_uid=False):
+        return 'https://cdn.example/stats.png'
+    monkeypatch.setattr(dispatcher.uploader, 'upload_image', fake_upload)
+
+    ev = _fake_event(is_group=False)
+    await dispatcher.lgtbot_data_stats(ev, None)
+    assert ev.reply.await_args.args[0] == '![数据统计 #640px #480px](https://cdn.example/stats.png)'
+
+
 async def test_window_view_image_reply_has_the_newline(monkeypatch, _stats_env):
     """窗口视图(这里用「数据统计总」)走的是另一个出口,同样带换行。"""
     import re as _re
