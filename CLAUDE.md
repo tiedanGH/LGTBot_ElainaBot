@@ -187,7 +187,7 @@ mod/quota: fix race                            # 不要带路径
 | `dispatcher`  | `@handler` 注册（消息派发 + INTERACTION）                                                                                                                            |
 | `game_switch` | 游戏开关（启动前拼出只含启用游戏的视图目录 + 开局拦截）                                                                                                                                |
 | `messaging/`  | 发送链路：`quota`（被动消息引用配额）/ `buttons`（按钮模板）/ `uploader`（图床上传）/ `log_attribution`（类级 monkey-patch `MessageSender`，push 归类为「LGTBot 消息派发」+ 发送失败计数）/ `at_all`（@全体成员） |
-| `users/`      | `userinfo`（主框架用户数据只读门面；昵称缓存 + 变化时写回）/ `nickname_review`（昵称审核）                                                                                                |
+| `users/`      | `userinfo`（主框架用户数据只读门面；昵称缓存 + 变化时写回）/ `nickname_review`（昵称审核）/ `titles`（玩家头衔）                                                                                |
 | `stats/`      | `metrics`（运行指标 + lgtbot.db 统计查询）/ `stats_image`（统计卡片渲染）                                                                                                      |
 | `announce/`   | `notice`（更新公告分段）/ `urgent`（紧急公告）                                                                                                                             |
 | `ops/`        | `audit`（操作审计）/ `backup`（数据备份）/ `prebuilt` + `_prebuilt_swap`（预编译包）/ `corefile`（游戏 core 文件解析）                                                                 |

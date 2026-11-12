@@ -223,6 +223,7 @@ a.dash-btn-primary, a.dash-btn-primary:visited { color: var(--accent-text); }
 .review,
 .crash,
 .metrics,
+.titles,
 .prebuilt { display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
 
 .dash-section {

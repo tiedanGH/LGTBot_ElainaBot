@@ -71,6 +71,9 @@ def _collect_sources() -> list[tuple[str, str, str]]:
         ('data/sponsors.txt',         os.path.join(boot.DATA_DIR, 'sponsors.txt'),         'plain'),
         # 游戏开关的停用名单
         ('data/games_disabled.json',  os.path.join(boot.DATA_DIR, 'games_disabled.json'),  'plain'),
+        # 玩家头衔:头衔库 + 等级表
+        ('data/titles/titles.json',   os.path.join(boot.DATA_DIR, 'titles', 'titles.json'),   'plain'),
+        ('data/titles/levels.json',   os.path.join(boot.DATA_DIR, 'titles', 'levels.json'),   'plain'),
     ]
     return [(arc, abs_p, kind) for arc, abs_p, kind in candidates
             if os.path.isfile(abs_p)]

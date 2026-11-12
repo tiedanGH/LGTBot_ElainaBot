@@ -11,7 +11,7 @@
 ![license](https://img.shields.io/badge/license-LGPLv2-orange.svg)
 [![CMake](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/cmake.yml/badge.svg)](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/cmake.yml)
 [![pytest](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/pytest.yml/badge.svg)](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/pytest.yml)
-[![QQ Group](https://img.shields.io/badge/QQ%20Group-1059834024-0085F0.svg)](https://qun.qq.com/universal-share/share?ac=1&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw&svctype=4&tempid=h5_group_info)
+[![QQ Group](https://img.shields.io/badge/QQ%20Group-1059834024-0085F0.svg)](https://qm.qq.com/q/R3GXMpMU2m)
 
 </div>
 
@@ -79,6 +79,7 @@
   - `/新游戏` `/加入` 等自动附交互按钮，游戏结束附快捷重开按钮
 - **数据统计指令** —— 统计卡片图，按日、月、年周期统计涨跌、主动消息额度与今日总计、10 日趋势、好友 / 群聊总数
   - **游戏统计**：`数据统计 游戏名` 查单个游戏的累计与近 7 日局数 / 玩家、热度排名、12 周趋势、局数与实力排行
+- **玩家头衔** —— 持有头衔的玩家在新建 / 加入房间后播报头衔提示
 - **更新公告** —— 按日期行自动分段，默认只发最新一段
   - 「历史更新公告」通过日期区间列表汇总，可查看指定时间段的更新公告与重要更新
 - **紧急公告** —— 面板「配置管理」里可编辑公告文案，实时读盘
@@ -106,16 +107,15 @@
 ### 🖥️ Web 面板与运维
 
 - **Web 面板拓展页** —— 侧边栏「LGTBot 机器人」单页多标签
-  - 仪表盘 / 指标面板 / 配置管理 / 预编译部署 / 引擎编译 / 数据备份 / 消息日志 / 操作审计 / 昵称审核 / 崩溃转储 / 用户数据
+  - 仪表盘 / 指标面板 / 配置管理 / 预编译部署 / 引擎编译 / 头衔系统 / 数据备份 / 消息日志 / 操作审计 / 昵称审核 / 崩溃转储 / 用户数据
   - 含一键更新、缓存清理、运行环境自检、在线编辑配置（可视化）与整进程重启
   - 明暗主题：**自动**（默认跟随主框架面板的夜间模式）/ 浅色 / 深色
 - **运维观测** —— 指标 / 审计 / 崩溃三条观测线
   - **指标面板**：数据统计、图床成功率、配额压力与异常发送失败、发送失败总计、重启累计、@全体次数、游戏数据、主动消息、排行榜、10 日趋势
-  - **操作审计**：编译 / 备份 / 清缓存 / 更新 / 配置 / 重启 / 换绑等状态变更
+  - **操作审计**：编译 / 备份 / 清缓存 / 头衔 / 更新 / 配置 / 重启 / 换绑等状态变更
   - **昵称审核**：连接「AI LLM 服务」判定用户昵称是否违规，违规昵称统一显示为匿名（默认关闭，接口与模型在该标签页选择）
   - **崩溃转储**：查看引擎 SIGSEGV / SIGBUS / SIGABRT 的 backtrace dump；另列**游戏子进程 core 文件**（游戏崩溃不影响主进程），读 ELF note 解析出信号 / 出错地址 / 是哪个游戏 / 崩溃模块
-- **机器人绑定** —— 多 bot 部署时在仪表盘可视化选择本插件服务的机器人
-  - 消息收发、全量群数据、邀请链接、错误推送均固定走绑定 bot，其他 bot 的事件静默忽略
+- **机器人绑定** —— 多 bot 部署时在仪表盘可视化选择本插件服务的机器人，其他 bot 的事件静默忽略
 - **自动化 API** —— 面向框架内其他插件的 HTTP 接口，独立 token 认证（面板一键复制）
   - 编译：`POST /api/ext/lgtbot/build/compile`（`{"target": "<名称>", "new": bool}`，同步等待并返回用时）与 `.../build/terminate`（强制中断）；完整增量编译不开放
   - 状态：`GET .../build/status` —— 只读探测编译服务此刻是否可用
@@ -124,7 +124,7 @@
 
 ## 开发计划（TODO）
 
-规划中的改进方向，欢迎在 [QQ 群](https://qun.qq.com/universal-share/share?ac=1&authKey=GLoA6W7KujPW%2B%2B%2FeirVZVVEn61q%2FAmLFyd9mkJ8u%2Bv0E%2B2IooquHavHi9iaJSxKK&busi_data=eyJncm91cENvZGUiOiIxMDU5ODM0MDI0IiwidG9rZW4iOiJsTUFlUHZsdVJpSUhTc2dLSTBoeDI2M0IxS09kTGg3NzFsd1dvaVVLajVqTTIvRm9zaGlMTHBrekRIOGdVZHlaIiwidWluIjoiMjI5NTgyNDkyNyJ9&data=IMqVKIvDehyMv2ooaqlgzql0-Q9XENN4pK6qGR1mqYoZH5AFDBMmrflWNEFN-EOLeKuJTxLABAwgaaUnUp-iyw&svctype=4&tempid=h5_group_info) 或 issue 中讨论：
+规划中的改进方向，欢迎在 [QQ 群](https://qm.qq.com/q/R3GXMpMU2m) 或 issue 中讨论：
 
 - [ ] **定时任务小框架** —— 插件内建轻量定时调度，替掉现在的 ad-hoc 定时器。**固定时间**的每日备份、每日排行榜推送、过期渲染图定时清理。跨热重载不重复注册、进程重启后能补跑漏掉的任务、单个任务失败不拖垮其他任务
 - [x] **Web 面板图标 SVG 化** —— 把面板内**全部 emoji 图标**换成 SVG，摆脱各平台 emoji 字形不一致（Windows / macOS / 移动端差异明显）、无法随主题换色的问题
@@ -170,7 +170,7 @@ plugins/LGTBot_ElainaBot/
 ├── README.md                本文档
 ├── LICENSE                  LGPLv2 许可证
 │
-├── mod/                     插件功能模块（根目录放引擎桥接与共享基础模块，其余按功能分子包）
+├── mod/                     插件功能模块（按功能分子包）
 │   ├── __init__.py
 │   ├── boot.py              C++ 扩展加载（chdir + lib*.so 预加载 + RTLD_GLOBAL）
 │   ├── state.py             共享运行时状态容器（含跨重载持久化）
@@ -187,9 +187,10 @@ plugins/LGTBot_ElainaBot/
 │   │   └── at_all.py        @全体成员：当日次数 / 主动消息额度 / 管理员身份校验 + 发送 + 记账
 │   ├── users/               用户数据
 │   │   ├── userinfo.py      主框架用户数据只读门面（昵称缓存 + 变化时写回最新昵称）
-│   │   └── nickname_review.py  昵称 AI 审核：结论库（SQLite，按昵称文本永久缓存）+ 送审队列 + 批量扫描
+│   │   ├── nickname_review.py  昵称 AI 审核：结论库（SQLite，按昵称文本永久缓存）+ 送审队列 + 批量扫描
+│   │   └── titles.py        玩家头衔：头衔库 + 当前装备 + 头衔等级的读写校验，KaTeX 上色
 │   ├── stats/               统计
-│   │   ├── metrics.py       运行指标计数（上传 / 崩溃 / 配额 / @全体，重启不丢）+ lgtbot.db 统计查询 + 不计分对局账本
+│   │   ├── metrics.py       运行指标计数（上传 / 崩溃 / 配额 / @全体）+ lgtbot.db 统计查询 + 不计分对局账本
 │   │   └── stats_image.py   「数据统计」指令的统计卡片渲染（PIL，缺字体自动回退文本）
 │   ├── announce/            公告
 │   │   ├── notice.py        更新公告分段：按日期行切分，最新一段 + 更早的日期区间列表与查询
@@ -198,7 +199,7 @@ plugins/LGTBot_ElainaBot/
 │   │   ├── audit.py         状态变更操作审计（持久化最近 30 天）
 │   │   ├── backup.py        数据备份（创建 / 恢复 / 删除 / 轮转 + 启动自动检查）
 │   │   ├── prebuilt.py      预编译包下载 / 校验 / 原子安装 / 本地·预编译切换 + 依赖自检
-│   │   ├── _prebuilt_swap.py  build_prebuilt 暂存换入：目录被运行中引擎占用时暂存 pending，boot 重启换入
+│   │   ├── _prebuilt_swap.py  build_prebuilt 暂存换入：目录被占用时暂存 pending，boot 重启换入
 │   │   └── corefile.py      游戏子进程 core 文件的 ELF note 解析（信号 / 游戏名 / 崩溃模块）
 │   └── webui/               Web 面板拓展页（侧边栏「LGTBot 机器人」/ 多标签）
 │       ├── __init__.py
@@ -218,7 +219,8 @@ plugins/LGTBot_ElainaBot/
 │       │   ├── audit.py     「操作审计」标签：只读展示审计记录
 │       │   ├── review.py    「昵称审核」标签：总开关 / 存量批量扫描 / 违规记录与白名单
 │       │   ├── crash.py     「崩溃转储」标签：崩溃重启概况 + dump 列表 + 游戏 core 列表
-│       │   └── users.py     「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
+│       │   ├── users.py     「用户数据」标签：读主框架数据库（昵称 / 消息数 / 最后活跃日）
+│       │   └── titles.py    「头衔系统」标签：头衔等级新增 / 编辑，全部玩家的头衔库与当前装备
 │       └── templates/       前端模板（纯 HTML / CSS / JS，按功能分子目录）
 │           ├── main/        主骨架 / 全局 + 通用 CSS / 公共 JS / 图标 SVG
 │           ├── dashboard/   「仪表盘」标签
@@ -231,7 +233,8 @@ plugins/LGTBot_ElainaBot/
 │           ├── audit/       「操作审计」标签
 │           ├── review/      「昵称审核」标签
 │           ├── crash/       「崩溃转储」标签
-│           └── users/       「用户数据」标签
+│           ├── users/       「用户数据」标签
+│           └── titles/      「头衔系统」标签
 │
 ├── _images/                 仓库内置静态资源
 │   ├── logo_transparent_colorful.png   欢迎菜单顶部 logo
@@ -254,7 +257,7 @@ plugins/LGTBot_ElainaBot/
 │   ├── libbot_core.so       引擎核心库（运行时由 boot.py 用 ctypes 预加载）
 │   ├── markdown2image       游戏图片渲染器
 │   ├── plugins/<game>/libgame.so   各游戏插件
-│   └── plugins_enabled/     游戏开关的视图目录：有停用游戏时每次引擎启动前重建（预编译包同样建在 build_prebuilt/build/ 下）
+│   └── plugins_enabled/     游戏开关的视图目录：有停用游戏时每次引擎启动前重建（预编译包 build_prebuilt/build/）
 │
 ├── build_prebuilt/          📦 下载的预编译包解压目录（与 build/ 并存）
 │   ├── LGTBot_ElainaBot.so  预编译的桥接层（预编译模式下 boot 从此 import）
@@ -279,6 +282,9 @@ plugins/LGTBot_ElainaBot/
     ├── review/              昵称审核（面板「昵称审核」）
     │   ├── settings.json    总开关 + 接口 / 模型选择 + 批量条数（面板维护）
     │   └── nickname.db      SQLite：昵称文本 → 审核结论（永久缓存）
+    ├── titles/              玩家头衔（面板「头衔系统」）
+    │   ├── titles.json      头衔库与当前装备
+    │   └── levels.json      头衔等级：名称 + HEX 颜色
     ├── prebuilt/            预编译部署状态（面板「预编译部署」）
     │   ├── active           构建来源开关：build | build_prebuilt（boot 启动时读）
     │   └── state.json       下载进度（前端轮询）

@@ -49,6 +49,7 @@
 [data-cat="build"]   { --cat: #b3600c; --cat-solid: #a9590a; }
 [data-cat="backup"]  { --cat: #0e7a68; --cat-solid: #0c6d5d; }
 [data-cat="cache"]   { --cat: #1f74b8; --cat-solid: #1b68a6; }
+[data-cat="title"]   { --cat: #c48c00; --cat-solid: #b88300; }
 [data-cat="update"]  { --cat: #1c8043; --cat-solid: #17713a; }
 [data-cat="config"]  { --cat: #6046c4; --cat-solid: #5940b4; }
 [data-cat="restart"] { --cat: #b83a3a; --cat-solid: #a83434; }
@@ -58,6 +59,7 @@
 html[data-theme="dark"] [data-cat="build"]   { --cat: #e59a4e; }
 html[data-theme="dark"] [data-cat="backup"]  { --cat: #43c8ad; }
 html[data-theme="dark"] [data-cat="cache"]   { --cat: #6ab8ec; }
+html[data-theme="dark"] [data-cat="title"]   { --cat: #ffc72c; }
 html[data-theme="dark"] [data-cat="update"]  { --cat: #52c47a; }
 html[data-theme="dark"] [data-cat="config"]  { --cat: #a294f2; }
 html[data-theme="dark"] [data-cat="restart"] { --cat: #ef8383; }

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 import asyncio
+import threading
 from typing import Optional
 
 from . import boot
@@ -21,6 +22,9 @@ event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 # LGTBot 引擎是否已成功 start（per-load，与 boot.is_engine_running() 配合使用）
 started: bool = False
+
+# 引擎派发线程的线程局部量:引擎在 dispatcher 起的线程里同步处理指令并回调 callbacks,dispatcher 先在这里记下发起人 uid,callbacks 从广播里认不出发起人时取它。
+engine_request = threading.local()
 
 # config.yaml 的 bind_bot_appid 原值（'' = 自动取框架第一个 bot），由 config._apply_runtime_tunables 写入。
 # 解析由 helpers.get_bound_appid() 每次调用时惰性完成:插件可能早于 bot 就绪加载。

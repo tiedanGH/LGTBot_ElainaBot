@@ -50,6 +50,7 @@ CATEGORIES = {
     'config':  ('#i-config', '配置变更'),
     'update':  ('#i-upgrade', '更新维护'),
     'cache':   ('#i-broom', '缓存清理'),
+    'title':   ('#i-title', '头衔系统'),
     'backup':  ('#i-backup', '数据备份'),
     'match':   ('#i-gamepad', '对局干预'),
     'bind':    ('#i-bot', '机器人绑定'),

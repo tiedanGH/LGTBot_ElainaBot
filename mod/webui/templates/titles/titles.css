@@ -1,0 +1,205 @@
+/* 「头衔系统」标签样式 */
+
+/* ── 等级胶囊:颜色由行内 --c 给出,选中时用它做实底,文字色 --on-c 由 JS 按亮度给出 ── */
+.titles-level-bar { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.titles-level-bar[hidden], .titles-level-editor[hidden] { display: none; }
+.titles-level-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 300px; min-width: 0; }
+.titles-level-actions { display: flex; gap: 6px; flex: 0 0 auto; margin-left: auto; }
+.titles-level-actions .dash-btn { white-space: nowrap; }
+.titles-level-chip {
+  --c: var(--text-muted); --on-c: #fff;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 14px; cursor: pointer; user-select: none;
+  font-size: 12px; line-height: 1.4; font-family: inherit;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 12%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--c) 35%, var(--border));
+  transition: background .15s, color .15s, border-color .15s;
+}
+.titles-level-chip:hover { border-color: var(--c); }
+.titles-level-chip.active { background: var(--c); border-color: var(--c); color: var(--on-c); font-weight: 600; }
+.titles-level-chip.all.active { --c: var(--accent); }
+
+/* ── 等级编辑:按屏宽 1-3 列,每个等级一格 ── */
+.titles-level-editor { display: flex; flex-direction: column; gap: 10px; }
+.titles-level-rows { display: grid; gap: 8px; grid-template-columns: 1fr; }
+@media (min-width: 1100px) { .titles-level-rows { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1600px) { .titles-level-rows { grid-template-columns: repeat(3, 1fr); } }
+.titles-level-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+}
+.titles-level-pick {
+  width: 30px; height: 30px; padding: 2px; flex: 0 0 auto; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+}
+.titles-level-row input[type="text"] {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 10px; border-radius: 6px; font-size: 12px; height: 30px; min-width: 0;
+}
+.titles-level-row input[type="text"]:focus { border-color: var(--accent); outline: none; }
+.titles-level-row input::placeholder { color: var(--text-faint); }
+.titles-level-name { flex: 1 1 120px; font-weight: 600; }
+.titles-level-hexinput { flex: 0 0 96px; font-family: 'Consolas', 'Menlo', monospace; }
+.titles-level-usage { font-size: 12px; color: var(--text-faint); flex: 0 0 auto; min-width: 56px; }
+.titles-level-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ── 头衔胶囊(玩家卡片上):同样按 --c 调淡底色 / 描边 ── */
+.titles-chip {
+  --c: var(--text);
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; line-height: 1.5; font-family: inherit;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 9%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--c) 32%, var(--border));
+}
+button.titles-chip { cursor: pointer; transition: background .15s, border-color .15s; }
+button.titles-chip:hover:not(:disabled) { background: color-mix(in srgb, var(--c) 18%, var(--panel)); }
+button.titles-chip:disabled { opacity: .6; cursor: wait; }
+.titles-chip.equipped {
+  font-weight: 600;
+  background: color-mix(in srgb, var(--c) 18%, var(--panel));
+  border-color: var(--c);
+}
+button.titles-chip.equipped { cursor: default; }
+.titles-chip-icon { width: 13px; height: 13px; stroke-width: 2.4; }
+.titles-rarity { font-size: 10px; font-weight: 400; opacity: .75; }
+
+/* ── 工具栏:搜索 + 添加玩家 ── */
+.titles-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.titles-search-wrap {
+  position: relative; display: inline-flex; align-items: center;
+  flex: 0 1 280px; min-width: 200px;
+}
+.titles-search-wrap .ui-icon {
+  position: absolute; left: 9px; color: var(--text-faint); pointer-events: none;
+}
+.titles-add-wrap { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 400px; min-width: 240px; }
+.titles-toolbar input,
+.titles-edit-row input[type="text"],
+.titles-edit-row select {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  padding: 5px 10px; border-radius: 6px; font-size: 12px; height: 30px; min-width: 0;
+  transition: border-color .15s;
+}
+.titles-toolbar input:focus,
+.titles-edit-row input[type="text"]:focus,
+.titles-edit-row select:focus { border-color: var(--accent); outline: none; }
+.titles-toolbar input::placeholder,
+.titles-edit-row input::placeholder { color: var(--text-faint); }
+#titles-search { width: 100%; padding-left: 30px; }
+#titles-add-openid { flex: 1 1 auto; font-family: 'Consolas', 'Menlo', monospace; }
+.titles-add-wrap .dash-btn { flex: 0 0 auto; white-space: nowrap; }
+.titles-msg { font-size: 12px; flex: 1 1 160px; }
+.titles-msg:empty { display: none; }
+
+/* ── 玩家卡片:多列展示 ── */
+.titles-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+.titles-card {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel-2);
+}
+.titles-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.titles-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover;
+  background: var(--panel); border: 1px solid var(--border);
+}
+.titles-who { flex: 1 1 auto; min-width: 0; }
+.titles-name {
+  font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.titles-noname { color: var(--text-faint); font-weight: 400; }
+.titles-openid { font-size: 11px; line-height: 1.4; color: var(--text-muted); white-space: nowrap; }
+.titles-head-note { font-size: 11px; color: var(--warn); margin-top: 2px; }
+.titles-ops { display: flex; gap: 6px; flex: 0 0 auto; }
+.titles-ops .dash-btn { white-space: nowrap; }
+.titles-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.titles-hint { font-size: 12px; color: var(--text-faint); }
+.titles-empty {
+  grid-column: 1 / -1;
+  text-align: center; padding: 28px 16px; color: var(--text-faint); font-size: 13px;
+  border: 1px dashed var(--border); border-radius: 8px;
+}
+
+/* ── 玩家编辑弹窗:层级低于公共确认框(dash-modal) ── */
+.titles-modal-backdrop {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0, 0, 0, .5);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.titles-modal-backdrop[hidden] { display: none; }
+.titles-modal {
+  width: 100%; max-width: 680px; max-height: 88vh;
+  display: flex; flex-direction: column;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
+}
+.titles-modal-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+.titles-modal-close {
+  flex: 0 0 auto; align-self: flex-start;
+  width: 30px; height: 30px; border-radius: 6px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; color: var(--text-muted);
+}
+.titles-modal-close:hover { background: var(--hover); border-color: var(--border); color: var(--text); }
+.titles-modal-body { padding: 14px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.titles-modal-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.titles-info-label { color: var(--text-faint); }
+.titles-info-label:not(:first-child) { margin-left: 8px; }
+.titles-modal-foot {
+  padding: 12px 18px; border-top: 1px solid var(--border);
+  background: var(--panel-2); border-radius: 0 0 10px 10px;
+}
+
+/* ── 玩家编辑行 ── */
+.titles-edit-rows { display: flex; flex-direction: column; gap: 8px; }
+.titles-edit-row { display: flex; align-items: center; gap: 8px; }
+.titles-edit-idx {
+  flex: 0 0 22px; text-align: right;
+  font-family: 'Consolas', 'Menlo', monospace; font-size: 12px; color: var(--text-faint);
+}
+.titles-edit-row .titles-edit-name { flex: 1 1 200px; max-width: 280px; font-weight: 600; }
+.titles-edit-row select { flex: 0 1 160px; }
+.titles-edit-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
+.titles-eq {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  font-size: 12px; color: var(--text-muted); cursor: pointer; user-select: none;
+}
+.titles-eq input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.titles-eq-none { margin-left: 30px; }
+.titles-edit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.titles-edit-msg { flex: 1 1 160px; font-size: 12px; }
+.titles-edit-msg:empty { display: none; }
+/* 窄屏折行后「取消 / 保存」仍贴右 */
+.titles-edit-actions [data-act="cancel"], .titles-edit-actions [data-act="level-cancel"] { margin-left: auto; }
+
+.titles-note {
+  margin-top: 12px; padding: 10px 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; color: var(--text-muted); line-height: 1.7;
+}
+
+/* ── 移动端 ── */
+@media (max-width: 600px) {
+  .titles-list { grid-template-columns: 1fr; }
+  .titles-card { padding: 10px 12px; }
+  .titles-search-wrap, .titles-add-wrap { flex: 1 0 100%; min-width: 0; }
+  .titles-level-actions { margin-left: 0; }
+  /* 编辑行拆两行:序号 + 装备 + 头衔名一行,等级与移除一行 */
+  .titles-edit-row { flex-wrap: wrap; row-gap: 6px; }
+  .titles-edit-row .titles-edit-name { flex: 1 1 140px; max-width: none; }
+  .titles-edit-row select { flex: 1 1 160px; margin-left: 30px; }
+  .titles-eq-none { margin-left: 0; }
+  /* 提示单独占一行,按钮留在同一行 */
+  .titles-edit-actions .titles-edit-msg { order: 1; flex-basis: 100%; }
+  .titles-modal-backdrop { padding: 10px; }
+  .titles-modal { max-height: 94vh; }
+  .titles-modal-head, .titles-modal-body, .titles-modal-foot { padding-left: 12px; padding-right: 12px; }
+}

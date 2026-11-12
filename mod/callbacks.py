@@ -9,8 +9,8 @@
   · cb_send_image_message(...)       投递图片发送任务（fire-and-forget,瞬时返回）
 
 发送流程（跑在 asyncio loop,per-target Lock 串行）：
-  · _serialized_text_send            Lock → _send_text_quota_managed → 消费教学标记
-  · _serialized_mixed_send           Lock → _send_mixed_message → 消费教学标记
+  · _serialized_text_send            Lock → _send_text_quota_managed → 消费教学标记 → 调度头衔播报
+  · _serialized_mixed_send           Lock → _send_mixed_message → 消费教学标记 → 调度头衔播报
   · _send_text_quota_managed         自动追加刷新按钮,交给 _deliver 发送
   · _send_mixed_message              图文混排:全图上传成功 → 单条 markdown 排版内联;否则退回逐图媒体通道
   · _send_image_quota_managed        上传 + markdown / media 二选一,交给 _deliver 发送
@@ -29,12 +29,13 @@ import os
 import random
 import re
 import sys
+import threading
 import time
 
 from core.base.logger import get_logger, PLUGIN
 from . import state, helpers, boot
 from .messaging import quota, uploader, buttons, log_attribution
-from .users import userinfo
+from .users import userinfo, titles
 from .stats import metrics
 from .ops import audit
 from .webui.pages import logs as page_logs
@@ -876,6 +877,57 @@ def _consume_pending_dm_warn(key: str, target_id: str, is_uid: bool) -> None:
     _schedule_dm_warning(target_id, is_uid)
 
 
+# ──────── 头衔播报(新建 / 加入房间后单独发头衔提示) ─────────
+# 播报加入广播里玩家的头衔;建房广播不带房主,取 dispatcher 在引擎派发线程上记下的发起人(state.engine_request)。
+# 发送 task 发完广播、调度完回复限制 / 主动私信提示才调度头衔播报,几条都抢同一把 per-target Lock,头衔排在提示后面。
+# 单机局没有建房广播,不播报。
+
+_JOIN_RE = re.compile(r'玩家 <@([0-9A-Za-z_-]+)> 加入了游戏')
+_title_mark = threading.local()
+
+
+def _take_title_uid(msg: str) -> str:
+    """取走本线程上 cb_match_event 刚打的标记,换成要播头衔的玩家;没有标记或是退出广播返回空串。"""
+    kind = getattr(_title_mark, 'kind', '')
+    if not kind:
+        return ''
+    _title_mark.kind = ''
+    if kind == 'new_game':
+        return getattr(state.engine_request, 'uid', '')
+    m = _JOIN_RE.match(msg or '')
+    return m.group(1) if m else ''
+
+
+async def _send_title_notice(target_id: str, is_uid: bool, text: str, log_text: str) -> None:
+    """走标准 ``_send_text_quota_managed`` 通道发出头衔播报,与提示消息同一把 per-target Lock。"""
+    key = helpers.target_key(target_id, is_uid)
+    try:
+        async with _get_send_lock(key):
+            page_logs.log_outgoing(target_id, is_uid, log_text)
+            await _send_text_quota_managed(target_id, is_uid, text, None)
+    except Exception as e:
+        log.debug(f'头衔播报发送失败 ({target_id}): {e}')
+
+
+def _schedule_title_notice(target_id: str, is_uid: bool, uid: str) -> None:
+    """玩家装备着头衔时把播报投到 asyncio loop。
+
+    和提示消息一样走 ``run_coroutine_threadsafe``:几条按调度顺序建 task、按建 task 的顺序排队抢锁;
+    直接 ``create_task`` 会先于提示建好 task,抢到锁跑到提示前面。
+    """
+    title = titles.equipped(uid)
+    if not title:
+        return
+    loop = state.event_loop
+    if loop is None or loop.is_closed():
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(
+            _send_title_notice(target_id, is_uid, titles.join_notice(title), f'[头衔] {title["name"]} 加入游戏'), loop)
+    except Exception as e:
+        log.debug(f'调度头衔播报失败: {e}')
+
+
 # ──────── 用户信息回调（被 LGTBot 引擎调用，需返回字符串） ─────────────────
 
 def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
@@ -914,6 +966,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
       ``unknown_game_name``  /新游戏 / /规则 等误输游戏名 —— 挂「🎲 游戏列表」。
       ``about``              /关于 命令回执 —— 挂「适配层仓库 + LGT-Bot 仓库」链接按钮。
 
+    new_game / join_leave 另在本线程打头衔播报标记(见 _take_title_uid)。
+
     所有按钮通过 ``state.pending_buttons[key]`` 暂存,被随后的
     ``cb_send_text_message`` pop 出来一次性附上(bridge 调本回调 → 再调
     send_text_message,同步顺序,GIL 下读写安全)。
@@ -921,6 +975,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
     if not target_id:
         return
     key = helpers.target_key(target_id, is_uid)
+    # 每条分类过的广播都重置标记,文字为空、没走到 cb_send_* 的那条留下的标记不会串到后面
+    _title_mark.kind = kind if kind in ('new_game', 'join_leave') else ''
 
     # 状态更新(mid_quit 仅私信按解散处理:群聊对局还有其他玩家,继续进行)
     if kind in ('all_left', 'terminate') or (kind == 'mid_quit' and is_uid):
@@ -1119,6 +1175,7 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """
     key = helpers.target_key(target_id, is_uid)
     _record_unranked(key, target_id, is_uid, msg)
+    title_uid = _take_title_uid(msg)
     extra_buttons = state.pending_buttons.pop(key, None)
     if not extra_buttons:
         # 群管发起的中断投票 → 给「还差 N 人」那条广播挂「强制中断游戏」;
@@ -1135,25 +1192,28 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
         return
     try:
         asyncio.run_coroutine_threadsafe(
-            _serialized_text_send(key, target_id, is_uid, msg, extra_buttons),
+            _serialized_text_send(key, target_id, is_uid, msg, extra_buttons, title_uid),
             loop)
     except Exception as e:
         log.warning(f'调度文本发送失败: {e}')
 
 
 async def _serialized_text_send(key: str, target_id: str, is_uid: bool,
-                                msg: str, extra_buttons) -> None:
+                                msg: str, extra_buttons, title_uid: str = '') -> None:
     """串行化的文本发送:per-target Lock 保证顺序,配额管理 + auto-refresh 按钮挂载。
 
     Lock 内顺序:
       ① ``_send_text_quota_managed``  实际把这条文本送出去
       ② ``_consume_pending_tip`` / ``_consume_pending_dm_warn``  如本帧标了 new_game,
          调度提示 task —— 它也走同一把 Lock,会自动排在本条之后。
+      ③ ``_schedule_title_notice``  本条是建房 / 加入广播时调度头衔播报,排在提示之后。
     """
     async with _get_send_lock(key):
         await _send_text_quota_managed(target_id, is_uid, msg, extra_buttons)
         _consume_pending_tip(key, target_id, is_uid)
         _consume_pending_dm_warn(key, target_id, is_uid)
+        if title_uid:
+            _schedule_title_notice(target_id, is_uid, title_uid)
 
 
 def _drop_scope(is_uid: bool) -> str:
@@ -1456,6 +1516,7 @@ def cb_send_image_message(target_id: str, is_uid: bool, image_paths, content: st
     # markdown 通道能挂按钮,媒体兜底不能,兜底时 _send_mixed_message 会把它还回去。
     key = helpers.target_key(target_id, is_uid)
     extra_buttons = state.pending_buttons.pop(key, None)
+    title_uid = _take_title_uid(plain)
 
     # 日志展示用 humanize + 去转义版（纯文本更可读），实际发送时再按通道决定
     page_logs.log_outgoing(
@@ -1469,20 +1530,22 @@ def cb_send_image_message(target_id: str, is_uid: bool, image_paths, content: st
         return
     try:
         asyncio.run_coroutine_threadsafe(
-            _serialized_mixed_send(key, target_id, is_uid, segs, images, plain, extra_buttons),
+            _serialized_mixed_send(key, target_id, is_uid, segs, images, plain, extra_buttons, title_uid),
             loop)
     except Exception as e:
         log.warning(f'调度图片发送失败: {e}')
 
 
 async def _serialized_mixed_send(key: str, target_id: str, is_uid: bool,
-                                 segs, images: dict, plain: str, extra_buttons) -> None:
+                                 segs, images: dict, plain: str, extra_buttons, title_uid: str = '') -> None:
     """串行化的图文发送 —— 与 ``_serialized_text_send`` 共享 per-target Lock。"""
     async with _get_send_lock(key):
         await _send_mixed_message(target_id, is_uid, segs, images, plain, extra_buttons)
         if plain:
             _consume_pending_tip(key, target_id, is_uid)
             _consume_pending_dm_warn(key, target_id, is_uid)
+        if title_uid:
+            _schedule_title_notice(target_id, is_uid, title_uid)
 
 
 async def _send_mixed_message(target_id: str, is_uid: bool, segs, images: dict,

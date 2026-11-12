@@ -1,0 +1,56 @@
+<div class="titles">
+
+  <!-- ──── 头衔等级:点胶囊筛选下方玩家,按钮新增 / 编辑 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-title"/></svg><span>头衔系统</span></h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">数据文件</span>
+        <span id="titles-path" class="dash-meta-value dash-mono">—</span>
+      </div>
+    </div>
+
+    <div id="titles-level-bar" class="titles-level-bar">
+      <div id="titles-level-chips" class="titles-level-chips"></div>
+      <div class="titles-level-actions">
+        <button id="titles-level-add" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">新增等级</span></button>
+        <button id="titles-level-edit" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">编辑等级</span></button>
+      </div>
+    </div>
+    <div id="titles-level-editor" class="titles-level-editor" hidden></div>
+  </section>
+
+  <!-- ──── 玩家头衔 ──── -->
+  <section class="dash-section">
+    <div class="dash-section-header">
+      <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-users"/></svg><span>玩家头衔</span></h2>
+      <div class="dash-section-meta">
+        <span class="dash-meta-label">共</span>
+        <span id="titles-count" class="dash-meta-value">—</span>
+        <span class="dash-meta-label">玩家</span>
+        <button id="titles-refresh" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
+      </div>
+    </div>
+
+    <div class="titles-toolbar">
+      <span class="titles-search-wrap"><svg class="ui-icon btn-icon"><use href="#i-search"/></svg><input type="text" id="titles-search" placeholder="搜索 昵称 / OpenID / 头衔" autocomplete="off" spellcheck="false"></span>
+      <span class="titles-add-wrap">
+        <input type="text" id="titles-add-openid" placeholder="玩家 OpenID（32 位）" autocomplete="off" spellcheck="false">
+        <button id="titles-add" class="dash-btn dash-btn-small dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">添加玩家</span></button>
+      </span>
+      <span id="titles-msg" class="titles-msg"></span>
+    </div>
+
+    <div id="titles-list" class="titles-list"></div>
+
+    <p class="titles-note">
+      头衔名最多 <span id="titles-name-max">—</span> 个字，且不能包含 \ { } $ % # &amp; _ ^ ~ * ` [ ] &lt; &gt; |。玩家 OpenID 可以在「用户数据」页面进行查询。
+    </p>
+  </section>
+
+  <!-- 玩家编辑弹窗:内容由 titles.js 渲染 -->
+  <div id="titles-modal-backdrop" class="titles-modal-backdrop" hidden>
+    <div id="titles-modal" class="titles-modal" role="dialog" aria-modal="true"></div>
+  </div>
+
+</div>

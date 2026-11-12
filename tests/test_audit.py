@@ -97,8 +97,10 @@ def _entry(ts: int, action: str) -> dict:
             'ok': True, 'src': '面板'}
 
 
-def test_records_past_the_retention_window_are_dropped_on_the_next_write():
+def test_records_past_the_retention_window_are_dropped_on_the_next_write(monkeypatch):
     now = int(time.time())
+    # 冻结时钟:record() 自己取当前时间,预置和写入之间跨过一秒时,边界那条会多出一秒被清掉
+    monkeypatch.setattr(audit.time, 'time', lambda: float(now))
     _seed([_entry(now - audit.RETENTION_S - 1, '一个月零一秒前'),
            _entry(now - audit.RETENTION_S, '正好一个月前'),
            _entry(now - 86400, '昨天')])

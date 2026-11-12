@@ -38,6 +38,8 @@ __REVIEW_CSS__
 __CRASH_CSS__
 
 __PREBUILT_CSS__
+
+__TITLES_CSS__
   </style>
 </head>
 <body>
@@ -60,6 +62,7 @@ __ICON_SPRITE__
       <button class="tab" data-tab="config"><svg class="ui-icon tab-icon"><use href="#i-config"/></svg>配置管理</button>
       <button class="tab" data-tab="prebuilt"><svg class="ui-icon tab-icon"><use href="#i-prebuilt"/></svg>预编译部署</button>
       <button class="tab" data-tab="build"><svg class="ui-icon tab-icon"><use href="#i-build"/></svg>引擎编译</button>
+      <button class="tab" data-tab="titles"><svg class="ui-icon tab-icon"><use href="#i-title"/></svg>头衔系统</button>
       <button class="tab" data-tab="backup"><svg class="ui-icon tab-icon"><use href="#i-backup"/></svg>数据备份</button>
       <button class="tab" data-tab="logs"><svg class="ui-icon tab-icon"><use href="#i-logs"/></svg>消息日志<span class="tab-live-badge" id="live-badge">实时</span></button>
       <button class="tab" data-tab="crash"><svg class="ui-icon tab-icon"><use href="#i-crash"/></svg>崩溃转储<span class="tab-clean-badge" id="crash-clean-badge">清理</span></button>
@@ -88,6 +91,10 @@ __PREBUILT_HTML__
 
     <div id="tab-build" class="tab-pane">
 __BUILD_HTML__
+    </div>
+
+    <div id="tab-titles" class="tab-pane">
+__TITLES_HTML__
     </div>
 
     <div id="tab-backup" class="tab-pane">
@@ -146,6 +153,7 @@ __USERS_HTML__
   <script id="review-data" type="application/json">__REVIEW_DATA__</script>
   <script id="crash-data" type="application/json">__CRASH_DATA__</script>
   <script id="prebuilt-data" type="application/json">__PREBUILT_DATA__</script>
+  <script id="titles-data" type="application/json">__TITLES_DATA__</script>
   <script>
 __MAIN_JS__
 
@@ -170,6 +178,8 @@ __REVIEW_JS__
 __CRASH_JS__
 
 __PREBUILT_JS__
+
+__TITLES_JS__
   </script>
 </body>
 </html>

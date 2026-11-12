@@ -834,7 +834,7 @@ async def _capture_send(monkeypatch, *, hint: bool, msg: str, pending=None) -> d
     monkeypatch.setattr(callbacks.state, 'event_loop', _a.get_running_loop())
     sent: dict = {}
 
-    async def _fake_send(key, tid, is_uid, m, btns):
+    async def _fake_send(key, tid, is_uid, m, btns, *_):
         sent['btns'] = btns
 
     monkeypatch.setattr(callbacks, '_serialized_text_send', _fake_send)

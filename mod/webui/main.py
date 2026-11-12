@@ -13,7 +13,7 @@ LGTBot WebUI 入口 —— 注册「LGTBot 机器人」侧边栏页面并组装�
   · 面板标签:仪表盘(``page_dashboard``)/ 指标面板(``page_metrics``)/
     配置管理(``page_config``)/ 引擎编译(``page_build``)/ 数据备份
     (``page_backup``)/ 消息日志(``page_logs``)/ 操作审计(``page_audit``)/
-    用户数据(``page_users``);各自的 HTML / JS / 数据生成都委托给对应模块,
+    用户数据(``page_users``)/ 头衔系统(``page_titles``);各自的 HTML / JS / 数据生成都委托给对应模块,
     本文件只做组装
 
 HTML / CSS / JS 在 ``templates/main/`` 的 ``main.html`` / ``main.css`` /
@@ -49,7 +49,7 @@ from .api import at_all as at_all_api, build as build_api, restart as restart_ap
 from .pages import (audit as page_audit, backup as page_backup, build as page_build,
                     config as page_config, crash as page_crash, dashboard as page_dashboard,
                     logs as page_logs, metrics as page_metrics, prebuilt as page_prebuilt,
-                    review as page_review, users as page_users)
+                    review as page_review, titles as page_titles, users as page_users)
 
 
 PAGE_KEY = 'lgtbot'
@@ -177,6 +177,12 @@ _RESTART_API_ROUTE          = '/api/ext/lgtbot/restart'
 _PLANNED_API_ROUTE          = '/api/ext/lgtbot/planned-restart'
 # @全体成员 API(同一枚 token)
 _AT_ALL_API_ROUTE           = '/api/ext/lgtbot/at-all'
+# 头衔系统:列表刷新 / 按 OpenID 查昵称(GET)+ 保存 / 删除、等级表保存(POST JSON)
+_TITLES_LIST_ROUTE   = '/api/ext/lgtbot/titles/list'
+_TITLES_LOOKUP_ROUTE = '/api/ext/lgtbot/titles/lookup'
+_TITLES_SAVE_ROUTE   = '/api/ext/lgtbot/titles/save'
+_TITLES_DELETE_ROUTE = '/api/ext/lgtbot/titles/delete'
+_TITLES_LEVELS_ROUTE = '/api/ext/lgtbot/titles/levels'
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
@@ -277,6 +283,7 @@ def _render_html() -> str:
             .replace('__REVIEW_CSS__', page_review.TAB_CSS)
             .replace('__CRASH_CSS__', page_crash.TAB_CSS)
             .replace('__PREBUILT_CSS__', page_prebuilt.TAB_CSS)
+            .replace('__TITLES_CSS__', page_titles.TAB_CSS)
             .replace('__DASHBOARD_HTML__', page_dashboard.TAB_HTML)
             .replace('__METRICS_HTML__', page_metrics.TAB_HTML)
             .replace('__CONFIG_HTML__', page_config.render_tab_html())
@@ -288,6 +295,7 @@ def _render_html() -> str:
             .replace('__REVIEW_HTML__', page_review.TAB_HTML)
             .replace('__CRASH_HTML__', page_crash.TAB_HTML)
             .replace('__PREBUILT_HTML__', page_prebuilt.TAB_HTML)
+            .replace('__TITLES_HTML__', page_titles.TAB_HTML)
             .replace('__DASHBOARD_DATA__', page_dashboard.get_data())
             .replace('__METRICS_DATA__', page_metrics.get_data())
             .replace('__CONFIG_DATA__', page_config.get_data())
@@ -299,6 +307,7 @@ def _render_html() -> str:
             .replace('__REVIEW_DATA__', page_review.get_data())
             .replace('__CRASH_DATA__', page_crash.get_data())
             .replace('__PREBUILT_DATA__', page_prebuilt.get_data())
+            .replace('__TITLES_DATA__', page_titles.get_data())
             .replace('__MAIN_JS__', _MAIN_JS)
             .replace('__DASHBOARD_JS__', page_dashboard.TAB_JS)
             .replace('__METRICS_JS__', page_metrics.TAB_JS)
@@ -318,6 +327,12 @@ def _render_html() -> str:
                      .replace('__REVIEW_SETTINGS_ROUTE__', _REVIEW_SETTINGS_ROUTE))
             .replace('__CRASH_JS__', page_crash.TAB_JS)
             .replace('__PREBUILT_JS__', page_prebuilt.TAB_JS)
+            .replace('__TITLES_JS__', page_titles.TAB_JS
+                     .replace('__TITLES_LIST_ROUTE__', _TITLES_LIST_ROUTE)
+                     .replace('__TITLES_LOOKUP_ROUTE__', _TITLES_LOOKUP_ROUTE)
+                     .replace('__TITLES_SAVE_ROUTE__', _TITLES_SAVE_ROUTE)
+                     .replace('__TITLES_DELETE_ROUTE__', _TITLES_DELETE_ROUTE)
+                     .replace('__TITLES_LEVELS_ROUTE__', _TITLES_LEVELS_ROUTE))
             .replace('__PAGE_KEY__', PAGE_KEY)
             .replace('__RESTART_ROUTE__', _RESTART_PANEL_ROUTE)
             .replace('__PLANNED_ON__', '1' if _plugin_state.is_planned_restart() else '0'))
@@ -564,6 +579,11 @@ def register():
     web_pages.register_route('POST', _RESTART_API_ROUTE, restart_api.restart_handler, auth=False)
     web_pages.register_route('POST', _PLANNED_API_ROUTE, restart_api.planned_restart_handler, auth=False)
     web_pages.register_route('POST', _AT_ALL_API_ROUTE, at_all_api.at_all_handler, auth=False)
+    web_pages.register_route('GET', _TITLES_LIST_ROUTE, page_titles.list_handler, auth=True)
+    web_pages.register_route('GET', _TITLES_LOOKUP_ROUTE, page_titles.lookup_handler, auth=True)
+    web_pages.register_route('POST', _TITLES_SAVE_ROUTE, page_titles.save_handler, auth=True)
+    web_pages.register_route('POST', _TITLES_DELETE_ROUTE, page_titles.delete_handler, auth=True)
+    web_pages.register_route('POST', _TITLES_LEVELS_ROUTE, page_titles.levels_handler, auth=True)
 
     _ensure_get_pages_filters_hidden()
 
@@ -600,3 +620,8 @@ def unregister():
     web_pages.unregister_route('POST', _RESTART_API_ROUTE)
     web_pages.unregister_route('POST', _PLANNED_API_ROUTE)
     web_pages.unregister_route('POST', _AT_ALL_API_ROUTE)
+    web_pages.unregister_route('GET', _TITLES_LIST_ROUTE)
+    web_pages.unregister_route('GET', _TITLES_LOOKUP_ROUTE)
+    web_pages.unregister_route('POST', _TITLES_SAVE_ROUTE)
+    web_pages.unregister_route('POST', _TITLES_DELETE_ROUTE)
+    web_pages.unregister_route('POST', _TITLES_LEVELS_ROUTE)

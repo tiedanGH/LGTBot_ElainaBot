@@ -25,7 +25,7 @@ from core.message.event import (
 
 from . import state, helpers, boot, game_switch
 from .messaging import quota, buttons, uploader
-from .users import userinfo, nickname_review
+from .users import userinfo, nickname_review, titles
 from .ops import audit
 from .stats import metrics, stats_image
 from .announce import urgent, notice
@@ -109,14 +109,16 @@ _P_STATS    = r'^/?数据统计\s*(\S[^\n]*?)?\s*$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 _P_SPONSOR  = r'^/?赞助支持$'
+_P_MY_TITLES = r'^/?我的头衔$'
+_P_EQUIP_TITLE = r'^/?切换头衔\s*(\S[^\n]*?)?\s*$'
 _P_ADMIN_INTERRUPT_AT = r'^(?:@.+?\s*)?%中断(?:\s+\S+)?$'
 _ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 
-# 「赞助支持」也列入专属指令:赞助功能**关闭**时 handler 会自己转发给引擎。
+# 赞助功能**关闭**时 handler 会自己转发给引擎。
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
     _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST, _P_ADMIN_INTERRUPT,
-    _P_SPONSOR,
+    _P_SPONSOR, _P_MY_TITLES, _P_EQUIP_TITLE,
 ))
 
 
@@ -146,6 +148,12 @@ def _capture_pending_game_name(content: str, event, gid: str, uid: str) -> None:
     else:
         return
     state.pending_new_game_name[key] = m.group(1)
+
+
+def _run_engine(fn, args: tuple, uid: str) -> None:
+    """引擎派发线程的线程体。引擎在本线程同步处理指令并回调 callbacks,先把发起人记到 ``state.engine_request``:建房广播不带房主,头衔播报靠它认人。"""
+    state.engine_request.uid = uid
+    fn(*args)
 
 
 # 玩家投票中断:`/中断`(可带其他参数,但 `取消` 是反向操作,不算)。
@@ -1427,6 +1435,82 @@ async def lgtbot_sponsor(event, match):
     await event.reply(md, buttons=buttons.build_sponsor_buttons())
 
 
+# ──────── 玩家头衔(所有人可用) ─────────────────────────────────────────────
+# 头衔由面板「头衔系统」发放,玩家只能查看与切换装备;新建 / 加入房间时的播报见 callbacks。
+
+_EQUIP_TITLE_RE = re.compile(_P_EQUIP_TITLE)
+_NO_TITLES = '您还没有头衔'
+
+
+def _my_titles_md(uid: str) -> str:
+    """「我的头衔」正文:序号、上色的头衔名与稀有度,装备中的那个加标记。序号用「1、」,理由同 lgtbot_data_stats。"""
+    rec = titles.get(uid)
+    if not rec or not rec['titles']:
+        return _NO_TITLES
+    lines = ['## 🏅 我的头衔', '']
+    for i, t in enumerate(rec['titles'], 1):
+        mark = '（装备中）' if t['name'] == rec['equipped'] else ''
+        lines.append(f'{i}、{titles.render(t)}【{titles.rarity(t)}】{mark}')
+    lines += ['', '> 发送「切换头衔 序号/名称」更换头衔']
+    return '\n'.join(lines)
+
+
+@handler(_P_MY_TITLES,
+         name='我的头衔',
+         desc='查看自己持有的全部头衔与当前装备的头衔',
+         priority=50,
+         block=True,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_my_titles(event, match):
+    if helpers.is_foreign_event(event):
+        return
+    if event.is_interaction and not _answer_button(event):
+        return
+    await event.reply(_with_at(_at(event), _my_titles_md(event.user_id or '')))
+
+
+@handler(_P_EQUIP_TITLE,
+         name='切换头衔',
+         desc='按序号或头衔名切换装备的头衔',
+         priority=50,
+         block=True,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_equip_title(event, match):
+    """「切换头衔 <序号|头衔名|无>」,「无」是不装备头衔。切换前后没变化时只提示,不记审计。"""
+    if helpers.is_foreign_event(event):
+        return
+    if event.is_interaction and not _answer_button(event):
+        return
+    m = match or _EQUIP_TITLE_RE.match((event.content or '').strip())
+    ref = ((m.group(1) if m else '') or '').strip()
+    uid = event.user_id or ''
+    if not ref:
+        text = '💡 用法：切换头衔 序号/头衔名，可发送「我的头衔」查看序号与名称；发送「切换头衔 无」卸下头衔'
+    elif ref == '无':
+        title, err = titles.unequip(uid)
+        if title:
+            text = '✅ 已取消装备头衔'
+            audit.record('title', '切换头衔', f'{titles.player_label(uid)}：装备 {title["name"]} → 无', src=audit.SRC_CMD)
+        elif err == 'none':
+            text = _NO_TITLES
+        else:
+            text = '您当前没有装备头衔'
+    else:
+        before = titles.equipped(uid)
+        title, err = titles.equip(uid, ref)
+        if title and before and before['name'] == title['name']:
+            text = '您已经装备了此头衔'
+        elif title:
+            text = f'✅ 已装备头衔：{titles.render(title)}'
+            old = before['name'] if before else '无'
+            audit.record('title', '切换头衔', f'{titles.player_label(uid)}：装备 {old} → {title["name"]}', src=audit.SRC_CMD)
+        elif err == 'none':
+            text = _NO_TITLES
+        else:
+            text = '❌ 您没有这个头衔，发送「我的头衔」查看序号与名称'
+    await event.reply(_with_at(_at(event), text))
+
+
 # ──────── /关于 抢占(优于系统插件的同名指令) ───────────────────────────────
 # 系统插件 ``plugins/system/app/basic.py::about_info`` 也注册了 ``^关于$``(priority=0,展示框架级机器人信息);
 # 在本 bot 上发 ``/关于`` 应优先看到引擎自带的 about 回执,所以 priority=50 + block=True 抢占后转发给 lgtbot_dispatch。
@@ -1558,14 +1642,14 @@ async def lgtbot_dispatch(event, match, *, _from_exclusive=False):
     try:
         if event.is_group and gid:
             threading.Thread(
-                target=boot.LGTBot_ElainaBot.on_public_message,
-                args=(content, uid, gid),
+                target=_run_engine,
+                args=(boot.LGTBot_ElainaBot.on_public_message, (content, uid, gid), uid),
                 daemon=True,
             ).start()
         elif event.is_direct and uid:
             threading.Thread(
-                target=boot.LGTBot_ElainaBot.on_private_message,
-                args=(content, uid),
+                target=_run_engine,
+                args=(boot.LGTBot_ElainaBot.on_private_message, (content, uid), uid),
                 daemon=True,
             ).start()
     except Exception as e:
@@ -1694,14 +1778,14 @@ async def lgtbot_interaction_dispatch(event, match):
     try:
         if event.is_group and gid:
             threading.Thread(
-                target=boot.LGTBot_ElainaBot.on_public_message,
-                args=(content, uid, gid),
+                target=_run_engine,
+                args=(boot.LGTBot_ElainaBot.on_public_message, (content, uid, gid), uid),
                 daemon=True,
             ).start()
         elif event.is_direct and uid:
             threading.Thread(
-                target=boot.LGTBot_ElainaBot.on_private_message,
-                args=(content, uid),
+                target=_run_engine,
+                args=(boot.LGTBot_ElainaBot.on_private_message, (content, uid), uid),
                 daemon=True,
             ).start()
     except Exception as e:
