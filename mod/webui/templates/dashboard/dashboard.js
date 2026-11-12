@@ -876,7 +876,7 @@ async function dashDoUpdateSubmodule() {
   const verb = isInit ? '初始化' : '更新';
   const cmd = 'git submodule update --init --recursive --force ' + path;
   const tail = isInit
-    ? '\n\n首次初始化会克隆完整的 lgtbot 仓库 (含 50+ 游戏插件)，通常需要 30 秒至几分钟。'
+    ? '\n\n首次初始化会克隆完整的 lgtbot 仓库 (含 60+ 游戏插件)，通常需要 30 秒至几分钟。'
     : '\n\n该命令会强制把本地子模块对齐到父仓库 gitlink，清除子模块内的本地修改。';
 
   const ok1 = await dashConfirm(
@@ -887,7 +887,7 @@ async function dashDoUpdateSubmodule() {
 
   const dangerText = isInit
     ? '再次确认：初始化子模块「' + path + '」?\n\n' +
-      '将从远端克隆完整 lgtbot 仓库 (含 50+ 游戏子模块) 到本地。\n' +
+      '将从远端克隆完整 lgtbot 仓库 (含 60+ 游戏插件) 到本地。\n' +
       '若网络中断，需手动删除半残的 lgtbot/ 目录后重试。'
     : '再次确认：更新子模块「' + path + '」?\n\n' +
       '此操作会强制清除 lgtbot/ 内所有未提交的本地修改，无法恢复！\n' +

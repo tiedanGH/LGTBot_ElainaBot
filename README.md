@@ -19,7 +19,7 @@
 
 ## 简介
 
-把 LGTBot 的 50+ 种游戏通过 ElainaBot 主框架接入到 **QQ 官方机器人**。核心游戏引擎来自上游项目 [LGTBot](https://github.com/Slontia/lgtbot)（© [@Slontia](https://github.com/Slontia)），本插件只做适配，详见[致谢与项目来源](#致谢与项目来源)。
+把 LGTBot 的 60+ 种游戏通过 ElainaBot 主框架接入到 **QQ 官方机器人**。核心游戏引擎来自上游项目 [LGTBot](https://github.com/Slontia/lgtbot)（© [@Slontia](https://github.com/Slontia)），本插件只做适配，详见[致谢与项目来源](#致谢与项目来源)。
 
 **作为 ElainaBot 插件零配置启动**：安装插件 → 启动主框架 → 面板下载预编译包 → 重启机器人 → 在群里 @ 机器人即可游玩，全程无需编译。
 
@@ -65,7 +65,7 @@
 >
 > *「LGT」源自日本漫画家甲斐谷忍《Liar Game》中的虚构组织「**L**iar **G**ame **T**ournament 事务所」*
 >
-> 一个基于 C++20 的多人文字推理游戏裁判机器人库，包含 50+ 种不同风格的游戏。游戏逻辑、引擎核心、图片渲染均由原作者 Slontia 设计实现。
+> 一个基于 C++20 的多人文字推理游戏裁判机器人库，包含 60+ 种不同风格的游戏。游戏逻辑、引擎核心、图片渲染均由原作者 Slontia 设计实现。
 
 本插件并未对 LGTBot 引擎做任何功能性修改，仅做：
 1. 把 [LGTBot](https://github.com/Slontia/lgtbot) 适配 [ElainaBot_v2](https://github.com/ElainaCore/ElainaBot_v2) QQ 官方机器人框架

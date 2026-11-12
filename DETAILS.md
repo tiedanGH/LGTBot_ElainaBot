@@ -86,7 +86,7 @@ QQ 官方机器人协议层面的限制，**所有 QQ Bot 都会遇到**，与 L
 └─────────────────────┘     run_coroutine_        │  LGTBot_ElainaBot.so         │
                             threadsafe            │   ↓ FFI                      │
                                                   │  libbot_core (C++)           │
-                                                  │  + 50+ games                 │
+                                                  │  + 60+ games                 │
                                                   └──────────────────────────────┘
 ```
 

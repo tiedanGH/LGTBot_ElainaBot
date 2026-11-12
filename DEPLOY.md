@@ -101,7 +101,7 @@ bash build.sh --help                   # 查看所有参数
 | `--gcov`                | `-DWITH_GCOV`        | `OFF`     | 覆盖率统计                                               |
 | `--glog`                | `-DWITH_GLOG`        | `OFF`     | glog 日志（默认关闭，加此参数启用）                                |
 | `--no-sqlite`           | `-DWITH_SQLITE`      | `ON`      | SQLite 持久化（关闭后无排行榜/历史）                              |
-| `--no-games`            | `-DWITH_GAMES`       | `ON`      | 50+ 内置游戏插件                                          |
+| `--no-games`            | `-DWITH_GAMES`       | `ON`      | 60+ 内置游戏插件                                          |
 | `-t` / `--target NAME`  | `cmake --target`     | `(全部)`    | 仅构建指定目标，可重复多次（如 `-t numcomb`）                       |
 | `--list-targets`        | —                    | —         | 列出 CMake 已知目标，方便挑 `-t` 参数                           |
 | `-i` / `--incremental`  | —                    | —         | 跳过 依赖检查 + CMake 直接构建；要求 `build/` 已存在，与 `--clean` 互斥 |
