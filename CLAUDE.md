@@ -277,3 +277,87 @@ PluginManager 文件保存触发热重载时：
 - 长篇技术分析可以输出在对话里，但**不要**默默写到代码注释里 —— 注释要简洁可维护
 - 用户常在 IDE 里同时编辑工作区文件：动手前先看 `git diff`，用户的删改一律保留，不要覆盖回去
 - 变异测试这类需要临时改源码的实验，在工作区之外的副本上做，不要原地改工作区再还原（用户并发保存会把临时改动存回磁盘）
+
+---
+
+## 8. Markdown 里的 KaTeX
+
+**只在用户明确提到时参考这里实现，不要自行在消息里使用 KaTeX 格式。**
+
+本插件消息按原生 markdown 发送，可用 KaTeX 给文字上色、加框、调字号：`$$…$$` 独占一行居中显示，`$…$` 嵌在行内；普通文字（含中文）包在 `\text{}` 里。
+
+### 文字颜色（居中）
+
+```
+$$\textcolor{#E74C3C}{\text{红色文字}}$$
+$$\textcolor{#FF8C00}{\text{橙色文字}}$$
+$$\textcolor{#FFD700}{\text{金色文字}}$$
+$$\textcolor{#27AE60}{\text{绿色文字}}$$
+$$\textcolor{#2980B9}{\text{蓝色文字}}$$
+$$\textcolor{#8E44AD}{\text{紫色文字}}$$
+$$\textcolor{#2C3E50}{\text{深蓝色文字}}$$
+$$\textcolor{white}{\text{白色文字}}$$
+$$\textcolor{black}{\text{黑色文字}}$$
+$$\textcolor{gray}{\text{灰色文字}}$$
+```
+
+### 文字颜色（行内）
+
+```
+$\textcolor{#E74C3C}{\text{红色文字}}$
+$\textcolor{#FF8C00}{\text{橙色文字}}$
+$\textcolor{#FFD700}{\text{金色文字}}$
+$\textcolor{#27AE60}{\text{绿色文字}}$
+$\textcolor{#2980B9}{\text{蓝色文字}}$
+$\textcolor{#8E44AD}{\text{紫色文字}}$
+$\textcolor{#2C3E50}{\text{深蓝色文字}}$
+$\textcolor{white}{\text{白色文字}}$
+$\textcolor{black}{\text{黑色文字}}$
+$\textcolor{gray}{\text{灰色文字}}$
+```
+
+### 加框高亮（居中）
+
+```
+$$\boxed{\text{重点内容加框}}$$
+$$\boxed{\text{这是另一个框}}$$
+$$\boxed{E=mc^2}$$
+```
+
+### 加框高亮（行内）
+
+```
+$\boxed{\text{重点内容加框}}$
+$\boxed{\text{这是另一个框}}$
+$\boxed{E=mc^2}$
+```
+
+### 字体大小控制（居中）
+
+```
+$$\tiny{\text{迷你文字}}$$
+$$\scriptsize{\text{很小文字}}$$
+$$\footnotesize{\text{较小文字}}$$
+$$\small{\text{小文字}}$$
+$$\normalsize{\text{正常文字}}$$
+$$\large{\text{较大文字}}$$
+$$\Large{\text{大文字}}$$
+$$\LARGE{\text{很大文字}}$$
+$$\huge{\text{巨大文字}}$$
+$$\Huge{\text{超大文字}}$$
+```
+
+### 字体大小控制（行内）
+
+```
+$\tiny{\text{迷你文字}}$
+$\scriptsize{\text{很小文字}}$
+$\footnotesize{\text{较小文字}}$
+$\small{\text{小文字}}$
+$\normalsize{\text{正常文字}}$
+$\large{\text{较大文字}}$
+$\Large{\text{大文字}}$
+$\LARGE{\text{很大文字}}$
+$\huge{\text{巨大文字}}$
+$\Huge{\text{超大文字}}$
+```
