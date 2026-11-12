@@ -3,10 +3,10 @@
 """玩家头衔测试 —— users.titles 数据层(头衔与等级)、「我的头衔 / 切换头衔」指令、新建 / 加入房间后的头衔播报。
 
 被测行为:
-  · 头衔库整份保存时逐项校验(32 位 OpenID / 数量 / 名字字符 / 等级存在 / 重名 / 装备必须在库里),空库等于删除
-  · 等级表整份保存:新增生成键、改名改色立即作用到已有头衔、在用的等级不能删、至少留一个
+  · 头衔库整份保存时逐项校验(32 位 OpenID / 名字字符 / 等级存在 / 重名 / 装备必须在库里),空库等于删除,数量不设上限
+  · 等级表按行序整份保存:头衔按等级名引用,改名连同头衔一起换(互换名字不串)、改色立即生效、在用的等级不能删、至少留一个
   · 装备按序号或名字,序号越界再按名字找;等级已不存在的头衔照常保留并灰色兜底;坏文件改名留证
-  · 指令回复带序号、KaTeX 上色、等级名与装备标记;找不到头衔时不复述玩家输入
+  · 指令回复带序号、KaTeX 上色、等级名与装备标记;找不到头衔时不复述玩家输入;播报把等级色标在「[头衔]」上、头衔名加粗
   · 头衔播报对象:建房广播取派发线程上记下的发起人,加入广播取加入的玩家,退出不播;标记只在打标的线程上可见
   · 播报排在回复限制 / 主动私信提示之后
 """
@@ -42,12 +42,17 @@ def _titles_files(tmp_path, monkeypatch):
     state.engine_request.uid = ''
 
 
-def _t(name, color='blue'):
-    return {'name': name, 'color': color}
+def _t(name, level='稀有'):
+    return {'name': name, 'level': level}
 
 
-def _lv(name, hexcolor, key=''):
-    return {'key': key, 'name': name, 'hex': hexcolor}
+def _lv(name, hexcolor, orig=''):
+    return {'orig': orig, 'name': name, 'hex': hexcolor}
+
+
+def _edit_rows():
+    """当前等级表原样作为编辑行(每行带原名)。"""
+    return [dict(lv, orig=lv['name']) for lv in titles.levels()]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -61,7 +66,6 @@ def test_set_record_validates_every_field_and_writes_nothing_on_error():
         (U1[:-1] + '!', [_t('A')], None),
         (U1 + '0', [_t('A')], None),
         (U1, 'A', None),
-        (U1, [_t(f'T{i}') for i in range(titles.MAX_TITLES + 1)], None),
         (U1, ['A'], None),
         (U1, [_t('')], None),
         (U1, [_t('一' * (titles.NAME_MAX_LEN + 1))], None),
@@ -69,19 +73,22 @@ def test_set_record_validates_every_field_and_writes_nothing_on_error():
         (U1, [_t('a\\b')], None),
         (U1, [_t('a}b')], None),
         (U1, [_t('a\nb')], None),
-        (U1, [_t('A', 'gold')], None),
-        (U1, [_t('A'), _t(' A ', 'red')], None),
+        (U1, [_t('A', '黄金')], None),
+        (U1, [_t('A', ['稀有'])], None),
+        (U1, [_t('A'), _t(' A ', '神话')], None),
         (U1, [_t('A')], 'B'),
     ]
     for openid, ts, eq in bad:
         assert titles.set_record(openid, ts, eq), (openid, ts, eq)
     assert not os.path.exists(titles._players.path)
 
-    assert titles.set_record(U1, [_t(' 铁蛋 '), _t('Ace', 'pink')], '铁蛋') is None
-    assert titles.get(U1) == {'titles': [_t('铁蛋'), _t('Ace', 'pink')], 'equipped': '铁蛋'}
+    assert titles.set_record(U1, [_t(' 铁蛋 '), _t('Ace', '限定')], '铁蛋') is None
+    assert titles.get(U1) == {'titles': [_t('铁蛋'), _t('Ace', '限定')], 'equipped': '铁蛋'}
     assert titles.equipped(U1) == _t('铁蛋')
-    assert titles.set_record(U1, [_t('Ace', 'pink')], '') is None
+    assert titles.set_record(U1, [_t('Ace', '限定')], '') is None
     assert titles.equipped(U1) is None
+    many = [_t(f'T{i}') for i in range(30)]                      # 管理端维护,数量不设上限
+    assert titles.set_record(U2, many, 'T29') is None and titles.get(U2)['titles'] == many
 
 
 def test_empty_library_deletes_the_record():
@@ -95,37 +102,39 @@ def test_empty_library_deletes_the_record():
 
 def test_equip_by_index_or_name():
     assert titles.equip(U1, '1') == (None, 'none')
-    titles.set_record(U1, [_t('A'), _t('B', 'red'), _t('2048', 'green')], None)
-    assert titles.equip(U1, '2') == (_t('B', 'red'), '')
+    titles.set_record(U1, [_t('A'), _t('B', '神话'), _t('2048', '普通')], None)
+    assert titles.equip(U1, '2') == (_t('B', '神话'), '')
     assert titles.get(U1)['equipped'] == 'B'
     assert titles.equip(U1, ' A ') == (_t('A'), '')
-    assert titles.equip(U1, '３')[0] == _t('2048', 'green')        # 全角数字照样当序号
-    assert titles.equip(U1, '2048')[0] == _t('2048', 'green')      # 序号越界再按名字找
+    assert titles.equip(U1, '３')[0] == _t('2048', '普通')        # 全角数字照样当序号
+    assert titles.equip(U1, '2048')[0] == _t('2048', '普通')      # 序号越界再按名字找
     assert titles.equip(U1, '0') == (None, 'missing')
     assert titles.equip(U1, '9' * 5000) == (None, 'missing')
     assert titles.equip(U1, '不存在') == (None, 'missing')
     assert titles.get(U1)['equipped'] == '2048'
+    titles.set_record(U2, [_t(f'T{i}') for i in range(1, 1201)], None)
+    assert titles.equip(U2, '1200')[0] == _t('T1200')             # 头衔多到四位数也能按序号切
 
 
 def test_render_uses_inline_katex_colour_of_the_level():
-    t = _t('铁蛋', 'blue')
+    t = _t('铁蛋', '稀有')
     assert titles.render(t) == '$\\textcolor{#2980B9}{\\text{铁蛋}}$'
-    assert titles.join_notice(t) == '[头衔] $\\textcolor{#2980B9}{\\text{铁蛋}}$ 加入游戏'
+    assert titles.join_notice(t) == '$\\textcolor{#2980B9}{\\text{[头衔]}}$ **铁蛋** 加入游戏'
     assert [lv['name'] for lv in titles.levels()] == ['普通', '稀有', '史诗', '传说', '神话', '限定']
-    assert titles.rarity(_t('x', 'pink')) == '限定'
+    assert titles.rarity(_t('x', '限定')) == '限定'
 
 
 def test_dirty_file_is_cleaned_but_unknown_levels_survive():
     with open(titles._players.path, 'w', encoding='utf-8') as f:
-        json.dump({U1: {'titles': [_t('A'), _t('A', 'red'), _t('B', 'gone'), 'x', _t('a{b'), {'name': 'C'}], 'equipped': 'B'},
+        json.dump({U1: {'titles': [_t('A'), _t('A', '神话'), _t('B', '已删除'), 'x', _t('a{b'), {'name': 'C'}], 'equipped': 'B'},
                    U2: 'garbage'}, f, ensure_ascii=False)
-    assert titles.get(U1) == {'titles': [_t('A'), _t('B', 'gone')], 'equipped': 'B'}
+    assert titles.get(U1) == {'titles': [_t('A'), _t('B', '已删除')], 'equipped': 'B'}
     assert titles.get(U2) is None
     assert set(titles.all_records()) == {U1}
     # 等级已不存在:灰色兜底,玩家切换装备时也不会把它弄丢
-    assert titles.render(_t('B', 'gone')) == '$\\textcolor{#808080}{\\text{B}}$' and titles.rarity(_t('B', 'gone')) == '未知'
+    assert titles.render(_t('B', '已删除')) == '$\\textcolor{#808080}{\\text{B}}$' and titles.rarity(_t('B', '已删除')) == '未知'
     titles.equip(U1, 'A')
-    assert titles.get(U1)['titles'] == [_t('A'), _t('B', 'gone')]
+    assert titles.get(U1)['titles'] == [_t('A'), _t('B', '已删除')]
 
 
 def test_corrupt_file_is_set_aside_and_saving_starts_fresh(tmp_path):
@@ -141,8 +150,8 @@ def test_file_changed_on_disk_is_picked_up():
     titles.set_record(U1, [_t('A')], 'A')
     assert titles.equipped(U1) == _t('A')
     with open(titles._players.path, 'w', encoding='utf-8') as f:
-        json.dump({U1: {'titles': [_t('Longer', 'red')], 'equipped': 'Longer'}}, f)
-    assert titles.equipped(U1) == _t('Longer', 'red')
+        json.dump({U1: {'titles': [_t('Longer', '神话')], 'equipped': 'Longer'}}, f)
+    assert titles.equipped(U1) == _t('Longer', '神话')
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -150,47 +159,63 @@ def test_file_changed_on_disk_is_picked_up():
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_levels_can_be_added_edited_and_reordered():
-    rows = [dict(lv) for lv in titles.levels()]
+def test_levels_can_be_added_renamed_recoloured_and_reordered():
+    titles.set_record(U1, [_t('A', '稀有'), _t('B', '神话')], 'A')
+    titles.set_record(U2, [_t('C', '普通')], None)
+    rows = _edit_rows()
     rows[1].update(name='稀有款', hex='3498db')                   # 改名改色,不带 # 也认
     rows.append(_lv(' 金色传说 ', '#ffd700'))
     assert titles.set_levels(rows) is None
     got = titles.levels()
-    assert got[1] == {'key': 'blue', 'name': '稀有款', 'hex': '#3498DB'}
-    assert got[-1]['name'] == '金色传说' and got[-1]['hex'] == '#FFD700' and got[-1]['key']
-    assert got[-1]['key'] not in {lv['key'] for lv in titles.DEFAULT_LEVELS}
-    # 已有头衔跟着等级改名改色
-    titles.set_record(U1, [_t('A', 'blue'), _t('B', got[-1]['key'])], 'B')
-    assert titles.render(_t('A', 'blue')) == '$\\textcolor{#3498DB}{\\text{A}}$'
-    assert titles.rarity(titles.equipped(U1)) == '金色传说'
-    assert titles.set_levels(list(reversed(got))) is None
-    assert [lv['key'] for lv in titles.levels()] == [lv['key'] for lv in reversed(got)]
+    assert got[1] == {'name': '稀有款', 'hex': '#3498DB'} and got[-1] == {'name': '金色传说', 'hex': '#FFD700'}
+    # 头衔里的等级名跟着改,颜色立即生效;别的头衔不动
+    assert titles.get(U1) == {'titles': [_t('A', '稀有款'), _t('B', '神话')], 'equipped': 'A'}
+    assert titles.render(titles.equipped(U1)) == '$\\textcolor{#3498DB}{\\text{A}}$'
+    assert titles.get(U2)['titles'] == [_t('C', '普通')]
+    # 两个等级互换名字:一次映射,不会串成同一个
+    rows = _edit_rows()
+    rows[0]['name'], rows[1]['name'] = '稀有款', '普通'
+    assert titles.set_levels(rows) is None
+    assert titles.get(U1)['titles'][0] == _t('A', '普通') and titles.get(U2)['titles'] == [_t('C', '稀有款')]
+    # 行序即排序
+    order = [lv['name'] for lv in titles.levels()]
+    assert titles.set_levels(list(reversed(_edit_rows()))) is None
+    assert [lv['name'] for lv in titles.levels()] == order[::-1]
+
+
+def test_levels_have_no_upper_limit():
+    rows = _edit_rows() + [_lv(f'L{i}', '#000000') for i in range(30)]
+    assert titles.set_levels(rows) is None and len(titles.levels()) == 36
 
 
 def test_level_in_use_cannot_be_deleted():
-    titles.set_record(U1, [_t('A', 'red'), _t('B', 'red')], None)
-    rest = [lv for lv in titles.levels() if lv['key'] != 'red']
+    titles.set_record(U1, [_t('A', '神话'), _t('B', '神话')], None)
+    rest = [r for r in _edit_rows() if r['name'] != '神话']
     err = titles.set_levels(rest)
     assert err and '神话' in err and '2' in err
-    assert any(lv['key'] == 'red' for lv in titles.levels())
-    titles.set_record(U1, [_t('A', 'blue')], None)
-    assert titles.set_levels(rest) is None
-    assert all(lv['key'] != 'red' for lv in titles.levels())
+    assert any(lv['name'] == '神话' for lv in titles.levels())
+    # 删掉又新建同名等级:头衔挂到新等级上,不算失去等级
+    assert titles.set_levels(rest + [_lv('神话', '#000000')]) is None
+    assert titles.render(_t('A', '神话')) == '$\\textcolor{#000000}{\\text{A}}$'
+    titles.set_record(U1, [_t('A', '稀有')], None)
+    assert titles.set_levels([r for r in _edit_rows() if r['name'] != '神话']) is None
+    assert all(lv['name'] != '神话' for lv in titles.levels())
 
 
 def test_set_levels_validates_and_writes_nothing_on_error():
     base = titles.levels()
     bad = [
         [], 'x',
-        [dict(base[0])] * 2,
+        [_edit_rows()[0]] * 2,
         [_lv('', '#000000')],
         [_lv('一' * (titles.LEVEL_NAME_MAX_LEN + 1), '#000000')],
         [_lv('a*b', '#000000')],
         [_lv('A', 'red')], [_lv('A', '#12345')], [_lv('A', '#1234567')],
         [_lv('A', '#000000'), _lv(' A ', '#111111')],
-        [_lv('A', '#000000', key='nope')],
+        [_lv('A', '#000000', orig='不存在')],
+        [_lv('A', '#000000', orig=['普通'])],
+        [_lv('A', '#000000', orig='普通'), _lv('B', '#000000', orig='普通')],
         ['A'],
-        [_lv(f'L{i}', '#000000') for i in range(titles.MAX_LEVELS + 1)],
     ]
     for rows in bad:
         assert titles.set_levels(rows), rows
@@ -201,14 +226,14 @@ def test_set_levels_validates_and_writes_nothing_on_error():
 def test_broken_levels_file_falls_back_to_defaults(tmp_path):
     with open(titles._levels.path, 'w', encoding='utf-8') as f:
         f.write('[oops')
-    assert [lv['key'] for lv in titles.levels()] == [lv['key'] for lv in titles.DEFAULT_LEVELS]
+    assert titles.levels() == list(titles.DEFAULT_LEVELS)
     assert [p.name for p in tmp_path.iterdir() if p.name.startswith('levels.json.corrupt_')]
     with open(titles._levels.path, 'w', encoding='utf-8') as f:
-        json.dump([{'key': 'k', 'name': 'A', 'hex': 'zz'}, 'x', {'key': 'g', 'name': '金', 'hex': '#ffd700'}], f)
-    assert titles.levels() == [{'key': 'g', 'name': '金', 'hex': '#FFD700'}]
+        json.dump([{'name': 'A', 'hex': 'zz'}, 'x', {'name': '金', 'hex': '#ffd700'}, {'name': '金', 'hex': '#000000'}], f)
+    assert titles.levels() == [{'name': '金', 'hex': '#FFD700'}]
     with open(titles._levels.path, 'w', encoding='utf-8') as f:
-        json.dump([{'key': 'k', 'name': '', 'hex': '#000000'}, 'x'], f)       # 一项能用的都没有
-    assert [lv['key'] for lv in titles.levels()] == [lv['key'] for lv in titles.DEFAULT_LEVELS]
+        json.dump([{'name': '', 'hex': '#000000'}, 'x'], f)       # 一项能用的都没有
+    assert titles.levels() == list(titles.DEFAULT_LEVELS)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -237,7 +262,7 @@ async def _call(handler, pattern, content, **kw):
 
 
 async def test_my_titles_lists_index_colour_level_and_equipped():
-    titles.set_record(U1, [_t('铁蛋', 'blue'), _t('Ace', 'orange')], 'Ace')
+    titles.set_record(U1, [_t('铁蛋', '稀有'), _t('Ace', '传说')], 'Ace')
     text = await _call(dispatcher.lgtbot_my_titles, dispatcher._P_MY_TITLES, '我的头衔')
     lines = text.split('\n')
     assert lines[0] == f'<@{U1}>'
@@ -253,7 +278,7 @@ async def test_equip_title_replies_and_never_echoes_input():
     p = dispatcher._P_EQUIP_TITLE
     h = dispatcher.lgtbot_equip_title
     assert (await _call(h, p, '切换头衔 1')).endswith('您还没有头衔')
-    titles.set_record(U1, [_t('铁蛋', 'blue'), _t('Ace', 'orange')], None)
+    titles.set_record(U1, [_t('铁蛋', '稀有'), _t('Ace', '传说')], None)
     assert (await _call(h, p, '切换头衔 2')).endswith('✅ 已装备头衔：$\\textcolor{#FF8C00}{\\text{Ace}}$')
     assert titles.get(U1)['equipped'] == 'Ace'
     assert (await _call(h, p, '切换头衔 Ace')).endswith('您已经装备了此头衔')
@@ -271,7 +296,7 @@ async def test_equip_title_by_command_is_audited_only_when_it_changes(monkeypatc
     monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: audits.append((a, k)))
     monkeypatch.setattr(titles.userinfo, 'get_name', lambda uid: {U1: '铁蛋'}.get(uid, ''))
     p, h = dispatcher._P_EQUIP_TITLE, dispatcher.lgtbot_equip_title
-    titles.set_record(U1, [_t('A'), _t('B', 'red')], None)
+    titles.set_record(U1, [_t('A'), _t('B', '神话')], None)
     await _call(h, p, '切换头衔 2')
     assert audits == [(('title', '切换头衔', f'铁蛋 ({U1})：装备 无 → B'), {'src': dispatcher.audit.SRC_CMD})]
     assert (await _call(h, p, '切换头衔 B')).endswith('您已经装备了此头衔')
@@ -291,12 +316,12 @@ async def test_equip_title_none_takes_the_title_off(monkeypatch):
     monkeypatch.setattr(titles.userinfo, 'get_name', lambda uid: {U1: '铁蛋'}.get(uid, ''))
     p, h = dispatcher._P_EQUIP_TITLE, dispatcher.lgtbot_equip_title
     assert (await _call(h, p, '切换头衔 无')).endswith('您还没有头衔')
-    titles.set_record(U1, [_t('A'), _t('B', 'red')], None)
+    titles.set_record(U1, [_t('A'), _t('B', '神话')], None)
     assert (await _call(h, p, '切换头衔 无')).endswith('您当前没有装备头衔')
     assert audits == []                                          # 本来就没装备:不记
     titles.equip(U1, 'B')
     assert (await _call(h, p, '切换头衔无')).endswith('✅ 已取消装备头衔')
-    assert titles.get(U1) == {'titles': [_t('A'), _t('B', 'red')], 'equipped': None}
+    assert titles.get(U1) == {'titles': [_t('A'), _t('B', '神话')], 'equipped': None}
     assert audits == [(('title', '切换头衔', f'铁蛋 ({U1})：装备 B → 无'), {'src': dispatcher.audit.SRC_CMD})]
 
 
@@ -425,19 +450,19 @@ async def _run_send(monkeypatch, *, push: bool, game: str, title_uid=HOST, mixed
 
 
 async def test_title_notice_follows_the_reply_limit_tip(monkeypatch):
-    titles.set_record(HOST, [_t('铁蛋', 'purple')], '铁蛋')
+    titles.set_record(HOST, [_t('铁蛋', '史诗')], '铁蛋')
     sent = await _run_send(monkeypatch, push=False, game='五子棋')
-    assert sent == [_NEW.split('\n')[0], '## ⚠️ 消息回复限制', '[头衔] $\\textcolor{#8E44AD}{\\text{铁蛋}}$ 加入游戏']
+    assert sent == [_NEW.split('\n')[0], '## ⚠️ 消息回复限制', '$\\textcolor{#8E44AD}{\\text{[头衔]}}$ **铁蛋** 加入游戏']
 
 
 async def test_title_notice_follows_the_dm_warning(monkeypatch):
-    titles.set_record(HOST, [_t('铁蛋', 'purple')], '铁蛋')
+    titles.set_record(HOST, [_t('铁蛋', '史诗')], '铁蛋')
     game = next(iter(callbacks._DM_LIMITED_GAMES))
     sent = await _run_send(monkeypatch, push=True, game=game, mixed=True)
-    assert len(sent) == 3 and sent[1].startswith('## ') and sent[2].startswith('[头衔] ')
+    assert len(sent) == 3 and sent[1].startswith('## ') and sent[2] == '$\\textcolor{#8E44AD}{\\text{[头衔]}}$ **铁蛋** 加入游戏'
 
 
 async def test_no_notice_without_an_equipped_title(monkeypatch):
-    titles.set_record(HOST, [_t('铁蛋', 'purple')], None)
+    titles.set_record(HOST, [_t('铁蛋', '史诗')], None)
     assert len(await _run_send(monkeypatch, push=True, game='五子棋')) == 1
     assert len(await _run_send(monkeypatch, push=True, game='五子棋', title_uid='')) == 1

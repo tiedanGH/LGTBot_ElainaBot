@@ -50,22 +50,26 @@ def _body(resp):
     return json.loads(resp.text)
 
 
+def _edit_rows():
+    return [dict(lv, orig=lv['name']) for lv in titles.levels()]
+
+
 async def test_save_validates_audits_and_returns_the_whole_payload(pt, audits):
-    for bad in (ValueError('x'), [U1], {'openid': U1, 'titles': [{'name': 'a$', 'color': 'blue'}]},
-                {'openid': 'U1', 'titles': [{'name': 'A', 'color': 'blue'}]}):
+    for bad in (ValueError('x'), [U1], {'openid': U1, 'titles': [{'name': 'a$', 'level': '稀有'}]},
+                {'openid': 'U1', 'titles': [{'name': 'A', 'level': '稀有'}]}):
         resp = await pt.save_handler(_Req(bad))
         assert resp.status == 400 and _body(resp)['success'] is False
     assert audits == [] and titles.all_records() == {}
 
-    resp = await pt.save_handler(_Req({'openid': U1, 'titles': [{'name': '铁蛋', 'color': 'blue'}], 'equipped': '铁蛋'}))
+    resp = await pt.save_handler(_Req({'openid': U1, 'titles': [{'name': '铁蛋', 'level': '稀有'}], 'equipped': '铁蛋'}))
     body = _body(resp)
     assert body['success'] and body['message'] == '已保存'
     assert body['players'] == [{'openid': U1, 'name': '铁蛋', 'avatar': f'https://a/{U1}',
-                                'titles': [{'name': '铁蛋', 'color': 'blue'}], 'equipped': '铁蛋'}]
-    assert [lv['key'] for lv in body['levels']] == [lv['key'] for lv in titles.DEFAULT_LEVELS]
+                                'titles': [{'name': '铁蛋', 'level': '稀有'}], 'equipped': '铁蛋'}]
+    assert body['levels'] == list(titles.DEFAULT_LEVELS)
     assert audits[-1] == ('title', '编辑头衔', f'铁蛋 ({U1})：新增 「铁蛋」；装备 无 → 铁蛋')
 
-    await pt.save_handler(_Req({'openid': U1, 'titles': [{'name': '铁蛋', 'color': 'red'}, {'name': 'Ace', 'color': 'pink'}],
+    await pt.save_handler(_Req({'openid': U1, 'titles': [{'name': '铁蛋', 'level': '神话'}, {'name': 'Ace', 'level': '限定'}],
                                 'equipped': 'Ace'}))
     assert audits[-1][2] == f'铁蛋 ({U1})：新增 「Ace」；改等级 「铁蛋」；装备 铁蛋 → Ace'
     n = len(audits)
@@ -79,7 +83,7 @@ async def test_save_validates_audits_and_returns_the_whole_payload(pt, audits):
 async def test_delete_removes_the_record_and_audits(pt, audits):
     assert (await pt.delete_handler(_Req({'openid': U9}))).status == 404
     assert (await pt.delete_handler(_Req(ValueError('x')))).status == 400
-    titles.set_record(U9, [{'name': 'A', 'color': 'green'}, {'name': 'B', 'color': 'red'}], 'A')
+    titles.set_record(U9, [{'name': 'A', 'level': '普通'}, {'name': 'B', 'level': '神话'}], 'A')
     body = _body(await pt.delete_handler(_Req({'openid': U9})))
     assert body['success'] and body['players'] == [] and titles.get(U9) is None
     assert audits[-1] == ('title', '删除头衔记录', f'{U9}：共 2 个头衔')
@@ -90,35 +94,37 @@ async def test_lookup_requires_32_chars_and_list_sorts_named_first(pt):
         assert (await pt.lookup_handler(_Req(openid=bad))).status == 400, bad
     body = _body(await pt.lookup_handler(_Req(openid=U1)))
     assert body == {'success': True, 'openid': U1, 'name': '铁蛋', 'avatar': f'https://a/{U1}', 'exists': False}
-    titles.set_record(U2, [{'name': 'A', 'color': 'green'}], None)
-    titles.set_record(U1, [{'name': 'B', 'color': 'green'}], None)
+    titles.set_record(U2, [{'name': 'A', 'level': '普通'}], None)
+    titles.set_record(U1, [{'name': 'B', 'level': '普通'}], None)
     assert _body(await pt.lookup_handler(_Req(openid=U2)))['exists'] is True
     body = _body(await pt.list_handler(_Req()))
     assert body['success'] and [p['openid'] for p in body['players']] == [U1, U2]
-    assert body['name_max'] == titles.NAME_MAX_LEN and body['max_titles'] == titles.MAX_TITLES
-    assert body['level_name_max'] == titles.LEVEL_NAME_MAX_LEN and body['max_levels'] == titles.MAX_LEVELS
+    assert body['name_max'] == titles.NAME_MAX_LEN and body['level_name_max'] == titles.LEVEL_NAME_MAX_LEN
 
 
 async def test_levels_handler_saves_audits_and_refuses_deleting_used_levels(pt, audits):
     assert (await pt.levels_handler(_Req(ValueError('x')))).status == 400
     assert (await pt.levels_handler(_Req({'levels': []}))).status == 400
-    rows = titles.levels()
+    titles.set_record(U1, [{'name': 'A', 'level': '普通'}], None)
+    rows = _edit_rows()
     rows[0].update(name='常见', hex='#00AA00')
     body = _body(await pt.levels_handler(_Req({'levels': rows + [{'name': '金', 'hex': 'ffd700'}]})))
     assert body['success'] and body['levels'][0]['name'] == '常见' and body['levels'][-1]['hex'] == '#FFD700'
+    assert body['players'][0]['titles'] == [{'name': 'A', 'level': '常见'}]     # 头衔跟着等级改名
     assert audits[-1] == ('title', '编辑头衔等级', '新增 「金 #FFD700」；修改 「普通 #27AE60」 → 「常见 #00AA00」')
     n = len(audits)
-    await pt.levels_handler(_Req({'levels': titles.levels()}))
+    await pt.levels_handler(_Req({'levels': _edit_rows()}))
     assert len(audits) == n                                      # 没变化不记审计
+    await pt.levels_handler(_Req({'levels': _edit_rows()[::-1]}))
+    assert audits[-1][2] == '调整排序'
 
-    titles.set_record(U1, [{'name': 'A', 'color': 'green'}], None)
-    resp = await pt.levels_handler(_Req({'levels': titles.levels()[1:]}))
+    resp = await pt.levels_handler(_Req({'levels': [r for r in _edit_rows() if r['name'] != '常见']}))
     assert resp.status == 400 and '在用' in _body(resp)['message']
-    body = _body(await pt.levels_handler(_Req({'levels': titles.levels()[:-1]})))
+    body = _body(await pt.levels_handler(_Req({'levels': [r for r in _edit_rows() if r['name'] != '金']})))
     assert body['success'] and audits[-1][2] == '删除 「金 #FFD700」'
 
 
 def test_get_data_is_safe_to_embed(pt, monkeypatch):
-    titles.set_record(U1, [{'name': 'A', 'color': 'green'}], None)
+    titles.set_record(U1, [{'name': 'A', 'level': '普通'}], None)
     monkeypatch.setattr(pt.userinfo, 'get_name', lambda uid: '</script><b>')
     assert '</script>' not in pt.get_data()

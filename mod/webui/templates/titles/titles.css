@@ -30,9 +30,13 @@
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
 }
 .titles-level-pick {
-  width: 30px; height: 30px; padding: 2px; flex: 0 0 auto; cursor: pointer;
+  width: 30px; height: 30px; padding: 0; flex: 0 0 auto; cursor: pointer; overflow: hidden;
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
 }
+/* 色块铺满方框 */
+.titles-level-pick::-webkit-color-swatch-wrapper { padding: 0; }
+.titles-level-pick::-webkit-color-swatch { border: none; border-radius: 5px; }
+.titles-level-pick::-moz-color-swatch { border: none; border-radius: 5px; }
 .titles-level-row input[type="text"] {
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   padding: 5px 10px; border-radius: 6px; font-size: 12px; height: 30px; min-width: 0;
@@ -43,6 +47,7 @@
 .titles-level-hexinput { flex: 0 0 96px; font-family: 'Consolas', 'Menlo', monospace; }
 .titles-level-usage { font-size: 12px; color: var(--text-faint); flex: 0 0 auto; min-width: 56px; }
 .titles-level-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
+.titles-level-row .titles-level-move { padding: 4px 6px; }
 
 /* ── 头衔胶囊(玩家卡片上):同样按 --c 调淡底色 / 描边 ── */
 .titles-chip {
@@ -54,15 +59,11 @@
   background: color-mix(in srgb, var(--c) 9%, var(--panel));
   border: 1px solid color-mix(in srgb, var(--c) 32%, var(--border));
 }
-button.titles-chip { cursor: pointer; transition: background .15s, border-color .15s; }
-button.titles-chip:hover:not(:disabled) { background: color-mix(in srgb, var(--c) 18%, var(--panel)); }
-button.titles-chip:disabled { opacity: .6; cursor: wait; }
 .titles-chip.equipped {
   font-weight: 600;
   background: color-mix(in srgb, var(--c) 18%, var(--panel));
   border-color: var(--c);
 }
-button.titles-chip.equipped { cursor: default; }
 .titles-chip-icon { width: 13px; height: 13px; stroke-width: 2.4; }
 .titles-rarity { font-size: 10px; font-weight: 400; opacity: .75; }
 
@@ -116,6 +117,8 @@ button.titles-chip.equipped { cursor: default; }
 }
 .titles-noname { color: var(--text-faint); font-weight: 400; }
 .titles-openid { font-size: 11px; line-height: 1.4; color: var(--text-muted); white-space: nowrap; }
+/* 弹窗里整串放一行,放不下才折 */
+.titles-openid.one-line { white-space: normal; overflow-wrap: anywhere; }
 .titles-head-note { font-size: 11px; color: var(--warn); margin-top: 2px; }
 .titles-ops { display: flex; gap: 6px; flex: 0 0 auto; }
 .titles-ops .dash-btn { white-space: nowrap; }
@@ -167,6 +170,12 @@ button.titles-chip.equipped { cursor: default; }
 }
 .titles-edit-row .titles-edit-name { flex: 1 1 200px; max-width: 280px; font-weight: 600; }
 .titles-edit-row select { flex: 0 1 160px; }
+/* 等级下拉:左侧圆点与文字都用所选等级的颜色(--c 由 JS 给出) */
+.titles-edit-row select.titles-edit-level {
+  --c: var(--text);
+  color: var(--c); font-weight: 600; padding-left: 24px;
+  background: radial-gradient(circle at 12px 50%, var(--c) 0 4px, transparent 4.5px) no-repeat, var(--panel);
+}
 .titles-edit-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
 .titles-eq {
   display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;

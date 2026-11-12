@@ -3,10 +3,10 @@
 """头衔系统 —— 每人可持有多个、同时只装备一个;头衔按等级上色,可新增 / 编辑,数据由面板维护。
 
 数据在 ``data/titles/`` 下的两份文件:
-  · ``titles.json``:``{"<openid>": {"titles": [{"name": 头衔名, "color": 等级键}, ...], "equipped": 头衔名 | null}}``
-  · ``levels.json``:``[{"key": 等级键, "name": 等级名, "hex": "#RRGGBB"}, ...]``,文件不存在时用默认的六个等级
+  · ``titles.json``:``{"<openid>": {"titles": [{"name": 头衔名, "level": 等级名}, ...], "equipped": 头衔名 | null}}``
+  · ``levels.json``:``[{"name": 等级名, "hex": "#RRGGBB"}, ...]``,顺序即排序;文件不存在时用默认的六个等级
 
-头衔按等级键引用等级,改等级的名称或颜色对所有头衔立即生效;还有头衔在用的等级不能删除。
+等级名唯一,头衔直接按名引用:改色立即生效,改名时同一把锁内把头衔里的旧名一并换掉;还有头衔在用的等级不能删除。
 装备按名字记,面板增删、调序头衔后照样对得上。展示时用 KaTeX 行内上色,头衔名与等级名因此不收会打断公式或 markdown 的字符。
 """
 
@@ -17,7 +17,6 @@ import os
 import re
 import threading
 import time
-import uuid
 
 from core.base.logger import get_logger, PLUGIN
 from .. import boot
@@ -25,25 +24,23 @@ from . import userinfo
 
 log = get_logger(PLUGIN, 'LGTBot')
 
-# 默认等级:顺序即稀有度由低到高,粉色是限定款;键沿用颜色名
+# 默认等级:顺序即稀有度由低到高,粉色是限定款
 DEFAULT_LEVELS = (
-    {'key': 'green',  'name': '普通', 'hex': '#27AE60'},
-    {'key': 'blue',   'name': '稀有', 'hex': '#2980B9'},
-    {'key': 'purple', 'name': '史诗', 'hex': '#8E44AD'},
-    {'key': 'orange', 'name': '传说', 'hex': '#FF8C00'},
-    {'key': 'red',    'name': '神话', 'hex': '#E74C3C'},
-    {'key': 'pink',   'name': '限定', 'hex': '#E84393'},
+    {'name': '普通', 'hex': '#27AE60'},
+    {'name': '稀有', 'hex': '#2980B9'},
+    {'name': '史诗', 'hex': '#8E44AD'},
+    {'name': '传说', 'hex': '#FF8C00'},
+    {'name': '神话', 'hex': '#E74C3C'},
+    {'name': '限定', 'hex': '#E84393'},
 )
 NAME_MAX_LEN = 12
 LEVEL_NAME_MAX_LEN = 8
-MAX_TITLES = 20
-MAX_LEVELS = 20
 # KaTeX \text{} 与 markdown 里有特殊含义的字符
 _FORBIDDEN = set('\\{}$%#&_^~*`[]<>|')
 _OPENID_RE = re.compile(r'^[0-9A-Za-z]{32}$')
 _HEX_RE = re.compile(r'^#?([0-9A-Fa-f]{6})$')
 # 等级文件损坏、被手改掉时头衔照常保留,按灰色兜底显示,可在面板重新选等级
-_UNKNOWN_LEVEL = {'key': '', 'name': '未知', 'hex': '#808080'}
+_UNKNOWN_LEVEL = {'name': '未知', 'hex': '#808080'}
 
 
 class _JsonFile:
@@ -131,33 +128,29 @@ def normalize_hex(value) -> str | None:
 # ──────── 等级 ────────────────────────────────────────────────────────────
 
 def _levels_unlocked() -> list[dict]:
-    """读到的等级表规整成合法形状(丢掉坏项);一个可用的都没有时退回默认等级。"""
-    raw = _levels.load()
-    out, keys, names = [], set(), set()
-    for lv in raw:
+    """读到的等级表规整成合法形状(丢掉坏项与重名);一个可用的都没有时退回默认等级。"""
+    out, names = [], set()
+    for lv in _levels.load():
         if not isinstance(lv, dict):
             continue
-        key, name, hexcolor = lv.get('key'), lv.get('name'), normalize_hex(lv.get('hex'))
-        if not isinstance(key, str) or not key or key in keys or validate_level_name(name) or not hexcolor:
+        name, hexcolor = lv.get('name'), normalize_hex(lv.get('hex'))
+        if validate_level_name(name) or not hexcolor or name.strip() in names:
             continue
-        if name.strip() in names:
-            continue
-        keys.add(key)
         names.add(name.strip())
-        out.append({'key': key, 'name': name.strip(), 'hex': hexcolor})
+        out.append({'name': name.strip(), 'hex': hexcolor})
     return out or [dict(lv) for lv in DEFAULT_LEVELS]
 
 
 def levels() -> list[dict]:
-    """全部等级(副本),顺序即面板里的顺序。"""
+    """全部等级(副本),顺序即面板里的排序。"""
     with _lock:
         return _levels_unlocked()
 
 
 def level_of(title: dict) -> dict:
     """头衔所属的等级;等级已不存在时返回灰色的「未知」兜底。"""
-    key = title.get('color')
-    return next((lv for lv in levels() if lv['key'] == key), _UNKNOWN_LEVEL)
+    name = title.get('level')
+    return next((lv for lv in levels() if lv['name'] == name), _UNKNOWN_LEVEL)
 
 
 def _usage_unlocked() -> dict[str, int]:
@@ -165,24 +158,36 @@ def _usage_unlocked() -> dict[str, int]:
     usage: dict[str, int] = {}
     for raw in _players.load().values():
         for t in (_clean_record(raw) or {}).get('titles', []):
-            usage[t['color']] = usage.get(t['color'], 0) + 1
+            usage[t['level']] = usage.get(t['level'], 0) + 1
     return usage
 
 
-def set_levels(rows) -> str | None:
-    """面板保存:整份覆盖等级表,不合法时返回原因(不写盘)。
+def _rename_levels_unlocked(moved: dict[str, str]) -> None:
+    """等级改名后把头衔里的旧名换成新名;一次映射,两个等级互换名字也不会串。"""
+    data, changed = {}, False
+    for uid, raw in _players.load().items():
+        if isinstance(raw, dict) and isinstance(raw.get('titles'), list):
+            ts = [dict(t, level=moved[t['level']]) if isinstance(t, dict) and isinstance(t.get('level'), str) and t['level'] in moved else t
+                  for t in raw['titles']]
+            if ts != raw['titles']:
+                raw, changed = dict(raw, titles=ts), True
+        data[uid] = raw
+    if changed:
+        _players.save(data)
 
-    行带现有等级的 key 是编辑,不带 key 是新增(在这里生成);删掉的等级还有头衔在用时拒绝保存。
+
+def set_levels(rows) -> str | None:
+    """面板保存:整份覆盖等级表,行的顺序即排序;不合法时返回原因(不写盘)。
+
+    行带 ``orig``(该等级原来的名称)是编辑,不带是新增;改名的等级连同头衔里的引用一起换名,保存后会让头衔失去等级时拒绝保存。
     """
     if not isinstance(rows, list) or not rows:
         return '至少保留一个等级'
-    if len(rows) > MAX_LEVELS:
-        return f'最多 {MAX_LEVELS} 个等级'
     with _lock:
-        current = {lv['key']: lv for lv in _levels_unlocked()}
-        out, names, kept = [], set(), set()
+        current = {lv['name'] for lv in _levels_unlocked()}
+        out, names, renames = [], set(), {}
         for row in rows:
-            if not isinstance(row, dict):
+            if not isinstance(row, dict) or not isinstance(row.get('orig') or '', str):
                 return '等级格式错误'
             err = validate_level_name(row.get('name'))
             if err:
@@ -193,19 +198,20 @@ def set_levels(rows) -> str | None:
                 return f'等级「{name}」颜色需为 #RRGGBB 格式的 HEX'
             if name in names:
                 return f'等级「{name}」重复'
-            key = row.get('key') or ''
-            if key and (key not in current or key in kept):
+            orig = row.get('orig') or ''
+            if orig and (orig not in current or orig in renames):
                 return f'等级「{name}」已被删除或重复，请刷新后再编辑'
-            if not key:
-                # 随机键:不会撞上被删等级的旧键(手改文件残留的头衔可能还引用着)
-                key = uuid.uuid4().hex[:8]
-            kept.add(key)
+            if orig:
+                renames[orig] = name
             names.add(name)
-            out.append({'key': key, 'name': name, 'hex': hexcolor})
-        usage = _usage_unlocked()
-        for key, lv in current.items():
-            if key not in kept and usage.get(key):
-                return f'等级「{lv["name"]}」还有 {usage[key]} 个头衔在用，先给这些头衔换个等级再删除'
+            out.append({'name': name, 'hex': hexcolor})
+        # 被删掉的等级名若又被新行用上,头衔就挂到新等级上,不算失去等级
+        for lv_name, n in _usage_unlocked().items():
+            if lv_name in current and renames.get(lv_name, lv_name) not in names:
+                return f'等级「{lv_name}」还有 {n} 个头衔在用，先给这些头衔换个等级再删除'
+        moved = {o: n for o, n in renames.items() if o != n}
+        if moved:
+            _rename_levels_unlocked(moved)
         _levels.save(out)
     return None
 
@@ -220,11 +226,11 @@ def _clean_record(raw) -> dict | None:
     for t in raw.get('titles') or []:
         if not isinstance(t, dict):
             continue
-        name, color = t.get('name'), t.get('color')
-        if validate_name(name) or not isinstance(color, str) or not color or name.strip() in seen:
+        name, level = t.get('name'), t.get('level')
+        if validate_name(name) or not isinstance(level, str) or not level or name.strip() in seen:
             continue
         seen.add(name.strip())
-        out.append({'name': name.strip(), 'color': color})
+        out.append({'name': name.strip(), 'level': level})
     equipped = raw.get('equipped')
     return {'titles': out, 'equipped': equipped if equipped in seen else None}
 
@@ -245,7 +251,7 @@ def all_records() -> dict:
 
 
 def equipped(openid: str) -> dict | None:
-    """玩家当前装备的头衔 ``{name, color}``;没装备返回 None。"""
+    """玩家当前装备的头衔 ``{name, level}``;没装备返回 None。"""
     rec = get(openid)
     if not rec or not rec['equipped']:
         return None
@@ -262,7 +268,8 @@ def equip(openid: str, ref: str) -> tuple[dict | None, str]:
             return None, 'none'
         titles = rec['titles']
         title = None
-        if ref.isdecimal() and len(ref) <= 3 and 1 <= int(ref) <= len(titles):
+        # 位数超过头衔总数的位数就不当序号,超长数字串也不会进 int()
+        if ref.isdecimal() and len(ref) <= len(str(len(titles))) and 1 <= int(ref) <= len(titles):
             title = titles[int(ref) - 1]
         if title is None:
             title = next((t for t in titles if t['name'] == ref), None)
@@ -298,10 +305,8 @@ def set_record(openid: str, titles, equipped_name) -> str | None:
         return 'OpenID 应为 32 位字母或数字'
     if not isinstance(titles, list):
         return '头衔列表格式错误'
-    if len(titles) > MAX_TITLES:
-        return f'每人最多 {MAX_TITLES} 个头衔'
     with _lock:
-        keys = {lv['key'] for lv in _levels_unlocked()}
+        level_names = {lv['name'] for lv in _levels_unlocked()}
         clean, seen = [], set()
         for t in titles:
             if not isinstance(t, dict):
@@ -310,12 +315,13 @@ def set_record(openid: str, titles, equipped_name) -> str | None:
             if err:
                 return err
             name = t['name'].strip()
-            if t.get('color') not in keys:
+            level = t.get('level')
+            if not isinstance(level, str) or level not in level_names:
                 return f'头衔「{name}」的等级不存在，请重新选择'
             if name in seen:
                 return f'头衔「{name}」重复'
             seen.add(name)
-            clean.append({'name': name, 'color': t['color']})
+            clean.append({'name': name, 'level': level})
         if equipped_name not in (None, '') and equipped_name not in seen:
             return '当前装备的头衔不在头衔库里'
         data = dict(_players.load())
@@ -351,8 +357,8 @@ def render(title: dict) -> str:
 
 
 def join_notice(title: dict) -> str:
-    """新建 / 加入游戏时的头衔播报。"""
-    return f'[头衔] {render(title)} 加入游戏'
+    """新建 / 加入游戏时的头衔播报:「[头衔]」上标颜色,头衔名只加粗。"""
+    return f'$\\textcolor{{{level_of(title)["hex"]}}}{{\\text{{[头衔]}}}}$ **{title["name"]}** 加入游戏'
 
 
 def player_label(openid: str) -> str:

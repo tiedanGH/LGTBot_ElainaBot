@@ -44,8 +44,6 @@ def _payload() -> dict:
         'levels': titles.levels(),
         'name_max': titles.NAME_MAX_LEN,
         'level_name_max': titles.LEVEL_NAME_MAX_LEN,
-        'max_titles': titles.MAX_TITLES,
-        'max_levels': titles.MAX_LEVELS,
         'players': players,
         'path': titles._players.path,
         'query_time': int(time.time()),
@@ -64,8 +62,8 @@ def _join(label: str, items: list) -> str:
 
 def _diff(before: dict | None, after: dict | None) -> str:
     """头衔审计详情:新增 / 移除 / 改等级的头衔与装备变化;改名记作移除旧名、新增新名。"""
-    b = {t['name']: t['color'] for t in (before or {}).get('titles', [])}
-    a = {t['name']: t['color'] for t in (after or {}).get('titles', [])}
+    b = {t['name']: t['level'] for t in (before or {}).get('titles', [])}
+    a = {t['name']: t['level'] for t in (after or {}).get('titles', [])}
     parts = [_join('新增', [f'「{n}」' for n in a if n not in b]),
              _join('移除', [f'「{n}」' for n in b if n not in a]),
              _join('改等级', [f'「{n}」' for n in a if n in b and a[n] != b[n]])]
@@ -79,13 +77,15 @@ def _level_label(lv: dict) -> str:
     return f'「{lv["name"]} {lv["hex"]}」'
 
 
-def _levels_diff(before: list, after: list) -> str:
-    """等级审计详情:新增 / 删除 / 改名改色的等级。"""
-    b = {lv['key']: lv for lv in before}
-    a = {lv['key']: lv for lv in after}
-    parts = [_join('新增', [_level_label(lv) for k, lv in a.items() if k not in b]),
-             _join('删除', [_level_label(lv) for k, lv in b.items() if k not in a]),
-             _join('修改', [f'{_level_label(b[k])} → {_level_label(lv)}' for k, lv in a.items() if k in b and b[k] != lv])]
+def _levels_diff(before: list, after: list, origs: list) -> str:
+    """等级审计详情:新增 / 删除 / 改名改色的等级与排序变化;``origs[i]`` 是 ``after[i]`` 原来的名称,新增的为空。"""
+    b = {lv['name']: lv for lv in before}
+    kept = [(b[o], lv) for o, lv in zip(origs, after) if o in b]
+    parts = [_join('新增', [_level_label(lv) for o, lv in zip(origs, after) if o not in b]),
+             _join('删除', [_level_label(lv) for n, lv in b.items() if n not in origs]),
+             _join('修改', [f'{_level_label(old)} → {_level_label(lv)}' for old, lv in kept if old != lv])]
+    if [old['name'] for old, _ in kept] != [n for n in b if n in origs]:
+        parts.append('调整排序')
     return '；'.join(p for p in parts if p) or '无变化'
 
 
@@ -116,7 +116,7 @@ async def lookup_handler(request) -> 'web.Response':
 
 
 async def save_handler(request) -> 'web.Response':
-    """``POST /api/ext/lgtbot/titles/save`` body ``{openid, titles: [{name, color}], equipped}``。
+    """``POST /api/ext/lgtbot/titles/save`` body ``{openid, titles: [{name, level}], equipped}``。
 
     整份覆盖该玩家的头衔库与当前装备,头衔库为空等于删除记录;校验不过时原样回 ``titles.set_record`` 的原因,不写盘;内容没变不记审计。
     """
@@ -148,15 +148,16 @@ async def delete_handler(request) -> 'web.Response':
 
 
 async def levels_handler(request) -> 'web.Response':
-    """``POST /api/ext/lgtbot/titles/levels`` body ``{levels: [{key?, name, hex}]}`` —— 整份覆盖等级表,不带 key 的行是新增;内容没变不记审计。"""
+    """``POST /api/ext/lgtbot/titles/levels`` body ``{levels: [{orig?, name, hex}]}`` —— 按行序整份覆盖等级表,不带 orig 的行是新增;内容没变不记审计。"""
     body = await _json_body(request)
     if body is None:
         return _fail('请求体不是 JSON 对象')
+    rows = body.get('levels')
     before = titles.levels()
-    err = titles.set_levels(body.get('levels'))
+    err = titles.set_levels(rows)
     if err:
         return _fail(err)
     after = titles.levels()
     if after != before:
-        audit.record('title', '编辑头衔等级', _levels_diff(before, after))
+        audit.record('title', '编辑头衔等级', _levels_diff(before, after, [r.get('orig') or '' for r in rows]))
     return web.json_response({'success': True, 'message': '等级已保存', **_payload()})
