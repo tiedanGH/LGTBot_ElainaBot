@@ -38,3 +38,6 @@ core.*
 
 # LGTBot SIGSEGV handler crash dumps (LGTBot_ElainaBot.cc::DumpCrashToFile)
 LGTBot_CRASH_DUMPS/
+
+# 本地开发测试脚本与缓存
+devtest/
