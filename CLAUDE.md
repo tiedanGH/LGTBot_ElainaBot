@@ -41,7 +41,7 @@ Co-Authored-By: <协作模型> <noreply@anthropic.com>
 
 #### 正文
 - 用**中文**写，只说**改了什么、怎么改的**
-- 可以逐条列点（`- ` 开头），也可以分成多个自然段；一条 / 一段只说一件事，顺带完成的次要改动（如 README / DEPLOY 同步）各占一条
+- 可以逐条列点（`- ` 开头），也可以分成多个自然段；一条 / 一段只说一件事，顺带完成的次要改动（如 README / DETAILS / DEPLOY 同步）各占一条
 - **每条、每段写成一行，不在句中换行**；内容多就拆成多条或多段，不要把一大段文字折成多行
 - 以下内容一律不写：
   - **修改前的表现**：不出现「原先」「此前」「之前会」这类表述，也不描述旧的实现方式
@@ -84,23 +84,23 @@ Co-Authored-By: <协作模型> <noreply@anthropic.com>
 README,前缀仍是 `config`)。功能域名字常与 `mod/` 模块名重合(quota / backup /
 uploader…),但判定依据始终是"这次改的是什么功能",不是"动了哪个文件"。
 
-| 改动主要功能                                     | 前缀                            | 示例                                                            |
-|--------------------------------------------|-------------------------------|---------------------------------------------------------------|
-| CI / 测试基建（workflows、`tests/`）              | `ci`                          | `ci: add real-bridge smoke test to cmake ci`                  |
-| 配置体系（字段 / 校验 / 热重载）                        | `config`                      | `config: validate config.yaml and lgtbot.json before saving`  |
-| 消息派发 / 指令处理行为                              | `dispatcher`                  | `dispatcher: stop exclusive commands leaking into catch-alls` |
-| 引擎回调 / 发送链路                                | `callbacks`                   | `callbacks: simplify refresh tip for full access group`       |
-| Web 面板界面与交互                                | `webui`                       | `webui: lock tabs nav to horizontal-only scrolling on mobile` |
-| 其他清晰功能域（配额 / 备份 / 图床 / 启动加载 …）             | `quota` / `backup` / `boot` … | `quota: fix race in shared Event causing dead wait`           |
-| 构建脚本 / 编译选项（`build.sh` / `CMakeLists.txt`） | `build`                       | `build: default glog off, flip flag to --glog`                |
-| 顶层文档单独改动（README / DEPLOY / CLAUDE）         | `doc`                         | `doc: trim key features table to the essentials`              |
-| 跨功能域的大型新特性（以特性本身命名最清楚）/ 版本 bump            | **无前缀**                       | `add owner planned-restart mode blocking only new games`      |
+| 改动主要功能                                       | 前缀                            | 示例                                                            |
+|----------------------------------------------|-------------------------------|---------------------------------------------------------------|
+| CI / 测试基建（workflows、`tests/`）                | `ci`                          | `ci: add real-bridge smoke test to cmake ci`                  |
+| 配置体系（字段 / 校验 / 热重载）                          | `config`                      | `config: validate config.yaml and lgtbot.json before saving`  |
+| 消息派发 / 指令处理行为                                | `dispatcher`                  | `dispatcher: stop exclusive commands leaking into catch-alls` |
+| 引擎回调 / 发送链路                                  | `callbacks`                   | `callbacks: simplify refresh tip for full access group`       |
+| Web 面板界面与交互                                  | `webui`                       | `webui: lock tabs nav to horizontal-only scrolling on mobile` |
+| 其他清晰功能域（配额 / 备份 / 图床 / 启动加载 …）               | `quota` / `backup` / `boot` … | `quota: fix race in shared Event causing dead wait`           |
+| 构建脚本 / 编译选项（`build.sh` / `CMakeLists.txt`）   | `build`                       | `build: default glog off, flip flag to --glog`                |
+| 顶层文档单独改动（README / DETAILS / DEPLOY / CLAUDE） | `doc`                         | `doc: trim key features table to the essentials`              |
+| 跨功能域的大型新特性（以特性本身命名最清楚）/ 版本 bump              | **无前缀**                       | `add owner planned-restart mode blocking only new games`      |
 
 **关键约束 ①：前缀是功能域短词,不带路径、不带 .py。** 功能域比文件路径稳定
 （文件会重构搬家,功能不会）;同一功能的后续演进沿用同一前缀,便于
 `git log --grep '^config:'` 按功能追溯。
 
-**关键约束 ②：README / DEPLOY 同步不改变前缀。** 它们是 §4 同步规则强制要求的
+**关键约束 ②：README / DETAILS / DEPLOY 同步不改变前缀。** 它们是 §4 同步规则强制要求的
 副作用,前缀跟功能走。仅当特性大到没有单一主导功能域时才用"无前缀 + 特性描述"。
 
 ✅ 好：
@@ -131,7 +131,7 @@ mod/quota: fix race                            # 不要带路径
 
 - **小版本**：提交涉及桥接层主逻辑时，除非用户明确说不动版本号，**把小版本 +1**（`2.12.10` → `2.12.11`），和改动放在同一个 commit 里，不单独提交；有正文时最后一条写 `- 更新版本至 v2.12.11`（只写标题的提交不为它单独加正文）
 - **主逻辑**：插件运行时加载或执行的代码 —— `main.py`、`mod/`（含面板模板）、`LGTBot_ElainaBot.cc`，以及本地编译入口 `build.sh` / `CMakeLists.txt`；一个提交里只要有一处主逻辑改动就照常 +1
-- **不动版本号**：不进入插件运行与本地编译的改动 —— CI 工作流（`.github/`）、CI 专用脚本（`tools/`）、测试（`tests/`）、文档（README / DEPLOY / CLAUDE.md 等）与注释；修正提交（amend）也不再重复 +1
+- **不动版本号**：不进入插件运行与本地编译的改动 —— CI 工作流（`.github/`）、CI 专用脚本（`tools/`）、测试（`tests/`）、文档（README / DETAILS / DEPLOY / CLAUDE.md 等）与注释；修正提交（amend）也不再重复 +1
 - **大版本**：用户要求时才升（`2.12.x` → `2.13.0`，小版本归零），**单独一个 commit**，只改版本号，标题 `bump version to 2.13.0`；同时按下方格式写 release 文本
 - **不打 tag**：tag 一律由用户手动添加
 
@@ -213,28 +213,31 @@ mod/quota: fix race                            # 不要带路径
 
 ## 4. 文档分工
 
-| 文件          | 用途   | 包含什么                           |
-|-------------|------|--------------------------------|
-| `README.md` | 项目展示 | 致谢、简介、工作原理图、特性、QQ 协议限制、文件结构、链接 |
-| `DEPLOY.md` | 部署专用 | **仅** 安装依赖、编译、启动、配置、卸载、故障排查    |
+| 文件           | 用途   | 包含什么                             |
+|--------------|------|----------------------------------|
+| `README.md`  | 项目展示 | 简介、快速开始、关键特性摘要、开发计划、致谢、赞助、许可证、链接 |
+| `DETAILS.md` | 详细说明 | 关键特性完整说明、QQ 协议限制、工作原理图、文件结构      |
+| `DEPLOY.md`  | 部署专用 | **仅** 安装依赖、编译、启动、配置、卸载、故障排查      |
 
-`DEPLOY.md` **不放**：架构说明、目录结构、模块职责、协议限制、Web UI 介绍。这些进 README。
+`README.md` 的关键特性只写摘要，完整说明写进 DETAILS。
+
+`DEPLOY.md` **不放**：架构说明、目录结构、模块职责、协议限制、Web UI 介绍。这些进 DETAILS。
 
 ### 同步规则（强制）
 
-**每次实质性改动都要检查并按需更新 README / DEPLOY，且应在同一个 commit 内完成**，避免文档与代码漂移。
+**每次实质性改动都要检查并按需更新 README / DETAILS / DEPLOY，且应在同一个 commit 内完成**，避免文档与代码漂移。
 
 特别需要同步的场景：
 
-| 改动类型                                             | 同步位置                                 |
-|--------------------------------------------------|--------------------------------------|
-| 新增 / 删除 / 移动文件                                   | README「文件结构」节                        |
-| 改动路径常量（`DATA_DIR` / `BUILD_DIR` / `CONF_PATH` …） | DEPLOY 配置 / 数据目录章节                   |
-| 新增依赖 / 编译选项                                      | DEPLOY「系统依赖」「一键编译」章节                 |
-| 新增功能特性                                           | README「关键特性」表                        |
-| 新增 / 修改协议限制 / 已知问题                               | README「QQ 协议相关限制」表                   |
-| 新增 / 修改 Web UI 页面                                | README「关键特性」+ DEPLOY「Web UI」相关说明（若有） |
-| 新增 / 修改启动日志 / 故障现象                               | DEPLOY「故障排查」表                        |
+| 改动类型                                             | 同步位置                                  |
+|--------------------------------------------------|---------------------------------------|
+| 新增 / 删除 / 移动文件                                   | DETAILS「文件结构」节                        |
+| 改动路径常量（`DATA_DIR` / `BUILD_DIR` / `CONF_PATH` …） | DEPLOY 配置 / 数据目录章节                    |
+| 新增依赖 / 编译选项                                      | DEPLOY「系统依赖」「一键编译」章节                  |
+| 新增功能特性                                           | DETAILS「关键特性」；摘要有变化时同步 README「关键特性」   |
+| 新增 / 修改协议限制 / 已知问题                               | DETAILS「QQ 协议相关限制」表                   |
+| 新增 / 修改 Web UI 页面                                | DETAILS「关键特性」+ DEPLOY「Web UI」相关说明（若有） |
+| 新增 / 修改启动日志 / 故障现象                               | DEPLOY「故障排查」表                         |
 
 ---
 
