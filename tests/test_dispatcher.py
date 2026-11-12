@@ -426,14 +426,11 @@ def test_builtin_list_covers_every_system_plugin_command():
     import os
     import re as _re
 
-    here = os.path.realpath(dispatcher.__file__)      # 穿过 pytest_root 软链
-    root = ''
-    for _ in range(6):
-        here = os.path.dirname(here)
-        cand = os.path.join(here, 'plugins', 'system')
-        if os.path.isdir(cand):
-            root = cand
-            break
+    import core
+
+    # 主框架根是 core 包的上一级,开发仓库不在框架目录里也能找到
+    cands = [os.path.join(os.path.dirname(os.path.realpath(p)), 'plugins', 'system') for p in core.__path__]
+    root = next((c for c in cands if os.path.isdir(c)), '')
     if not root:
         pytest.skip('未随框架一起检出 plugins/system')
 
