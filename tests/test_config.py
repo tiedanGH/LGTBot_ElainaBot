@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 
 import pytest
 import yaml
@@ -647,6 +648,15 @@ def test_order_falls_back_to_rendering_when_blocks_cannot_be_cut():
     out = config.order_config_yaml(src)
     assert list(yaml.safe_load(out)) == ['bind_bot_appid', 'button_cooldown', 'sponsor_enabled']
     assert yaml.safe_load(out) == yaml.safe_load(src)
+
+
+def test_top_key_split_is_linear_and_strips_trailing_spaces():
+    """超长、不带冒号的顶格行切块不会让正则回溯卡住;字段名去掉冒号前的空白,冒号后不跟空白的行不算字段。"""
+    t = time.perf_counter()
+    head, blocks, _ = config._config_blocks('9' + ' ' * 100000 + '\n')
+    assert time.perf_counter() - t < 1 and blocks == [] and head.startswith('9 ')
+    _, blocks, _ = config._config_blocks('button_cooldown \t: 3.0\nkey:value\n')
+    assert blocks == [('button_cooldown', 'button_cooldown \t: 3.0\nkey:value\n')]
 
 
 @pytest.mark.parametrize('text', ['a: [1,\n', '- just\n- a list\n', '', 'plain'])

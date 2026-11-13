@@ -135,8 +135,8 @@ def render_config_yaml(cfg: dict) -> str:
     return '\n'.join(lines) + '\n'
 
 
-# 顶层字段所在行:顶格,且不是注释、列表项或文档标记
-_TOP_KEY_RE = re.compile(r'^(?![\s#-])([^:]+?)\s*:(?=\s|$)')
+# 顶层字段所在行:顶格,且不是注释、列表项或文档标记;字段名贪婪取到冒号、再去尾部空白,惰性匹配接 \s* 会在超长行上平方级回溯
+_TOP_KEY_RE = re.compile(r'^(?![\s#-])([^:]+):(?=\s|$)')
 
 
 def _config_blocks(text: str) -> tuple:
@@ -152,7 +152,7 @@ def _config_blocks(text: str) -> tuple:
             line += '\n'
         m = _TOP_KEY_RE.match(line)
         if m:
-            blocks.append((m.group(1), pending + [line]))
+            blocks.append((m.group(1).rstrip(), pending + [line]))
             pending = []
         elif not line.strip() or line.startswith('#'):
             pending.append(line)
