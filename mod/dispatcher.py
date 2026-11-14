@@ -25,7 +25,7 @@ from core.message.event import (
 
 from . import state, helpers, boot, game_switch
 from .messaging import quota, buttons, uploader
-from .users import userinfo, nickname_review, titles
+from .users import userinfo, nickname_review, titles, titles_image
 from .ops import audit
 from .stats import metrics, stats_image
 from .announce import urgent, notice
@@ -110,6 +110,7 @@ _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 _P_SPONSOR  = r'^/?赞助支持$'
 _P_MY_TITLES = r'^/?我的头衔$'
+_P_TITLE_LIST = r'^/?头衔列表$'
 _P_EQUIP_TITLE = r'^/?切换头衔\s*(\S[^\n]*?)?\s*$'
 _P_ADMIN_INTERRUPT_AT = r'^(?:@.+?\s*)?%中断(?:\s+\S+)?$'
 _ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
@@ -118,7 +119,7 @@ _ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
     _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST, _P_ADMIN_INTERRUPT,
-    _P_SPONSOR, _P_MY_TITLES, _P_EQUIP_TITLE,
+    _P_SPONSOR, _P_MY_TITLES, _P_TITLE_LIST, _P_EQUIP_TITLE,
 ))
 
 
@@ -1440,19 +1441,49 @@ async def lgtbot_sponsor(event, match):
 
 _EQUIP_TITLE_RE = re.compile(_P_EQUIP_TITLE)
 _NO_TITLES = '您还没有头衔'
+_MY_TITLES_WIDE = 15          # 持有这么多头衔起「我的头衔」也排五列,免得图片拖得太长
+_titles_dep_warned = False
 
 
-def _my_titles_md(uid: str) -> str:
-    """「我的头衔」正文:序号、上色的头衔名与稀有度,装备中的那个加标记。序号用「1、」,理由同 lgtbot_data_stats。"""
-    rec = titles.get(uid)
-    if not rec or not rec['titles']:
-        return _NO_TITLES
-    lines = ['## 🏅 我的头衔', '']
-    for i, t in enumerate(rec['titles'], 1):
-        mark = '（装备中）' if t['name'] == rec['equipped'] else ''
-        lines.append(f'{i}、{titles.render(t)}【{titles.rarity(t)}】{mark}')
-    lines += ['', '> 发送「切换头衔 序号/名称」更换头衔']
-    return '\n'.join(lines)
+def _title_cells(ts: list, b: dict, owned: set, first: int = 0, label: bool = False) -> list:
+    """头衔 → 图片格子;``first`` 非 0 时从它开始标序号(与「切换头衔 序号」一致),``label`` 在名字下方写分类。"""
+    cats = set(b['categories'])
+    return [{'name': t['name'], 'hex': b['colors'].get(t['color'], titles.UNKNOWN_COLOR['hex']), 'owned': t['name'] in owned,
+             'equipped': t['name'] == b['equipped'], 'index': first + i if first else 0,
+             'label': (t['category'] if t['category'] in cats else titles.UNKNOWN_CATEGORY) if label else ''}
+            for i, t in enumerate(ts)]
+
+
+async def _reply_titles_image(event, title: str, sub: str, sections: list, footer: str, cols: int) -> None:
+    """头衔图片回执:缺依赖时提示安装,不做文字回退;配了图床走 markdown 内嵌并带 @,否则直接回复图片(媒体消息不解析 @)。"""
+    global _titles_dep_warned
+    missing = titles_image.missing_dependency()
+    if missing:
+        if not _titles_dep_warned:
+            _titles_dep_warned = True
+            log.warning(f'头衔图片渲染{missing},「头衔列表」「我的头衔」不可用')
+        await event.reply(_with_at(_at(event), f'❌ 头衔图片渲染{missing}，请联系管理员安装'))
+        return
+    loop = asyncio.get_running_loop()
+    img = await loop.run_in_executor(None, titles_image.render, title, sub, sections, footer, cols)
+    if not img:
+        await event.reply(_with_at(_at(event), '❌ 头衔图片生成失败，请稍后再试'))
+        return
+    uid = event.user_id or ''
+    gid = event.group_id or event.channel_id or ''
+    is_group = bool(event.is_group and gid)
+    if uploader.SELECTED_BACKEND:
+        url = await uploader.upload_image(img, 'lgtbot_titles.png', target_id=(gid if is_group else uid), target_is_uid=not is_group)
+        if url:
+            w, h = uploader.get_image_size(img)
+            await event.reply(_with_at(_at(event), f'![{title} #{w}px #{h}px]({url})'))
+            return
+    await event.reply_image(img)
+
+
+def _whose(uid: str) -> str:
+    name = userinfo.display_name(uid)
+    return f'{name}　' if name else ''
 
 
 @handler(_P_MY_TITLES,
@@ -1462,11 +1493,49 @@ def _my_titles_md(uid: str) -> str:
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_my_titles(event, match):
+    """持有的头衔图片:「限定」是自定义头衔,「已收集」是库内头衔,格子下方写分类,持有的多时排五列;序号与「切换头衔 序号」一致。"""
     if helpers.is_foreign_event(event):
         return
     if event.is_interaction and not _answer_button(event):
         return
-    await event.reply(_with_at(_at(event), _my_titles_md(event.user_id or '')))
+    uid = event.user_id or ''
+    b = titles.board(uid)
+    if not b['mine']:
+        await event.reply(_with_at(_at(event), _NO_TITLES))
+        return
+    owned = {t['name'] for t in b['mine']}
+    collected = b['mine'][len(b['custom']):]
+    sections = [('限定', _title_cells(b['custom'], b, owned, 1, label=True)),
+                ('已收集', _title_cells(collected, b, owned, len(b['custom']) + 1, label=True))]
+    sub = f'{_whose(uid)}共 {len(b["mine"])} 个头衔' + (f' · 装备中：{b["equipped"]}' if b['equipped'] else '')
+    cols = 5 if len(b['mine']) >= _MY_TITLES_WIDE else 3
+    await _reply_titles_image(event, '我的头衔', sub, sections, '发送「切换头衔 序号/名称」更换头衔，「切换头衔 无」取消装备', cols)
+
+
+@handler(_P_TITLE_LIST,
+         name='头衔列表',
+         desc='查看头衔库里的全部头衔与自己的持有情况',
+         priority=50,
+         block=True,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_title_list(event, match):
+    """头衔库全表图片:自己的自定义头衔在最前的「限定」,其余按分类分组、组内按颜色;没持有的调淡,装备中的高亮。"""
+    if helpers.is_foreign_event(event):
+        return
+    if event.is_interaction and not _answer_button(event):
+        return
+    uid = event.user_id or ''
+    b = titles.board(uid)
+    if not b['library'] and not b['custom']:
+        await event.reply(_with_at(_at(event), '头衔库里还没有头衔'))
+        return
+    owned = {t['name'] for t in b['mine']}
+    have = sum(t['name'] in owned for t in b['library'])
+    sections = [('限定', _title_cells(b['custom'], b, owned))]
+    sections += [(cat, _title_cells([t for t in b['library'] if t['category'] == cat], b, owned)) for cat in b['categories']]
+    sections.append((titles.UNKNOWN_CATEGORY, _title_cells([t for t in b['library'] if t['category'] not in b['categories']], b, owned)))
+    sub = f'{_whose(uid)}已收集 {have} / {len(b["library"])}' + (f' · 限定 {len(b["custom"])}' if b['custom'] else '')
+    await _reply_titles_image(event, '头衔列表', sub, sections, '发送「我的头衔」查看序号，「切换头衔 序号/名称」更换头衔', 5)
 
 
 @handler(_P_EQUIP_TITLE,

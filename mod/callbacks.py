@@ -921,9 +921,12 @@ def _schedule_title_notice(target_id: str, is_uid: bool, uid: str) -> None:
     loop = state.event_loop
     if loop is None or loop.is_closed():
         return
+    # 玩家名用展示昵称(违规换匿名);查不到昵称退回 @,由出站改写成各场景的写法
+    name = userinfo.display_name(uid)
+    player = helpers.sanitize_md_name(name) if name else f'<@{uid}>'
     try:
         asyncio.run_coroutine_threadsafe(
-            _send_title_notice(target_id, is_uid, titles.join_notice(title), f'[头衔] {title["name"]} 加入游戏'), loop)
+            _send_title_notice(target_id, is_uid, titles.join_notice(title, player), f'【{title["name"]}】{name or uid} 加入游戏'), loop)
     except Exception as e:
         log.debug(f'调度头衔播报失败: {e}')
 

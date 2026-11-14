@@ -933,7 +933,7 @@ def test_review_scan_section_sits_last_unless_never_completed():
 
 
 def test_titles_tab_is_wired_with_its_routes(_clean_registry):
-    """标签(在引擎编译与数据备份之间)、内嵌数据与五条路由都接上了 —— 占位符漏换,按钮就会 fetch 到字面量路径;路由注册 / 注销要成对。"""
+    """标签(在引擎编译与数据备份之间)、内嵌数据与八条路由都接上了 —— 占位符漏换,按钮就会 fetch 到字面量路径;路由注册 / 注销要成对。"""
     wm = _main()
     html = wm._render_html()
     order = re.findall(r'data-tab="(\w+)"', _sticky_top(html))
@@ -941,8 +941,9 @@ def test_titles_tab_is_wired_with_its_routes(_clean_registry):
     assert order[i - 1] == 'build' and order[i + 1] == 'backup'
     assert '<div id="tab-titles" class="tab-pane">' in html and 'id="titles-data"' in html
     assert '__TITLES_' not in html
-    routes = (('GET', wm._TITLES_LIST_ROUTE), ('GET', wm._TITLES_LOOKUP_ROUTE), ('POST', wm._TITLES_SAVE_ROUTE),
-              ('POST', wm._TITLES_DELETE_ROUTE), ('POST', wm._TITLES_LEVELS_ROUTE))
+    routes = (('GET', wm._TITLES_LIST_ROUTE), ('GET', wm._TITLES_LOOKUP_ROUTE), ('GET', wm._TITLES_SEARCH_ROUTE),
+              ('POST', wm._TITLES_SAVE_ROUTE), ('POST', wm._TITLES_DELETE_ROUTE), ('POST', wm._TITLES_COLORS_ROUTE),
+              ('POST', wm._TITLES_CATEGORIES_ROUTE), ('POST', wm._TITLES_LIBRARY_ROUTE))
     for _method, route in routes:
         assert f"'{route}'" in html
     wm.register()

@@ -1,23 +1,48 @@
 <div class="titles">
 
-  <!-- ──── 头衔等级:点胶囊筛选下方玩家,按钮新增 / 编辑 ──── -->
+  <!-- ──── 颜色 / 分类:胶囊可同时按两者筛选下方头衔库与玩家,按钮新增 / 编辑;头衔库默认折叠 ──── -->
   <section class="dash-section">
     <div class="dash-section-header">
       <h2 class="dash-section-title"><svg class="ui-icon title-icon"><use href="#i-title"/></svg><span>头衔系统</span></h2>
       <div class="dash-section-meta">
-        <span class="dash-meta-label">数据文件</span>
+        <span class="dash-meta-label">数据目录</span>
         <span id="titles-path" class="dash-meta-value dash-mono">—</span>
       </div>
     </div>
 
-    <div id="titles-level-bar" class="titles-level-bar">
-      <div id="titles-level-chips" class="titles-level-chips"></div>
+    <div id="titles-color-bar" class="titles-level-bar">
+      <span class="titles-bar-label">颜色</span>
+      <div id="titles-color-chips" class="titles-level-chips"></div>
       <div class="titles-level-actions">
-        <button id="titles-level-add" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">新增等级</span></button>
-        <button id="titles-level-edit" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">编辑等级</span></button>
+        <button id="titles-color-add" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">新增颜色</span></button>
+        <button id="titles-color-edit" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">编辑颜色</span></button>
       </div>
     </div>
-    <div id="titles-level-editor" class="titles-level-editor" hidden></div>
+    <div id="titles-color-editor" class="titles-level-editor" hidden></div>
+
+    <div id="titles-category-bar" class="titles-level-bar">
+      <span class="titles-bar-label">分类</span>
+      <div id="titles-category-chips" class="titles-level-chips"></div>
+      <div class="titles-level-actions">
+        <button id="titles-category-add" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">新增分类</span></button>
+        <button id="titles-category-edit" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">编辑分类</span></button>
+      </div>
+    </div>
+    <div id="titles-category-editor" class="titles-level-editor" hidden></div>
+
+    <div class="titles-lib">
+      <div class="titles-lib-head">
+        <button id="titles-lib-toggle" class="titles-lib-toggle" type="button" aria-expanded="false">
+          <svg class="ui-icon titles-lib-caret"><use href="#i-arrow-down"/></svg><span class="btn-label">头衔库</span><span id="titles-lib-count" class="titles-lib-count">0</span>
+        </button>
+        <div class="titles-level-actions">
+          <button id="titles-lib-add" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">新增头衔</span></button>
+          <button id="titles-lib-edit" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">编辑头衔库</span></button>
+        </div>
+      </div>
+      <div id="titles-lib-body" class="titles-lib-body" hidden></div>
+      <div id="titles-lib-editor" class="titles-level-editor" hidden></div>
+    </div>
   </section>
 
   <!-- ──── 玩家头衔 ──── -->
@@ -35,8 +60,9 @@
     <div class="titles-toolbar">
       <span class="titles-search-wrap"><svg class="ui-icon btn-icon"><use href="#i-search"/></svg><input type="text" id="titles-search" placeholder="搜索 昵称 / OpenID / 头衔" autocomplete="off" spellcheck="false"></span>
       <span class="titles-add-wrap">
-        <input type="text" id="titles-add-openid" placeholder="玩家 OpenID（32 位）" autocomplete="off" spellcheck="false">
+        <input type="text" id="titles-add-openid" placeholder="输入昵称或 OpenID 添加玩家" autocomplete="off" spellcheck="false">
         <button id="titles-add" class="dash-btn dash-btn-small dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">添加玩家</span></button>
+        <div id="titles-add-results" class="titles-add-results" hidden></div>
       </span>
       <span id="titles-msg" class="titles-msg"></span>
     </div>
@@ -44,7 +70,7 @@
     <div id="titles-list" class="titles-list"></div>
 
     <p class="titles-note">
-      头衔名最多 <span id="titles-name-max">—</span> 个字，且不能包含 \ { } $ % # &amp; _ ^ ~ * ` [ ] &lt; &gt; |。玩家 OpenID 可以在「用户数据」页面进行查询。
+      头衔名最多 <span id="titles-name-max">—</span> 个字，且不能包含 \ { } $ % # &amp; _ ^ ~ * ` [ ] &lt; &gt; |。「限定」头衔不进头衔库，只在玩家的头衔列表里出现（虚线框）。
     </p>
   </section>
 

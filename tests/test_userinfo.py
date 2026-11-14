@@ -201,6 +201,22 @@ def test_get_name_without_bot_returns_empty(monkeypatch):
     assert userinfo.get_name('U1') == ''
 
 
+def test_search_users_matches_fragments_literally_and_ranks_exact_first(fake_bot, monkeypatch):
+    """★ 昵称片段按字面匹配(% _ 不当通配符),完全相同的排最前、再按昵称长短;无 bot / 空关键词返回空。"""
+    _init_data_db(str(fake_bot.log_service._base_dir), users=[
+        ('U1', '铁蛋'), ('U2', '铁蛋的小号'), ('U3', '大铁蛋'), ('U4', '50%_off'), ('U5', '500 off'), ('U6', ''), ('U7', 'Ace'), ('U8', 'ace')])
+    got = userinfo.search_users('铁蛋')
+    assert [u['openid'] for u in got] == ['U1', 'U3', 'U2']
+    assert got[0] == {'openid': 'U1', 'name': '铁蛋', 'avatar': 'https://q.qlogo.cn/qqapp/APP123/U1/100'}
+    assert [u['openid'] for u in userinfo.search_users('0%_')] == ['U4']
+    assert userinfo.search_users('0%o') == [] and userinfo.search_users('0_o') == []
+    assert [u['openid'] for u in userinfo.search_users('ace')] == ['U8', 'U7']     # 不分大小写匹配,完全相同的排前
+    assert len(userinfo.search_users('铁', limit=2)) == 2
+    assert userinfo.search_users('  ') == [] and fake_bot.log_service.failed == []
+    monkeypatch.setattr(helpers, 'get_bound_bot', lambda: None)
+    assert userinfo.search_users('铁蛋') == []
+
+
 # ──────── 昵称写回 note_username ─────────────────────────────────────────
 
 def test_note_username_gates_and_writeback(fake_bot):

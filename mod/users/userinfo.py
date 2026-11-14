@@ -116,6 +116,28 @@ def display_name(openid: str) -> str:
     return name
 
 
+def search_users(keyword: str, limit: int = 20) -> list[dict]:
+    """按昵称片段找用户,完全相同的排最前、再按昵称长短;返回 ``[{'openid','name','avatar'}]``,无 bot / 异常返回 []。"""
+    keyword = (keyword or '').strip()
+    bot = _bound_bot()
+    if not keyword or bot is None:
+        return []
+    pattern = '%' + keyword.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+    try:
+        rows = bot.log_service.query_data(
+            "SELECT user_id, name FROM users WHERE name LIKE ? ESCAPE '\\' "
+            'ORDER BY name <> ?, length(name), name LIMIT ?', (pattern, keyword, int(limit)))
+    except Exception as e:
+        log.debug(f'userinfo.search_users 异常: {e}')
+        return []
+    out = []
+    for r in rows or []:
+        uid = str(r.get('user_id') or '')
+        if uid:
+            out.append({'openid': uid, 'name': str(r.get('name') or ''), 'avatar': avatar_url(uid)})
+    return out
+
+
 def avatar_url(openid: str, size: int = 100) -> str:
     """按绑定 bot 的 appid 推导头像直链;无 appid / openid 返回 ''。"""
     if not openid:

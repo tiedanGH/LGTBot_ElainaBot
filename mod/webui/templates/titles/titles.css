@@ -1,8 +1,11 @@
 /* 「头衔系统」标签样式 */
 
-/* ── 等级胶囊:颜色由行内 --c 给出,选中时用它做实底,文字色 --on-c 由 JS 按亮度给出 ── */
+/* ── 颜色 / 分类胶囊:颜色由行内 --c 给出,选中时用它做实底,文字色 --on-c 由 JS 按亮度给出;分类胶囊不带颜色(plain) ── */
 .titles-level-bar { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
-.titles-level-bar[hidden], .titles-level-editor[hidden] { display: none; }
+.titles-level-bar + .titles-level-editor, .titles-level-editor + .titles-level-bar { margin-top: 10px; }
+.titles-bar-label { flex: 0 0 auto; width: 32px; padding-top: 5px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.titles-level-bar[hidden], .titles-level-editor[hidden], .titles-level-actions[hidden],
+.titles-lib-body[hidden], .titles-add-results[hidden] { display: none; }
 .titles-level-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 300px; min-width: 0; }
 .titles-level-actions { display: flex; gap: 6px; flex: 0 0 auto; margin-left: auto; }
 .titles-level-actions .dash-btn { white-space: nowrap; }
@@ -18,7 +21,33 @@
 }
 .titles-level-chip:hover { border-color: var(--c); }
 .titles-level-chip.active { background: var(--c); border-color: var(--c); color: var(--on-c); font-weight: 600; }
-.titles-level-chip.all.active { --c: var(--accent); }
+.titles-level-chip.all.active, .titles-level-chip.plain.active { --c: var(--accent); }
+.titles-level-chip.plain { color: var(--text); }
+.titles-level-chip.plain.active { color: var(--accent-text); }
+/* 胶囊上的头衔库数量 */
+.titles-chip-n {
+  min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center;
+  font-size: 11px; font-weight: 600; background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* ── 头衔库:等级下方的折叠列表 ── */
+.titles-lib { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.titles-lib-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.titles-lib-toggle {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 2px;
+  background: transparent; border: none; cursor: pointer; font: inherit;
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.titles-lib-caret { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform .15s; }
+.titles-lib-toggle.open .titles-lib-caret { transform: none; }
+.titles-lib-count {
+  padding: 0 7px; border-radius: 10px; font-size: 11px; color: var(--text-muted);
+  border: 1px solid var(--border); background: var(--panel-2);
+}
+.titles-lib-body {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+}
 
 /* ── 等级编辑:按屏宽 1-3 列,每个等级一格 ── */
 .titles-level-editor { display: flex; flex-direction: column; gap: 10px; }
@@ -46,6 +75,8 @@
 .titles-level-name { flex: 1 1 120px; font-weight: 600; }
 .titles-level-hexinput { flex: 0 0 96px; font-family: 'Consolas', 'Menlo', monospace; }
 .titles-level-usage { font-size: 12px; color: var(--text-faint); flex: 0 0 auto; min-width: 56px; }
+.titles-lib-name { flex: 1 1 140px; font-weight: 600; }
+.titles-level-row select { flex: 0 1 130px; }
 .titles-level-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
 .titles-level-row .titles-level-move { padding: 4px 6px; }
 
@@ -64,6 +95,8 @@
   background: color-mix(in srgb, var(--c) 18%, var(--panel));
   border-color: var(--c);
 }
+/* 自定义头衔:不进头衔库,仅玩家本人显示 */
+.titles-chip.custom { border-style: dashed; }
 .titles-chip-icon { width: 13px; height: 13px; stroke-width: 2.4; }
 .titles-rarity { font-size: 10px; font-weight: 400; opacity: .75; }
 
@@ -79,17 +112,42 @@
 .titles-search-wrap .ui-icon {
   position: absolute; left: 9px; color: var(--text-faint); pointer-events: none;
 }
-.titles-add-wrap { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 400px; min-width: 240px; }
+.titles-add-wrap { position: relative; display: inline-flex; align-items: center; gap: 6px; flex: 0 1 400px; min-width: 240px; }
 .titles-toolbar input,
 .titles-edit-row input[type="text"],
-.titles-edit-row select {
+select.titles-level-select, select.titles-plain-select {
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   padding: 5px 10px; border-radius: 6px; font-size: 12px; height: 30px; min-width: 0;
   transition: border-color .15s;
 }
 .titles-toolbar input:focus,
 .titles-edit-row input[type="text"]:focus,
-.titles-edit-row select:focus { border-color: var(--accent); outline: none; }
+select.titles-level-select:focus, select.titles-plain-select:focus { border-color: var(--accent); outline: none; }
+/* 等级下拉:左侧圆点与文字都用所选等级的颜色(--c 由 JS 给出) */
+select.titles-level-select {
+  --c: var(--text-faint);
+  color: var(--c); font-weight: 600; padding-left: 24px;
+  background: radial-gradient(circle at 12px 50%, var(--c) 0 4px, transparent 4.5px) no-repeat, var(--panel);
+}
+select.titles-level-select option { font-weight: 400; }
+/* 昵称搜索结果:浮在添加框下方 */
+.titles-add-results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
+  display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+}
+.titles-add-result {
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px;
+  background: transparent; border: none; cursor: pointer; text-align: left; font: inherit; color: var(--text);
+}
+.titles-add-result:hover { background: var(--hover); }
+.titles-add-result .titles-avatar { width: 28px; height: 28px; }
+.titles-add-result .titles-who { display: flex; flex-direction: column; }
+.titles-tag-exists {
+  flex: 0 0 auto; margin-left: auto; padding: 1px 7px; border-radius: 10px; font-size: 11px;
+  color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+}
 .titles-toolbar input::placeholder,
 .titles-edit-row input::placeholder { color: var(--text-faint); }
 #titles-search { width: 100%; padding-left: 30px; }
@@ -138,7 +196,7 @@
 }
 .titles-modal-backdrop[hidden] { display: none; }
 .titles-modal {
-  width: 100%; max-width: 680px; max-height: 88vh;
+  width: 100%; max-width: 780px; max-height: 88vh;
   display: flex; flex-direction: column;
   background: var(--panel); color: var(--text);
   border: 1px solid var(--border); border-radius: 10px;
@@ -163,20 +221,35 @@
 
 /* ── 玩家编辑行 ── */
 .titles-edit-rows { display: flex; flex-direction: column; gap: 8px; }
-.titles-edit-row { display: flex; align-items: center; gap: 8px; }
+.titles-edit-row { display: flex; align-items: center; gap: 8px; min-height: 30px; }
 .titles-edit-idx {
   flex: 0 0 22px; text-align: right;
   font-family: 'Consolas', 'Menlo', monospace; font-size: 12px; color: var(--text-faint);
 }
-.titles-edit-row .titles-edit-name { flex: 1 1 200px; max-width: 280px; font-weight: 600; }
-.titles-edit-row select { flex: 0 1 160px; }
-/* 等级下拉:左侧圆点与文字都用所选等级的颜色(--c 由 JS 给出) */
-.titles-edit-row select.titles-edit-level {
-  --c: var(--text);
-  color: var(--c); font-weight: 600; padding-left: 24px;
-  background: radial-gradient(circle at 12px 50%, var(--c) 0 4px, transparent 4.5px) no-repeat, var(--panel);
+.titles-edit-row .titles-edit-name { flex: 1 1 160px; max-width: 240px; font-weight: 600; }
+.titles-edit-row select { flex: 0 1 110px; }
+/* 库内头衔:名字、颜色、分类跟随头衔库,只读展示 */
+.titles-edit-static {
+  flex: 1 1 160px; max-width: 240px; padding: 0 11px; font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.titles-edit-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
+.titles-edit-lvl {
+  flex: 0 1 220px; display: inline-flex; align-items: center; gap: 7px; padding-left: 8px;
+  font-size: 12px; font-weight: 600; color: var(--c);
+}
+.titles-edit-lvl::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.titles-tag-custom {
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 10px; font-size: 11px;
+  color: var(--text-muted); border: 1px dashed var(--border-2);
+}
+.titles-edit-row .dash-btn { flex: 0 0 auto; white-space: nowrap; margin-left: auto; }
+/* 从头衔库快捷添加 / 自定义头衔 */
+.titles-quick-add {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-top: 12px; border-top: 1px dashed var(--border);
+}
+.titles-quick-add select { flex: 1 1 220px; max-width: 320px; }
+.titles-quick-add .dash-btn { flex: 0 0 auto; white-space: nowrap; }
 .titles-eq {
   display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
   font-size: 12px; color: var(--text-muted); cursor: pointer; user-select: none;
@@ -187,7 +260,8 @@
 .titles-edit-msg { flex: 1 1 160px; font-size: 12px; }
 .titles-edit-msg:empty { display: none; }
 /* 窄屏折行后「取消 / 保存」仍贴右 */
-.titles-edit-actions [data-act="cancel"], .titles-edit-actions [data-act="level-cancel"] { margin-left: auto; }
+.titles-edit-actions [data-act="cancel"], .titles-edit-actions [data-act="preset-cancel"],
+.titles-edit-actions [data-act="lib-cancel"] { margin-left: auto; }
 
 .titles-note {
   margin-top: 12px; padding: 10px 14px;
@@ -203,8 +277,9 @@
   .titles-level-actions { margin-left: 0; }
   /* 编辑行拆两行:序号 + 装备 + 头衔名一行,等级与移除一行 */
   .titles-edit-row { flex-wrap: wrap; row-gap: 6px; }
-  .titles-edit-row .titles-edit-name { flex: 1 1 140px; max-width: none; }
-  .titles-edit-row select { flex: 1 1 160px; margin-left: 30px; }
+  .titles-edit-row .titles-edit-name, .titles-edit-static { flex: 1 1 140px; max-width: none; }
+  .titles-edit-row .titles-edit-color, .titles-edit-lvl { flex: 1 1 110px; margin-left: 30px; }
+  .titles-edit-row .titles-edit-category { flex: 1 1 100px; }
   .titles-eq-none { margin-left: 0; }
   /* 提示单独占一行,按钮留在同一行 */
   .titles-edit-actions .titles-edit-msg { order: 1; flex-basis: 100%; }

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""「头衔系统」标签 —— 头衔等级的新增 / 编辑,全部玩家的头衔库与当前装备的查看、编辑、切换与删除。
+"""「头衔系统」标签 —— 颜色、分类与头衔库的新增 / 编辑 / 排序,全部玩家持有的头衔与当前装备的查看、编辑、切换与删除。
 
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_CSS`` / ``TAB_JS`` 从 ``templates/titles/`` 加载
-  · ``get_data()`` 首屏 payload(等级表 + 全部玩家记录,昵称 / 头像经 userinfo 门面查)
-  · ``list_handler`` / ``lookup_handler`` / ``save_handler`` / ``delete_handler`` / ``levels_handler`` 五条真路由;改动类接口都回完整 payload,前端整页重绘
+  · ``get_data()`` 首屏 payload(颜色 + 分类 + 头衔库 + 全部玩家记录,昵称 / 头像经 userinfo 门面查)
+  · ``list`` / ``lookup`` / ``search`` / ``save`` / ``delete`` / ``colors`` / ``categories`` / ``library`` 八条真路由(``*_handler``);改动类接口都回完整 payload,前端整页重绘
 
 数据读写与校验都在 ``users.titles``,这里只做请求解析、审计与组装。
 """
@@ -41,11 +41,13 @@ def _payload() -> dict:
                for uid, rec in titles.all_records().items()]
     players.sort(key=lambda p: (not p['name'], p['name'], p['openid']))
     return {
-        'levels': titles.levels(),
+        'colors': titles.colors(),
+        'categories': titles.categories(),
+        'library': titles.library(),
         'name_max': titles.NAME_MAX_LEN,
-        'level_name_max': titles.LEVEL_NAME_MAX_LEN,
+        'preset_name_max': titles.PRESET_NAME_MAX_LEN,
         'players': players,
-        'path': titles._players.path,
+        'path': titles.data_dir(),
         'query_time': int(time.time()),
     }
 
@@ -61,31 +63,46 @@ def _join(label: str, items: list) -> str:
 
 
 def _diff(before: dict | None, after: dict | None) -> str:
-    """头衔审计详情:新增 / 移除 / 改等级的头衔与装备变化;改名记作移除旧名、新增新名。"""
-    b = {t['name']: t['level'] for t in (before or {}).get('titles', [])}
-    a = {t['name']: t['level'] for t in (after or {}).get('titles', [])}
+    """头衔审计详情:新增 / 移除 / 改颜色分类的头衔与装备变化;改名记作移除旧名、新增新名。"""
+    b = {t['name']: t for t in (before or {}).get('titles', [])}
+    a = {t['name']: t for t in (after or {}).get('titles', [])}
     parts = [_join('新增', [f'「{n}」' for n in a if n not in b]),
              _join('移除', [f'「{n}」' for n in b if n not in a]),
-             _join('改等级', [f'「{n}」' for n in a if n in b and a[n] != b[n]])]
+             _join('改样式', [f'「{n}」' for n in a if n in b and a[n] != b[n]])]
     eb, ea = (before or {}).get('equipped'), (after or {}).get('equipped')
     if eb != ea:
         parts.append(f'装备 {eb or "无"} → {ea or "无"}')
     return '；'.join(p for p in parts if p) or '无变化'
 
 
-def _level_label(lv: dict) -> str:
-    return f'「{lv["name"]} {lv["hex"]}」'
+def _preset_label(p: dict) -> str:
+    return f'「{p["name"]} {p["hex"]}」' if 'hex' in p else f'「{p["name"]}」'
 
 
-def _levels_diff(before: list, after: list, origs: list) -> str:
-    """等级审计详情:新增 / 删除 / 改名改色的等级与排序变化;``origs[i]`` 是 ``after[i]`` 原来的名称,新增的为空。"""
-    b = {lv['name']: lv for lv in before}
-    kept = [(b[o], lv) for o, lv in zip(origs, after) if o in b]
-    parts = [_join('新增', [_level_label(lv) for o, lv in zip(origs, after) if o not in b]),
-             _join('删除', [_level_label(lv) for n, lv in b.items() if n not in origs]),
-             _join('修改', [f'{_level_label(old)} → {_level_label(lv)}' for old, lv in kept if old != lv])]
+def _presets_diff(before: list, after: list, origs: list) -> str:
+    """颜色 / 分类审计详情:新增 / 删除 / 修改与排序变化;``origs[i]`` 是 ``after[i]`` 原来的名称,新增的为空。"""
+    b = {p['name']: p for p in before}
+    kept = [(b[o], p) for o, p in zip(origs, after) if o in b]
+    parts = [_join('新增', [_preset_label(p) for o, p in zip(origs, after) if o not in b]),
+             _join('删除', [_preset_label(p) for n, p in b.items() if n not in origs]),
+             _join('修改', [f'{_preset_label(old)} → {_preset_label(p)}' for old, p in kept if old != p])]
     if [old['name'] for old, _ in kept] != [n for n in b if n in origs]:
         parts.append('调整排序')
+    return '；'.join(p for p in parts if p) or '无变化'
+
+
+def _title_label(t: dict) -> str:
+    return f'「{t["name"]} · {t["color"]} · {t["category"]}」'
+
+
+def _library_diff(before: list, rows: list) -> str:
+    """头衔库审计详情:新增 / 删除 / 修改;``rows`` 是已通过校验的请求行(``orig`` 为原名,新增的为空)。"""
+    b = {t['name']: t for t in before}
+    pairs = [(r.get('orig') or '', {'name': r['name'].strip(), 'color': r['color'], 'category': r['category']}) for r in rows]
+    origs = {o for o, _ in pairs}
+    parts = [_join('新增', [_title_label(t) for o, t in pairs if o not in b]),
+             _join('删除', [_title_label(t) for n, t in b.items() if n not in origs]),
+             _join('修改', [f'{_title_label(b[o])} → {_title_label(t)}' for o, t in pairs if o in b and b[o] != t])]
     return '；'.join(p for p in parts if p) or '无变化'
 
 
@@ -115,10 +132,21 @@ async def lookup_handler(request) -> 'web.Response':
                               'avatar': userinfo.avatar_url(openid), 'exists': titles.get(openid) is not None})
 
 
-async def save_handler(request) -> 'web.Response':
-    """``POST /api/ext/lgtbot/titles/save`` body ``{openid, titles: [{name, level}], equipped}``。
+async def search_handler(request) -> 'web.Response':
+    """``GET /api/ext/lgtbot/titles/search?q=`` —— 按昵称片段找玩家(最多 20 个),``exists`` 表示已有头衔记录。"""
+    q = str(request.query.get('q') or '').strip()
+    if not q:
+        return _fail('请输入要搜索的昵称')
+    if len(q) > 32:
+        return _fail('昵称关键词最多 32 个字')
+    records = titles.all_records()
+    return web.json_response({'success': True, 'results': [dict(u, exists=u['openid'] in records) for u in userinfo.search_users(q, 20)]})
 
-    整份覆盖该玩家的头衔库与当前装备,头衔库为空等于删除记录;校验不过时原样回 ``titles.set_record`` 的原因,不写盘;内容没变不记审计。
+
+async def save_handler(request) -> 'web.Response':
+    """``POST /api/ext/lgtbot/titles/save`` body ``{openid, titles: [{name, color, category}], equipped}``。
+
+    整份覆盖该玩家持有的头衔与当前装备,头衔清空等于删除记录;校验不过时原样回 ``titles.set_record`` 的原因,不写盘;内容没变不记审计。
     """
     body = await _json_body(request)
     if body is None:
@@ -131,7 +159,7 @@ async def save_handler(request) -> 'web.Response':
     after = titles.get(openid)
     if after != before:
         audit.record('title', '编辑头衔', f'{titles.player_label(openid)}：{_diff(before, after)}')
-    return web.json_response({'success': True, 'message': '已保存' if after else '头衔库已清空，玩家记录已删除', **_payload()})
+    return web.json_response({'success': True, 'message': '已保存' if after else '头衔已清空，玩家记录已删除', **_payload()})
 
 
 async def delete_handler(request) -> 'web.Response':
@@ -147,17 +175,42 @@ async def delete_handler(request) -> 'web.Response':
     return web.json_response({'success': True, 'message': '已删除', **_payload()})
 
 
-async def levels_handler(request) -> 'web.Response':
-    """``POST /api/ext/lgtbot/titles/levels`` body ``{levels: [{orig?, name, hex}]}`` —— 按行序整份覆盖等级表,不带 orig 的行是新增;内容没变不记审计。"""
+async def _presets_handler(request, key: str, label: str, read, write) -> 'web.Response':
     body = await _json_body(request)
     if body is None:
         return _fail('请求体不是 JSON 对象')
-    rows = body.get('levels')
-    before = titles.levels()
-    err = titles.set_levels(rows)
+    rows = body.get(key)
+    before = read()
+    err = write(rows)
     if err:
         return _fail(err)
-    after = titles.levels()
+    after = read()
     if after != before:
-        audit.record('title', '编辑头衔等级', _levels_diff(before, after, [r.get('orig') or '' for r in rows]))
-    return web.json_response({'success': True, 'message': '等级已保存', **_payload()})
+        audit.record('title', f'编辑头衔{label}', _presets_diff(before, after, [r.get('orig') or '' for r in rows]))
+    return web.json_response({'success': True, 'message': f'{label}已保存', **_payload()})
+
+
+async def colors_handler(request) -> 'web.Response':
+    """``POST /api/ext/lgtbot/titles/colors`` body ``{colors: [{orig?, name, hex}]}`` —— 按行序整份覆盖颜色表,不带 orig 的行是新增;内容没变不记审计。"""
+    return await _presets_handler(request, 'colors', '颜色', titles.colors, titles.set_colors)
+
+
+async def categories_handler(request) -> 'web.Response':
+    """``POST /api/ext/lgtbot/titles/categories`` body ``{categories: [{orig?, name}]}`` —— 同颜色表。"""
+    return await _presets_handler(request, 'categories', '分类', titles.categories, titles.set_categories)
+
+
+async def library_handler(request) -> 'web.Response':
+    """``POST /api/ext/lgtbot/titles/library`` body ``{library: [{orig?, name, color, category}]}`` —— 整份覆盖头衔库,不带 orig 的行是新增;内容没变不记审计。"""
+    body = await _json_body(request)
+    if body is None:
+        return _fail('请求体不是 JSON 对象')
+    rows = body.get('library')
+    before = titles.library()
+    err = titles.set_library(rows)
+    if err:
+        return _fail(err)
+    diff = _library_diff(before, rows)
+    if diff != '无变化':
+        audit.record('title', '编辑头衔库', diff)
+    return web.json_response({'success': True, 'message': '头衔库已保存', **_payload()})
