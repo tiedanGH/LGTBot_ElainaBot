@@ -330,10 +330,10 @@ async def broadcast_notify(md: str, label: str, *, timeout: float = 8.0) -> int:
     return ok
 
 
-def restart_room_message(reason: str) -> str:
-    """重启前发给「等待中房间」的简要通知。"""
+def restart_room_message(reason: str, is_uid: bool = False) -> str:
+    """重启前发给「等待中房间」的简要通知;私信发给房间里的每位玩家。"""
     parts = ['## 🔁 LGT-Bot 即将重启', '',
-             '> 本群有**尚未开始**的房间，已被清理']
+             f'> {"您" if is_uid else "本群"}有**尚未开始**的房间，已被清理']
     if reason:
         parts += ['', f'📌 更新内容：{helpers.sanitize_md_name(reason)}']
     parts += ['', '⏳ 预计 10 秒内恢复服务...']
@@ -345,51 +345,71 @@ def snapshot_waiting_rooms() -> list:
     return [dict(r, key=k) for k, r in state.waiting_rooms.items()]
 
 
+def _restart_notice_route(target_id: str, is_uid: bool):
+    """重启通知的发送通道,返回 ``(sender, kwargs)``;送不到返回 None。
+
+    群只走主动推送,没权限的群直接丢弃。私信先用被动引用,用完了只对有主动私信资格的玩家直推。
+    主动推送受每日主动消息额度限制;都不等刷新,通知夹在释放引擎与换进程 / 重建引擎之间。
+    """
+    if is_uid:
+        consumed = quota.try_consume_ref(helpers.target_key(target_id, True))
+        if consumed is not None:
+            ref_type, ref_value, _used, ref_appid = consumed
+            return helpers.get_sender(ref_appid), {ref_type: ref_value}
+        can_push = _is_sandbox_dm(target_id, True)
+    else:
+        can_push = helpers.can_push_group(target_id)
+    if not (can_push and _active_push_allowed(target_id, is_uid)):
+        return None
+    return helpers.get_sender(''), {}
+
+
 async def notify_restart_rooms(reason: str = '', *, skip_keys=(),
                                rooms=None) -> int:
-    """重启前给所有**等待中房间**所在的群推一条通知,返回送达数。
+    """重启前给所有**等待中房间**推一条通知,返回送达数。
 
     ``rooms`` 传 ``snapshot_waiting_rooms()`` 的结果(重启路径必须这么传);
     省略时读当前的 ``state.waiting_rooms``。
 
-    只发**有主动推送权限**的群:重启这一刻多半没有可用的被动引用,没权限的群直接丢弃。
-    私信房间不在范围内:私信 ``/新游戏`` 直接开局,不存在「等待中」的房间。
+    私信对局的广播逐人私发,私信房间里每位已报名的玩家各有一条记录,各收一条;发送通道见 ``_restart_notice_route``。
 
     ``skip_keys`` 用来去重:自动重启已经给通知群推过一条了,那些群不必再收一条。
 
-    并发发送 + 每条独立超时:夹在「引擎已释放」与 ``os.execv`` 之间,不能被某个群的慢请求拖住整个重启。
+    并发发送 + 每条独立超时:夹在「引擎已释放」与 ``os.execv`` 之间,不能被某个目标的慢请求拖住整个重启。
     """
     if rooms is None:
         rooms = snapshot_waiting_rooms()
-    picked = [r for r in rooms
-              if not r.get('is_uid') and r.get('target_id')
-              and r.get('key') not in skip_keys]
-    targets = [r['target_id'] for r in picked if helpers.can_push_group(r['target_id'])]
+    picked = [r for r in rooms if r.get('target_id') and r.get('key') not in skip_keys]
+    routed = []
+    for r in picked:
+        is_uid = bool(r.get('is_uid'))
+        route = _restart_notice_route(r['target_id'], is_uid)
+        if route is not None and route[0] is not None:
+            routed.append((r['target_id'], is_uid, *route))
     log.info(f'🔁 [重启通知] 等待中房间 {len(rooms)} 个，'
-             f'跳过(私信 / 已通知) {len(rooms) - len(picked)} 个，'
-             f'可主动推送 {len(targets)} 个')
-    if not targets:
+             f'跳过(已通知) {len(rooms) - len(picked)} 个，'
+             f'可送达 {len(routed)} 个')
+    if not routed:
         return 0
-    sender = helpers.get_sender('')
-    if sender is None:
-        log.warning('无可用 sender，跳过重启房间通知')
-        return 0
-    md = restart_room_message(reason)
 
-    async def _one(gid: str) -> bool:
-        page_logs.log_outgoing(gid, False, md)
+    async def _one(tid: str, is_uid: bool, sender, kwargs: dict) -> bool:
+        md = restart_room_message(reason, is_uid)
+        page_logs.log_outgoing(tid, is_uid, md)
         try:
             with log_attribution.mark_outbound():
-                await asyncio.wait_for(sender.send_to_group(gid, md), timeout=5.0)
-            return True
+                send = sender.send_to_user if is_uid else sender.send_to_group
+                await asyncio.wait_for(send(tid, md, **kwargs), timeout=5.0)
         except Exception as e:
-            log.warning(f'重启通知推送失败 ({gid}): {e}')
+            log.warning(f'重启通知推送失败 ({tid}): {e}')
             return False
+        if not kwargs:
+            metrics.record_active_push(tid, is_uid)
+        return True
 
-    results = await asyncio.gather(*(_one(g) for g in targets),
+    results = await asyncio.gather(*(_one(*x) for x in routed),
                                    return_exceptions=True)
     ok = sum(1 for r in results if r is True)
-    log.warning(f'🔁 [重启通知] {ok}/{len(targets)} 个群送达')
+    log.warning(f'🔁 [重启通知] {ok}/{len(routed)} 个送达')
     return ok
 
 

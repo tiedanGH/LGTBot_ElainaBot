@@ -16,7 +16,7 @@ __plugin_meta__ = {
     'name': 'LGTBot 机器人',
     'author': '铁蛋',
     'description': '基于 C++ 的 LGTBot 游戏裁判机器人',
-    'version': '2.15.3',
+    'version': '2.15.4',
     'github': 'https://github.com/tiedanGH/LGTBot_ElainaBot',
 }
 
@@ -112,8 +112,7 @@ async def _setup():
     # ── 热重载检测：上一轮的引擎可能还活着 ─────────────────────────────────
     # 再调 start() 会覆盖 g_bot_core，进行中的游戏全部失联；所以先尝试干净释放，释放失败（有游戏在跑）就跳过 start() 复用现有引擎。
     if boot.is_engine_running():
-        if boot.LGTBot_ElainaBot.release_bot_if_not_processing_games():
-            boot.mark_engine_running(False)
+        if await dispatcher.release_engine_for_reload():
             log.info('🔁 [热重载] 旧引擎已成功释放，将重新初始化')
         else:
             log.warning('=' * 60)
@@ -172,9 +171,8 @@ async def _teardown():
 
     if not _state.started or not boot.LGTBOT_AVAILABLE:
         return
-    if boot.LGTBot_ElainaBot.release_bot_if_not_processing_games():
-        _state.started = False
-        boot.mark_engine_running(False)
+    # 释放引擎会清掉等待中房间,释放成功时先给它们推「即将重启」
+    if await dispatcher.release_engine_for_reload():
         log.info('LGTBot 引擎已安全关闭')
     else:
         # 关键：保留 mark_engine_running(True)，下次 @on_load 据此跳过 start()

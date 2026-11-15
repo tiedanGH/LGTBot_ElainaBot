@@ -2150,6 +2150,33 @@ async def test_restart_command_from_dm_skips_nothing(monkeypatch):
     assert seen['skip'] == set()
 
 
+async def test_reload_release_notifies_cleared_rooms_with_fixed_reason(monkeypatch):
+    """★ 热重载换引擎:先快照等待中房间再释放;释放成功才推「即将重启」,更新内容固定为「框架功能更新」;有进行中的对局释放不了就复用旧引擎、不推。"""
+    seen, marks = [], []
+
+    async def fake_notify(reason='', *, skip_keys=frozenset(), rooms=None):
+        seen.append((reason, [r['key'] for r in rooms]))
+        return 0
+
+    monkeypatch.setattr(dispatcher, '_notify_restart_rooms', fake_notify)
+    monkeypatch.setattr(dispatcher.boot, 'mark_engine_running', marks.append)
+    monkeypatch.setattr(_state, 'started', True)
+    _state.waiting_rooms['u:U1'] = {'target_id': 'U1', 'is_uid': True, 'game': 'X', 'since': 0}
+    engine = dispatcher.boot.LGTBot_ElainaBot
+
+    monkeypatch.setattr(engine, 'release_bot_if_not_processing_games', lambda: False)
+    assert await dispatcher.release_engine_for_reload() is False
+    assert seen == [] and marks == [] and _state.started is True
+
+    def release_ok():
+        _state.waiting_rooms.clear()          # ← 释放引擎的真实副作用
+        return True
+
+    monkeypatch.setattr(engine, 'release_bot_if_not_processing_games', release_ok)
+    assert await dispatcher.release_engine_for_reload() is True
+    assert seen == [('框架功能更新', ['u:U1'])] and marks == [False] and _state.started is False
+
+
 async def test_restart_command_rejected_sends_nothing(monkeypatch):
     """有进行中对局被拒 → 不通知任何房间(压根没重启)。"""
     monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)

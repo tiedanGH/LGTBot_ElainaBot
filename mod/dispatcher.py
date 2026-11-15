@@ -2066,7 +2066,7 @@ def snapshot_waiting_rooms() -> list:
     """重启路径在**调 check_and_prepare_restart 之前**先取这一份快照。
 
     释放引擎会把等待中房间全部解散(理由见 callbacks.snapshot_waiting_rooms),
-    之后再读永远是空的 —— 四条重启路径都必须先快照、后释放。
+    之后再读永远是空的 —— 各条重启路径(含热重载换引擎)都必须先快照、后释放。
     """
     from . import callbacks as _callbacks
     try:
@@ -2078,7 +2078,7 @@ def snapshot_waiting_rooms() -> list:
 
 async def _notify_restart_rooms(reason: str = '', *, skip_keys=frozenset(),
                                 rooms=None) -> int:
-    """重启前通知「还有等待中房间」的群 —— 四条重启路径(指令 / 面板 / API / 自动)共用这一个入口,
+    """重启前通知「还有等待中房间」的群与私信玩家 —— 各条重启路径(指令 / 面板 / API / 自动 / 热重载)共用这一个入口,
     实现在 ``callbacks.notify_restart_rooms``。
 
     ``rooms`` 传释放引擎**之前**取的快照(``snapshot_waiting_rooms``)。
@@ -2091,6 +2091,24 @@ async def _notify_restart_rooms(reason: str = '', *, skip_keys=frozenset(),
     except Exception as e:
         log.warning(f'重启房间通知失败: {e}')
         return 0
+
+
+# 热重载换引擎时随「即将重启」通知发出的更新内容
+_RELOAD_REASON = '框架功能更新'
+
+
+async def release_engine_for_reload() -> bool:
+    """热重载释放旧引擎(@on_unload / @on_load 共用),返回是否释放成功;有进行中的对局时释放不了,调用方复用旧引擎。
+
+    释放会清掉全部等待中房间,所以同普通重启:先快照、释放成功后再给这些房间推「即将重启」,更新内容固定为「框架功能更新」。
+    """
+    rooms = snapshot_waiting_rooms()
+    if not boot.LGTBot_ElainaBot.release_bot_if_not_processing_games():
+        return False
+    state.started = False
+    boot.mark_engine_running(False)
+    await _notify_restart_rooms(_RELOAD_REASON, rooms=rooms)
+    return True
 
 
 async def _notify_auto_restart(reason: str) -> None:
@@ -2315,7 +2333,7 @@ async def lgtbot_restart(event, match):
     libbot_core.so / 全部 libgame.so 重新 dlopen,等价于让 build.sh 重编后的
     C++ 二进制即刻生效。
 
-    ``/重启 <更新内容>`` 可选:该文案会随重启通知发给还有等待中房间的群。
+    ``/重启 <更新内容>`` 可选:该文案会随重启通知发给还有等待中房间的群与私信玩家。
     **手动重启不推通知群**(那是自动重启的语义),但发起指令的这个群要排除掉。
     """
     if helpers.is_foreign_event(event):

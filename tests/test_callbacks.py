@@ -1227,7 +1227,7 @@ async def test_restart_notice_logs_even_when_nothing_sent(monkeypatch, setup, kw
 
     hit = [m for m in lines if '重启通知' in m]
     assert hit, f'没有留下任何重启通知日志: {lines}'
-    assert '等待中房间' in hit[0] and '可主动推送 0 个' in hit[0]
+    assert '等待中房间' in hit[0] and '可送达 0 个' in hit[0]
 
 
 async def test_restart_notice_escapes_reason(monkeypatch):
@@ -1238,6 +1238,39 @@ async def test_restart_notice_escapes_reason(monkeypatch):
     mark_push_group('GE')
     await callbacks.notify_restart_rooms('*紧急*')
     assert r'\*紧急\*' in sender.send_to_group.await_args.args[1]
+
+
+async def test_restart_notice_reaches_dm_room_players(monkeypatch):
+    """★ 私信房间里每位已报名的玩家各收一条:还有被动引用就引用回复,用完了只对有主动私信资格的玩家直推,其余丢弃;只有直推计入主动消息额度。"""
+    sender = _fake_sender()
+    _patch_send_env(monkeypatch, sender, push_all=False, whitelist=frozenset({'U_SANDBOX'}))
+    pushes = []
+    monkeypatch.setattr(callbacks.metrics, 'record_active_push', lambda tid, is_uid: pushes.append((tid, is_uid)))
+    for uid in ('U_REF', 'U_SANDBOX', 'U_NONE'):
+        callbacks.cb_match_event(uid, True, 'join_leave', '狼人杀')
+    quota.refresh_ref(callbacks.helpers.target_key('U_REF', True), 'msg_id', 'M1', 'APP')
+
+    assert await callbacks.notify_restart_rooms('框架功能更新') == 2
+
+    sent = {c.args[0]: c for c in sender.send_to_user.await_args_list}
+    assert set(sent) == {'U_REF', 'U_SANDBOX'}
+    assert sent['U_REF'].kwargs == {'msg_id': 'M1'} and sent['U_SANDBOX'].kwargs == {}
+    md = sent['U_SANDBOX'].args[1]
+    assert '您有**尚未开始**的房间' in md and '框架功能更新' in md and '本群' not in md
+    assert pushes == [('U_SANDBOX', True)]
+    sender.send_to_group.assert_not_called()
+
+
+async def test_restart_notice_dm_push_skips_players_out_of_daily_quota(monkeypatch):
+    """全员直推模式下没有被动引用的私信玩家照常直推,今日主动消息额度用满的不发。"""
+    sender = _fake_sender()
+    _patch_send_env(monkeypatch, sender, push_all=True)
+    monkeypatch.setattr(callbacks, '_active_push_allowed', lambda tid, is_uid: tid != 'U_FULL')
+    for uid in ('U_OK', 'U_FULL'):
+        callbacks.cb_match_event(uid, True, 'new_game', '狼人杀')
+
+    assert await callbacks.notify_restart_rooms('') == 1
+    assert [c.args[0] for c in sender.send_to_user.await_args_list] == ['U_OK']
 
 
 # ─────────────────────────────────────────────────────────────────────────

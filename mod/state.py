@@ -43,7 +43,7 @@ current_game: dict[str, str] = _p['current_game']  # target_key → 游戏名
 active_matches: dict[str, dict] = _p['active_matches']
 # **等待中**(已建房、未开局)的房间 —— 与 active_matches 同形状,互斥:
 # new_game / join_leave 进这里,game_started 时挪去 active_matches,结算 / 解散移除。
-# 重启前给这些群推「即将重启」:房间会随重启清空,而有进行中对局时不允许重启,所以只需通知这一批。不落盘,理由同上。
+# 重启 / 热重载换引擎前给这些群与私信玩家推「即将重启」(私信对局逐人私发,房间里每位玩家各一条):房间会随重启清空,而有进行中对局时不允许重启,所以只需通知这一批。不落盘,理由同上。
 waiting_rooms: dict[str, dict] = _p['waiting_rooms']
 # 「/新游戏 X …」命令里抓下的游戏名(target_key → 游戏名),由 dispatcher 在派发给引擎前写入,callbacks 的 game_started 消费。
 # 只在 current_game 为空时兜底:单机局引擎跳过 new_game 广播、game_started 又无 brief。
