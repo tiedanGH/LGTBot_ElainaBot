@@ -79,6 +79,10 @@
 .titles-level-row select { flex: 0 1 130px; }
 .titles-level-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
 .titles-level-row .titles-level-move { padding: 4px 6px; }
+/* 头衔库编辑行:删除按钮在同一行 */
+.titles-lib-row { flex-wrap: nowrap; }
+.titles-lib-row .titles-lib-name { flex: 1 1 90px; }
+.titles-lib-row select { flex: 0 1 86px; }
 
 /* ── 头衔胶囊(玩家卡片上):同样按 --c 调淡底色 / 描边 ── */
 .titles-chip {
@@ -95,7 +99,7 @@
   background: color-mix(in srgb, var(--c) 18%, var(--panel));
   border-color: var(--c);
 }
-/* 自定义头衔:不进头衔库,仅玩家本人显示 */
+/* 限定头衔:不进头衔库,仅玩家本人显示 */
 .titles-chip.custom { border-style: dashed; }
 .titles-chip-icon { width: 13px; height: 13px; stroke-width: 2.4; }
 .titles-rarity { font-size: 10px; font-weight: 400; opacity: .75; }
@@ -174,6 +178,17 @@ select.titles-level-select option { font-weight: 400; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .titles-noname { color: var(--text-faint); font-weight: 400; }
+.titles-name-pop { cursor: pointer; }
+.titles-name-pop:hover { color: var(--accent); }
+/* 点昵称浮出的 OpenID 气泡:整串一行,点一下全选 */
+.titles-pop {
+  position: fixed; z-index: 1200; max-width: calc(100vw - 24px);
+  padding: 7px 11px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--border-2);
+  box-shadow: var(--shadow);
+  font-family: 'Consolas', 'Menlo', monospace; font-size: 12px; line-height: 1.5;
+  color: var(--text); white-space: nowrap; user-select: all;
+}
 .titles-openid { font-size: 11px; line-height: 1.4; color: var(--text-muted); white-space: nowrap; }
 /* 弹窗里整串放一行,放不下才折 */
 .titles-openid.one-line { white-space: normal; overflow-wrap: anywhere; }
@@ -243,7 +258,7 @@ select.titles-level-select option { font-weight: 400; }
   color: var(--text-muted); border: 1px dashed var(--border-2);
 }
 .titles-edit-row .dash-btn { flex: 0 0 auto; white-space: nowrap; margin-left: auto; }
-/* 从头衔库快捷添加 / 自定义头衔 */
+/* 从头衔库快捷添加 / 限定头衔 */
 .titles-quick-add {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding-top: 12px; border-top: 1px dashed var(--border);
@@ -258,6 +273,13 @@ select.titles-level-select option { font-weight: 400; }
 .titles-eq-none { margin-left: 30px; }
 .titles-edit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .titles-edit-msg { flex: 1 1 160px; font-size: 12px; }
+/* 头衔库编辑状态:新增绿、修改黄、删除红;黄色混入文字色,浅色主题压暗、深色主题提亮 */
+.titles-edit-stat { flex: 0 0 auto; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+.titles-edit-stat span { font-weight: 600; }
+.titles-edit-stat .add { color: var(--in); }
+.titles-edit-stat .mod { color: color-mix(in srgb, #f1c40f 75%, var(--text)); }
+.titles-edit-stat .del { color: #dc3545; }
+.titles-edit-stat .sep { color: var(--text); margin: 0 6px; }
 .titles-edit-msg:empty { display: none; }
 /* 窄屏折行后「取消 / 保存」仍贴右 */
 .titles-edit-actions [data-act="cancel"], .titles-edit-actions [data-act="preset-cancel"],
@@ -275,6 +297,10 @@ select.titles-level-select option { font-weight: 400; }
   .titles-card { padding: 10px 12px; }
   .titles-search-wrap, .titles-add-wrap { flex: 1 0 100%; min-width: 0; }
   .titles-level-actions { margin-left: 0; }
+  /* 头衔库编辑行拆两行:头衔名一行,颜色、分类、持有人数与删除一行 */
+  .titles-lib-row { flex-wrap: wrap; }
+  .titles-lib-row .titles-lib-name { flex: 1 0 100%; }
+  .titles-lib-row select { flex: 1 1 0; }
   /* 编辑行拆两行:序号 + 装备 + 头衔名一行,等级与移除一行 */
   .titles-edit-row { flex-wrap: wrap; row-gap: 6px; }
   .titles-edit-row .titles-edit-name, .titles-edit-static { flex: 1 1 140px; max-width: none; }

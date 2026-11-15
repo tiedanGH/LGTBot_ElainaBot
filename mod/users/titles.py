@@ -9,8 +9,8 @@
   · ``titles.json``:``{"<openid>": {"titles": [{"name", "color", "category"}, ...], "equipped": 头衔名 | null}}``
 
 名字都唯一并直接按名引用:颜色 / 分类改名连同头衔库与玩家头衔一起换名,还有头衔在用的不能删除;头衔库改名、改颜色分类同步到持有者。
-玩家头衔与头衔库同名即库内头衔,颜色分类跟随头衔库;不在库里的是自定义头衔,只在本人的头衔列表里出现。
-排序一律先分类、再颜色;序号按展示顺序(自定义在前、库内在后)计。展示时用 KaTeX 行内上色。
+玩家头衔与头衔库同名即库内头衔,颜色分类跟随头衔库;不在库里的是限定头衔,只在本人的头衔列表里出现。
+排序一律先分类、再颜色;序号按展示顺序(限定在前、库内在后)计。展示时用 KaTeX 行内上色。
 """
 
 from __future__ import annotations
@@ -28,12 +28,14 @@ from . import userinfo
 log = get_logger(PLUGIN, 'LGTBot')
 
 DEFAULT_COLORS = (
-    {'name': '蓝', 'hex': '#2980B9'},
-    {'name': '紫', 'hex': '#8E44AD'},
-    {'name': '粉', 'hex': '#E84393'},
-    {'name': '红', 'hex': '#E74C3C'},
-    {'name': '绿', 'hex': '#27AE60'},
+    {'name': '黄', 'hex': '#F1C40F'},
     {'name': '橙', 'hex': '#FF8C00'},
+    {'name': '红', 'hex': '#E74C3C'},
+    {'name': '粉', 'hex': '#E84393'},
+    {'name': '紫', 'hex': '#8E44AD'},
+    {'name': '蓝', 'hex': '#2980B9'},
+    {'name': '青', 'hex': '#17A2B8'},
+    {'name': '绿', 'hex': '#27AE60'},
 )
 DEFAULT_CATEGORIES = ({'name': '常驻'},)
 NAME_MAX_LEN = 12
@@ -199,7 +201,7 @@ def color_of(title: dict) -> dict:
 
 
 def _usage_unlocked(field: str) -> dict[str, int]:
-    """各颜色 / 分类被多少个头衔引用:头衔库每项算一个,玩家头衔只算自定义的(库内头衔跟随头衔库)。"""
+    """各颜色 / 分类被多少个头衔引用:头衔库每项算一个,玩家头衔只算限定的(库内头衔跟随头衔库)。"""
     lib = _library_unlocked()
     lib_names = {t['name'] for t in lib}
     usage: dict[str, int] = {}
@@ -328,7 +330,7 @@ def _check_style(t: dict, name: str, color_names: set, category_names: set) -> s
 def set_library(rows) -> str | None:
     """面板保存:整份覆盖头衔库,不合法时返回原因(不写盘)。
 
-    行带 ``orig``(原名)是编辑,不带是新增;改名、改颜色分类同步到持有者,删掉的头衔持有者照常保留,成为自定义头衔。
+    行带 ``orig``(原名)是编辑,不带是新增;改名、改颜色分类同步到持有者,删掉的头衔持有者照常保留,成为限定头衔。
     """
     if not isinstance(rows, list):
         return '头衔库格式错误'
@@ -372,7 +374,7 @@ def _clean_record(raw) -> dict | None:
 
 
 def _display_order(titles: list[dict], lib_sorted: list[dict], key) -> list[dict]:
-    """展示顺序:自定义头衔在前(先分类再颜色),库内头衔按头衔库的顺序。"""
+    """展示顺序:限定头衔在前(先分类再颜色),库内头衔按头衔库的顺序。"""
     pos = {t['name']: i for i, t in enumerate(lib_sorted)}
     custom = sorted((t for t in titles if t['name'] not in pos), key=key)
     return custom + sorted((t for t in titles if t['name'] in pos), key=lambda t: pos[t['name']])
@@ -402,7 +404,7 @@ def equipped(openid: str) -> dict | None:
 
 
 def board(openid: str) -> dict:
-    """头衔图片用的数据:``library`` 头衔库(已排序),``custom`` 玩家的自定义头衔与 ``mine`` 持有的头衔(都按展示顺序),``equipped`` 装备的头衔名,``colors`` 颜色名 → HEX,``categories`` 分类名(按顺序)。"""
+    """头衔图片用的数据:``library`` 头衔库(已排序),``custom`` 玩家的限定头衔与 ``mine`` 持有的头衔(都按展示顺序),``equipped`` 装备的头衔名,``colors`` 颜色名 → HEX,``categories`` 分类名(按顺序)。"""
     with _lock:
         color_list, category_list = _presets_unlocked('color'), _presets_unlocked('category')
         key = _sorter(color_list, category_list)

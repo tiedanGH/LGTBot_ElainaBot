@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""玩家头衔测试 —— users.titles 数据层(颜色、分类、头衔库、玩家头衔)、头衔图片、「我的头衔 / 头衔列表 / 切换头衔」指令、新建 / 加入房间后的头衔播报。
+"""玩家头衔测试 —— users.titles 数据层(颜色、分类、头衔库、玩家头衔)、头衔图片、「头衔」帮助与「头衔 我的 / 列表 / 切换」指令、新建 / 加入房间后的头衔播报。
 
 被测行为:
   · 玩家头衔整份保存时逐项校验(32 位 OpenID / 名字字符 / 颜色与分类存在 / 重名 / 装备必须持有),清空等于删除,数量不设上限;与头衔库同名的颜色分类以库为准
   · 颜色、分类按行序整份保存:头衔按名引用,改名连同头衔库与玩家头衔一起换(互换名字不串)、改色立即生效、在用的不能删、至少留一个
-  · 头衔库整份保存:改名、改颜色分类同步到持有者(装备跟着换名),同名的自定义头衔并入库内,删掉的头衔持有者照常保留成自定义
-  · 排序先分类再颜色;装备按序号或名字,序号按展示顺序(自定义在前、库内在后)计,越界再按名字找;颜色分类已不存在的头衔照常保留并兜底;坏文件改名留证
-  · 「头衔列表」五列、自定义在「限定」、其余按分类分组;「我的头衔」三列、「限定」与「已收集」两组并写分类;有图床走 markdown,没有直接回图;缺依赖提示安装
+  · 头衔库整份保存:改名、改颜色分类同步到持有者(装备跟着换名),同名的限定头衔并入库内,删掉的头衔持有者照常保留成限定头衔
+  · 排序先分类再颜色;装备按序号或名字,序号按展示顺序(限定在前、库内在后)计,越界再按名字找;颜色分类已不存在的头衔照常保留并兜底;坏文件改名留证
+  · 只发「头衔」回子指令说明;「头衔 列表」五列、限定头衔在「限定」、其余按分类分组;「头衔 我的」三列(满 15 个五列)、「限定」与「已收集」两组并写分类;有图床走 markdown,没有直接回图;缺依赖提示安装
   · 播报「【头衔名】」加粗上色,后接展示昵称(查不到才 @);播报对象:建房取派发线程上记下的发起人,加入取加入的玩家,退出不播;标记只在打标的线程上可见
   · 播报排在回复限制 / 主动私信提示之后
 """
@@ -51,6 +51,11 @@ def _t(name, color='蓝', category='常驻'):
 def _rows(kind):
     """当前颜色 / 分类表原样作为编辑行(每行带原名)。"""
     return [dict(p, orig=p['name']) for p in (titles.colors() if kind == 'color' else titles.categories())]
+
+
+def _pos(rows, name):
+    """编辑行里某个名字所在的位置。"""
+    return next(i for i, r in enumerate(rows) if r['name'] == name)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -102,7 +107,7 @@ def test_empty_library_deletes_the_record():
 def test_equip_by_index_or_name():
     assert titles.equip(U1, '1') == (None, 'none')
     titles.set_record(U1, [_t('2048', '绿'), _t('A'), _t('B', '红')], None)
-    assert titles.equip(U1, '2') == (_t('B', '红'), '')            # 序号按颜色顺序:蓝、红、绿
+    assert titles.equip(U1, '1') == (_t('B', '红'), '')            # 序号按颜色顺序:红、蓝、绿
     assert titles.get(U1)['equipped'] == 'B'
     assert titles.equip(U1, ' A ') == (_t('A'), '')
     assert titles.equip(U1, '３')[0] == _t('2048', '绿')          # 全角数字照样当序号
@@ -119,7 +124,7 @@ def test_render_uses_inline_katex_colour():
     t = _t('铁蛋', '蓝')
     assert titles.render(t) == '$\\textcolor{#2980B9}{\\text{铁蛋}}$'
     assert titles.join_notice(t, '玩家甲') == '$\\textcolor{#2980B9}{\\textbf{【铁蛋】}}$ 玩家甲 加入游戏'
-    assert [c['name'] for c in titles.colors()] == ['蓝', '紫', '粉', '红', '绿', '橙']
+    assert [c['name'] for c in titles.colors()] == ['黄', '橙', '红', '粉', '紫', '蓝', '青', '绿']
     assert titles.categories() == [{'name': '常驻'}]
 
 
@@ -162,18 +167,19 @@ def test_colors_can_be_added_renamed_recoloured_and_reordered():
     titles.set_record(U1, [_t('A', '紫'), _t('B', '红')], 'A')
     titles.set_record(U2, [_t('C', '蓝')], None)
     rows = _rows('color')
-    rows[1].update(name='深紫', hex='3498db')                      # 改名改色,不带 # 也认
+    i = _pos(rows, '紫')
+    rows[i].update(name='深紫', hex='3498db')                      # 改名改色,不带 # 也认
     rows.append({'name': ' 金 ', 'hex': '#ffd700'})
     assert titles.set_colors(rows) is None
     got = titles.colors()
-    assert got[1] == {'name': '深紫', 'hex': '#3498DB'} and got[-1] == {'name': '金', 'hex': '#FFD700'}
+    assert got[i] == {'name': '深紫', 'hex': '#3498DB'} and got[-1] == {'name': '金', 'hex': '#FFD700'}
     # 头衔里的颜色名跟着改,颜色立即生效;别的头衔不动
     assert titles.get(U1) == {'titles': [_t('A', '深紫'), _t('B', '红')], 'equipped': 'A'}
     assert titles.render(titles.equipped(U1)) == '$\\textcolor{#3498DB}{\\text{A}}$'
     assert titles.get(U2)['titles'] == [_t('C', '蓝')]
     # 两个颜色互换名字:一次映射,不会串成同一个
     rows = _rows('color')
-    rows[0]['name'], rows[1]['name'] = '深紫', '蓝'
+    rows[_pos(rows, '蓝')]['name'], rows[_pos(rows, '深紫')]['name'] = '深紫', '蓝'
     assert titles.set_colors(rows) is None
     assert titles.get(U1)['titles'][0] == _t('A', '蓝') and titles.get(U2)['titles'] == [_t('C', '深紫')]
     # 行序即排序
@@ -197,7 +203,7 @@ def test_categories_follow_the_same_rules():
 
 def test_presets_have_no_upper_limit():
     rows = _rows('color') + [{'name': f'C{i}', 'hex': '#000000'} for i in range(30)]
-    assert titles.set_colors(rows) is None and len(titles.colors()) == 36
+    assert titles.set_colors(rows) is None and len(titles.colors()) == len(titles.DEFAULT_COLORS) + 30
 
 
 def test_style_in_use_cannot_be_deleted():
@@ -270,8 +276,8 @@ def test_library_validates_sorts_by_category_then_colour():
     assert not os.path.exists(titles._library.path)
     titles.set_categories(_rows('category') + [{'name': '活动'}])
     assert titles.set_library([_lib('活动橙', '橙', '活动'), _lib('开发者', '红'), _lib(' Bug猎人 ', '紫'), _lib('萌新', '紫'), _lib('活动蓝', '蓝', '活动')]) is None
-    # 先分类(常驻、活动)再颜色(蓝紫粉红绿橙),同分类同颜色保持录入顺序
-    assert [t['name'] for t in titles.library()] == ['Bug猎人', '萌新', '开发者', '活动蓝', '活动橙']
+    # 先分类(常驻、活动)再颜色(黄橙红粉紫蓝青绿),同分类同颜色保持录入顺序
+    assert [t['name'] for t in titles.library()] == ['开发者', 'Bug猎人', '萌新', '活动橙', '活动蓝']
     assert titles.set_library([]) is None and titles.library() == []
 
 
@@ -282,15 +288,15 @@ def test_library_titles_follow_the_library_style_and_name():
     assert titles.get(U1)['titles'] == [_t('开发者', '橙'), _t('自创', '蓝')]        # 库内头衔的颜色分类以库为准
     titles.set_record(U2, [_t('金牌', '绿')], None)
     rows = _lib_rows()
-    rows[1].update(name='主创', color='红', category='活动')     # 开发者 → 主创,改颜色分类
-    rows.append(_lib('金牌', '粉'))                               # 与 U2 的自定义头衔同名:并入库内
+    rows[_pos(rows, '开发者')].update(name='主创', color='红', category='活动')     # 开发者 → 主创,改颜色分类
+    rows.append(_lib('金牌', '粉'))                               # 与 U2 的限定头衔同名:并入库内
     assert titles.set_library(rows) is None
     assert titles.get(U1) == {'titles': [_t('主创', '红', '活动'), _t('自创', '蓝')], 'equipped': '主创'}
     assert titles.get(U2)['titles'] == [_t('金牌', '粉')]
-    # 删掉库里的头衔:持有者照常保留,成为自定义头衔
+    # 删掉库里的头衔:持有者照常保留,成为限定头衔
     assert titles.set_library([r for r in _lib_rows() if r['name'] != '主创']) is None
     assert titles.get(U1)['titles'][0] == _t('主创', '红', '活动')
-    assert titles.board(U1)['custom'] == [_t('自创', '蓝'), _t('主创', '红', '活动')]     # 自定义也先分类再颜色
+    assert titles.board(U1)['custom'] == [_t('自创', '蓝'), _t('主创', '红', '活动')]     # 限定头衔也先分类再颜色
 
 
 def test_library_rename_onto_a_held_name_keeps_one_title():
@@ -306,7 +312,7 @@ def test_styles_used_by_the_library_cannot_be_deleted_and_renames_reach_it():
     err = titles.set_colors([r for r in _rows('color') if r['name'] != '红'])
     assert err and '红' in err and '1' in err                     # 头衔库一项,持有者不重复计
     rows = _rows('color')
-    rows[3]['name'] = '大红'
+    rows[_pos(rows, '红')]['name'] = '大红'
     assert titles.set_colors(rows) is None
     rows = _rows('category')
     rows[0]['name'] = '常驻款'
@@ -317,13 +323,13 @@ def test_styles_used_by_the_library_cannot_be_deleted_and_renames_reach_it():
 def test_display_order_puts_custom_first_and_drives_equip_index():
     titles.set_categories(_rows('category') + [{'name': '活动'}])
     titles.set_library([_lib('L橙', '橙'), _lib('L蓝', '蓝'), _lib('L活动', '蓝', '活动')])
-    titles.set_record(U1, [_t('L活动', '蓝', '活动'), _t('L橙', '橙'), _t('自定义橙', '橙'), _t('自定义活动', '蓝', '活动'), _t('L蓝', '蓝')], 'L蓝')
+    titles.set_record(U1, [_t('L活动', '蓝', '活动'), _t('L橙', '橙'), _t('限定蓝', '蓝'), _t('限定活动', '橙', '活动'), _t('L蓝', '蓝')], 'L蓝')
     b = titles.board(U1)
-    assert [t['name'] for t in b['mine']] == ['自定义橙', '自定义活动', 'L蓝', 'L橙', 'L活动']
-    assert [t['name'] for t in b['custom']] == ['自定义橙', '自定义活动'] and b['equipped'] == 'L蓝'
-    assert [t['name'] for t in b['library']] == ['L蓝', 'L橙', 'L活动']
+    assert [t['name'] for t in b['mine']] == ['限定蓝', '限定活动', 'L橙', 'L蓝', 'L活动']
+    assert [t['name'] for t in b['custom']] == ['限定蓝', '限定活动'] and b['equipped'] == 'L蓝'
+    assert [t['name'] for t in b['library']] == ['L橙', 'L蓝', 'L活动']
     assert b['colors']['橙'] == '#FF8C00' and b['categories'] == ['常驻', '活动']
-    assert titles.equip(U1, '1')[0]['name'] == '自定义橙'
+    assert titles.equip(U1, '1')[0]['name'] == '限定蓝'
     assert titles.equip(U1, '5')[0]['name'] == 'L活动'
     assert titles.board(U2) == dict(b, custom=[], mine=[], equipped=None)
 
@@ -378,47 +384,47 @@ def _cells(section):
 async def test_my_titles_groups_custom_as_limited_and_collected_with_categories(renders):
     titles.set_categories(_rows('category') + [{'name': '活动'}])
     titles.set_library([_lib('L橙', '橙'), _lib('L活动', '蓝', '活动'), _lib('没拿到', '红')])
-    titles.set_record(U1, [_t('L活动', '蓝', '活动'), _t('自定义', '粉'), _t('L橙', '橙')], 'L橙')
-    ev = _ev('我的头衔')
+    titles.set_record(U1, [_t('L活动', '蓝', '活动'), _t('限定款', '粉'), _t('L橙', '橙')], 'L橙')
+    ev = _ev('头衔 我的')
     await dispatcher.lgtbot_my_titles(ev, None)
     ev.reply.assert_not_awaited()
     ev.reply_image.assert_awaited_once_with(b'PNG')                 # 没配图床:直接回图片
     call = renders[0]
     assert call['title'] == '我的头衔' and call['cols'] == 3 and call['sub'] == '铁蛋玩家　共 3 个头衔 · 装备中：L橙'
     assert [s[0] for s in call['sections']] == ['限定', '已收集']
-    assert _cells(call['sections'][0]) == [('自定义', '#E84393', True, False, 1, '常驻')]
+    assert _cells(call['sections'][0]) == [('限定款', '#E84393', True, False, 1, '常驻')]
     assert _cells(call['sections'][1]) == [('L橙', '#FF8C00', True, True, 2, '常驻'), ('L活动', '#2980B9', True, False, 3, '活动')]
     assert titles.equip(U1, '3')[0]['name'] == 'L活动'            # 图上的序号就是切换序号
-    assert await _call(dispatcher.lgtbot_my_titles, dispatcher._P_MY_TITLES, '我的头衔', uid=U2) == f'<@{U2}>\n您还没有头衔'
+    assert await _call(dispatcher.lgtbot_my_titles, dispatcher._P_MY_TITLES, '头衔 我的', uid=U2) == f'<@{U2}>\n您还没有头衔'
 
 
 async def test_my_titles_switch_to_five_columns_from_fifteen_titles(renders):
     assert dispatcher._MY_TITLES_WIDE == 15
     titles.set_library([_lib(f'L{i}') for i in range(10)])
-    held = [_t(f'L{i}') for i in range(10)] + [_t(f'自定义{i}') for i in range(4)]
-    titles.set_record(U1, held, None)                               # 头衔库与自定义头衔合计 14 个
-    await dispatcher.lgtbot_my_titles(_ev('我的头衔'), None)
-    titles.set_record(U1, held + [_t('自定义4')], None)
-    await dispatcher.lgtbot_my_titles(_ev('我的头衔'), None)
+    held = [_t(f'L{i}') for i in range(10)] + [_t(f'限定{i}') for i in range(4)]
+    titles.set_record(U1, held, None)                               # 头衔库与限定头衔合计 14 个
+    await dispatcher.lgtbot_my_titles(_ev('头衔 我的'), None)
+    titles.set_record(U1, held + [_t('限定4')], None)
+    await dispatcher.lgtbot_my_titles(_ev('头衔 我的'), None)
     assert [c['cols'] for c in renders] == [3, 5]
 
 
 async def test_title_list_groups_by_category_in_five_columns_without_labels(renders):
-    assert (await _call(dispatcher.lgtbot_title_list, dispatcher._P_TITLE_LIST, '头衔列表')).endswith('头衔库里还没有头衔')
+    assert (await _call(dispatcher.lgtbot_title_list, dispatcher._P_TITLE_LIST, '头衔 列表')).endswith('头衔库里还没有头衔')
     titles.set_categories(_rows('category') + [{'name': '活动'}])
-    titles.set_library([_lib('L橙', '橙'), _lib('L蓝', '蓝'), _lib('L活动', '紫', '活动')])
-    titles.set_record(U1, [_t('自定义', '粉'), _t('L橙', '橙')], '自定义')
-    ev = _ev('/头衔列表', group=False)
+    titles.set_library([_lib('L蓝', '蓝'), _lib('L橙', '橙'), _lib('L活动', '紫', '活动')])
+    titles.set_record(U1, [_t('限定款', '粉'), _t('L橙', '橙')], '限定款')
+    ev = _ev('/头衔 列表', group=False)
     await dispatcher.lgtbot_title_list(ev, None)
     call = renders[0]
     assert call['title'] == '头衔列表' and call['cols'] == 5 and call['sub'] == '铁蛋玩家　已收集 1 / 3 · 限定 1'
     assert [s[0] for s in call['sections']] == ['限定', '常驻', '活动', titles.UNKNOWN_CATEGORY]
-    assert _cells(call['sections'][0]) == [('自定义', '#E84393', True, True, 0, '')]
-    assert _cells(call['sections'][1]) == [('L蓝', '#2980B9', False, False, 0, ''), ('L橙', '#FF8C00', True, False, 0, '')]
+    assert _cells(call['sections'][0]) == [('限定款', '#E84393', True, True, 0, '')]
+    assert _cells(call['sections'][1]) == [('L橙', '#FF8C00', True, False, 0, ''), ('L蓝', '#2980B9', False, False, 0, '')]
     assert _cells(call['sections'][2]) == [('L活动', '#8E44AD', False, False, 0, '')] and call['sections'][3][1] == []
     ev.reply_image.assert_awaited_once_with(b'PNG')
-    # 别人的自定义头衔不出现在自己的头衔列表里
-    await dispatcher.lgtbot_title_list(_ev('头衔列表', uid=U2), None)
+    # 别人的限定头衔不出现在自己的头衔列表里
+    await dispatcher.lgtbot_title_list(_ev('头衔 列表', uid=U2), None)
     assert renders[1]['sections'][0] == ('限定', [])
 
 
@@ -428,12 +434,12 @@ async def test_title_images_go_through_the_image_host_when_configured(renders, m
     monkeypatch.setattr(uploader, 'upload_image', AsyncMock(return_value='https://img/t.png'))
     monkeypatch.setattr(uploader, 'get_image_size', lambda data: (1080, 640))
     titles.set_record(U1, [_t('A')], 'A')
-    ev = _ev('我的头衔')
+    ev = _ev('头衔 我的')
     await dispatcher.lgtbot_my_titles(ev, None)
     ev.reply.assert_awaited_once_with(f'<@{U1}>\n![我的头衔 #1080px #640px](https://img/t.png)')
     ev.reply_image.assert_not_awaited()
     uploader.upload_image.return_value = None                       # 图床上传失败:退回直接回图
-    ev = _ev('我的头衔')
+    ev = _ev('头衔 我的')
     await dispatcher.lgtbot_my_titles(ev, None)
     ev.reply_image.assert_awaited_once_with(b'PNG')
 
@@ -441,8 +447,8 @@ async def test_title_images_go_through_the_image_host_when_configured(renders, m
 async def test_title_images_ask_for_missing_dependencies_without_a_text_fallback(renders, monkeypatch):
     monkeypatch.setattr(dispatcher.titles_image, 'missing_dependency', lambda: '缺少 Pillow')
     titles.set_record(U1, [_t('A')], 'A')
-    for handler, pattern, text in ((dispatcher.lgtbot_my_titles, dispatcher._P_MY_TITLES, '我的头衔'),
-                                   (dispatcher.lgtbot_title_list, dispatcher._P_TITLE_LIST, '头衔列表')):
+    for handler, pattern, text in ((dispatcher.lgtbot_my_titles, dispatcher._P_MY_TITLES, '头衔 我的'),
+                                   (dispatcher.lgtbot_title_list, dispatcher._P_TITLE_LIST, '头衔 列表')):
         assert await _call(handler, pattern, text) == f'<@{U1}>\n❌ 头衔图片渲染缺少 Pillow，请联系管理员安装'
     assert renders == []
 
@@ -465,21 +471,32 @@ def test_title_image_renders_grids_with_and_without_labels():
     assert w == ti.width(3) == 1080 and h == 40 + 124 + section + ti.CELL_H_LABEL + 20 + 56 + 40
 
 
+async def test_bare_title_command_replies_with_the_subcommand_help():
+    text = await _call(dispatcher.lgtbot_title_help, dispatcher._P_TITLE_HELP, '头衔')
+    for cmd in ('/头衔 我的', '/头衔 列表', '/头衔 切换 '):
+        assert f'text="{cmd}"' in text, cmd
+    assert '头衔 切换 无' in text
+    # 帮助只认单独的「头衔」,子指令各走各的 handler
+    pats = (dispatcher._P_TITLE_HELP, dispatcher._P_MY_TITLES, dispatcher._P_TITLE_LIST, dispatcher._P_EQUIP_TITLE)
+    for content, hit in (('/头衔', 0), ('头衔 我的', 1), ('头衔我的', 1), ('头衔 列表', 2), ('/头衔列表', 2), ('头衔 切换 3', 3), ('头衔切换无', 3)):
+        assert [bool(re.match(p, content)) for p in pats] == [i == hit for i in range(4)], content
+
+
 async def test_equip_title_replies_and_never_echoes_input():
     p = dispatcher._P_EQUIP_TITLE
     h = dispatcher.lgtbot_equip_title
-    assert (await _call(h, p, '切换头衔 1')).endswith('您还没有头衔')
+    assert (await _call(h, p, '头衔 切换 1')).endswith('您还没有头衔')
     titles.set_record(U1, [_t('铁蛋', '蓝'), _t('Ace', '橙')], None)
-    assert (await _call(h, p, '切换头衔 2')).endswith('✅ 已装备头衔：$\\textcolor{#FF8C00}{\\text{Ace}}$')
+    assert (await _call(h, p, '头衔 切换 1')).endswith('✅ 已装备头衔：$\\textcolor{#FF8C00}{\\text{Ace}}$')
     assert titles.get(U1)['equipped'] == 'Ace'
-    assert (await _call(h, p, '切换头衔 Ace')).endswith('您已经装备了此头衔')
-    assert (await _call(h, p, '/切换头衔铁蛋')).endswith('✅ 已装备头衔：$\\textcolor{#2980B9}{\\text{铁蛋}}$')
+    assert (await _call(h, p, '头衔 切换 Ace')).endswith('您已经装备了此头衔')
+    assert (await _call(h, p, '/头衔切换铁蛋')).endswith('✅ 已装备头衔：$\\textcolor{#2980B9}{\\text{铁蛋}}$')
     for arg in ('奇怪的输入', '99'):
-        text = await _call(h, p, f'切换头衔 {arg}')
-        assert arg not in text and '我的头衔' in text
+        text = await _call(h, p, f'头衔 切换 {arg}')
+        assert arg not in text and '头衔 我的' in text
     assert titles.get(U1)['equipped'] == '铁蛋'
-    usage = await _call(h, p, '切换头衔')
-    assert '用法' in usage and '我的头衔' in usage and '切换头衔 无' in usage
+    usage = await _call(h, p, '头衔 切换')
+    assert '用法' in usage and '头衔 我的' in usage and '头衔 切换 无' in usage
 
 
 async def test_equip_title_by_command_is_audited_only_when_it_changes(monkeypatch):
@@ -488,16 +505,16 @@ async def test_equip_title_by_command_is_audited_only_when_it_changes(monkeypatc
     monkeypatch.setattr(titles.userinfo, 'get_name', lambda uid: {U1: '铁蛋'}.get(uid, ''))
     p, h = dispatcher._P_EQUIP_TITLE, dispatcher.lgtbot_equip_title
     titles.set_record(U1, [_t('A'), _t('B', '红')], None)
-    await _call(h, p, '切换头衔 2')
+    await _call(h, p, '头衔 切换 1')
     assert audits == [(('title', '切换头衔', f'铁蛋 ({U1})：装备 无 → B'), {'src': dispatcher.audit.SRC_CMD})]
-    assert (await _call(h, p, '切换头衔 B')).endswith('您已经装备了此头衔')
-    for bad in ('切换头衔 不存在', '切换头衔'):
+    assert (await _call(h, p, '头衔 切换 B')).endswith('您已经装备了此头衔')
+    for bad in ('头衔 切换 不存在', '头衔 切换'):
         await _call(h, p, bad)
     assert len(audits) == 1                                      # 切的就是当前这个、或没切换成:不记
-    await _call(h, p, '切换头衔 1')
+    await _call(h, p, '头衔 切换 2')
     assert audits[-1][0][2] == f'铁蛋 ({U1})：装备 B → A'
     titles.set_record(U2, [_t('C')], None)
-    await _call(h, p, '切换头衔 C', uid=U2)
+    await _call(h, p, '头衔 切换 C', uid=U2)
     assert audits[-1][0][2] == f'{U2}：装备 无 → C'               # 没有昵称只写 OpenID
 
 
@@ -506,20 +523,21 @@ async def test_equip_title_none_takes_the_title_off(monkeypatch):
     monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: audits.append((a, k)))
     monkeypatch.setattr(titles.userinfo, 'get_name', lambda uid: {U1: '铁蛋'}.get(uid, ''))
     p, h = dispatcher._P_EQUIP_TITLE, dispatcher.lgtbot_equip_title
-    assert (await _call(h, p, '切换头衔 无')).endswith('您还没有头衔')
+    assert (await _call(h, p, '头衔 切换 无')).endswith('您还没有头衔')
     titles.set_record(U1, [_t('A'), _t('B', '红')], None)
-    assert (await _call(h, p, '切换头衔 无')).endswith('您当前没有装备头衔')
+    assert (await _call(h, p, '头衔 切换 无')).endswith('您当前没有装备头衔')
     assert audits == []                                          # 本来就没装备:不记
     titles.equip(U1, 'B')
-    assert (await _call(h, p, '切换头衔无')).endswith('✅ 已取消装备头衔')
+    assert (await _call(h, p, '头衔切换无')).endswith('✅ 已取消装备头衔')
     assert titles.get(U1) == {'titles': [_t('A'), _t('B', '红')], 'equipped': None}
     assert audits == [(('title', '切换头衔', f'铁蛋 ({U1})：装备 B → 无'), {'src': dispatcher.audit.SRC_CMD})]
 
 
 def test_title_commands_never_reach_the_engine():
-    for text in ('我的头衔', '/我的头衔', '头衔列表', '/头衔列表', '切换头衔', '切换头衔 2', '/切换头衔 铁 蛋', '切换头衔2'):
+    for text in ('头衔', '/头衔', '头衔 我的', '/头衔我的', '头衔 列表', '/头衔 列表', '头衔 切换', '头衔 切换 2', '/头衔 切换 铁 蛋', '头衔切换2'):
         assert dispatcher._is_exclusive_command(text), text
-    assert not dispatcher._is_exclusive_command('我的头衔们')
+    for text in ('头衔们', '头衔 我的们', '头衔真好看', '我的', '列表', '我的头衔', '切换头衔 2'):
+        assert not dispatcher._is_exclusive_command(text), text
 
 
 def test_engine_thread_records_the_requester_on_its_own_thread():

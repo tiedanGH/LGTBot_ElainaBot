@@ -109,9 +109,10 @@ _P_STATS    = r'^/?数据统计\s*(\S[^\n]*?)?\s*$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 _P_SPONSOR  = r'^/?赞助支持$'
-_P_MY_TITLES = r'^/?我的头衔$'
-_P_TITLE_LIST = r'^/?头衔列表$'
-_P_EQUIP_TITLE = r'^/?切换头衔\s*(\S[^\n]*?)?\s*$'
+_P_TITLE_HELP = r'^/?头衔$'
+_P_MY_TITLES = r'^/?头衔\s*我的$'
+_P_TITLE_LIST = r'^/?头衔\s*列表$'
+_P_EQUIP_TITLE = r'^/?头衔\s*切换\s*(\S[^\n]*?)?\s*$'
 _P_ADMIN_INTERRUPT_AT = r'^(?:@.+?\s*)?%中断(?:\s+\S+)?$'
 _ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 
@@ -119,7 +120,7 @@ _ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
     _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST, _P_ADMIN_INTERRUPT,
-    _P_SPONSOR, _P_MY_TITLES, _P_TITLE_LIST, _P_EQUIP_TITLE,
+    _P_SPONSOR, _P_TITLE_HELP, _P_MY_TITLES, _P_TITLE_LIST, _P_EQUIP_TITLE,
 ))
 
 
@@ -1441,12 +1442,22 @@ async def lgtbot_sponsor(event, match):
 
 _EQUIP_TITLE_RE = re.compile(_P_EQUIP_TITLE)
 _NO_TITLES = '您还没有头衔'
-_MY_TITLES_WIDE = 15          # 持有这么多头衔起「我的头衔」也排五列,免得图片拖得太长
+_MY_TITLES_WIDE = 15          # 持有这么多头衔起「头衔 我的」也排五列,防止图片拖得太长
+# 子指令做成点击回填的指令链接;「头衔 切换」末尾留空格,让玩家接着补序号或名称
+_TITLE_HELP_MD = (
+    '## 🏅 头衔帮助\n'
+    '\n'
+    '---\n'
+    '\n'
+    f'{buttons.cmd_input("/头衔 我的", "我的头衔")}：查看持有的头衔\n'
+    f'{buttons.cmd_input("/头衔 列表", "头衔列表")}：查看全部头衔\n'
+    f'{buttons.cmd_input("/头衔 切换 ", "切换头衔")}：发送「头衔 切换 序号/名称」装备头衔，「头衔 切换 无」取消装备\n'
+)
 _titles_dep_warned = False
 
 
 def _title_cells(ts: list, b: dict, owned: set, first: int = 0, label: bool = False) -> list:
-    """头衔 → 图片格子;``first`` 非 0 时从它开始标序号(与「切换头衔 序号」一致),``label`` 在名字下方写分类。"""
+    """头衔 → 图片格子;``first`` 非 0 时从它开始标序号(与「头衔 切换 序号」一致),``label`` 在名字下方写分类。"""
     cats = set(b['categories'])
     return [{'name': t['name'], 'hex': b['colors'].get(t['color'], titles.UNKNOWN_COLOR['hex']), 'owned': t['name'] in owned,
              'equipped': t['name'] == b['equipped'], 'index': first + i if first else 0,
@@ -1461,7 +1472,7 @@ async def _reply_titles_image(event, title: str, sub: str, sections: list, foote
     if missing:
         if not _titles_dep_warned:
             _titles_dep_warned = True
-            log.warning(f'头衔图片渲染{missing},「头衔列表」「我的头衔」不可用')
+            log.warning(f'头衔图片渲染{missing},「头衔 我的」「头衔 列表」不可用')
         await event.reply(_with_at(_at(event), f'❌ 头衔图片渲染{missing}，请联系管理员安装'))
         return
     loop = asyncio.get_running_loop()
@@ -1486,6 +1497,21 @@ def _whose(uid: str) -> str:
     return f'{name}　' if name else ''
 
 
+@handler(_P_TITLE_HELP,
+         name='头衔帮助',
+         desc='查看头衔指令的用法',
+         priority=50,
+         block=True,
+         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
+async def lgtbot_title_help(event, match):
+    """只发「头衔」时回子指令说明。"""
+    if helpers.is_foreign_event(event):
+        return
+    if event.is_interaction and not _answer_button(event):
+        return
+    await event.reply(_TITLE_HELP_MD)
+
+
 @handler(_P_MY_TITLES,
          name='我的头衔',
          desc='查看自己持有的全部头衔与当前装备的头衔',
@@ -1493,7 +1519,7 @@ def _whose(uid: str) -> str:
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_my_titles(event, match):
-    """持有的头衔图片:「限定」是自定义头衔,「已收集」是库内头衔,格子下方写分类,持有的多时排五列;序号与「切换头衔 序号」一致。"""
+    """持有的头衔图片:「限定」是不在头衔库里的头衔,「已收集」是库内头衔,格子下方写分类,持有的多时排五列;序号与「头衔 切换 序号」一致。"""
     if helpers.is_foreign_event(event):
         return
     if event.is_interaction and not _answer_button(event):
@@ -1509,7 +1535,7 @@ async def lgtbot_my_titles(event, match):
                 ('已收集', _title_cells(collected, b, owned, len(b['custom']) + 1, label=True))]
     sub = f'{_whose(uid)}共 {len(b["mine"])} 个头衔' + (f' · 装备中：{b["equipped"]}' if b['equipped'] else '')
     cols = 5 if len(b['mine']) >= _MY_TITLES_WIDE else 3
-    await _reply_titles_image(event, '我的头衔', sub, sections, '发送「切换头衔 序号/名称」更换头衔，「切换头衔 无」取消装备', cols)
+    await _reply_titles_image(event, '我的头衔', sub, sections, '发送「头衔 切换 序号/名称」更换头衔，「头衔 切换 无」取消装备', cols)
 
 
 @handler(_P_TITLE_LIST,
@@ -1519,7 +1545,7 @@ async def lgtbot_my_titles(event, match):
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_title_list(event, match):
-    """头衔库全表图片:自己的自定义头衔在最前的「限定」,其余按分类分组、组内按颜色;没持有的调淡,装备中的高亮。"""
+    """头衔库全表图片:自己的限定头衔在最前,其余按分类分组、组内按颜色;没持有的调淡,装备中的高亮。"""
     if helpers.is_foreign_event(event):
         return
     if event.is_interaction and not _answer_button(event):
@@ -1535,7 +1561,7 @@ async def lgtbot_title_list(event, match):
     sections += [(cat, _title_cells([t for t in b['library'] if t['category'] == cat], b, owned)) for cat in b['categories']]
     sections.append((titles.UNKNOWN_CATEGORY, _title_cells([t for t in b['library'] if t['category'] not in b['categories']], b, owned)))
     sub = f'{_whose(uid)}已收集 {have} / {len(b["library"])}' + (f' · 限定 {len(b["custom"])}' if b['custom'] else '')
-    await _reply_titles_image(event, '头衔列表', sub, sections, '发送「我的头衔」查看序号，「切换头衔 序号/名称」更换头衔', 5)
+    await _reply_titles_image(event, '头衔列表', sub, sections, '发送「头衔 我的」查看序号，「头衔 切换 序号/名称」更换头衔', 5)
 
 
 @handler(_P_EQUIP_TITLE,
@@ -1545,7 +1571,7 @@ async def lgtbot_title_list(event, match):
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_equip_title(event, match):
-    """「切换头衔 <序号|头衔名|无>」,「无」是不装备头衔。切换前后没变化时只提示,不记审计。"""
+    """「头衔 切换 <序号|头衔名|无>」,「无」是不装备头衔。切换前后没变化时只提示,不记审计。"""
     if helpers.is_foreign_event(event):
         return
     if event.is_interaction and not _answer_button(event):
@@ -1554,7 +1580,7 @@ async def lgtbot_equip_title(event, match):
     ref = ((m.group(1) if m else '') or '').strip()
     uid = event.user_id or ''
     if not ref:
-        text = '💡 用法：切换头衔 序号/头衔名，可发送「我的头衔」查看序号与名称；发送「切换头衔 无」卸下头衔'
+        text = '💡 用法：头衔 切换 序号/头衔名，可发送「头衔 我的」查看序号与名称；发送「头衔 切换 无」卸下头衔'
     elif ref == '无':
         title, err = titles.unequip(uid)
         if title:
@@ -1576,7 +1602,7 @@ async def lgtbot_equip_title(event, match):
         elif err == 'none':
             text = _NO_TITLES
         else:
-            text = '❌ 您没有这个头衔，发送「我的头衔」查看序号与名称'
+            text = '❌ 您没有这个头衔，发送「头衔 我的」查看序号与名称'
     await event.reply(_with_at(_at(event), text))
 
 

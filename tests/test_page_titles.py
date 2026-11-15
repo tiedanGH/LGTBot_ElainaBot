@@ -131,9 +131,10 @@ async def test_color_and_category_handlers_save_audit_and_refuse_deleting_used_o
     assert (await pt.colors_handler(_Req({'colors': []}))).status == 400
     titles.set_record(U1, [_t('A')], None)
     rows = _rows(titles.colors())
-    rows[0].update(name='天蓝', hex='#00AAFF')
+    i = next(i for i, r in enumerate(rows) if r['name'] == '蓝')
+    rows[i].update(name='天蓝', hex='#00AAFF')
     body = _body(await pt.colors_handler(_Req({'colors': rows + [{'name': '金', 'hex': 'ffd700'}]})))
-    assert body['success'] and body['colors'][0] == {'name': '天蓝', 'hex': '#00AAFF'} and body['colors'][-1]['hex'] == '#FFD700'
+    assert body['success'] and body['colors'][i] == {'name': '天蓝', 'hex': '#00AAFF'} and body['colors'][-1]['hex'] == '#FFD700'
     assert body['players'][0]['titles'] == [_t('A', '天蓝')]                # 头衔跟着颜色改名
     assert audits[-1] == ('title', '编辑头衔颜色', '新增 「金 #FFD700」；修改 「蓝 #2980B9」 → 「天蓝 #00AAFF」')
     n = len(audits)
@@ -154,16 +155,17 @@ async def test_color_and_category_handlers_save_audit_and_refuse_deleting_used_o
 async def test_library_handler_saves_syncs_holders_and_audits(pt, audits):
     assert (await pt.library_handler(_Req(ValueError('x')))).status == 400
     assert (await pt.library_handler(_Req({'library': [_t('A', '金')]}))).status == 400
-    body = _body(await pt.library_handler(_Req({'library': [_t('开发者', '橙'), _t('萌新', '蓝')]})))
-    assert body['success'] and body['library'] == [_t('萌新', '蓝'), _t('开发者', '橙')]
-    assert audits[-1] == ('title', '编辑头衔库', '新增 「开发者 · 橙 · 常驻」、「萌新 · 蓝 · 常驻」')
+    body = _body(await pt.library_handler(_Req({'library': [_t('萌新', '蓝'), _t('开发者', '橙')]})))
+    assert body['success'] and body['library'] == [_t('开发者', '橙'), _t('萌新', '蓝')]
+    assert audits[-1] == ('title', '编辑头衔库', '新增 「萌新 · 蓝 · 常驻」、「开发者 · 橙 · 常驻」')
     titles.set_record(U1, [_t('开发者', '绿')], '开发者')
     rows = _rows(titles.library())
     n = len(audits)
     await pt.library_handler(_Req({'library': rows}))
     assert len(audits) == n                                      # 没变化不记审计
-    rows[1].update(name='主创', color='红')
-    body = _body(await pt.library_handler(_Req({'library': rows[1:]})))
+    keep = next(r for r in rows if r['name'] == '开发者')
+    keep.update(name='主创', color='红')
+    body = _body(await pt.library_handler(_Req({'library': [keep]})))
     assert audits[-1][2] == '删除 「萌新 · 蓝 · 常驻」；修改 「开发者 · 橙 · 常驻」 → 「主创 · 红 · 常驻」'
     assert body['players'][0]['titles'] == [_t('主创', '红')] and body['players'][0]['equipped'] == '主创'
 

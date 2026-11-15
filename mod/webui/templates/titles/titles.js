@@ -2,7 +2,7 @@
  * 读写都走真路由:保存 / 删除 / 刷新都回完整 payload,整块重绘。
  * 颜色、分类、头衔库在顶部编辑框里改,玩家在独立弹窗里查看与编辑;草稿在 titlesPresetEdit / titlesLibEdit / titlesEditing 里,重绘不丢。
  * 筛选同操作审计:titlesFilter.color / .category 各是一个 Set<名字>,空集 = 不限;两者同时生效,作用于头衔库与玩家(拥有任一符合的头衔)。
- * 与头衔库同名的玩家头衔是库内头衔,其余是自定义头衔(不进头衔库,只在玩家本人的头衔列表里以「限定」出现)。排序一律先分类再颜色。
+ * 与头衔库同名的玩家头衔是库内头衔,其余是限定头衔(不进头衔库,只在玩家本人的头衔列表里出现)。排序一律先分类再颜色。
  */
 
 const TITLES_LIST_ROUTE = '__TITLES_LIST_ROUTE__';
@@ -82,13 +82,13 @@ function titlesLibIndex() {
   return idx;
 }
 
-/* 展示顺序(同「我的头衔」与切换序号):自定义在前(先分类再颜色),库内按头衔库的顺序 */
+/* 展示顺序(同「头衔 我的」与切换序号):限定在前(先分类再颜色),库内按头衔库的顺序 */
 function titlesDisplayOrder(list) {
   const idx = titlesLibIndex();
   return titlesBySortKey(list.filter(t => !idx.has(t.name))).concat(list.filter(t => idx.has(t.name)).sort((a, b) => idx.get(a.name) - idx.get(b.name)));
 }
 
-/* 编辑弹窗加行后重排:自定义行保持在前,库内行按头衔库的顺序 */
+/* 编辑弹窗加行后重排:限定行保持在前,库内行按头衔库的顺序 */
 function titlesSortRows(rows) {
   const idx = titlesLibIndex();
   const lib = rows.filter(r => r.lib).sort((a, b) => (idx.has(a.name) ? idx.get(a.name) : 1e9) - (idx.has(b.name) ? idx.get(b.name) : 1e9));
@@ -104,7 +104,7 @@ function titlesFiltering() {
   return titlesFilter.color.size > 0 || titlesFilter.category.size > 0;
 }
 
-/* 各颜色 / 分类被多少个头衔引用:头衔库每项一个 + 玩家的自定义头衔(同后端),在用的不能删 */
+/* 各颜色 / 分类被多少个头衔引用:头衔库每项一个 + 玩家的限定头衔(同后端),在用的不能删 */
 function titlesUsage(field) {
   const usage = {};
   const idx = titlesLibIndex();
@@ -131,11 +131,6 @@ function titlesSelect(kind, cls, sel) {
   return P.hex
     ? '<select class="' + cls + ' titles-level-select" style="--c:' + escapeHtml(titlesColor(sel).hex) + '">' + opts + '</select>'
     : '<select class="' + cls + ' titles-plain-select">' + opts + '</select>';
-}
-
-/* OpenID 是 32 位定长串:卡片里每 16 位一行,弹窗够宽放一行 */
-function titlesOpenidHtml(openid, oneLine) {
-  return oneLine ? escapeHtml(openid) : (String(openid).match(/.{1,16}/g) || ['']).map(escapeHtml).join('<br>');
 }
 
 function titlesShowMsg(text, kind) {
@@ -167,7 +162,7 @@ async function titlesPost(route, body) {
 function titlesChip(t, opts) {
   const o = opts || {};
   return '<span class="titles-chip' + (o.equipped ? ' equipped' : '') + (o.custom ? ' custom' : '') + '" style="--c:' + escapeHtml(titlesColor(t.color).hex) + '"' +
-    (o.custom ? ' title="自定义头衔，只在玩家本人的头衔列表里以「限定」出现"' : '') + '>' +
+    (o.custom ? ' title="限定头衔，不进头衔库，只在玩家本人的头衔列表里出现"' : '') + '>' +
     (o.equipped ? '<svg class="ui-icon titles-chip-icon"><use href="#i-check"/></svg>' : '') +
     escapeHtml(t.name) + '<span class="titles-rarity">' + escapeHtml(titlesCategory(t.category) + (o.extra ? ' · ' + o.extra : '')) + '</span></span>';
 }
@@ -364,6 +359,35 @@ function titlesRenderLibrary() {
     : '<div class="titles-hint">' + (lib.length ? '所选颜色 / 分类下还没有头衔，「限定」头衔仅属于玩家' : '头衔库是空的，点右侧「新增头衔」添加') + '</div>';
 }
 
+/* 草稿对比已保存的头衔库:没有原名的是新增,名字或颜色分类变了的是修改,原名不在草稿里的是删除(held 是其中有玩家持有的) */
+function titlesLibChanges(e) {
+  const lib = new Map(((titlesData && titlesData.library) || []).map(t => [t.name, t]));
+  const holders = titlesHolders();
+  const kept = new Set(e.rows.map(r => r.orig).filter(Boolean));
+  const gone = [...lib.keys()].filter(n => !kept.has(n));
+  const changed = r => { const t = lib.get(r.orig); return !t || r.orig !== r.name.trim() || t.color !== r.color || t.category !== r.category; };
+  return {added: e.rows.filter(r => !r.orig).length, modified: e.rows.filter(r => r.orig && changed(r)).length, deleted: gone.length, held: gone.filter(n => holders[n]).length};
+}
+
+/* 有改动的几项 [样式, 文字],编辑状态与保存确认共用 */
+function titlesLibChangeParts(c) {
+  return [['add', '新增', c.added], ['mod', '修改', c.modified], ['del', '删除', c.deleted]].filter(x => x[2]).map(x => [x[0], x[1] + ' ' + x[2] + ' 项']);
+}
+
+/* 编辑状态就地改,不重绘(重绘会让输入框丢焦点);新增、修改、删除各自着色 */
+function titlesUpdateLibStat() {
+  const el = document.querySelector('#titles-lib-editor .titles-edit-stat');
+  if (!el || !titlesLibEdit) return;
+  const node = (cls, text) => {
+    const s = document.createElement('span');
+    s.className = cls;
+    s.textContent = text;
+    return s;
+  };
+  const parts = titlesLibChangeParts(titlesLibChanges(titlesLibEdit)).map(([cls, text]) => node(cls, text));
+  el.replaceChildren(...(parts.length ? parts.flatMap((s, i) => i ? [node('sep', '·'), s] : [s]) : ['暂无修改']));
+}
+
 function titlesRenderLibEditor() {
   const box = document.getElementById('titles-lib-editor');
   const e = titlesLibEdit;
@@ -376,22 +400,24 @@ function titlesRenderLibEditor() {
   const holders = titlesHolders();
   const rows = e.rows.map((r, i) => {
     const held = r.orig ? (holders[r.orig] || 0) : 0;
-    return '<div class="titles-level-row" data-row="' + i + '">' +
+    return '<div class="titles-level-row titles-lib-row" data-row="' + i + '">' +
       '<input type="text" class="titles-lib-name" maxlength="' + titlesData.name_max + '" placeholder="头衔名" autocomplete="off" spellcheck="false"' +
         ' value="' + escapeHtml(r.name) + '" style="color:' + escapeHtml(titlesColor(r.color).hex) + '">' +
       titlesSelect('color', 'titles-lib-color', r.color) + titlesSelect('category', 'titles-lib-category', r.category) +
       '<span class="titles-level-usage">' + (r.orig ? (held ? held + ' 人持有' : '无人持有') : '新增') + '</span>' +
-      '<button class="dash-btn dash-btn-small" type="button" data-act="lib-del"' + (held ? ' title="删除后持有者照常保留，变成他们的自定义头衔"' : '') + '><svg class="ui-icon btn-icon"><use href="#i-x"/></svg><span class="btn-label">删除</span></button>' +
+      '<button class="dash-btn dash-btn-small" type="button" data-act="lib-del"' + (held ? ' title="删除后持有者照常保留，变成他们的限定头衔"' : '') + '><svg class="ui-icon btn-icon"><use href="#i-x"/></svg><span class="btn-label">删除</span></button>' +
     '</div>';
   }).join('');
   const msg = e.msg || ['', 'info'];
   box.innerHTML = '<div class="titles-level-rows">' + (rows || '<div class="titles-hint">头衔库是空的，点下方「新增头衔」</div>') + '</div>' +
     '<div class="titles-edit-actions">' +
       '<button class="dash-btn dash-btn-small" type="button" data-act="lib-add"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">新增头衔</span></button>' +
+      '<span class="titles-edit-stat"></span>' +
       '<span class="titles-edit-msg dash-msg-' + msg[1] + '">' + escapeHtml(msg[0]) + '</span>' +
       '<button class="dash-btn dash-btn-small" type="button" data-act="lib-cancel"><svg class="ui-icon btn-icon"><use href="#i-x"/></svg><span class="btn-label">取消</span></button>' +
       '<button class="dash-btn dash-btn-small dash-btn-primary" type="button" data-act="lib-save"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>' +
     '</div>';
+  titlesUpdateLibStat();
 }
 
 function titlesOpenLibEditor(addRow) {
@@ -422,10 +448,10 @@ async function titlesSaveLibrary(btn) {
     titlesEditMsg('#titles-lib-editor', e, '❌ 还有头衔没选颜色或分类', 'err');
     return;
   }
-  const holders = titlesHolders();
-  const kept = new Set(rows.map(r => r.orig).filter(Boolean));
-  const dropped = (titlesData.library || []).filter(t => !kept.has(t.name) && holders[t.name]).length;
-  if (dropped && !await dashConfirm('要删除的头衔里有 ' + dropped + ' 个已有玩家持有，删除后仍会保留玩家持有，变成自定义头衔。确定保存？', {level: 'warn', okText: '保存'})) return;
+  const c = titlesLibChanges(e);
+  const stat = titlesLibChangeParts(c).map(x => x[1]).join('，');
+  const note = c.held ? '\n其中删除头衔有 ' + c.held + ' 个已有玩家持有，删除后仍会保留玩家头衔，变成「限定」头衔。' : '';
+  if (stat && !await dashConfirm('确定保存对头衔库的修改？\n\n' + '变更：' + stat + '。' + note, {level: c.held ? 'warn' : 'info', okText: '保存'})) return;
   setBtnBusy(btn, '保存中……');
   try {
     const data = await titlesPost(TITLES_LIBRARY_ROUTE, {library: rows});
@@ -473,6 +499,7 @@ function titlesOnLibInput(ev) {
   if (!e || !row || !ev.target.classList.contains('titles-lib-name')) return;
   e.rows[+row.dataset.row].name = ev.target.value;
   e.dirty = true;
+  titlesUpdateLibStat();
 }
 
 function titlesOnLibChange(ev) {
@@ -492,19 +519,34 @@ function titlesOnLibChange(ev) {
     return;
   }
   e.dirty = true;
+  titlesUpdateLibStat();
 }
 
 /* ──── 玩家列表 ──── */
 
-function titlesHead(p, ops, note, oneLine) {
+/* 卡片只写昵称,点昵称浮出 OpenID;弹窗表头 OpenID 写在昵称下方 */
+function titlesHead(p, ops, note, showId) {
   const avatar = p.avatar
     ? '<img class="titles-avatar" src="' + escapeHtml(p.avatar) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
     : '<div class="titles-avatar"></div>';
   const name = p.name ? escapeHtml(p.name) : '<span class="titles-noname">昵称未知</span>';
   return '<div class="titles-card-head">' + avatar +
-    '<div class="titles-who"><div class="titles-name">' + name + '</div>' +
-    '<div class="titles-openid dash-mono' + (oneLine ? ' one-line' : '') + '">' + titlesOpenidHtml(p.openid, oneLine) + '</div>' +
+    '<div class="titles-who">' +
+    (showId ? '<div class="titles-name">' + name + '</div><div class="titles-openid dash-mono one-line">' + escapeHtml(p.openid) + '</div>'
+            : '<div class="titles-name"><span class="titles-name-pop" title="点击查看 OpenID">' + name + '</span></div>') +
     (note ? '<div class="titles-head-note">' + note + '</div>' : '') + '</div>' + (ops || '') + '</div>';
+}
+
+/* OpenID 气泡贴着点击位置浮在上方,不锁整页 */
+function titlesPopOpenid(ev, openid) {
+  const el = document.getElementById('titles-pop');
+  if (!el) return;
+  el.textContent = openid || '';
+  el.hidden = false;
+  const left = Math.min(Math.max(8, ev.clientX - el.offsetWidth / 2), window.innerWidth - el.offsetWidth - 8);
+  const above = ev.clientY - el.offsetHeight - 10;
+  el.style.left = left + 'px';
+  el.style.top = (above >= 8 ? above : ev.clientY + 16) + 'px';
 }
 
 function titlesCard(p) {
@@ -574,17 +616,17 @@ function titlesRenderModal() {
     modal.innerHTML = '';
     return;
   }
-  /* 库内头衔的名字、颜色、分类跟随头衔库,只能移除或装备;自定义头衔都可改 */
+  /* 库内头衔的名字、颜色、分类跟随头衔库,只能移除或装备;限定头衔都可改 */
   const rows = e.rows.map((r, i) => {
     const c = titlesColor(r.color);
     const hex = escapeHtml(c.hex);
     const body = r.lib
       ? '<span class="titles-edit-static" style="color:' + hex + '">' + escapeHtml(r.name) + '</span>' +
         '<span class="titles-edit-lvl" style="--c:' + hex + '">' + escapeHtml(c.name + ' · ' + titlesCategory(r.category)) + '</span>'
-      : '<input class="titles-edit-name" type="text" maxlength="' + titlesData.name_max + '" placeholder="自定义头衔名" autocomplete="off" spellcheck="false"' +
+      : '<input class="titles-edit-name" type="text" maxlength="' + titlesData.name_max + '" placeholder="限定头衔名" autocomplete="off" spellcheck="false"' +
           ' value="' + escapeHtml(r.name) + '" style="color:' + hex + '">' +
         titlesSelect('color', 'titles-edit-color', r.color) + titlesSelect('category', 'titles-edit-category', r.category) +
-        '<span class="titles-tag-custom" title="不进头衔库，只在玩家本人的头衔列表里以「限定」出现">自定义</span>';
+        '<span class="titles-tag-custom" title="不进头衔库，只在玩家本人的头衔列表里出现">限定</span>';
     return '<div class="titles-edit-row" data-row="' + i + '">' +
       '<span class="titles-edit-idx">' + (i + 1) + '</span>' +
       '<label class="titles-eq" title="装备这个头衔"><input type="radio" name="titles-eq" value="' + i + '"' + (e.eq === r ? ' checked' : '') + '><span>装备</span></label>' +
@@ -601,7 +643,7 @@ function titlesRenderModal() {
   const quick = '<div class="titles-quick-add">' +
     '<select class="titles-quick-pick titles-level-select"' + (avail.length ? '' : ' disabled') + '>' + picks + '</select>' +
     '<button class="dash-btn dash-btn-small" type="button" data-act="lib-pick"' + (avail.length ? '' : ' disabled') + '><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">添加</span></button>' +
-    '<button class="dash-btn dash-btn-small" type="button" data-act="row-add"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">自定义头衔</span></button>' +
+    '<button class="dash-btn dash-btn-small" type="button" data-act="row-add"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">新增限定头衔</span></button>' +
   '</div>';
   /* 信息栏按已保存的数据显示,编辑中的草稿不算 */
   const saved = e.isNew ? null : titlesFindPlayer(e.openid);
@@ -617,7 +659,7 @@ function titlesRenderModal() {
     '<div class="titles-modal-head">' + titlesHead(e, close, note, true) + '</div>' +
     '<div class="titles-modal-body">' +
       '<div class="titles-modal-info">' + info + '</div>' +
-      '<div class="titles-edit-rows">' + (rows || '<div class="titles-hint">还没有头衔，可从头衔库添加或自定义</div>') + '</div>' +
+      '<div class="titles-edit-rows">' + (rows || '<div class="titles-hint">还没有头衔，可从头衔库添加，或添加限定头衔</div>') + '</div>' +
       (e.rows.length ? '<label class="titles-eq titles-eq-none"><input type="radio" name="titles-eq" value="-1"' + (e.eq ? '' : ' checked') + '><span>不装备头衔</span></label>' : '') +
       quick +
     '</div>' +
@@ -870,6 +912,11 @@ async function titlesDelete(openid, btn) {
 }
 
 async function titlesOnListClick(ev) {
+  const who = ev.target.closest('.titles-name-pop');
+  if (who) {
+    titlesPopOpenid(ev, who.closest('.titles-card').dataset.openid);
+    return;
+  }
   const btn = ev.target.closest('[data-act]');
   if (!btn || btn.disabled) return;
   const openid = btn.closest('.titles-card').dataset.openid;
@@ -908,6 +955,7 @@ window.addEventListener('DOMContentLoaded', () => {
   /* Esc 关闭;公共确认框开着时归它处理。捕获阶段注册:main.js 的冒泡监听会先把确认框关掉,晚了就判断不出来 */
   document.addEventListener('keydown', ev => {
     if (ev.key !== 'Escape') return;
+    document.getElementById('titles-pop').hidden = true;
     if (!document.getElementById('titles-add-results').hidden) titlesHideResults();
     if (!titlesEditing) return;
     if (!document.getElementById('dash-modal-backdrop').classList.contains('hidden')) return;
@@ -944,4 +992,10 @@ window.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('mousedown', ev => {
     if (!ev.target.closest('.titles-add-wrap')) titlesHideResults();
   });
+  /* 捕获阶段注册,别处 stopPropagation 也挡不住收起;点昵称或气泡本身不收,方便选中复制 */
+  const pop = document.getElementById('titles-pop');
+  document.addEventListener('click', ev => {
+    if (!ev.target.closest('.titles-name-pop, #titles-pop')) pop.hidden = true;
+  }, true);
+  window.addEventListener('scroll', () => { pop.hidden = true; }, true);
 });
