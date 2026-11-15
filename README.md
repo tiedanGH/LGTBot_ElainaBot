@@ -1,13 +1,13 @@
 <div align="center">
 
-![Logo](https://github.com/Slontia/lgtbot/blob/master/images/logo_transparent_colorful.svg)
+![Logo](./_images/logo_transparent_colorful.png)
 
 # LGTBot × ElainaBot
 
 **QQ 官方机器人版 LGTBot 适配插件**
 
+[![version](https://img.shields.io/github/v/tag/tiedanGH/LGTBot_ElainaBot?label=version&sort=semver)](https://github.com/tiedanGH/LGTBot_ElainaBot/tags)
 ![lang](https://img.shields.io/badge/language-Python%20%2F%20C%2B%2B20-green.svg)
-![platform](https://img.shields.io/badge/platform-QQ%E5%AE%98%E6%96%B9%E6%9C%BA%E5%99%A8%E4%BA%BA-blue.svg)
 ![license](https://img.shields.io/badge/license-LGPLv2-orange.svg)
 [![CMake](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/cmake.yml/badge.svg)](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/cmake.yml)
 [![pytest](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/pytest.yml/badge.svg)](https://github.com/tiedanGH/LGTBot_ElainaBot/actions/workflows/pytest.yml)
@@ -19,9 +19,12 @@
 
 ## 简介
 
-把 LGTBot 的 60+ 种游戏通过 [ElainaBot_v2](https://github.com/ElainaCore/ElainaBot_v2) 框架接入到 **QQ 官方机器人**，核心游戏引擎来自上游项目 [LGTBot](https://github.com/Slontia/lgtbot)（© [@Slontia](https://github.com/Slontia)）。
+把 [LGTBot](https://github.com/Slontia/lgtbot) 的 **60+** 种游戏通过 [ElainaBot_v2](https://github.com/ElainaCore/ElainaBot_v2) 框架接入到 **QQ 官方机器人**，作为 ElainaBot 插件一键启动。
 
-**作为 ElainaBot 插件零配置启动**：安装插件 → 启动主框架 → 面板下载预编译包 → 重启机器人 → 在群里 @ 机器人即可游玩，全程无需编译。
+## 运行要求
+
+- **Linux**：引擎依赖 POSIX 与 Boost.Python，不支持 Windows
+- **主框架**：已部署 ElainaBot_v2 并接入 QQ 官方机器人
 
 ## 快速开始
 
@@ -56,7 +59,12 @@
 └─────────────────────┘     run_coroutine_        │  LGTBot_ElainaBot.so         │
                             threadsafe            │   ↓ FFI                      │
                                                   │  libbot_core (C++)           │
-                                                  │  + 60+ games                 │
+                                                  └──────────────┬───────────────┘
+                                                                 │ 管道 IPC
+                                                  ┌──────────────▼───────────────┐
+                                                  │  match_game_runner           │
+                                                  │   ↓ dlopen                   │
+                                                  │  libgame.so (60+ games)      │
                                                   └──────────────────────────────┘
 ```
 
@@ -112,12 +120,3 @@
 本适配层与 LGTBot 引擎保持一致，使用 **LGPLv2** 协议。
 
 游戏逻辑、引擎核心、图片渲染等核心实现的著作权归 [@Slontia](https://github.com/Slontia) 所有，请遵守上游项目的 [LICENSE](https://github.com/Slontia/lgtbot/blob/master/LICENSE)。
-
-## 链接
-
-- 🎮 LGTBot 上游仓库：https://github.com/Slontia/lgtbot
-- 🟢 KOOK 版（本项目参考实现）：https://github.com/Slontia/lgtbot-khl
-- 🤖 ElainaBot_v2 主框架：[https://github.com/ElainaCore/ElainaBot_v2](https://github.com/ElainaCore/ElainaBot_v2)
-- 📖 部署指南：[DEPLOY.md](./DEPLOY.md)
-- 📑 详细说明：[DETAILS.md](./DETAILS.md)
-- ❤️ 赞助支持：https://tiedan.site/pages/support/
