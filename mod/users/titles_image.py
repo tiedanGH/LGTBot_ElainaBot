@@ -19,6 +19,7 @@ PAD, GAP = 40, 20
 # 每种列数的格宽:三列与五列都让最长的头衔名在最小字号下放得下
 CELL_W = {3: 320, 5: 248}
 CELL_H, CELL_H_LABEL = 96, 124
+EMPTY_H = 150                # 一个格子都没有时正文提示框的高度
 _GOLD = (245, 179, 1)
 _GRAY = (128, 128, 128)
 _UNOWNED_SAT = 0.65          # 未持有:保留的饱和度,太低时相近的颜色分不出来
@@ -107,16 +108,16 @@ def _cell(d, x: int, y: int, w: int, h: int, t: dict) -> None:
         _center(d, x + w // 2, y + h - 22, label, si._font(22), fg)
 
 
-def render(title: str, sub: str, sections: list, footer: str, cols: int = 3) -> bytes | None:
-    """``sections`` 是 ``[(小标题, [{'name','hex','owned','equipped','index','label'}, ...]), ...]``,空的小节跳过;``label`` 写在头衔名下方,一张图里有一个带就都留出这一行。渲染异常返回 None。"""
+def render(title: str, sub: str, sections: list, footer: str, cols: int = 3, empty: str = '') -> bytes | None:
+    """``sections`` 是 ``[(小标题, [{'name','hex','owned','equipped','index','label'}, ...]), ...]``,空的小节跳过;``label`` 写在头衔名下方,一张图里有一个带就都留出这一行。小节全空时把 ``empty`` 写在正文的提示框里。渲染异常返回 None。"""
     try:
-        return _render(title, sub, [(label, items) for label, items in sections if items], footer, cols)
+        return _render(title, sub, [(label, items) for label, items in sections if items], footer, cols, empty)
     except Exception as e:
         log.warning(f'头衔图片渲染失败: {e}')
         return None
 
 
-def _render(title: str, sub: str, sections: list, footer: str, cols: int) -> bytes | None:
+def _render(title: str, sub: str, sections: list, footer: str, cols: int, empty: str) -> bytes | None:
     from PIL import Image, ImageDraw
     if not si._find_font():
         return None
@@ -125,7 +126,8 @@ def _render(title: str, sub: str, sections: list, footer: str, cols: int) -> byt
     head_h, label_h, footer_h = 124, 58, 56
     rows = [-(-len(items) // cols) for _label, items in sections]
     total_w = width(cols)
-    height = PAD + head_h + sum(GAP + label_h + n * ch + (n - 1) * GAP for n in rows) + GAP + footer_h + PAD
+    empty_h = EMPTY_H if empty and not sections else 0
+    height = PAD + head_h + sum(GAP + label_h + n * ch + (n - 1) * GAP for n in rows) + (GAP + empty_h if empty_h else 0) + GAP + footer_h + PAD
     img = Image.new('RGB', (total_w, height), si._BG)
     d = ImageDraw.Draw(img)
 
@@ -143,6 +145,11 @@ def _render(title: str, sub: str, sections: list, footer: str, cols: int) -> byt
             r, c = divmod(i, cols)
             _cell(d, PAD + c * (cw + GAP), y + r * (ch + GAP), cw, ch, t)
         y += n * ch + (n - 1) * GAP
+    if empty_h:
+        y += GAP
+        si._section(d, (PAD, y, total_w - PAD, y + empty_h))
+        _center(d, total_w // 2, y + empty_h // 2, empty, si._font(34), si._TEXT_MUTED)
+        y += empty_h
     _center(d, total_w // 2, y + GAP + footer_h // 2, footer, si._font(22), si._TEXT_FAINT)
 
     buf = BytesIO()

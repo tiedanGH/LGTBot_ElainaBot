@@ -95,6 +95,9 @@ BTN_NOTICE_OLDER    = btn('📜 历史更新公告', '历史更新公告', type=
 BTN_DATA_STATS      = btn('📈 数据统计', '数据统计', type=1, style=4)
 BTN_TROUBLESHOOT    = btn('❓ 疑难解答', '疑难解答', type=1, style=0, group='faq')
 BTN_ABOUT           = btn('ℹ️ 关于框架', '/关于', style=1)
+# 头衔(type=2 回填;「装备头衔」末尾留空格)
+BTN_MY_TITLES       = btn('🏅 我的头衔', '/头衔 我的', style=1)
+BTN_TITLE_EQUIP     = btn('🎖️ 装备头衔', '/头衔 装备 ', style=4)
 # 赞助入口(type=1 callback:点击直接触发「赞助支持」)
 BTN_SPONSOR         = btn('❤️ 赞助支持', '赞助支持', type=1, style=1, group='sponsor')
 # 链接按钮(点击跳外部 URL,不依赖 bot 进程存活)
@@ -317,6 +320,11 @@ def build_more_features_buttons() -> list[list[dict]]:
     if SPONSOR_ENABLED:
         rows.append([BTN_SPONSOR])
     return rows
+
+
+def build_title_equip_buttons(usage: bool = False) -> list[list[dict]]:
+    """「头衔 装备」回复底部:都挂「我的头衔」,用法提示前面再加「装备头衔」。"""
+    return [[BTN_TITLE_EQUIP, BTN_MY_TITLES]] if usage else [[BTN_MY_TITLES]]
 
 
 # ──────── 欢迎菜单按钮组 ────────────────────────────────────────────────────

@@ -82,7 +82,7 @@ function titlesLibIndex() {
   return idx;
 }
 
-/* 展示顺序(同「头衔 我的」与切换序号):限定在前(先分类再颜色),库内按头衔库的顺序 */
+/* 展示顺序(同「头衔 我的」与装备序号):限定在前(先分类再颜色),库内按头衔库的顺序 */
 function titlesDisplayOrder(list) {
   const idx = titlesLibIndex();
   return titlesBySortKey(list.filter(t => !idx.has(t.name))).concat(list.filter(t => idx.has(t.name)).sort((a, b) => idx.get(a.name) - idx.get(b.name)));
@@ -158,7 +158,7 @@ async function titlesPost(route, body) {
   return r.json();
 }
 
-/* 胶囊只展示(按颜色上色,小字写分类);切换装备走编辑弹窗或玩家指令,避免误触 */
+/* 胶囊只展示(按颜色上色,小字写分类);装备头衔走编辑弹窗或玩家指令,避免误触 */
 function titlesChip(t, opts) {
   const o = opts || {};
   return '<span class="titles-chip' + (o.equipped ? ' equipped' : '') + (o.custom ? ' custom' : '') + '" style="--c:' + escapeHtml(titlesColor(t.color).hex) + '"' +

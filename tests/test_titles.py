@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""玩家头衔测试 —— users.titles 数据层(颜色、分类、头衔库、玩家头衔)、头衔图片、「头衔」帮助与「头衔 我的 / 列表 / 切换」指令、新建 / 加入房间后的头衔播报。
+"""玩家头衔测试 —— users.titles 数据层(颜色、分类、头衔库、玩家头衔)、头衔图片、「头衔」主指令(我的 / 列表 / 装备,其余回帮助)、新建 / 加入房间后的头衔播报。
 
 被测行为:
   · 玩家头衔整份保存时逐项校验(32 位 OpenID / 名字字符 / 颜色与分类存在 / 重名 / 装备必须持有),清空等于删除,数量不设上限;与头衔库同名的颜色分类以库为准
   · 颜色、分类按行序整份保存:头衔按名引用,改名连同头衔库与玩家头衔一起换(互换名字不串)、改色立即生效、在用的不能删、至少留一个
   · 头衔库整份保存:改名、改颜色分类同步到持有者(装备跟着换名),同名的限定头衔并入库内,删掉的头衔持有者照常保留成限定头衔
   · 排序先分类再颜色;装备按序号或名字,序号按展示顺序(限定在前、库内在后)计,越界再按名字找;颜色分类已不存在的头衔照常保留并兜底;坏文件改名留证
-  · 只发「头衔」回子指令说明;「头衔 列表」五列、限定头衔在「限定」、其余按分类分组;「头衔 我的」三列(满 15 个五列)、「限定」与「已收集」两组并写分类;有图床走 markdown,没有直接回图;缺依赖提示安装
+  · 「头衔」后接任何内容都由头衔指令处理,子指令不存在时回帮助;「头衔 列表」五列、限定头衔在「限定」、其余按分类分组;「头衔 我的」三列(满 15 个五列)、「限定」与「已收集」两组并写分类,没有头衔也回图片;有图床走 markdown,没有直接回图;缺依赖提示安装;装备回复挂「我的头衔」按钮,用法提示另加「装备头衔」
   · 播报「【头衔名】」加粗上色,后接展示昵称(查不到才 @);播报对象:建房取派发线程上记下的发起人,加入取加入的玩家,退出不播;标记只在打标的线程上可见
   · 播报排在回复限制 / 主动私信提示之后
 """
@@ -135,7 +135,7 @@ def test_dirty_file_is_cleaned_but_unknown_styles_survive():
     assert titles.get(U1) == {'titles': [_t('A'), _t('B', '已删除', '旧分类')], 'equipped': 'B'}
     assert titles.get(U2) is None
     assert set(titles.all_records()) == {U1}
-    # 颜色已不存在:灰色兜底,玩家切换装备时也不会把它弄丢
+    # 颜色已不存在:灰色兜底,玩家装备别的头衔时也不会把它弄丢
     assert titles.render(_t('B', '已删除')) == '$\\textcolor{#808080}{\\text{B}}$'
     titles.equip(U1, 'A')
     assert titles.get(U1)['titles'] == [_t('A'), _t('B', '已删除', '旧分类')]
@@ -354,10 +354,15 @@ def _ev(content, *, group=True, uid=U1):
     return ev
 
 
-async def _call(handler, pattern, content, **kw):
+async def _send(content, **kw):
+    """经「头衔」主指令发一条消息,返回事件。"""
     ev = _ev(content, **kw)
-    await handler(ev, re.search(pattern, content))
-    return ev.reply.await_args.args[0]
+    await dispatcher.lgtbot_title(ev, re.search(dispatcher._P_TITLE, content))
+    return ev
+
+
+async def _call(content, **kw):
+    return (await _send(content, **kw)).reply.await_args.args[0]
 
 
 @pytest.fixture
@@ -366,8 +371,8 @@ def renders(monkeypatch):
     from plugins.LGTBot_ElainaBot.mod.messaging import uploader
     calls = []
 
-    def fake_render(title, sub, sections, footer, cols):
-        calls.append({'title': title, 'sub': sub, 'sections': sections, 'footer': footer, 'cols': cols})
+    def fake_render(title, sub, sections, footer, cols, empty=''):
+        calls.append({'title': title, 'sub': sub, 'sections': sections, 'footer': footer, 'cols': cols, 'empty': empty})
         return b'PNG'
 
     monkeypatch.setattr(dispatcher.titles_image, 'render', fake_render)
@@ -385,17 +390,23 @@ async def test_my_titles_groups_custom_as_limited_and_collected_with_categories(
     titles.set_categories(_rows('category') + [{'name': '活动'}])
     titles.set_library([_lib('L橙', '橙'), _lib('L活动', '蓝', '活动'), _lib('没拿到', '红')])
     titles.set_record(U1, [_t('L活动', '蓝', '活动'), _t('限定款', '粉'), _t('L橙', '橙')], 'L橙')
-    ev = _ev('头衔 我的')
-    await dispatcher.lgtbot_my_titles(ev, None)
+    ev = await _send('头衔 我的')
     ev.reply.assert_not_awaited()
     ev.reply_image.assert_awaited_once_with(b'PNG')                 # 没配图床:直接回图片
     call = renders[0]
     assert call['title'] == '我的头衔' and call['cols'] == 3 and call['sub'] == '铁蛋玩家　共 3 个头衔 · 装备中：L橙'
-    assert [s[0] for s in call['sections']] == ['限定', '已收集']
+    assert [s[0] for s in call['sections']] == ['限定', '已收集'] and call['empty'] == ''
     assert _cells(call['sections'][0]) == [('限定款', '#E84393', True, False, 1, '常驻')]
     assert _cells(call['sections'][1]) == [('L橙', '#FF8C00', True, True, 2, '常驻'), ('L活动', '#2980B9', True, False, 3, '活动')]
-    assert titles.equip(U1, '3')[0]['name'] == 'L活动'            # 图上的序号就是切换序号
-    assert await _call(dispatcher.lgtbot_my_titles, dispatcher._P_MY_TITLES, '头衔 我的', uid=U2) == f'<@{U2}>\n您还没有头衔'
+    assert titles.equip(U1, '3')[0]['name'] == 'L活动'            # 图上的序号就是装备序号
+
+
+async def test_my_titles_without_titles_is_still_an_image_with_the_hint(renders):
+    ev = await _send('头衔我的', uid=U2)
+    ev.reply.assert_not_awaited()
+    ev.reply_image.assert_awaited_once_with(b'PNG')
+    call = renders[0]
+    assert call['title'] == '我的头衔' and call['sections'] == [] and call['empty'] == '您还没有头衔' and '头衔 列表' in call['footer']
 
 
 async def test_my_titles_switch_to_five_columns_from_fifteen_titles(renders):
@@ -403,19 +414,18 @@ async def test_my_titles_switch_to_five_columns_from_fifteen_titles(renders):
     titles.set_library([_lib(f'L{i}') for i in range(10)])
     held = [_t(f'L{i}') for i in range(10)] + [_t(f'限定{i}') for i in range(4)]
     titles.set_record(U1, held, None)                               # 头衔库与限定头衔合计 14 个
-    await dispatcher.lgtbot_my_titles(_ev('头衔 我的'), None)
+    await _send('头衔 我的')
     titles.set_record(U1, held + [_t('限定4')], None)
-    await dispatcher.lgtbot_my_titles(_ev('头衔 我的'), None)
+    await _send('头衔 我的')
     assert [c['cols'] for c in renders] == [3, 5]
 
 
 async def test_title_list_groups_by_category_in_five_columns_without_labels(renders):
-    assert (await _call(dispatcher.lgtbot_title_list, dispatcher._P_TITLE_LIST, '头衔 列表')).endswith('头衔库里还没有头衔')
+    assert (await _call('头衔 列表')).endswith('头衔库里还没有头衔')
     titles.set_categories(_rows('category') + [{'name': '活动'}])
     titles.set_library([_lib('L蓝', '蓝'), _lib('L橙', '橙'), _lib('L活动', '紫', '活动')])
     titles.set_record(U1, [_t('限定款', '粉'), _t('L橙', '橙')], '限定款')
-    ev = _ev('/头衔 列表', group=False)
-    await dispatcher.lgtbot_title_list(ev, None)
+    ev = await _send('/头衔 列表', group=False)
     call = renders[0]
     assert call['title'] == '头衔列表' and call['cols'] == 5 and call['sub'] == '铁蛋玩家　已收集 1 / 3 · 限定 1'
     assert [s[0] for s in call['sections']] == ['限定', '常驻', '活动', titles.UNKNOWN_CATEGORY]
@@ -424,7 +434,7 @@ async def test_title_list_groups_by_category_in_five_columns_without_labels(rend
     assert _cells(call['sections'][2]) == [('L活动', '#8E44AD', False, False, 0, '')] and call['sections'][3][1] == []
     ev.reply_image.assert_awaited_once_with(b'PNG')
     # 别人的限定头衔不出现在自己的头衔列表里
-    await dispatcher.lgtbot_title_list(_ev('头衔 列表', uid=U2), None)
+    await _send('头衔 列表', uid=U2)
     assert renders[1]['sections'][0] == ('限定', [])
 
 
@@ -434,22 +444,19 @@ async def test_title_images_go_through_the_image_host_when_configured(renders, m
     monkeypatch.setattr(uploader, 'upload_image', AsyncMock(return_value='https://img/t.png'))
     monkeypatch.setattr(uploader, 'get_image_size', lambda data: (1080, 640))
     titles.set_record(U1, [_t('A')], 'A')
-    ev = _ev('头衔 我的')
-    await dispatcher.lgtbot_my_titles(ev, None)
+    ev = await _send('头衔 我的')
     ev.reply.assert_awaited_once_with(f'<@{U1}>\n![我的头衔 #1080px #640px](https://img/t.png)')
     ev.reply_image.assert_not_awaited()
     uploader.upload_image.return_value = None                       # 图床上传失败:退回直接回图
-    ev = _ev('头衔 我的')
-    await dispatcher.lgtbot_my_titles(ev, None)
+    ev = await _send('头衔 我的')
     ev.reply_image.assert_awaited_once_with(b'PNG')
 
 
 async def test_title_images_ask_for_missing_dependencies_without_a_text_fallback(renders, monkeypatch):
     monkeypatch.setattr(dispatcher.titles_image, 'missing_dependency', lambda: '缺少 Pillow')
     titles.set_record(U1, [_t('A')], 'A')
-    for handler, pattern, text in ((dispatcher.lgtbot_my_titles, dispatcher._P_MY_TITLES, '头衔 我的'),
-                                   (dispatcher.lgtbot_title_list, dispatcher._P_TITLE_LIST, '头衔 列表')):
-        assert await _call(handler, pattern, text) == f'<@{U1}>\n❌ 头衔图片渲染缺少 Pillow，请联系管理员安装'
+    for text in ('头衔 我的', '头衔 列表'):
+        assert await _call(text) == f'<@{U1}>\n❌ 头衔图片渲染缺少 Pillow，请联系管理员安装'
     assert renders == []
 
 
@@ -460,61 +467,78 @@ def test_title_image_renders_grids_with_and_without_labels():
         pytest.skip('本机没有中文字体')
     from io import BytesIO
     from PIL import Image
+    size = lambda png: Image.open(BytesIO(png)).size
     cell = {'name': '一个很长很长的头衔名字', 'hex': '#FF8C00', 'owned': True, 'equipped': True, 'index': 0, 'label': ''}
     faded = dict(cell, name='未持有', owned=False, equipped=False)
-    png = ti.render('头衔列表', '已收集 1 / 6', [('限定', [cell]), ('常驻', [cell] + [faded] * 5), ('空', [])], '底部提示', 5)
-    w, h = Image.open(BytesIO(png)).size
+    w, h = size(ti.render('头衔列表', '已收集 1 / 6', [('限定', [cell]), ('常驻', [cell] + [faded] * 5), ('空', [])], '底部提示', 5))
     section = ti.GAP + 58                                           # 小节间距 + 小标题
     assert w == ti.width(5) == 1400 and h == 40 + 124 + (section + ti.CELL_H) + (section + 2 * ti.CELL_H + ti.GAP) + 20 + 56 + 40
-    png = ti.render('我的头衔', '', [('限定', [dict(cell, index=1, label='常驻')])], '底部提示', 3)
-    w, h = Image.open(BytesIO(png)).size
+    labeled = [('限定', [dict(cell, index=1, label='常驻')])]
+    w, h = size(ti.render('我的头衔', '', labeled, '底部提示', 3))
     assert w == ti.width(3) == 1080 and h == 40 + 124 + section + ti.CELL_H_LABEL + 20 + 56 + 40
+    # 一个格子都没有:正文画提示框;有格子时提示不占地方
+    assert size(ti.render('我的头衔', '', [('限定', []), ('已收集', [])], '底部提示', 3, empty='您还没有头衔')) == (1080, 40 + 124 + ti.GAP + ti.EMPTY_H + 20 + 56 + 40)
+    assert size(ti.render('我的头衔', '', labeled, '底部提示', 3, empty='您还没有头衔')) == (w, h)
 
 
-async def test_bare_title_command_replies_with_the_subcommand_help():
-    text = await _call(dispatcher.lgtbot_title_help, dispatcher._P_TITLE_HELP, '头衔')
-    for cmd in ('/头衔 我的', '/头衔 列表', '/头衔 切换 '):
-        assert f'text="{cmd}"' in text, cmd
-    assert '头衔 切换 无' in text
-    # 帮助只认单独的「头衔」,子指令各走各的 handler
-    pats = (dispatcher._P_TITLE_HELP, dispatcher._P_MY_TITLES, dispatcher._P_TITLE_LIST, dispatcher._P_EQUIP_TITLE)
-    for content, hit in (('/头衔', 0), ('头衔 我的', 1), ('头衔我的', 1), ('头衔 列表', 2), ('/头衔列表', 2), ('头衔 切换 3', 3), ('头衔切换无', 3)):
-        assert [bool(re.match(p, content)) for p in pats] == [i == hit for i in range(4)], content
+async def test_title_main_command_routes_subcommands_and_answers_the_rest_with_help(renders):
+    help_md = await _call('头衔')
+    for cmd in ('/头衔 我的', '/头衔 列表', '/头衔 装备 '):
+        assert f'text="{cmd}"' in help_md, cmd
+    assert '头衔 装备 无' in help_md
+    # 子指令不存在、或「我的」「列表」后面还跟着东西:都回帮助,不转给引擎
+    for content in ('/头衔', '头衔 1', '头衔真好看', '头衔 我的们', '头衔 列表 2', '头衔 切换 1'):
+        assert await _call(content) == help_md, content
+    assert renders == []
+    titles.set_library([_lib('L')])
+    await _send('头衔我的')
+    await _send('/头衔列表')
+    assert [r['title'] for r in renders] == ['我的头衔', '头衔列表']
+    assert (await _call('头衔装备 无')).endswith('您还没有头衔')
 
 
 async def test_equip_title_replies_and_never_echoes_input():
-    p = dispatcher._P_EQUIP_TITLE
-    h = dispatcher.lgtbot_equip_title
-    assert (await _call(h, p, '头衔 切换 1')).endswith('您还没有头衔')
+    assert (await _call('头衔 装备 1')).endswith('您还没有头衔')
     titles.set_record(U1, [_t('铁蛋', '蓝'), _t('Ace', '橙')], None)
-    assert (await _call(h, p, '头衔 切换 1')).endswith('✅ 已装备头衔：$\\textcolor{#FF8C00}{\\text{Ace}}$')
+    assert (await _call('头衔 装备 1')).endswith('✅ 已装备头衔：$\\textcolor{#FF8C00}{\\text{Ace}}$')
     assert titles.get(U1)['equipped'] == 'Ace'
-    assert (await _call(h, p, '头衔 切换 Ace')).endswith('您已经装备了此头衔')
-    assert (await _call(h, p, '/头衔切换铁蛋')).endswith('✅ 已装备头衔：$\\textcolor{#2980B9}{\\text{铁蛋}}$')
+    assert (await _call('头衔 装备 Ace')).endswith('您已经装备：$\\textcolor{#FF8C00}{\\text{Ace}}$')
+    assert (await _call('/头衔装备铁蛋')).endswith('✅ 已装备头衔：$\\textcolor{#2980B9}{\\text{铁蛋}}$')
     for arg in ('奇怪的输入', '99'):
-        text = await _call(h, p, f'头衔 切换 {arg}')
+        text = await _call(f'头衔 装备 {arg}')
         assert arg not in text and '头衔 我的' in text
     assert titles.get(U1)['equipped'] == '铁蛋'
-    usage = await _call(h, p, '头衔 切换')
-    assert '用法' in usage and '头衔 我的' in usage and '头衔 切换 无' in usage
+    usage = await _call('头衔 装备')
+    assert '用法' in usage and '头衔 我的' in usage and '头衔 装备 无' in usage
+
+
+async def test_equip_replies_carry_input_fill_buttons():
+    from plugins.LGTBot_ElainaBot.mod.messaging import buttons
+    mine, equip = buttons.BTN_MY_TITLES, buttons.BTN_TITLE_EQUIP
+    # 都是回填输入框的指令按钮(type=2、不带 enter):「我的头衔」蓝框,「装备头衔」蓝底并留空格等玩家补序号
+    assert [(b['data'], b['type'], b['style'], 'enter' in b) for b in (mine, equip)] == [('/头衔 我的', 2, 1, False), ('/头衔 装备 ', 2, 4, False)]
+    assert (await _send('头衔 装备')).reply.await_args.kwargs['buttons'] == [[equip, mine]]
+    assert (await _send('头衔 装备 1')).reply.await_args.kwargs['buttons'] == [[mine]]      # 还没有头衔
+    titles.set_record(U1, [_t('A')], None)
+    for content in ('头衔 装备 1', '头衔 装备 A', '头衔 装备 不存在', '头衔 装备 无', '头衔 装备 无'):
+        assert (await _send(content)).reply.await_args.kwargs['buttons'] == [[mine]], content
 
 
 async def test_equip_title_by_command_is_audited_only_when_it_changes(monkeypatch):
     audits = []
     monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: audits.append((a, k)))
     monkeypatch.setattr(titles.userinfo, 'get_name', lambda uid: {U1: '铁蛋'}.get(uid, ''))
-    p, h = dispatcher._P_EQUIP_TITLE, dispatcher.lgtbot_equip_title
     titles.set_record(U1, [_t('A'), _t('B', '红')], None)
-    await _call(h, p, '头衔 切换 1')
-    assert audits == [(('title', '切换头衔', f'铁蛋 ({U1})：装备 无 → B'), {'src': dispatcher.audit.SRC_CMD})]
-    assert (await _call(h, p, '头衔 切换 B')).endswith('您已经装备了此头衔')
-    for bad in ('头衔 切换 不存在', '头衔 切换'):
-        await _call(h, p, bad)
-    assert len(audits) == 1                                      # 切的就是当前这个、或没切换成:不记
-    await _call(h, p, '头衔 切换 2')
+    await _call('头衔 装备 1')
+    assert audits == [(('title', '装备头衔', f'铁蛋 ({U1})：装备 无 → B'), {'src': dispatcher.audit.SRC_CMD})]
+    assert (await _call('头衔 装备 B')).endswith('您已经装备：$\\textcolor{#E74C3C}{\\text{B}}$')
+    for bad in ('头衔 装备 不存在', '头衔 装备'):
+        await _call(bad)
+    assert len(audits) == 1                                      # 装备的就是当前这个、或没装备成:不记
+    await _call('头衔 装备 2')
     assert audits[-1][0][2] == f'铁蛋 ({U1})：装备 B → A'
     titles.set_record(U2, [_t('C')], None)
-    await _call(h, p, '头衔 切换 C', uid=U2)
+    await _call('头衔 装备 C', uid=U2)
     assert audits[-1][0][2] == f'{U2}：装备 无 → C'               # 没有昵称只写 OpenID
 
 
@@ -522,21 +546,20 @@ async def test_equip_title_none_takes_the_title_off(monkeypatch):
     audits = []
     monkeypatch.setattr(dispatcher.audit, 'record', lambda *a, **k: audits.append((a, k)))
     monkeypatch.setattr(titles.userinfo, 'get_name', lambda uid: {U1: '铁蛋'}.get(uid, ''))
-    p, h = dispatcher._P_EQUIP_TITLE, dispatcher.lgtbot_equip_title
-    assert (await _call(h, p, '头衔 切换 无')).endswith('您还没有头衔')
+    assert (await _call('头衔 装备 无')).endswith('您还没有头衔')
     titles.set_record(U1, [_t('A'), _t('B', '红')], None)
-    assert (await _call(h, p, '头衔 切换 无')).endswith('您当前没有装备头衔')
+    assert (await _call('头衔 装备 无')).endswith('您当前没有装备头衔')
     assert audits == []                                          # 本来就没装备:不记
     titles.equip(U1, 'B')
-    assert (await _call(h, p, '头衔切换无')).endswith('✅ 已取消装备头衔')
+    assert (await _call('头衔装备无')).endswith('✅ 已取消装备头衔')
     assert titles.get(U1) == {'titles': [_t('A'), _t('B', '红')], 'equipped': None}
-    assert audits == [(('title', '切换头衔', f'铁蛋 ({U1})：装备 B → 无'), {'src': dispatcher.audit.SRC_CMD})]
+    assert audits == [(('title', '装备头衔', f'铁蛋 ({U1})：装备 B → 无'), {'src': dispatcher.audit.SRC_CMD})]
 
 
 def test_title_commands_never_reach_the_engine():
-    for text in ('头衔', '/头衔', '头衔 我的', '/头衔我的', '头衔 列表', '/头衔 列表', '头衔 切换', '头衔 切换 2', '/头衔 切换 铁 蛋', '头衔切换2'):
+    for text in ('头衔', '/头衔', '头衔 我的', '/头衔我的', '头衔 列表', '头衔 装备', '头衔 装备 2', '/头衔 装备 铁 蛋', '头衔装备2', '头衔 1', '头衔真好看', '头衔 我的们'):
         assert dispatcher._is_exclusive_command(text), text
-    for text in ('头衔们', '头衔 我的们', '头衔真好看', '我的', '列表', '我的头衔', '切换头衔 2'):
+    for text in ('我的', '列表', '我的头衔', '切换头衔 2', '装备头衔 2', '说头衔'):
         assert not dispatcher._is_exclusive_command(text), text
 
 

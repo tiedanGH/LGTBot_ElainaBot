@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""「头衔系统」标签 —— 颜色、分类与头衔库的新增 / 编辑 / 排序,全部玩家持有的头衔与当前装备的查看、编辑、切换与删除。
+"""「头衔系统」标签 —— 颜色、分类与头衔库的新增 / 编辑 / 排序,全部玩家持有的头衔与当前装备的查看、编辑、装备与删除。
 
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_CSS`` / ``TAB_JS`` 从 ``templates/titles/`` 加载
@@ -119,7 +119,7 @@ def _fail(message: str, status: int = 400) -> 'web.Response':
 
 
 async def list_handler(request) -> 'web.Response':
-    """``GET /api/ext/lgtbot/titles/list`` —— 重新读取全部数据(玩家在群里切换头衔后面板据此刷新)。"""
+    """``GET /api/ext/lgtbot/titles/list`` —— 重新读取全部数据(玩家在群里装备头衔后面板据此刷新)。"""
     return web.json_response({'success': True, **_payload()})
 
 

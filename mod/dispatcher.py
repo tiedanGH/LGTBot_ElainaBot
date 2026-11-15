@@ -109,10 +109,7 @@ _P_STATS    = r'^/?数据统计\s*(\S[^\n]*?)?\s*$'
 _P_MATCHLIST = r'^/?赛事列表$'
 _P_ADMIN_INTERRUPT = r'^%中断(?:\s+\S+)?$'
 _P_SPONSOR  = r'^/?赞助支持$'
-_P_TITLE_HELP = r'^/?头衔$'
-_P_MY_TITLES = r'^/?头衔\s*我的$'
-_P_TITLE_LIST = r'^/?头衔\s*列表$'
-_P_EQUIP_TITLE = r'^/?头衔\s*切换\s*(\S[^\n]*?)?\s*$'
+_P_TITLE    = r'^/?头衔\s*(\S[^\n]*?)?\s*$'
 _P_ADMIN_INTERRUPT_AT = r'^(?:@.+?\s*)?%中断(?:\s+\S+)?$'
 _ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 
@@ -120,7 +117,7 @@ _ADMIN_INTERRUPT_RE = re.compile(_P_ADMIN_INTERRUPT)
 _EXCLUSIVE_RES = tuple(re.compile(p, re.DOTALL) for p in (
     _P_QUERY_ID, _P_MENU, _P_MORE, _P_NOTICE, _P_TROUBLE, _P_ABOUT,
     _P_RESTART, _P_PLANNED, _P_STATS, _P_MATCHLIST, _P_ADMIN_INTERRUPT,
-    _P_SPONSOR, _P_TITLE_HELP, _P_MY_TITLES, _P_TITLE_LIST, _P_EQUIP_TITLE,
+    _P_SPONSOR, _P_TITLE,
 ))
 
 
@@ -1438,12 +1435,13 @@ async def lgtbot_sponsor(event, match):
 
 
 # ──────── 玩家头衔(所有人可用) ─────────────────────────────────────────────
-# 头衔由面板「头衔系统」发放,玩家只能查看与切换装备;新建 / 加入房间时的播报见 callbacks。
+# 头衔由面板「头衔系统」发放,玩家只能查看与装备;新建 / 加入房间时的播报见 callbacks。
 
-_EQUIP_TITLE_RE = re.compile(_P_EQUIP_TITLE)
+_TITLE_RE = re.compile(_P_TITLE)
+_TITLE_SUB_RE = re.compile(r'^(我的|列表|装备)\s*(.*)$')
 _NO_TITLES = '您还没有头衔'
 _MY_TITLES_WIDE = 15          # 持有这么多头衔起「头衔 我的」也排五列,防止图片拖得太长
-# 子指令做成点击回填的指令链接;「头衔 切换」末尾留空格,让玩家接着补序号或名称
+# 子指令做成点击回填的指令链接;「头衔 装备」末尾留空格,让玩家接着补序号或名称
 _TITLE_HELP_MD = (
     '## 🏅 头衔帮助\n'
     '\n'
@@ -1451,13 +1449,13 @@ _TITLE_HELP_MD = (
     '\n'
     f'{buttons.cmd_input("/头衔 我的", "我的头衔")}：查看持有的头衔\n'
     f'{buttons.cmd_input("/头衔 列表", "头衔列表")}：查看全部头衔\n'
-    f'{buttons.cmd_input("/头衔 切换 ", "切换头衔")}：发送「头衔 切换 序号/名称」装备头衔，「头衔 切换 无」取消装备\n'
+    f'{buttons.cmd_input("/头衔 装备 ", "装备头衔")}：发送「头衔 装备 序号/名称」装备头衔，「头衔 装备 无」取消装备\n'
 )
 _titles_dep_warned = False
 
 
 def _title_cells(ts: list, b: dict, owned: set, first: int = 0, label: bool = False) -> list:
-    """头衔 → 图片格子;``first`` 非 0 时从它开始标序号(与「头衔 切换 序号」一致),``label`` 在名字下方写分类。"""
+    """头衔 → 图片格子;``first`` 非 0 时从它开始标序号(与「头衔 装备 序号」一致),``label`` 在名字下方写分类。"""
     cats = set(b['categories'])
     return [{'name': t['name'], 'hex': b['colors'].get(t['color'], titles.UNKNOWN_COLOR['hex']), 'owned': t['name'] in owned,
              'equipped': t['name'] == b['equipped'], 'index': first + i if first else 0,
@@ -1465,8 +1463,8 @@ def _title_cells(ts: list, b: dict, owned: set, first: int = 0, label: bool = Fa
             for i, t in enumerate(ts)]
 
 
-async def _reply_titles_image(event, title: str, sub: str, sections: list, footer: str, cols: int) -> None:
-    """头衔图片回执:缺依赖时提示安装,不做文字回退;配了图床走 markdown 内嵌并带 @,否则直接回复图片(媒体消息不解析 @)。"""
+async def _reply_titles_image(event, title: str, sub: str, sections: list, footer: str, cols: int, empty: str = '') -> None:
+    """头衔图片回执:缺依赖时提示安装,不做文字回退;配了图床走 markdown 内嵌并带 @,否则直接回复图片(媒体消息不解析 @)。``empty`` 是一个格子都没有时图里的提示。"""
     global _titles_dep_warned
     missing = titles_image.missing_dependency()
     if missing:
@@ -1476,7 +1474,7 @@ async def _reply_titles_image(event, title: str, sub: str, sections: list, foote
         await event.reply(_with_at(_at(event), f'❌ 头衔图片渲染{missing}，请联系管理员安装'))
         return
     loop = asyncio.get_running_loop()
-    img = await loop.run_in_executor(None, titles_image.render, title, sub, sections, footer, cols)
+    img = await loop.run_in_executor(None, titles_image.render, title, sub, sections, footer, cols, empty)
     if not img:
         await event.reply(_with_at(_at(event), '❌ 头衔图片生成失败，请稍后再试'))
         return
@@ -1497,59 +1495,49 @@ def _whose(uid: str) -> str:
     return f'{name}　' if name else ''
 
 
-@handler(_P_TITLE_HELP,
-         name='头衔帮助',
-         desc='查看头衔指令的用法',
+@handler(_P_TITLE,
+         name='头衔',
+         desc='查看持有的头衔与全部头衔、装备头衔',
          priority=50,
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
-async def lgtbot_title_help(event, match):
-    """只发「头衔」时回子指令说明。"""
+async def lgtbot_title(event, match):
+    """「头衔」主指令:后面接什么都在这里处理,「我的」「列表」「装备 …」以外一律回头衔帮助,不转给引擎。"""
     if helpers.is_foreign_event(event):
         return
     if event.is_interaction and not _answer_button(event):
         return
-    await event.reply(_TITLE_HELP_MD)
+    m = match or _TITLE_RE.match((event.content or '').strip())
+    sub = _TITLE_SUB_RE.match(((m.group(1) if m else '') or '').strip())
+    cmd, arg = (sub.group(1), sub.group(2).strip()) if sub else ('', '')
+    if cmd == '装备':
+        await _title_equip(event, arg)
+    elif cmd == '我的' and not arg:
+        await _title_mine(event)
+    elif cmd == '列表' and not arg:
+        await _title_list(event)
+    else:
+        await event.reply(_TITLE_HELP_MD)
 
 
-@handler(_P_MY_TITLES,
-         name='我的头衔',
-         desc='查看自己持有的全部头衔与当前装备的头衔',
-         priority=50,
-         block=True,
-         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
-async def lgtbot_my_titles(event, match):
-    """持有的头衔图片:「限定」是不在头衔库里的头衔,「已收集」是库内头衔,格子下方写分类,持有的多时排五列;序号与「头衔 切换 序号」一致。"""
-    if helpers.is_foreign_event(event):
-        return
-    if event.is_interaction and not _answer_button(event):
-        return
+async def _title_mine(event) -> None:
+    """持有的头衔图片:「限定」是不在头衔库里的头衔,「已收集」是库内头衔,格子下方写分类,持有的多时排五列;序号与「头衔 装备 序号」一致。没有头衔时图里只写提示。"""
     uid = event.user_id or ''
     b = titles.board(uid)
+    sub = f'{_whose(uid)}共 {len(b["mine"])} 个头衔' + (f' · 装备中：{b["equipped"]}' if b['equipped'] else '')
     if not b['mine']:
-        await event.reply(_with_at(_at(event), _NO_TITLES))
+        await _reply_titles_image(event, '我的头衔', sub, [], '发送「头衔 列表」查看全部头衔', 3, empty=_NO_TITLES)
         return
     owned = {t['name'] for t in b['mine']}
     collected = b['mine'][len(b['custom']):]
     sections = [('限定', _title_cells(b['custom'], b, owned, 1, label=True)),
                 ('已收集', _title_cells(collected, b, owned, len(b['custom']) + 1, label=True))]
-    sub = f'{_whose(uid)}共 {len(b["mine"])} 个头衔' + (f' · 装备中：{b["equipped"]}' if b['equipped'] else '')
     cols = 5 if len(b['mine']) >= _MY_TITLES_WIDE else 3
-    await _reply_titles_image(event, '我的头衔', sub, sections, '发送「头衔 切换 序号/名称」更换头衔，「头衔 切换 无」取消装备', cols)
+    await _reply_titles_image(event, '我的头衔', sub, sections, '发送「头衔 装备 序号/名称」更换头衔，「头衔 装备 无」取消装备', cols)
 
 
-@handler(_P_TITLE_LIST,
-         name='头衔列表',
-         desc='查看头衔库里的全部头衔与自己的持有情况',
-         priority=50,
-         block=True,
-         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
-async def lgtbot_title_list(event, match):
+async def _title_list(event) -> None:
     """头衔库全表图片:自己的限定头衔在最前,其余按分类分组、组内按颜色;没持有的调淡,装备中的高亮。"""
-    if helpers.is_foreign_event(event):
-        return
-    if event.is_interaction and not _answer_button(event):
-        return
     uid = event.user_id or ''
     b = titles.board(uid)
     if not b['library'] and not b['custom']:
@@ -1561,31 +1549,19 @@ async def lgtbot_title_list(event, match):
     sections += [(cat, _title_cells([t for t in b['library'] if t['category'] == cat], b, owned)) for cat in b['categories']]
     sections.append((titles.UNKNOWN_CATEGORY, _title_cells([t for t in b['library'] if t['category'] not in b['categories']], b, owned)))
     sub = f'{_whose(uid)}已收集 {have} / {len(b["library"])}' + (f' · 限定 {len(b["custom"])}' if b['custom'] else '')
-    await _reply_titles_image(event, '头衔列表', sub, sections, '发送「头衔 我的」查看序号，「头衔 切换 序号/名称」更换头衔', 5)
+    await _reply_titles_image(event, '头衔列表', sub, sections, '发送「头衔 我的」查看序号，「头衔 装备 序号/名称」更换头衔', 5)
 
 
-@handler(_P_EQUIP_TITLE,
-         name='切换头衔',
-         desc='按序号或头衔名切换装备的头衔',
-         priority=50,
-         block=True,
-         event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
-async def lgtbot_equip_title(event, match):
-    """「头衔 切换 <序号|头衔名|无>」,「无」是不装备头衔。切换前后没变化时只提示,不记审计。"""
-    if helpers.is_foreign_event(event):
-        return
-    if event.is_interaction and not _answer_button(event):
-        return
-    m = match or _EQUIP_TITLE_RE.match((event.content or '').strip())
-    ref = ((m.group(1) if m else '') or '').strip()
+async def _title_equip(event, ref: str) -> None:
+    """「头衔 装备 <序号|头衔名|无>」,「无」是卸下头衔;装备前后没变化时只提示,不记审计。回复都挂「我的头衔」,用法提示再加「装备头衔」。"""
     uid = event.user_id or ''
     if not ref:
-        text = '💡 用法：头衔 切换 序号/头衔名，可发送「头衔 我的」查看序号与名称；发送「头衔 切换 无」卸下头衔'
+        text = '💡 用法：头衔 装备 序号/头衔名，可发送「头衔 我的」查看序号与名称；发送「头衔 装备 无」卸下头衔'
     elif ref == '无':
         title, err = titles.unequip(uid)
         if title:
             text = '✅ 已取消装备头衔'
-            audit.record('title', '切换头衔', f'{titles.player_label(uid)}：装备 {title["name"]} → 无', src=audit.SRC_CMD)
+            audit.record('title', '装备头衔', f'{titles.player_label(uid)}：装备 {title["name"]} → 无', src=audit.SRC_CMD)
         elif err == 'none':
             text = _NO_TITLES
         else:
@@ -1594,16 +1570,16 @@ async def lgtbot_equip_title(event, match):
         before = titles.equipped(uid)
         title, err = titles.equip(uid, ref)
         if title and before and before['name'] == title['name']:
-            text = '您已经装备了此头衔'
+            text = f'您已经装备：{titles.render(title)}'
         elif title:
             text = f'✅ 已装备头衔：{titles.render(title)}'
             old = before['name'] if before else '无'
-            audit.record('title', '切换头衔', f'{titles.player_label(uid)}：装备 {old} → {title["name"]}', src=audit.SRC_CMD)
+            audit.record('title', '装备头衔', f'{titles.player_label(uid)}：装备 {old} → {title["name"]}', src=audit.SRC_CMD)
         elif err == 'none':
             text = _NO_TITLES
         else:
             text = '❌ 您没有这个头衔，发送「头衔 我的」查看序号与名称'
-    await event.reply(_with_at(_at(event), text))
+    await event.reply(_with_at(_at(event), text), buttons=buttons.build_title_equip_buttons(usage=not ref))
 
 
 # ──────── /关于 抢占(优于系统插件的同名指令) ───────────────────────────────
