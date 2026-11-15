@@ -2151,7 +2151,8 @@ async def test_restart_command_from_dm_skips_nothing(monkeypatch):
 
 
 async def test_reload_release_notifies_cleared_rooms_with_fixed_reason(monkeypatch):
-    """★ 热重载换引擎:先快照等待中房间再释放;释放成功才推「即将重启」,更新内容固定为「框架功能更新」;有进行中的对局释放不了就复用旧引擎、不推。"""
+    """★ 热重载换引擎:先快照等待中房间再释放;释放成功才推「即将重启」,更新内容固定为「框架功能更新」,并清空等待中 / 进行中两张表(没收到解散广播的残留不跨引擎留下);
+    有进行中的对局释放不了就复用旧引擎、不推也不清。"""
     seen, marks = [], []
 
     async def fake_notify(reason='', *, skip_keys=frozenset(), rooms=None):
@@ -2162,19 +2163,23 @@ async def test_reload_release_notifies_cleared_rooms_with_fixed_reason(monkeypat
     monkeypatch.setattr(dispatcher.boot, 'mark_engine_running', marks.append)
     monkeypatch.setattr(_state, 'started', True)
     _state.waiting_rooms['u:U1'] = {'target_id': 'U1', 'is_uid': True, 'game': 'X', 'since': 0}
+    _state.waiting_rooms['u:LEFT'] = {'target_id': 'LEFT', 'is_uid': True, 'game': 'X', 'since': 0}
+    _state.active_matches['u:OLD'] = {'target_id': 'OLD', 'is_uid': True, 'game': 'X', 'since': 0}
     engine = dispatcher.boot.LGTBot_ElainaBot
 
     monkeypatch.setattr(engine, 'release_bot_if_not_processing_games', lambda: False)
     assert await dispatcher.release_engine_for_reload() is False
     assert seen == [] and marks == [] and _state.started is True
+    assert 'u:LEFT' in _state.waiting_rooms and 'u:OLD' in _state.active_matches
 
     def release_ok():
-        _state.waiting_rooms.clear()          # ← 释放引擎的真实副作用
+        _state.waiting_rooms.pop('u:U1')      # ← 释放引擎时解散广播清掉的房间;u:LEFT 是收不到广播的残留
         return True
 
     monkeypatch.setattr(engine, 'release_bot_if_not_processing_games', release_ok)
     assert await dispatcher.release_engine_for_reload() is True
-    assert seen == [('框架功能更新', ['u:U1'])] and marks == [False] and _state.started is False
+    assert seen == [('框架功能更新', ['u:U1', 'u:LEFT'])] and marks == [False] and _state.started is False
+    assert _state.waiting_rooms == {} and _state.active_matches == {}
 
 
 async def test_restart_command_rejected_sends_nothing(monkeypatch):

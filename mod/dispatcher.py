@@ -2107,6 +2107,9 @@ async def release_engine_for_reload() -> bool:
         return False
     state.started = False
     boot.mark_engine_running(False)
+    # 释放后引擎里已没有任何房间,两张表剩下的只可能是没收到解散广播的残留
+    state.waiting_rooms.clear()
+    state.active_matches.clear()
     await _notify_restart_rooms(_RELOAD_REASON, rooms=rooms)
     return True
 

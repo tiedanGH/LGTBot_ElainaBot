@@ -970,10 +970,9 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
       ``terminate``      清空当前游戏名,不挂按钮(/新游戏 前置解散 / 管理员
                          主动结束等场景,紧接着会有真正的新建消息覆盖,或就该
                          安静收尾)。
-      ``mid_quit``       玩家中途强退广播。**仅私信**按 terminate 语义清理 ——
-                         私信对局全员 LEFT 后的解散广播私发不到任何人,这条可送达的
-                         中途退出就是对局对该目标结束的最后信号;群聊对局仍在继续,
-                         不动任何状态。
+      ``mid_quit``       玩家中途强退广播,不动任何状态:广播发在标记离开之前,退出者与
+                         留下的玩家都收得到,对局对留下的人还在继续;私信退出者由发给
+                         本人的「退出成功」清理(见 _forget_dm_leaver)。
       ``game_over``      游戏自然结束的结算广播 —— 挂「📊 查看战绩 + 🔄 重开一局」。
                          结算广播无 brief,重开按钮的游戏名从 ``current_game`` 回查,
                          取完即清(对局已随结算释放)。
@@ -1001,8 +1000,8 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
     # 每条分类过的广播都重置标记,文字为空、没走到 cb_send_* 的那条留下的标记不会串到后面
     _title_mark.kind = kind if kind in ('new_game', 'join_leave') else ''
 
-    # 状态更新(mid_quit 仅私信按解散处理:群聊对局还有其他玩家,继续进行)
-    if kind in ('all_left', 'terminate') or (kind == 'mid_quit' and is_uid):
+    # 状态更新
+    if kind in ('all_left', 'terminate'):
         state.current_game.pop(key, None)
     elif game_name:
         state.current_game[key] = game_name
@@ -1032,8 +1031,7 @@ def cb_match_event(target_id: str, is_uid: bool, kind: str, game_name: str):
             'game': game_name or prev.get('game') or state.current_game.get(key, ''),
             'since': prev.get('since') or time.time(),
         }
-    elif kind in ('game_over', 'game_over_unrecorded', 'all_left', 'terminate') \
-            or (kind == 'mid_quit' and is_uid):
+    elif kind in ('game_over', 'game_over_unrecorded', 'all_left', 'terminate'):
         state.active_matches.pop(key, None)
         state.waiting_rooms.pop(key, None)
 
@@ -1185,6 +1183,18 @@ def _record_unranked(key: str, target_id: str, is_uid: bool, msg: str) -> None:
                                   '' if is_uid else target_id)
 
 
+# 私信里 `/退出` 成功只回退出者这一句:之后的退出 / 解散广播都不再发给他,这是清掉他那条私信记录的唯一信号
+_LEFT_REPLY = '退出成功'
+
+
+def _forget_dm_leaver(key: str, is_uid: bool, msg: str) -> None:
+    """私信收到「退出成功」时清掉这位玩家的等待中房间、进行中对局与当前游戏名。"""
+    if is_uid and msg.strip() == _LEFT_REPLY:
+        state.waiting_rooms.pop(key, None)
+        state.active_matches.pop(key, None)
+        state.current_game.pop(key, None)
+
+
 def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     """C++ → Python：发送文本消息（fire-and-forget,不阻塞 C++ 调用线程）
 
@@ -1197,6 +1207,7 @@ def cb_send_text_message(target_id: str, is_uid: bool, msg: str):
     GIL 保护下读写安全。这里 pop 出来跟着 send task 走。
     """
     key = helpers.target_key(target_id, is_uid)
+    _forget_dm_leaver(key, is_uid, msg)
     _record_unranked(key, target_id, is_uid, msg)
     title_uid = _take_title_uid(msg)
     extra_buttons = state.pending_buttons.pop(key, None)

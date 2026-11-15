@@ -388,20 +388,19 @@ def test_game_started_attaches_game_help_button():
            (same['text'], same['data'], same['type'], same['style'])
 
 
-def test_mid_quit_clears_dm_match_but_not_group():
-    """mid_quit(玩家中途强退广播):私信对局全员 LEFT 后的解散广播私发不达,
-    这条就是终止信号 → 清 active_matches + current_game;群聊对局仍在进行 →
-    两者都不动。回归:私信单机/私信局中途退出后「进行中的对局」永久卡住。"""
-    # 私信局:开局 → mid_quit → 清理
-    state.current_game['u:dm1'] = '单机游戏'
-    callbacks.cb_match_event('dm1', True, 'game_started', '')
-    assert 'u:dm1' in state.active_matches
-    # 模拟开局广播发送时 pop 掉「游戏帮助」按钮,下面只检验 mid_quit 自身不挂按钮
-    state.pending_buttons.pop('u:dm1', None)
-    callbacks.cb_match_event('dm1', True, 'mid_quit', '')
-    assert 'u:dm1' not in state.active_matches
-    assert 'u:dm1' not in state.current_game
-    assert 'u:dm1' not in state.pending_buttons          # mid_quit 自身不挂按钮
+def test_dm_mid_quit_clears_only_the_leaver_by_own_reply():
+    """私信局中途强退:退出者先收「退出成功」,靠这句清掉他的进行中对局与游戏名;中途退出广播发在标记离开之前,所有人都收得到,
+    不动任何状态 —— 留下的玩家对局还在继续。群聊局一人中途退出同样不动。回归:私信单机 / 私信局中途退出后「进行中的对局」永久卡住。"""
+    for uid in ('dm1', 'dm2'):
+        state.current_game[f'u:{uid}'] = '狼人杀'
+        callbacks.cb_match_event(uid, True, 'game_started', '')
+        state.pending_buttons.pop(f'u:{uid}', None)    # 开局广播发送时已取走「游戏帮助」按钮
+    callbacks.cb_send_text_message('dm1', True, '退出成功')
+    for uid in ('dm1', 'dm2'):
+        callbacks.cb_match_event(uid, True, 'mid_quit', '')
+    assert 'u:dm1' not in state.active_matches and 'u:dm1' not in state.current_game
+    assert 'u:dm2' in state.active_matches and state.current_game['u:dm2'] == '狼人杀'
+    assert 'u:dm2' not in state.pending_buttons          # mid_quit 自身不挂按钮
     # 群聊局:一人中途退出,对局继续 → 状态保留
     state.current_game['g:grp9'] = '狼人杀'
     callbacks.cb_match_event('grp9', False, 'game_started', '')
@@ -1143,6 +1142,27 @@ def test_waiting_room_cleared_on_dissolve():
         assert 'g:G9' in state.waiting_rooms
         callbacks.cb_match_event('G9', False, kind, '')
         assert 'g:G9' not in state.waiting_rooms, kind
+
+
+def test_dm_lobby_leaver_is_dropped_by_own_reply():
+    """私信等待中房间:退出者先被移出玩家表,退出广播只发给留下的人;最后一人走后的解散广播谁也收不到 —— 都靠发给本人的「退出成功」清掉他的记录。"""
+    for uid in ('dm1', 'dm2'):
+        callbacks.cb_match_event(uid, True, 'join_leave', '狼人杀')
+    callbacks.cb_send_text_message('dm1', True, '退出成功')
+    callbacks.cb_match_event('dm2', True, 'join_leave', '狼人杀')      # 留下的人收到「玩家 dm1 退出了游戏」
+    assert 'u:dm1' not in state.waiting_rooms and 'u:dm2' in state.waiting_rooms
+    callbacks.cb_send_text_message('dm2', True, '退出成功')            # 最后一人
+    assert 'u:dm2' not in state.waiting_rooms
+
+
+def test_leave_reply_only_clears_the_dm_leaver():
+    """只认私信里的「退出成功」:群里这句回复不动群房间(别人还在),退出失败的提示不算;在私信里退出群房间时他没有私信记录,群房间照旧。"""
+    callbacks.cb_match_event('G1', False, 'new_game', '狼人杀')
+    callbacks.cb_match_event('dm3', True, 'new_game', '五子棋')
+    callbacks.cb_send_text_message('G1', False, '退出成功')
+    callbacks.cb_send_text_message('dm3', True, '[错误] 退出失败：您未处于游戏中或已经离开')
+    callbacks.cb_send_text_message('dm9', True, '退出成功')
+    assert {'g:G1', 'u:dm3'} <= set(state.waiting_rooms)
 
 
 def test_waiting_room_join_keeps_since_and_fills_game():

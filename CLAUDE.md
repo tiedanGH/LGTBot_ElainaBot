@@ -199,7 +199,7 @@ mod/quota: fix race                            # 不要带路径
 
 - 引擎 → Python 的回调（`cb_match_event` / `cb_send_text_message` / `cb_send_image_message` 等）都在引擎持有 `Match::mutex_` 的 C++ 栈内同步触发，例如 `Match::GameStart` 全程持锁直到发出开局广播
 - 回调里**不能**调用任何会再次获取该锁的引擎方法（枚举 `MatchManager::Matches()` 后读 `HostUserId()` / `UserNum()` 等），否则同一把非递归锁自锁，整个引擎卡死
-- 需要「进行中对局」这类引擎状态时，在 `cb_match_event` 里用纯 Python 事件流维护（`game_started` 加入，`game_over` / `all_left` / `terminate` 移除），不回引擎查询；dispatcher 用 fire-and-forget 线程派发引擎，没有能在回调之后安全查询引擎的栈外钩子
+- 需要「进行中对局」这类引擎状态时，在 `cb_match_event` 里用纯 Python 事件流维护（`game_started` 加入，`game_over` / `all_left` / `terminate` 移除；私信退出者收不到之后的广播，靠发给本人的「退出成功」移除），不回引擎查询；dispatcher 用 fire-and-forget 线程派发引擎，没有能在回调之后安全查询引擎的栈外钩子
 
 ### 注释与 docstring
 
