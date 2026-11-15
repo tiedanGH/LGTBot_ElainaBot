@@ -11,7 +11,7 @@
   · state.started=False → 整个 handler 跳过
   · INTERACTION relay 同上互斥
   · INTERACTION dispatch 同上互斥
-  · is_at_self 守卫挡住全量群日常对话
+  · is_at_self 守卫挡住全量群日常对话(重启 / 计划重启也只认 @)
   · _is_blocked_command:内置屏蔽项(斜杠不敏感 + 数字连写参数)与配置追加项(斜杠严格)的匹配语义
 """
 
@@ -2148,6 +2148,33 @@ async def test_restart_command_from_dm_skips_nothing(monkeypatch):
     ev.reply = AsyncMock()
     await dispatcher.lgtbot_restart(ev, _re.match(dispatcher._P_RESTART, '重启'))
     assert seen['skip'] == set()
+
+
+async def test_restart_commands_in_full_groups_need_a_mention(monkeypatch, _bot_named):
+    """★ 全量群里主人随口说「重启」「计划重启」不触发:没叫机器人当闲聊(消息照常登记进引用池),@ 了才执行。"""
+    monkeypatch.setattr(dispatcher.helpers, 'is_foreign_event', lambda e: False)
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
+    calls = []
+    monkeypatch.setattr(dispatcher, 'check_and_prepare_restart', lambda: calls.append('restart') or (False, '有对局'))
+    monkeypatch.setattr(dispatcher, 'set_planned_mode', lambda *a: calls.append('planned') or (False, '已取消'))
+    cases = ((dispatcher.lgtbot_restart, dispatcher._P_RESTART, '重启'), (dispatcher.lgtbot_planned_restart, dispatcher._P_PLANNED, '计划重启'))
+    for handler, pattern, text in cases:
+        ev = _text_at_event(text)
+        ev.reply = AsyncMock()
+        await handler(ev, re.match(pattern, text))
+        ev.reply.assert_not_awaited()
+    assert calls == []
+    assert [r['ref_value'] for r in quota._active_ref['g:FULL_GROUP']] == ['M_TEXTAT']
+    for handler, pattern, text in cases:
+        ev = _text_at_event(text)
+        ev.is_at_self = True
+        ev.reply = AsyncMock()
+        await handler(ev, re.match(pattern, text))
+        ev.reply.assert_awaited_once()
+    ev = _text_at_event('@LGTBot 重启')
+    ev.reply = AsyncMock()
+    await dispatcher.lgtbot_restart(ev, re.match(dispatcher._P_RESTART, '重启'))       # 框架剥掉开头的文字 @ 再匹配
+    assert calls == ['restart', 'planned', 'restart']
 
 
 async def test_reload_release_notifies_cleared_rooms_with_fixed_reason(monkeypatch):

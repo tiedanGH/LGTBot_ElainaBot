@@ -48,6 +48,9 @@
   display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
 }
+/* 编辑中标题栏右侧的取消 / 保存:提示在按钮左边,空时不占位 */
+#titles-lib-top-actions { align-items: center; }
+#titles-lib-top-actions .titles-edit-msg { flex: 0 1 auto; }
 
 /* ── 等级编辑:按屏宽 1-3 列,每个等级一格 ── */
 .titles-level-editor { display: flex; flex-direction: column; gap: 10px; }
@@ -116,9 +119,10 @@
 .titles-search-wrap .ui-icon {
   position: absolute; left: 9px; color: var(--text-faint); pointer-events: none;
 }
-.titles-add-wrap { position: relative; display: inline-flex; align-items: center; gap: 6px; flex: 0 1 400px; min-width: 240px; }
+.titles-add-wrap { position: relative; display: inline-flex; align-items: center; gap: 6px; flex: 0 1 480px; min-width: 240px; }
 .titles-toolbar input,
 .titles-edit-row input[type="text"],
+.titles-grant input[type="text"],
 select.titles-level-select, select.titles-plain-select {
   background: var(--panel); border: 1px solid var(--border); color: var(--text);
   padding: 5px 10px; border-radius: 6px; font-size: 12px; height: 30px; min-width: 0;
@@ -126,6 +130,7 @@ select.titles-level-select, select.titles-plain-select {
 }
 .titles-toolbar input:focus,
 .titles-edit-row input[type="text"]:focus,
+.titles-grant input[type="text"]:focus,
 select.titles-level-select:focus, select.titles-plain-select:focus { border-color: var(--accent); outline: none; }
 /* 等级下拉:左侧圆点与文字都用所选等级的颜色(--c 由 JS 给出) */
 select.titles-level-select {
@@ -153,7 +158,8 @@ select.titles-level-select option { font-weight: 400; }
   color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 .titles-toolbar input::placeholder,
-.titles-edit-row input::placeholder { color: var(--text-faint); }
+.titles-edit-row input::placeholder,
+.titles-grant input::placeholder { color: var(--text-faint); }
 #titles-search { width: 100%; padding-left: 30px; }
 #titles-add-openid { flex: 1 1 auto; font-family: 'Consolas', 'Menlo', monospace; }
 .titles-add-wrap .dash-btn { flex: 0 0 auto; white-space: nowrap; }
@@ -273,7 +279,7 @@ select.titles-level-select option { font-weight: 400; }
 .titles-eq-none { margin-left: 30px; }
 .titles-edit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .titles-edit-msg { flex: 1 1 160px; font-size: 12px; }
-/* 头衔库编辑状态:新增绿、修改黄、删除红;黄色混入文字色,浅色主题压暗、深色主题提亮 */
+/* 编辑状态:新增绿、修改黄、删除红;黄色混入文字色,浅色主题压暗、深色主题提亮 */
 .titles-edit-stat { flex: 0 0 auto; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
 .titles-edit-stat span { font-weight: 600; }
 .titles-edit-stat .add { color: var(--in); }
@@ -284,6 +290,47 @@ select.titles-level-select option { font-weight: 400; }
 /* 窄屏折行后「取消 / 保存」仍贴右 */
 .titles-edit-actions [data-act="cancel"], .titles-edit-actions [data-act="preset-cancel"],
 .titles-edit-actions [data-act="lib-cancel"] { margin-left: auto; }
+
+/* ── 批量授予弹窗:上方选头衔,下方搜索结果(点选)与已选玩家 ── */
+.titles-grant { max-width: 640px; }
+.titles-grant-head { display: flex; align-items: center; gap: 10px; }
+.titles-grant-heading { flex: 1 1 auto; font-size: 15px; font-weight: 600; }
+.titles-grant-sec { display: flex; flex-direction: column; gap: 8px; }
+.titles-grant-sec + .titles-grant-sec { padding-top: 12px; border-top: 1px dashed var(--border); }
+.titles-grant-label { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.titles-grant-label .titles-eq { font-weight: 400; }
+.titles-grant-count { font-weight: 400; color: var(--text-faint); }
+.titles-grant-count:empty { display: none; }
+.titles-grant-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.titles-grant-row select { flex: 0 1 120px; }
+.titles-grant-row select.titles-grant-pick { flex: 1 1 240px; max-width: 360px; }
+.titles-grant-name { flex: 1 1 160px; max-width: 240px; font-weight: 600; }
+.titles-grant-q { flex: 1 1 220px; font-family: 'Consolas', 'Menlo', monospace; }
+.titles-grant-row .dash-btn { flex: 0 0 auto; white-space: nowrap; }
+.titles-grant-results {
+  display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; padding: 4px;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.titles-grant-results:empty { display: none; }
+.titles-add-result.chosen { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.titles-grant-players { display: flex; flex-wrap: wrap; gap: 6px; }
+.titles-grant-player {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 2px 2px 3px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--panel-2); font-size: 12px;
+}
+.titles-grant-player .titles-avatar { width: 22px; height: 22px; }
+/* 已持有所选头衔的玩家授予时跳过:虚线、调淡 */
+.titles-grant-player.held { border-style: dashed; opacity: .7; }
+.titles-grant-who { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.titles-grant-held { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); }
+.titles-grant-remove {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; color: var(--text-muted);
+}
+.titles-grant-remove:hover { background: var(--hover); color: var(--text); }
+.titles-grant-remove .ui-icon { width: 13px; height: 13px; }
+.titles-edit-actions [data-act="grant-cancel"] { margin-left: auto; }
 
 .titles-note {
   margin-top: 12px; padding: 10px 14px;
@@ -296,6 +343,9 @@ select.titles-level-select option { font-weight: 400; }
   .titles-list { grid-template-columns: 1fr; }
   .titles-card { padding: 10px 12px; }
   .titles-search-wrap, .titles-add-wrap { flex: 1 0 100%; min-width: 0; }
+  /* 添加玩家输入框独占一行,「添加玩家」「批量授予」在下一行 */
+  .titles-add-wrap { flex-wrap: wrap; }
+  #titles-add-openid { flex: 1 0 100%; }
   .titles-level-actions { margin-left: 0; }
   /* 头衔库编辑行拆两行:头衔名一行,颜色、分类、持有人数与删除一行 */
   .titles-lib-row { flex-wrap: wrap; }

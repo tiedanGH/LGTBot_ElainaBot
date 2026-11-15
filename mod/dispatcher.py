@@ -433,6 +433,14 @@ def _note_chat_ref(event) -> None:
                           event.message_id, event.appid or '')
 
 
+def _is_chatter(event) -> bool:
+    """全量群里没叫机器人的消息算闲聊:登记它的被动引用后返回 True,调用方不作回应。"""
+    if _addressed_content(event) is not None:
+        return False
+    _note_chat_ref(event)
+    return True
+
+
 def _is_blocked_command(text: str) -> bool:
     """content 是否命中屏蔽表(BUILTIN_BLOCKED_COMMANDS + BLOCKED_COMMANDS)。
 
@@ -1502,7 +1510,7 @@ def _whose(uid: str) -> str:
          block=True,
          event_types=_LGT_MSG_EVENTS | {INTERACTION_CREATE})
 async def lgtbot_title(event, match):
-    """「头衔」主指令:后面接什么都在这里处理,「我的」「列表」「装备 …」以外一律回头衔帮助,不转给引擎。"""
+    """「头衔」主指令:后面接什么都在这里处理,「我的」「列表」「装备 …」以外一律回头衔帮助,不转给引擎;全量群里没叫机器人时只认这三个子指令,其余当闲聊不回。"""
     if helpers.is_foreign_event(event):
         return
     if event.is_interaction and not _answer_button(event):
@@ -1516,7 +1524,7 @@ async def lgtbot_title(event, match):
         await _title_mine(event)
     elif cmd == '列表' and not arg:
         await _title_list(event)
-    else:
+    elif not _is_chatter(event):
         await event.reply(_TITLE_HELP_MD)
 
 
@@ -2306,8 +2314,9 @@ async def lgtbot_planned_restart(event, match):
 
     默认**自动重启**:不限制新游戏创建,全部对局结束并静默 30s 后自动执行重启;开启时已经没有进行中的对局则立即重启。
     首词恰为「手动」才进入手动模式 —— 拦下新建房间,等对局自然结束后由管理员自己发「重启」。
+    全量群里只认叫了机器人的消息,避免主人聊天时随口一句就触发。
     """
-    if helpers.is_foreign_event(event):
+    if helpers.is_foreign_event(event) or _is_chatter(event):
         return
     raw = (match.group(1) or '').strip() if match and match.lastindex else ''
     auto = True
@@ -2338,8 +2347,9 @@ async def lgtbot_restart(event, match):
 
     ``/重启 <更新内容>`` 可选:该文案会随重启通知发给还有等待中房间的群与私信玩家。
     **手动重启不推通知群**(那是自动重启的语义),但发起指令的这个群要排除掉。
+    全量群里只认叫了机器人的消息,避免主人聊天时随口一句就触发。
     """
-    if helpers.is_foreign_event(event):
+    if helpers.is_foreign_event(event) or _is_chatter(event):
         return
     try:
         reason = ((match.group(1) or '').strip() if match else '')[:_RESTART_REASON_MAX]

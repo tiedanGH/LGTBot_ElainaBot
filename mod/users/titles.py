@@ -493,6 +493,44 @@ def set_record(openid: str, titles, equipped_name) -> str | None:
     return None
 
 
+def grant(openids, title) -> tuple[dict | None, str | None]:
+    """面板批量授予:把一个头衔发给多位玩家,返回 ``({title, custom, granted, equipped, held}, None)``,不合法时返回 ``(None, 原因)`` 且不写盘。
+
+    与头衔库同名的按库内头衔发放(颜色分类以头衔库为准),否则是限定头衔;已持有的跳过(``held``),原本没有头衔的玩家顺带装备上(``equipped``)。
+    """
+    if not isinstance(openids, list) or not openids:
+        return None, '请至少选择一位玩家'
+    if not all(valid_openid(u) for u in openids):
+        return None, 'OpenID 应为 32 位字母或数字'
+    if not isinstance(title, dict):
+        return None, '头衔格式错误'
+    err = validate_name(title.get('name'))
+    if err:
+        return None, err
+    name = title['name'].strip()
+    with _lock:
+        lib = {t['name']: t for t in _library_unlocked()}
+        item = dict(lib[name]) if name in lib else {'name': name, 'color': title.get('color'), 'category': title.get('category')}
+        err = _check_style(item, name, {c['name'] for c in _presets_unlocked('color')}, {c['name'] for c in _presets_unlocked('category')})
+        if err:
+            return None, err
+        data = dict(_players.load())
+        out = {'title': item, 'custom': name not in lib, 'granted': [], 'equipped': [], 'held': []}
+        for uid in dict.fromkeys(openids):
+            rec = _clean_record(data.get(uid)) or {'titles': [], 'equipped': None}
+            if any(t['name'] == name for t in rec['titles']):
+                out['held'].append(uid)
+                continue
+            first = not rec['titles']
+            if first:
+                out['equipped'].append(uid)
+            data[uid] = {'titles': rec['titles'] + [dict(item)], 'equipped': name if first else rec['equipped']}
+            out['granted'].append(uid)
+        if out['granted']:
+            _players.save(data)
+    return out, None
+
+
 def delete(openid: str) -> bool:
     """删除玩家的头衔记录;本来就没有返回 False。"""
     with _lock:

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""「头衔系统」标签 —— 颜色、分类与头衔库的新增 / 编辑 / 排序,全部玩家持有的头衔与当前装备的查看、编辑、装备与删除。
+"""「头衔系统」标签 —— 颜色、分类与头衔库的新增 / 编辑 / 排序,全部玩家持有的头衔与当前装备的查看、编辑、装备与删除,头衔批量授予。
 
 Python 侧职责:
   · ``TAB_HTML`` / ``TAB_CSS`` / ``TAB_JS`` 从 ``templates/titles/`` 加载
   · ``get_data()`` 首屏 payload(颜色 + 分类 + 头衔库 + 全部玩家记录,昵称 / 头像经 userinfo 门面查)
-  · ``list`` / ``lookup`` / ``search`` / ``save`` / ``delete`` / ``colors`` / ``categories`` / ``library`` 八条真路由(``*_handler``);改动类接口都回完整 payload,前端整页重绘
+  · ``list`` / ``lookup`` / ``search`` / ``save`` / ``delete`` / ``colors`` / ``categories`` / ``library`` / ``grant`` 九条真路由(``*_handler``);改动类接口都回完整 payload,前端整页重绘
 
 数据读写与校验都在 ``users.titles``,这里只做请求解析、审计与组装。
 """
@@ -214,3 +214,25 @@ async def library_handler(request) -> 'web.Response':
     if diff != '无变化':
         audit.record('title', '编辑头衔库', diff)
     return web.json_response({'success': True, 'message': '头衔库已保存', **_payload()})
+
+
+async def grant_handler(request) -> 'web.Response':
+    """``POST /api/ext/lgtbot/titles/grant`` body ``{openids: [...], title: {name, color, category}}`` —— 把一个头衔批量授予多位玩家;与头衔库同名的按库内头衔发放,已持有的跳过,原本没有头衔的顺带装备。"""
+    body = await _json_body(request)
+    if body is None:
+        return _fail('请求体不是 JSON 对象')
+    res, err = titles.grant(body.get('openids'), body.get('title'))
+    if err:
+        return _fail(err)
+    granted, equipped, held = res['granted'], res['equipped'], res['held']
+    if granted:
+        detail = f'{_title_label(res["title"])}{"（限定）" if res["custom"] else ""}，共 {len(granted)} 人：' + '、'.join(titles.player_label(u) for u in granted)
+        if equipped:
+            detail += f'；其中 {len(equipped)} 人没有头衔，已自动装备'
+        if held:
+            detail += f'；{len(held)} 人已持有，跳过'
+        audit.record('title', '批量授予头衔', detail)
+        message = f'已授予 {len(granted)} 位玩家' + (f'，其中 {len(equipped)} 人没有头衔，已自动装备' if equipped else '') + (f'；{len(held)} 位已持有，已跳过' if held else '')
+    else:
+        message = '所选玩家都已持有这个头衔'
+    return web.json_response({'success': True, 'message': message, 'granted': len(granted), **_payload()})

@@ -177,7 +177,7 @@ _RESTART_API_ROUTE          = '/api/ext/lgtbot/restart'
 _PLANNED_API_ROUTE          = '/api/ext/lgtbot/planned-restart'
 # @全体成员 API(同一枚 token)
 _AT_ALL_API_ROUTE           = '/api/ext/lgtbot/at-all'
-# 头衔系统:列表刷新 / 按 OpenID 查昵称 / 按昵称找玩家(GET)+ 保存 / 删除、颜色 / 分类 / 头衔库保存(POST JSON)
+# 头衔系统:列表刷新 / 按 OpenID 查昵称 / 按昵称找玩家(GET)+ 保存 / 删除、颜色 / 分类 / 头衔库保存、批量授予(POST JSON)
 _TITLES_LIST_ROUTE       = '/api/ext/lgtbot/titles/list'
 _TITLES_LOOKUP_ROUTE     = '/api/ext/lgtbot/titles/lookup'
 _TITLES_SEARCH_ROUTE     = '/api/ext/lgtbot/titles/search'
@@ -186,6 +186,7 @@ _TITLES_DELETE_ROUTE     = '/api/ext/lgtbot/titles/delete'
 _TITLES_COLORS_ROUTE     = '/api/ext/lgtbot/titles/colors'
 _TITLES_CATEGORIES_ROUTE = '/api/ext/lgtbot/titles/categories'
 _TITLES_LIBRARY_ROUTE    = '/api/ext/lgtbot/titles/library'
+_TITLES_GRANT_ROUTE      = '/api/ext/lgtbot/titles/grant'
 
 # 所有「不该出现在侧边栏列表」的 key —— filter wrap 据此过滤
 _HIDDEN_KEYS = frozenset({
@@ -338,7 +339,8 @@ def _render_html() -> str:
                      .replace('__TITLES_DELETE_ROUTE__', _TITLES_DELETE_ROUTE)
                      .replace('__TITLES_COLORS_ROUTE__', _TITLES_COLORS_ROUTE)
                      .replace('__TITLES_CATEGORIES_ROUTE__', _TITLES_CATEGORIES_ROUTE)
-                     .replace('__TITLES_LIBRARY_ROUTE__', _TITLES_LIBRARY_ROUTE))
+                     .replace('__TITLES_LIBRARY_ROUTE__', _TITLES_LIBRARY_ROUTE)
+                     .replace('__TITLES_GRANT_ROUTE__', _TITLES_GRANT_ROUTE))
             .replace('__PAGE_KEY__', PAGE_KEY)
             .replace('__RESTART_ROUTE__', _RESTART_PANEL_ROUTE)
             .replace('__PLANNED_ON__', '1' if _plugin_state.is_planned_restart() else '0'))
@@ -593,6 +595,7 @@ def register():
     web_pages.register_route('POST', _TITLES_COLORS_ROUTE, page_titles.colors_handler, auth=True)
     web_pages.register_route('POST', _TITLES_CATEGORIES_ROUTE, page_titles.categories_handler, auth=True)
     web_pages.register_route('POST', _TITLES_LIBRARY_ROUTE, page_titles.library_handler, auth=True)
+    web_pages.register_route('POST', _TITLES_GRANT_ROUTE, page_titles.grant_handler, auth=True)
 
     _ensure_get_pages_filters_hidden()
 
@@ -637,3 +640,4 @@ def unregister():
     web_pages.unregister_route('POST', _TITLES_COLORS_ROUTE)
     web_pages.unregister_route('POST', _TITLES_CATEGORIES_ROUTE)
     web_pages.unregister_route('POST', _TITLES_LIBRARY_ROUTE)
+    web_pages.unregister_route('POST', _TITLES_GRANT_ROUTE)

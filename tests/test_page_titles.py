@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""「头衔系统」面板接口测试 —— 玩家头衔保存 / 删除、按 OpenID 查昵称、按昵称找玩家、刷新、颜色 / 分类 / 头衔库保存八条路由与审计。
+"""「头衔系统」面板接口测试 —— 玩家头衔保存 / 删除、按 OpenID 查昵称、按昵称找玩家、刷新、颜色 / 分类 / 头衔库保存、批量授予九条路由与审计。
 
 aiohttp 是 webui 的顶层 import,dev 机可能没装 → importorskip 守卫(同 test_webui_pages)。
 """
@@ -168,6 +168,20 @@ async def test_library_handler_saves_syncs_holders_and_audits(pt, audits):
     body = _body(await pt.library_handler(_Req({'library': [keep]})))
     assert audits[-1][2] == '删除 「萌新 · 蓝 · 长期」；修改 「开发者 · 橙 · 长期」 → 「主创 · 红 · 长期」'
     assert body['players'][0]['titles'] == [_t('主创', '红')] and body['players'][0]['equipped'] == '主创'
+
+
+async def test_grant_handler_audits_who_got_it_and_reports_skips(pt, audits):
+    assert (await pt.grant_handler(_Req(ValueError('x')))).status == 400
+    resp = await pt.grant_handler(_Req({'openids': [], 'title': _t('A')}))
+    assert resp.status == 400 and audits == []
+    titles.set_record(U2, [_t('A', '红')], 'A')
+    body = _body(await pt.grant_handler(_Req({'openids': [U1, U2], 'title': _t('A', '红')})))
+    assert body['success'] and body['granted'] == 1 and [p['openid'] for p in body['players']] == [U1, U2]
+    assert body['message'] == '已授予 1 位玩家，其中 1 位原本没有头衔，已顺带装备；1 位已持有，已跳过'
+    assert audits[-1] == ('title', '批量授予头衔', f'「A · 红 · 长期」（限定），共 1 人：铁蛋 ({U1})；其中 1 人原本没有头衔，已顺带装备；1 人已持有，跳过')
+    n = len(audits)
+    body = _body(await pt.grant_handler(_Req({'openids': [U1], 'title': _t('A', '红')})))
+    assert body['success'] and body['granted'] == 0 and body['message'] == '所选玩家都已持有这个头衔' and len(audits) == n
 
 
 def test_get_data_is_safe_to_embed(pt, monkeypatch):

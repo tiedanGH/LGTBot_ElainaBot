@@ -35,9 +35,15 @@
         <button id="titles-lib-toggle" class="titles-lib-toggle" type="button" aria-expanded="false">
           <svg class="ui-icon titles-lib-caret"><use href="#i-arrow-down"/></svg><span class="btn-label">头衔库</span><span id="titles-lib-count" class="titles-lib-count">0</span>
         </button>
-        <div class="titles-level-actions">
+        <div id="titles-lib-actions" class="titles-level-actions">
           <button id="titles-lib-add" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">新增头衔</span></button>
           <button id="titles-lib-edit" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-edit"/></svg><span class="btn-label">编辑头衔库</span></button>
+        </div>
+        <!-- 编辑中:顶部也放一组取消 / 保存 -->
+        <div id="titles-lib-top-actions" class="titles-level-actions" hidden>
+          <span class="titles-edit-msg"></span>
+          <button class="dash-btn dash-btn-small" type="button" data-act="lib-cancel"><svg class="ui-icon btn-icon"><use href="#i-x"/></svg><span class="btn-label">取消</span></button>
+          <button class="dash-btn dash-btn-small dash-btn-primary" type="button" data-act="lib-save"><svg class="ui-icon btn-icon"><use href="#i-save"/></svg><span class="btn-label">保存</span></button>
         </div>
       </div>
       <div id="titles-lib-body" class="titles-lib-body" hidden></div>
@@ -62,6 +68,7 @@
       <span class="titles-add-wrap">
         <input type="text" id="titles-add-openid" placeholder="输入昵称或 OpenID 添加玩家" autocomplete="off" spellcheck="false">
         <button id="titles-add" class="dash-btn dash-btn-small dash-btn-primary"><svg class="ui-icon btn-icon"><use href="#i-plus"/></svg><span class="btn-label">添加玩家</span></button>
+        <button id="titles-grant-open" class="dash-btn dash-btn-small"><svg class="ui-icon btn-icon"><use href="#i-users"/></svg><span class="btn-label">批量授予</span></button>
         <div id="titles-add-results" class="titles-add-results" hidden></div>
       </span>
       <span id="titles-msg" class="titles-msg"></span>
@@ -80,6 +87,11 @@
   <!-- 玩家编辑弹窗:内容由 titles.js 渲染 -->
   <div id="titles-modal-backdrop" class="titles-modal-backdrop" hidden>
     <div id="titles-modal" class="titles-modal" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <!-- 批量授予弹窗:内容由 titles.js 渲染 -->
+  <div id="titles-grant-backdrop" class="titles-modal-backdrop" hidden>
+    <div id="titles-grant" class="titles-modal titles-grant" role="dialog" aria-modal="true"></div>
   </div>
 
 </div>

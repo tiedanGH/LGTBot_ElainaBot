@@ -6,8 +6,9 @@
   · 玩家头衔整份保存时逐项校验(32 位 OpenID / 名字字符 / 颜色与分类存在 / 重名 / 装备必须持有),清空等于删除,数量不设上限;与头衔库同名的颜色分类以库为准
   · 颜色、分类按行序整份保存:头衔按名引用,改名连同头衔库与玩家头衔一起换(互换名字不串)、改色立即生效、在用的不能删、至少留一个
   · 头衔库整份保存:改名、改颜色分类同步到持有者(装备跟着换名),同名的限定头衔并入库内,删掉的头衔持有者照常保留成限定头衔
+  · 批量授予:与头衔库同名的按库内样式发放,否则是限定头衔;已持有的跳过,原本没有头衔的顺带装备;不合法时不写盘
   · 排序先分类再颜色;装备按序号或名字,序号按展示顺序(限定在前、库内在后)计,越界再按名字找;颜色分类已不存在的头衔照常保留并兜底;坏文件改名留证
-  · 「头衔」后接任何内容都由头衔指令处理,子指令不存在时回帮助;「头衔 列表」五列、限定头衔在「限定」、其余按分类分组;「头衔 我的」三列(满 15 个五列)、「限定」与「已收集」两组并写分类,没有头衔也回图片;有图床走 markdown,没有直接回图;缺依赖提示安装;装备回复挂「我的头衔」按钮,用法提示另加「装备头衔」
+  · 「头衔」后接任何内容都由头衔指令处理,子指令不存在时回帮助,全量群里没叫机器人时不回;「头衔 列表」五列、限定头衔在「限定」、其余按分类分组;「头衔 我的」三列(满 15 个五列)、「限定」与「已收集」两组并写分类,没有头衔也回图片;有图床走 markdown,没有直接回图;缺依赖提示安装;装备回复挂「我的头衔」按钮,用法提示另加「装备头衔」
   · 播报「【头衔名】」加粗上色,后接展示昵称(查不到才 @);播报对象:建房取派发线程上记下的发起人,加入取加入的玩家,退出不播;标记只在打标的线程上可见
   · 播报排在回复限制 / 主动私信提示之后
 """
@@ -112,6 +113,31 @@ def test_empty_library_deletes_the_record():
     assert titles.delete(U1) is False
     titles.set_record(U2, [_t('B')], None)
     assert titles.delete(U2) is True and titles.all_records() == {}
+
+
+def test_grant_validates_and_writes_nothing_on_error():
+    bad = [([], _t('A')), (U1, _t('A')), ([U1, 'U2'], _t('A')), ([U1], 'A'), ([U1], _t('')), ([U1], _t('a\nb')),
+           ([U1], _t('A', '金')), ([U1], _t('A', category='限时'))]
+    for openids, title in bad:
+        res, err = titles.grant(openids, title)
+        assert res is None and err, (openids, title)
+    assert not os.path.exists(titles._players.path)
+
+
+def test_grant_uses_the_library_style_skips_holders_and_equips_first_titles():
+    U3 = '3' * 32
+    titles.set_library([_lib('萌新', '紫')])
+    titles.set_record(U1, [_t('铁蛋', '红')], None)                 # 有头衔但没装备:授予后照旧不装备
+    titles.set_record(U2, [_t('萌新', '紫')], '萌新')               # 已持有:跳过
+    res, err = titles.grant([U1, U2, U3, U3], _t('萌新', '蓝', '活动'))
+    assert err is None and res == {'title': _t('萌新', '紫'), 'custom': False, 'granted': [U1, U3], 'equipped': [U3], 'held': [U2]}
+    assert titles.get(U1) == {'titles': [_t('铁蛋', '红'), _t('萌新', '紫')], 'equipped': None}
+    assert titles.get(U3) == {'titles': [_t('萌新', '紫')], 'equipped': '萌新'}
+    res, err = titles.grant([U1], _t(' 限定 ', '粉'))
+    assert err is None and res['custom'] and res['title'] == _t('限定', '粉') and res['equipped'] == []
+    assert titles.get(U1)['titles'][-1] == _t('限定', '粉')
+    res, _ = titles.grant([U1, U2, U3], _t('萌新'))
+    assert res['granted'] == [] and res['held'] == [U1, U2, U3]
 
 
 def test_equip_by_index_or_name():
@@ -349,9 +375,12 @@ def test_display_order_puts_custom_first_and_drives_equip_index():
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _ev(content, *, group=True, uid=U1):
+def _ev(content, *, group=True, uid=U1, full=False, at=False):
+    """``full`` 是全量群里的消息(GROUP_MESSAGE_CREATE),``at`` 表示 @ 了机器人。"""
     ev = MagicMock()
-    ev.event_type = dispatcher.GROUP_AT_MESSAGE_CREATE if group else dispatcher.C2C_MESSAGE_CREATE
+    ev.event_type = dispatcher.GROUP_MESSAGE_CREATE if full else dispatcher.GROUP_AT_MESSAGE_CREATE if group else dispatcher.C2C_MESSAGE_CREATE
+    ev.is_at_self = at
+    ev.message_id = 'M_CHAT'
     ev.is_group, ev.is_direct = group, not group
     ev.group_id = 'G1' if group else ''
     ev.channel_id = ''
@@ -505,6 +534,27 @@ async def test_title_main_command_routes_subcommands_and_answers_the_rest_with_h
     await _send('/头衔列表')
     assert [r['title'] for r in renders] == ['我的头衔', '头衔列表']
     assert (await _call('头衔装备 无')).endswith('您还没有头衔')
+
+
+async def test_full_group_chatter_gets_help_only_when_the_bot_is_called(renders, monkeypatch):
+    """全量群里没叫机器人:单发「头衔」或接不认识的内容当闲聊不回(消息照常登记进引用池),三个子指令照常响应;@ 了机器人(含开头的文字 @)才回帮助。"""
+    from types import SimpleNamespace
+    from plugins.LGTBot_ElainaBot.mod.messaging import quota
+    monkeypatch.setattr(dispatcher, 'TEXT_AT_AS_MENTION', True)
+    monkeypatch.setattr(dispatcher.helpers, 'get_sender', lambda appid='': SimpleNamespace(_bot_name='LGTBot'))
+    for content in ('头衔', '/头衔', '头衔 1', '头衔真好看', '头衔 我的们', '头衔 列表 2'):
+        (await _send(content, full=True)).reply.assert_not_awaited()
+    assert [r['ref_value'] for r in quota._active_ref['g:G1']] == ['M_CHAT']
+    titles.set_library([_lib('L')])
+    await _send('头衔 我的', full=True)
+    await _send('头衔列表', full=True)
+    assert [r['title'] for r in renders] == ['我的头衔', '头衔列表']
+    assert (await _call('头衔 装备 无', full=True)).endswith('您还没有头衔')
+    help_md = await _call('头衔')
+    assert await _call('头衔 1', full=True, at=True) == help_md
+    ev = _ev('@LGTBot 头衔 1', full=True)
+    await dispatcher.lgtbot_title(ev, re.search(dispatcher._P_TITLE, '头衔 1'))       # 框架剥掉开头的文字 @ 再匹配
+    assert ev.reply.await_args.args[0] == help_md
 
 
 async def test_equip_title_replies_and_never_echoes_input():
