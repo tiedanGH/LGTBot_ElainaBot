@@ -52,7 +52,7 @@ def _body(resp):
     return json.loads(resp.text)
 
 
-def _t(name, color='蓝', category='常驻'):
+def _t(name, color='蓝', category='长期'):
     return {'name': name, 'color': color, 'category': category}
 
 
@@ -61,7 +61,7 @@ def _rows(items):
 
 
 async def test_save_validates_audits_and_returns_the_whole_payload(pt, audits, tmp_path):
-    for bad in (ValueError('x'), [U1], {'openid': U1, 'titles': [_t('a$')]}, {'openid': 'U1', 'titles': [_t('A')]}):
+    for bad in (ValueError('x'), [U1], {'openid': U1, 'titles': [_t('a\nb')]}, {'openid': 'U1', 'titles': [_t('A')]}):
         resp = await pt.save_handler(_Req(bad))
         assert resp.status == 400 and _body(resp)['success'] is False
     assert audits == [] and titles.all_records() == {}
@@ -146,7 +146,7 @@ async def test_color_and_category_handlers_save_audit_and_refuse_deleting_used_o
     assert resp.status == 400 and '在用' in _body(resp)['message']
 
     body = _body(await pt.categories_handler(_Req({'categories': _rows(titles.categories()) + [{'name': '活动'}]})))
-    assert body['success'] and body['categories'] == [{'name': '常驻'}, {'name': '活动'}]
+    assert body['success'] and body['categories'] == [{'name': '长期'}, {'name': '活动'}]
     assert audits[-1] == ('title', '编辑头衔分类', '新增 「活动」')
     resp = await pt.categories_handler(_Req({'categories': [{'name': '活动', 'orig': '活动'}]}))
     assert resp.status == 400 and '在用' in _body(resp)['message']
@@ -157,7 +157,7 @@ async def test_library_handler_saves_syncs_holders_and_audits(pt, audits):
     assert (await pt.library_handler(_Req({'library': [_t('A', '金')]}))).status == 400
     body = _body(await pt.library_handler(_Req({'library': [_t('萌新', '蓝'), _t('开发者', '橙')]})))
     assert body['success'] and body['library'] == [_t('开发者', '橙'), _t('萌新', '蓝')]
-    assert audits[-1] == ('title', '编辑头衔库', '新增 「萌新 · 蓝 · 常驻」、「开发者 · 橙 · 常驻」')
+    assert audits[-1] == ('title', '编辑头衔库', '新增 「萌新 · 蓝 · 长期」、「开发者 · 橙 · 长期」')
     titles.set_record(U1, [_t('开发者', '绿')], '开发者')
     rows = _rows(titles.library())
     n = len(audits)
@@ -166,7 +166,7 @@ async def test_library_handler_saves_syncs_holders_and_audits(pt, audits):
     keep = next(r for r in rows if r['name'] == '开发者')
     keep.update(name='主创', color='红')
     body = _body(await pt.library_handler(_Req({'library': [keep]})))
-    assert audits[-1][2] == '删除 「萌新 · 蓝 · 常驻」；修改 「开发者 · 橙 · 常驻」 → 「主创 · 红 · 常驻」'
+    assert audits[-1][2] == '删除 「萌新 · 蓝 · 长期」；修改 「开发者 · 橙 · 长期」 → 「主创 · 红 · 长期」'
     assert body['players'][0]['titles'] == [_t('主创', '红')] and body['players'][0]['equipped'] == '主创'
 
 

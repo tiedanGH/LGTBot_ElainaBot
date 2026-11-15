@@ -37,11 +37,9 @@ DEFAULT_COLORS = (
     {'name': '青', 'hex': '#17A2B8'},
     {'name': '绿', 'hex': '#27AE60'},
 )
-DEFAULT_CATEGORIES = ({'name': '常驻'},)
+DEFAULT_CATEGORIES = ({'name': '长期'},)
 NAME_MAX_LEN = 12
 PRESET_NAME_MAX_LEN = 8
-# KaTeX \text{} 与 markdown 里有特殊含义的字符
-_FORBIDDEN = set('\\{}$%#&_^~*`[]<>|')
 _OPENID_RE = re.compile(r'^[0-9A-Za-z]{32}$')
 _HEX_RE = re.compile(r'^#?([0-9A-Fa-f]{6})$')
 # 颜色 / 分类文件损坏、被手改掉时头衔照常保留,按灰色、「未分类」兜底显示,可在面板重新选
@@ -123,8 +121,8 @@ def _check_text(text, label: str, max_len: int) -> str | None:
     text = text.strip()
     if len(text) > max_len:
         return f'{label}最多 {max_len} 个字'
-    if any(c in _FORBIDDEN or c in '\r\n\t' for c in text):
-        return f'{label}不能包含 \\ {{ }} $ % # & _ ^ ~ * ` [ ] < > | 等符号'
+    if any(c in '\r\n\t' for c in text):
+        return f'{label}不能包含换行或制表符'
     return None
 
 

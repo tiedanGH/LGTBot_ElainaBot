@@ -44,7 +44,7 @@ def _titles_files(tmp_path, monkeypatch):
     state.engine_request.uid = ''
 
 
-def _t(name, color='蓝', category='常驻'):
+def _t(name, color='蓝', category='长期'):
     return {'name': name, 'color': color, 'category': category}
 
 
@@ -72,10 +72,8 @@ def test_set_record_validates_every_field_and_writes_nothing_on_error():
         (U1, ['A'], None),
         (U1, [_t('')], None),
         (U1, [_t('一' * (titles.NAME_MAX_LEN + 1))], None),
-        (U1, [_t('a$b')], None),
-        (U1, [_t('a\\b')], None),
-        (U1, [_t('a}b')], None),
         (U1, [_t('a\nb')], None),
+        (U1, [_t('a\tb')], None),
         (U1, [_t('A', '金')], None),
         (U1, [_t('A', category='限时')], None),
         (U1, [_t('A', ['蓝'])], None),
@@ -93,6 +91,18 @@ def test_set_record_validates_every_field_and_writes_nothing_on_error():
     assert titles.equipped(U1) is None
     many = [_t(f'T{i}') for i in range(30)]                      # 管理端维护,数量不设上限
     assert titles.set_record(U2, many, 'T29') is None and titles.get(U2)['titles'] == many
+
+
+def test_names_take_symbols_but_not_line_breaks():
+    """头衔名、颜色名、分类名只由管理员在面板输入,内容可控:特殊符号照收,只拒换行与制表符。"""
+    sym, color, cat = '<A&B>_{x}$%|', '#金^`\\', '[限时]~*'
+    assert titles.set_categories(_rows('category') + [{'name': cat}]) is None
+    assert titles.set_colors(_rows('color') + [{'name': color, 'hex': '#FFD700'}]) is None
+    assert titles.set_library([_lib(sym, color, cat)]) is None
+    assert titles.set_record(U1, [_t(sym, color, cat)], sym) is None
+    assert titles.equipped(U1) == _t(sym, color, cat)
+    for bad in ('a\nb', 'a\tb'):
+        assert titles.validate_name(bad)
 
 
 def test_empty_library_deletes_the_record():
@@ -125,12 +135,12 @@ def test_render_uses_inline_katex_colour():
     assert titles.render(t) == '$\\textcolor{#2980B9}{\\text{铁蛋}}$'
     assert titles.join_notice(t, '玩家甲') == '$\\textcolor{#2980B9}{\\textbf{【铁蛋】}}$ 玩家甲 加入游戏'
     assert [c['name'] for c in titles.colors()] == ['黄', '橙', '红', '粉', '紫', '蓝', '青', '绿']
-    assert titles.categories() == [{'name': '常驻'}]
+    assert titles.categories() == [{'name': '长期'}]
 
 
 def test_dirty_file_is_cleaned_but_unknown_styles_survive():
     with open(titles._players.path, 'w', encoding='utf-8') as f:
-        json.dump({U1: {'titles': [_t('A'), _t('A', '红'), _t('B', '已删除', '旧分类'), 'x', _t('a{b'), {'name': 'C', 'color': '蓝'}], 'equipped': 'B'},
+        json.dump({U1: {'titles': [_t('A'), _t('A', '红'), _t('B', '已删除', '旧分类'), 'x', _t('a\nb'), {'name': 'C', 'color': '蓝'}], 'equipped': 'B'},
                    U2: 'garbage'}, f, ensure_ascii=False)
     assert titles.get(U1) == {'titles': [_t('A'), _t('B', '已删除', '旧分类')], 'equipped': 'B'}
     assert titles.get(U2) is None
@@ -191,13 +201,13 @@ def test_colors_can_be_added_renamed_recoloured_and_reordered():
 def test_categories_follow_the_same_rules():
     titles.set_record(U1, [_t('A')], None)
     rows = _rows('category') + [{'name': '活动'}]
-    rows[0]['name'] = '常驻款'
+    rows[0]['name'] = '长期款'
     assert titles.set_categories(rows) is None
-    assert titles.categories() == [{'name': '常驻款'}, {'name': '活动'}]
-    assert titles.get(U1)['titles'] == [_t('A', category='常驻款')]
+    assert titles.categories() == [{'name': '长期款'}, {'name': '活动'}]
+    assert titles.get(U1)['titles'] == [_t('A', category='长期款')]
     err = titles.set_categories([{'name': '活动', 'orig': '活动'}])
-    assert err and '常驻款' in err and '1' in err                 # 还有头衔在用:不能删
-    assert titles.set_categories([]) and titles.set_categories([{'name': 'a*b'}]) and titles.set_categories([{'name': 'X'}, {'name': ' X '}])
+    assert err and '长期款' in err and '1' in err                 # 还有头衔在用:不能删
+    assert titles.set_categories([]) and titles.set_categories([{'name': 'a\nb'}]) and titles.set_categories([{'name': 'X'}, {'name': ' X '}])
     assert len(titles.categories()) == 2
 
 
@@ -227,7 +237,7 @@ def test_set_colors_validates_and_writes_nothing_on_error():
         [_rows('color')[0]] * 2,
         [{'name': '', 'hex': '#000000'}],
         [{'name': '一' * (titles.PRESET_NAME_MAX_LEN + 1), 'hex': '#000000'}],
-        [{'name': 'a*b', 'hex': '#000000'}],
+        [{'name': 'a\nb', 'hex': '#000000'}],
         [{'name': 'A', 'hex': 'red'}], [{'name': 'A', 'hex': '#12345'}], [{'name': 'A', 'hex': '#1234567'}],
         [{'name': 'A', 'hex': '#000000'}, {'name': ' A ', 'hex': '#111111'}],
         [{'name': 'A', 'hex': '#000000', 'orig': '不存在'}],
@@ -259,7 +269,7 @@ def test_broken_preset_files_fall_back_to_defaults(tmp_path):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _lib(name, color='蓝', category='常驻', orig=''):
+def _lib(name, color='蓝', category='长期', orig=''):
     return {'orig': orig, 'name': name, 'color': color, 'category': category}
 
 
@@ -269,14 +279,14 @@ def _lib_rows():
 
 
 def test_library_validates_sorts_by_category_then_colour():
-    bad = ['x', [_lib('')], [_lib('a$b')], [_lib('A', '金')], [_lib('A', category='限时')], [_lib('A', ['蓝'])],
+    bad = ['x', [_lib('')], [_lib('a\nb')], [_lib('A', '金')], [_lib('A', category='限时')], [_lib('A', ['蓝'])],
            [_lib('A'), _lib(' A ', '红')], [_lib('A', orig='不存在')], [_lib('A', orig=['A'])], ['A']]
     for rows in bad:
         assert titles.set_library(rows), rows
     assert not os.path.exists(titles._library.path)
     titles.set_categories(_rows('category') + [{'name': '活动'}])
     assert titles.set_library([_lib('活动橙', '橙', '活动'), _lib('开发者', '红'), _lib(' Bug猎人 ', '紫'), _lib('萌新', '紫'), _lib('活动蓝', '蓝', '活动')]) is None
-    # 先分类(常驻、活动)再颜色(黄橙红粉紫蓝青绿),同分类同颜色保持录入顺序
+    # 先分类(长期、活动)再颜色(黄橙红粉紫蓝青绿),同分类同颜色保持录入顺序
     assert [t['name'] for t in titles.library()] == ['开发者', 'Bug猎人', '萌新', '活动橙', '活动蓝']
     assert titles.set_library([]) is None and titles.library() == []
 
@@ -315,9 +325,9 @@ def test_styles_used_by_the_library_cannot_be_deleted_and_renames_reach_it():
     rows[_pos(rows, '红')]['name'] = '大红'
     assert titles.set_colors(rows) is None
     rows = _rows('category')
-    rows[0]['name'] = '常驻款'
+    rows[0]['name'] = '长期款'
     assert titles.set_categories(rows) is None
-    assert titles.library() == [_t('开发者', '大红', '常驻款')] and titles.get(U1)['titles'] == [_t('开发者', '大红', '常驻款')]
+    assert titles.library() == [_t('开发者', '大红', '长期款')] and titles.get(U1)['titles'] == [_t('开发者', '大红', '长期款')]
 
 
 def test_display_order_puts_custom_first_and_drives_equip_index():
@@ -328,7 +338,7 @@ def test_display_order_puts_custom_first_and_drives_equip_index():
     assert [t['name'] for t in b['mine']] == ['限定蓝', '限定活动', 'L橙', 'L蓝', 'L活动']
     assert [t['name'] for t in b['custom']] == ['限定蓝', '限定活动'] and b['equipped'] == 'L蓝'
     assert [t['name'] for t in b['library']] == ['L橙', 'L蓝', 'L活动']
-    assert b['colors']['橙'] == '#FF8C00' and b['categories'] == ['常驻', '活动']
+    assert b['colors']['橙'] == '#FF8C00' and b['categories'] == ['长期', '活动']
     assert titles.equip(U1, '1')[0]['name'] == '限定蓝'
     assert titles.equip(U1, '5')[0]['name'] == 'L活动'
     assert titles.board(U2) == dict(b, custom=[], mine=[], equipped=None)
@@ -396,8 +406,8 @@ async def test_my_titles_groups_custom_as_limited_and_collected_with_categories(
     call = renders[0]
     assert call['title'] == '我的头衔' and call['cols'] == 3 and call['sub'] == '铁蛋玩家　共 3 个头衔 · 装备中：L橙'
     assert [s[0] for s in call['sections']] == ['限定', '已收集'] and call['empty'] == ''
-    assert _cells(call['sections'][0]) == [('限定款', '#E84393', True, False, 1, '常驻')]
-    assert _cells(call['sections'][1]) == [('L橙', '#FF8C00', True, True, 2, '常驻'), ('L活动', '#2980B9', True, False, 3, '活动')]
+    assert _cells(call['sections'][0]) == [('限定款', '#E84393', True, False, 1, '长期')]
+    assert _cells(call['sections'][1]) == [('L橙', '#FF8C00', True, True, 2, '长期'), ('L活动', '#2980B9', True, False, 3, '活动')]
     assert titles.equip(U1, '3')[0]['name'] == 'L活动'            # 图上的序号就是装备序号
 
 
@@ -428,7 +438,7 @@ async def test_title_list_groups_by_category_in_five_columns_without_labels(rend
     ev = await _send('/头衔 列表', group=False)
     call = renders[0]
     assert call['title'] == '头衔列表' and call['cols'] == 5 and call['sub'] == '铁蛋玩家　已收集 1 / 3 · 限定 1'
-    assert [s[0] for s in call['sections']] == ['限定', '常驻', '活动', titles.UNKNOWN_CATEGORY]
+    assert [s[0] for s in call['sections']] == ['限定', '长期', '活动', titles.UNKNOWN_CATEGORY]
     assert _cells(call['sections'][0]) == [('限定款', '#E84393', True, True, 0, '')]
     assert _cells(call['sections'][1]) == [('L橙', '#FF8C00', True, False, 0, ''), ('L蓝', '#2980B9', False, False, 0, '')]
     assert _cells(call['sections'][2]) == [('L活动', '#8E44AD', False, False, 0, '')] and call['sections'][3][1] == []
@@ -470,10 +480,10 @@ def test_title_image_renders_grids_with_and_without_labels():
     size = lambda png: Image.open(BytesIO(png)).size
     cell = {'name': '一个很长很长的头衔名字', 'hex': '#FF8C00', 'owned': True, 'equipped': True, 'index': 0, 'label': ''}
     faded = dict(cell, name='未持有', owned=False, equipped=False)
-    w, h = size(ti.render('头衔列表', '已收集 1 / 6', [('限定', [cell]), ('常驻', [cell] + [faded] * 5), ('空', [])], '底部提示', 5))
+    w, h = size(ti.render('头衔列表', '已收集 1 / 6', [('限定', [cell]), ('长期', [cell] + [faded] * 5), ('空', [])], '底部提示', 5))
     section = ti.GAP + 58                                           # 小节间距 + 小标题
     assert w == ti.width(5) == 1400 and h == 40 + 124 + (section + ti.CELL_H) + (section + 2 * ti.CELL_H + ti.GAP) + 20 + 56 + 40
-    labeled = [('限定', [dict(cell, index=1, label='常驻')])]
+    labeled = [('限定', [dict(cell, index=1, label='长期')])]
     w, h = size(ti.render('我的头衔', '', labeled, '底部提示', 3))
     assert w == ti.width(3) == 1080 and h == 40 + 124 + section + ti.CELL_H_LABEL + 20 + 56 + 40
     # 一个格子都没有:正文画提示框;有格子时提示不占地方
