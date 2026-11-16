@@ -233,7 +233,7 @@ function titlesRenderPresetEditor(kind) {
                       : (e.rows.length <= 1 ? ' disabled title="至少保留一个' + P.label + '"' : '');
     return '<div class="titles-level-row" data-row="' + i + '">' +
       (P.hex ? '<input type="color" class="titles-level-pick" value="' + (hex || '#808080').toLowerCase() + '" title="选择颜色">' : '') +
-      '<input type="text" class="titles-level-name" maxlength="' + titlesData.preset_name_max + '" placeholder="' + P.label + '名称" autocomplete="off" spellcheck="false"' +
+      '<input type="text" class="titles-level-name" maxlength="' + escapeHtml(titlesData.preset_name_max) + '" placeholder="' + P.label + '名称" autocomplete="off" spellcheck="false"' +
         ' value="' + escapeHtml(r.name) + '"' + (hex ? ' style="color:' + hex + '"' : '') + '>' +
       (P.hex ? '<input type="text" class="titles-level-hexinput" maxlength="7" placeholder="#RRGGBB" autocomplete="off" spellcheck="false" value="' + escapeHtml(r.hex) + '">' : '') +
       '<span class="titles-level-usage">' + (r.orig ? (used ? used + ' 个头衔' : '未使用') : '新增') + '</span>' +
@@ -449,7 +449,7 @@ function titlesRenderLibEditor() {
     if (e.shown && !e.shown.has(r)) return '';
     const held = r.orig ? (holders[r.orig] || 0) : 0;
     return '<div class="titles-level-row titles-lib-row" data-row="' + i + '">' +
-      '<input type="text" class="titles-lib-name" maxlength="' + titlesData.name_max + '" placeholder="头衔名" autocomplete="off" spellcheck="false"' +
+      '<input type="text" class="titles-lib-name" maxlength="' + escapeHtml(titlesData.name_max) + '" placeholder="头衔名" autocomplete="off" spellcheck="false"' +
         ' value="' + escapeHtml(r.name) + '" style="color:' + escapeHtml(titlesColor(r.color).hex) + '">' +
       titlesSelect('color', 'titles-lib-color', r.color) + titlesSelect('category', 'titles-lib-category', r.category) +
       '<span class="titles-level-usage">' + (r.orig ? (held ? held + ' 人持有' : '无人持有') : '新增') + '</span>' +
@@ -678,7 +678,7 @@ function titlesRenderModal() {
     const body = r.lib
       ? '<span class="titles-edit-static" style="color:' + hex + '">' + escapeHtml(r.name) + '</span>' +
         '<span class="titles-edit-lvl" style="--c:' + hex + '">' + escapeHtml(c.name + ' · ' + titlesCategory(r.category)) + '</span>'
-      : '<input class="titles-edit-name" type="text" maxlength="' + titlesData.name_max + '" placeholder="限定头衔名" autocomplete="off" spellcheck="false"' +
+      : '<input class="titles-edit-name" type="text" maxlength="' + escapeHtml(titlesData.name_max) + '" placeholder="限定头衔名" autocomplete="off" spellcheck="false"' +
           ' value="' + escapeHtml(r.name) + '" style="color:' + hex + '">' +
         titlesSelect('color', 'titles-edit-color', r.color) + titlesSelect('category', 'titles-edit-category', r.category) +
         '<span class="titles-tag-custom" title="不进头衔库，只在玩家本人的头衔列表里出现">限定</span>';
@@ -1033,7 +1033,7 @@ function titlesRenderGrant() {
         '<option value="">从头衔库选择…</option>' + lib.map(t => '<option value="' + escapeHtml(t.name) + '" style="color:' + escapeHtml(titlesColor(t.color).hex) + '"' + (t.name === g.pick ? ' selected' : '') + '>' +
           escapeHtml(t.name + ' · ' + titlesCategory(t.category)) + '</option>').join('') +
       '</select>'
-    : '<input type="text" class="titles-grant-name" maxlength="' + titlesData.name_max + '" placeholder="限定头衔名" autocomplete="off" spellcheck="false"' +
+    : '<input type="text" class="titles-grant-name" maxlength="' + escapeHtml(titlesData.name_max) + '" placeholder="限定头衔名" autocomplete="off" spellcheck="false"' +
         ' value="' + escapeHtml(g.name) + '" style="color:' + escapeHtml(titlesColor(g.color).hex) + '">' +
       titlesSelect('color', 'titles-grant-color', g.color) + titlesSelect('category', 'titles-grant-category', g.category);
   const msg = g.msg || ['', 'info'];
